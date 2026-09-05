@@ -226,6 +226,7 @@ export function applyServerEvent(event: ServerEvent): void {
     case 'agent.log': {
       const existing = state.transcripts[event.entry.agentId];
       if (!existing) break;   // not open, so nothing to append to
+      if (existing.some(e => e.id === event.entry.id)) break;   // already have it
       set({
         transcripts: {
           ...state.transcripts,
@@ -338,11 +339,15 @@ export async function createSession(
     const agent = await api.createAgent({ projectId, task, model, workspace: 'branch', permissionMode });
     set({
       agents: [agent, ...state.agents],
-      transcripts: { ...state.transcripts, [agent.id]: [] },
       openAgentId: agent.id,
       tab: 'agents',
       newAgentOpen: false,
     });
+
+    // The run starts logging the moment it is created, which is before this
+    // client has anywhere to put those lines. Read what it already has rather
+    // than starting from an empty transcript that is missing the prompt.
+    await loadTranscript(agent.id);
   } catch (err) {
     showToast(`Could not start it: ${message(err)}`);
   }

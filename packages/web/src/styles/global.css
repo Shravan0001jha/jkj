@@ -575,6 +575,41 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .seg button:last-child { border-right: 0; }
 .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
 
+/* ---------- working indicator ---------- */
+.working {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 16px; border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+}
+.working .phrase { color: var(--ink); }
+.working .meta {
+  margin-left: auto; color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+.working .linkish { font-family: var(--mono); font-size: 11px; }
+
+/* A braille spinner, the same shape the CLI uses, so the two read as one
+   family rather than two products. */
+.working .spinner::before {
+  content: "\2807";
+  color: var(--accent);
+  animation: braille 0.9s steps(1, end) infinite;
+}
+@keyframes braille {
+  0%   { content: "\280B"; }
+  12%  { content: "\2819"; }
+  25%  { content: "\2839"; }
+  37%  { content: "\2838"; }
+  50%  { content: "\283C"; }
+  62%  { content: "\2834"; }
+  75%  { content: "\2826"; }
+  87%  { content: "\2827"; }
+  100% { content: "\280F"; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .working .spinner::before { content: "\2807"; animation: none; }
+}
+
 /* ---------- toast ---------- */
 .toast {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 40;

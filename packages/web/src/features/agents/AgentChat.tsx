@@ -8,6 +8,7 @@ import { Pill } from '../../components/Pill.js';
 import { Transcript } from './Transcript.js';
 import { Composer } from './Composer.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
+import { WorkingIndicator } from './WorkingIndicator.js';
 
 /**
  * One session's transcript. Works for a session and for a subagent run inside
@@ -96,6 +97,7 @@ export function AgentChat({ agent }: { agent: Agent }) {
       {agent.approval && <ApprovalPrompt agent={agent} approval={agent.approval} />}
 
       <Transcript agentId={agent.id} />
+      {agent.status === 'running' && !agent.approval && <WorkingIndicator agent={agent} />}
       <Composer agent={agent} />
     </div>
   );
