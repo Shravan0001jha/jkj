@@ -1,0 +1,70 @@
+/**
+ * Wire protocol.
+ *
+ * REST for anything a page load needs; the socket for everything that
+ * changes while you watch. Both sides import these types, so a change here
+ * breaks the build rather than production.
+ */
+import type {
+  Agent, ActivityEvent, AssembledContext, ContextDoc,
+  LogEntry, McpCatalogEntry, McpServer, Project, WorkspaceMode,
+} from './types.js';
+
+/** Sent by the server, consumed by the UI. */
+export type ServerEvent =
+  | { type: 'hello'; version: string; startedAt: string }
+  | { type: 'snapshot'; projects: Project[]; agents: Agent[]; mcp: McpServer[] }
+  | { type: 'agent.updated'; agent: Agent }
+  | { type: 'agent.removed'; agentId: string }
+  | { type: 'agent.log'; entry: LogEntry }
+  | { type: 'mcp.updated'; server: McpServer }
+  | { type: 'activity'; event: ActivityEvent }
+  | { type: 'error'; message: string };
+
+/** Sent by the UI, consumed by the server. */
+export type ClientCommand =
+  | { type: 'subscribe'; projectId: string }
+  | { type: 'agent.message'; agentId: string; text: string }
+  | { type: 'agent.interrupt'; agentId: string }
+  | { type: 'agent.approve'; agentId: string; approvalId: string; decision: ApprovalDecision };
+
+export type ApprovalDecision = 'once' | 'always' | 'deny';
+
+/** REST request/response shapes. */
+export interface CreateAgentRequest {
+  projectId: string;
+  task: string;
+  model: string;
+  workspace: WorkspaceMode;
+}
+
+export interface ContextResponse {
+  central: ContextDoc;
+  project: ContextDoc;
+  assembled: AssembledContext;
+}
+
+export interface McpListResponse {
+  installed: McpServer[];
+  catalog: McpCatalogEntry[];
+}
+
+export interface HealthResponse {
+  ok: true;
+  name: 'jkj';
+  version: string;
+  uptimeSeconds: number;
+}
+
+/** Every REST route in one place, so the client can never guess a path. */
+export const API = {
+  health: '/api/health',
+  projects: '/api/projects',
+  agents: '/api/agents',
+  agent: (id: string) => `/api/agents/${id}`,
+  agentLog: (id: string) => `/api/agents/${id}/log`,
+  context: (projectId: string) => `/api/context?projectId=${encodeURIComponent(projectId)}`,
+  mcp: '/api/mcp',
+  activity: '/api/activity',
+  socket: '/ws',
+} as const;

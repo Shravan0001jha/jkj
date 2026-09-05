@@ -1,0 +1,82 @@
+/*
+ * Design tokens. Every colour in the app comes from here — no literals in
+ * component styles, so both themes stay correct by construction.
+ */
+:root {
+  --bg: #f2f3ef;
+  --surface: #ffffff;
+  --surface-2: #e9ebe4;
+  --surface-3: #dfe2d8;
+  --line: #d6d9ce;
+  --line-strong: #bec3b2;
+  --ink: #1a1d17;
+  --ink-2: #4a4f44;
+  --ink-3: #787e6d;
+  --accent: #6b7f1e;
+  --accent-soft: #e4eac5;
+  --accent-ink: #4c5a13;
+
+  --run: #2c6fa8;
+  --run-soft: #dceaf6;
+  --wait: #a86d08;
+  --wait-soft: #f7ebd1;
+  --err: #a63d28;
+  --err-soft: #f6dfd9;
+  --done: #3b7550;
+  --done-soft: #ddebe1;
+
+  --ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --doc: "Newsreader", Georgia, serif;
+  --radius: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12150e;
+    --surface: #1a1e15;
+    --surface-2: #22271d;
+    --surface-3: #2b3125;
+    --line: #2f3529;
+    --line-strong: #48503c;
+    --ink: #ecefe3;
+    --ink-2: #b2b9a6;
+    --ink-3: #828978;
+    --accent: #b8ce55;
+    --accent-soft: #2c3517;
+    --accent-ink: #c9dc74;
+
+    --run: #6facde;
+    --run-soft: #15283a;
+    --wait: #dfa640;
+    --wait-soft: #372911;
+    --err: #e27a60;
+    --err-soft: #391e18;
+    --done: #70be89;
+    --done-soft: #152f1e;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #12150e;
+  --surface: #1a1e15;
+  --surface-2: #22271d;
+  --surface-3: #2b3125;
+  --line: #2f3529;
+  --line-strong: #48503c;
+  --ink: #ecefe3;
+  --ink-2: #b2b9a6;
+  --ink-3: #828978;
+  --accent: #b8ce55;
+  --accent-soft: #2c3517;
+  --accent-ink: #c9dc74;
+
+  --run: #6facde;
+  --run-soft: #15283a;
+  --wait: #dfa640;
+  --wait-soft: #372911;
+  --err: #e27a60;
+  --err-soft: #391e18;
+  --done: #70be89;
+  --done-soft: #152f1e;
+}

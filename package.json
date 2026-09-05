@@ -1,0 +1,26 @@
+{
+  "name": "jkj",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A local control plane for running many Claude Code agents across projects.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c yellow,green \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm run dev -w @jkj/server",
+    "dev:web": "npm run dev -w @jkj/web",
+    "build": "npm run build -w @jkj/shared && npm run build -w @jkj/web && npm run build -w @jkj/server",
+    "typecheck": "tsc -b --pretty",
+    "start": "node packages/server/dist/cli.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": { "node": ">=20" }
+}

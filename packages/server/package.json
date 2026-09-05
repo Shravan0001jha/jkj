@@ -1,0 +1,21 @@
+{
+  "name": "@jkj/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "bin": { "jkj": "./dist/cli.js" },
+  "scripts": {
+    "dev": "tsx watch src/cli.ts",
+    "build": "tsc -b",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@jkj/shared": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2"
+  }
+}
