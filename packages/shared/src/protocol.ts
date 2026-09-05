@@ -6,7 +6,8 @@
  * breaks the build rather than production.
  */
 import type {
-  Agent, ActivityEvent, LogEntry, McpCatalogEntry, McpServer, Project, WorkspaceMode,
+  Agent, ActivityEvent, LogEntry, McpCatalogEntry, McpServer,
+  PermissionMode, Project, WorkspaceMode,
 } from './types.js';
 
 /** Sent by the server, consumed by the UI. */
@@ -25,8 +26,10 @@ export type ClientCommand =
   | { type: 'subscribe'; projectId: string }
   | { type: 'agent.message'; agentId: string; text: string }
   | { type: 'agent.interrupt'; agentId: string }
-  | { type: 'agent.approve'; agentId: string; approvalId: string; decision: ApprovalDecision };
+  | { type: 'agent.approve'; agentId: string; approvalId: string; decision: ApprovalDecision }
+  | { type: 'agent.mode'; agentId: string; mode: PermissionMode };
 
+/** 'always' stops the session asking about that tool again. */
 export type ApprovalDecision = 'once' | 'always' | 'deny';
 
 /** REST request/response shapes. */
@@ -35,8 +38,8 @@ export interface CreateAgentRequest {
   task: string;
   model: string;
   workspace: WorkspaceMode;
-  /** How tool calls are handled. 'default' asks you; 'acceptEdits' does not. */
-  permissionMode?: 'default' | 'acceptEdits' | 'plan';
+  /** How much the session asks before touching your machine. */
+  permissionMode?: PermissionMode;
   attachments?: Attachment[];
 }
 
@@ -59,6 +62,19 @@ export interface SendMessageRequest {
   attachments?: Attachment[];
 }
 
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  isRepo: boolean;
+}
+
+export interface BrowseResponse {
+  path: string;
+  parent: string | null;
+  crumbs: { name: string; path: string }[];
+  entries: BrowseEntry[];
+}
+
 export interface McpListResponse {
   installed: McpServer[];
   catalog: McpCatalogEntry[];
@@ -77,6 +93,8 @@ export interface HealthResponse {
 export const API = {
   health: '/api/health',
   projects: '/api/projects',
+  project: (id: string) => `/api/projects/${id}`,
+  browse: (path?: string) => path ? `/api/browse?path=${encodeURIComponent(path)}` : '/api/browse',
   agents: '/api/agents',
   agent: (id: string) => `/api/agents/${id}`,
   agentLog: (id: string) => `/api/agents/${id}/log`,

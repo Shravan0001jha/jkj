@@ -14,8 +14,9 @@ JKJ reads what the `claude` CLI already writes to disk and puts it in one
 window.
 
 - **Every session, every project.** Each directory Claude Code has worked in
-  becomes a project; each session in it becomes a row you can open. Sessions
-  running right now are separated from ones that have ended.
+  becomes a project on its own; anywhere else can be added by pointing at it
+  in a folder browser. Each session becomes a row you can open, with the ones
+  running right now kept apart from the ones that have ended.
 - **Real transcripts.** The prompts you wrote, the model's replies, and every
   tool call it made, with subagent runs linked from the session that spawned
   them.
@@ -36,6 +37,11 @@ window.
 - **Sessions you can drive.** Start one from the browser and JKJ owns the
   process: you steer it mid-run, approve or deny each tool call, and interrupt
   it. Transcripts stream as they happen.
+- **Answer a permission once.** *Always allow* applies the rule the CLI itself
+  suggests, so that tool stops asking for the rest of the session. How much a
+  session asks is a control in its header, changeable while it runs: **Ask
+  me**, **Auto** (a classifier decides, and only the risky calls reach you),
+  **Edits** (file edits run, commands still ask), or **Never ask**.
 
 - **Continue anything that has finished.** Type into a past session and JKJ
   picks it up where it stopped, with the model's memory of the conversation
@@ -208,6 +214,8 @@ styles/tokens.css     Every colour and font, light and dark
 - [x] Markdown, code blocks and pasted images in transcripts
 - [x] Continue a finished session, with its history intact
 - [x] Attach images and text files to a message
+- [x] Add a project by browsing to it
+- [x] Persistent approvals, and a permission mode you can change mid-session
 - [ ] Remember an "always allow" decision across turns
 - [ ] Reach a session that is open in a terminal, over its peer socket
 - [ ] Fork a session onto its own git worktree
@@ -219,11 +227,18 @@ styles/tokens.css     Every colour and font, light and dark
 
 JKJ binds to `127.0.0.1` only.
 
-Sessions it drives run tools on your machine. In the default permission mode
-every tool call waits for you to approve it in the browser; the other modes
-loosen that deliberately, and the New session dialog says what each one gives
-away. The Context tab writes the `CLAUDE.md` files you edit. Everything else
-is read-only.
+Sessions it drives run tools on your machine. In the default mode every tool
+call waits for you to approve it in the browser. The other modes loosen that
+deliberately and each says what it gives away — **Never ask** runs everything
+without asking, and is offered because the alternative is a control that
+looks available and silently refuses.
+
+*Always allow* applies the rule for the running session only. It does not
+write into your Claude Code permission settings, so nothing JKJ does here
+changes what the CLI allows tomorrow.
+
+The Context tab writes the `CLAUDE.md` files you edit, and the folder browser
+lists directory names so you can pick a project. Everything else is read-only.
 
 Your session transcripts contain everything you have ever asked Claude Code,
 including whatever it read from your files. Do not expose this to a network

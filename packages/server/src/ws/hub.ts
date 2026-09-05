@@ -113,6 +113,12 @@ function handleCommand(ws: WebSocket, command: ClientCommand): void {
       case 'agent.approve':
         agents.resolveApproval(command.agentId, command.decision);
         break;
+      case 'agent.mode':
+        agents.setPermissionMode(command.agentId, command.mode).catch(err => send(ws, {
+          type: 'error',
+          message: err instanceof Error ? err.message : 'Could not change the mode',
+        }));
+        break;
     }
   } catch (err) {
     send(ws, { type: 'error', message: err instanceof Error ? err.message : 'Command failed' });

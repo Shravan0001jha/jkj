@@ -6,6 +6,7 @@ import { ContextView } from './features/context/ContextView.js';
 import { McpView } from './features/mcp/McpView.js';
 import { ActivityFeed } from './features/activity/ActivityFeed.js';
 import { EmptyWorkspace } from './components/EmptyWorkspace.js';
+import { AddProjectDialog } from './components/AddProjectDialog.js';
 import { applyServerEvent, loadWorkspace, setConnection, useStore } from './state/store.js';
 import { connect } from './api/socket.js';
 
@@ -18,6 +19,7 @@ export function App() {
   const loading = useStore(s => s.loading);
   const projects = useStore(s => s.projects);
   const newAgentOpen = useStore(s => s.newAgentOpen);
+  const addProjectOpen = useStore(s => s.addProjectOpen);
 
   useEffect(() => {
     void loadWorkspace();
@@ -37,6 +39,7 @@ export function App() {
           </>
         )}
       {newAgentOpen && <NewAgentDialog />}
+      {addProjectOpen && <AddProjectDialog />}
     </AppShell>
   );
 }

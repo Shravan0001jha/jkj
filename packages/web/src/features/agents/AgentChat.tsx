@@ -8,6 +8,7 @@ import { Pill } from '../../components/Pill.js';
 import { Transcript } from './Transcript.js';
 import { Composer } from './Composer.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
+import { PermissionModePicker } from './PermissionModePicker.js';
 import { WorkingIndicator } from './WorkingIndicator.js';
 
 /**
@@ -64,6 +65,7 @@ export function AgentChat({ agent }: { agent: Agent }) {
       </div>
 
       <div className="dactions">
+        {agent.driven && <PermissionModePicker agent={agent} />}
         {isSubagent ? (
           <button className="btn sm" onClick={() => parent && openAgent(parent.id)}>
             ← Back to {parent?.name}

@@ -1,11 +1,14 @@
 import { useState } from 'react';
+import type { PermissionMode } from '@jkj/shared';
 import { useStore, currentProject, setNewAgentOpen, createSession } from '../../state/store.js';
 import { Modal } from '../../components/Modal.js';
 
-const MODES: { id: 'default' | 'acceptEdits' | 'plan'; label: string; hint: string }[] = [
-  { id: 'default', label: 'Ask me', hint: 'Every tool call that touches your machine waits for you here.' },
+const MODES: { id: PermissionMode; label: string; hint: string }[] = [
+  { id: 'ask', label: 'Ask me', hint: 'Every tool call that touches your machine waits for you here.' },
+  { id: 'auto', label: 'Auto', hint: 'A classifier decides. Only the calls it considers risky reach you.' },
   { id: 'acceptEdits', label: 'Auto-accept edits', hint: 'File edits run without asking. Commands still ask.' },
-  { id: 'plan', label: 'Plan only', hint: 'Reads and thinks, but changes nothing until you say so.' },
+  { id: 'plan', label: 'Plan only', hint: 'Reads and reasons, but changes nothing until you say so.' },
+  { id: 'dontAsk', label: 'Never ask', hint: 'Nothing is asked at all. Everything runs on your machine.' },
 ];
 
 /** Starts a session JKJ owns, which is the only kind it can then drive. */
@@ -13,7 +16,7 @@ export function NewAgentDialog() {
   const project = useStore(currentProject);
   const [task, setTask] = useState('');
   const [model, setModel] = useState('sonnet');
-  const [mode, setMode] = useState<'default' | 'acceptEdits' | 'plan'>('default');
+  const [mode, setMode] = useState<PermissionMode>('ask');
   const [starting, setStarting] = useState(false);
 
   const close = (): void => setNewAgentOpen(false);
@@ -61,7 +64,7 @@ export function NewAgentDialog() {
 
       <div className="f">
         <label>Permissions</label>
-        <div className="seg">
+        <div className="seg wrap">
           {MODES.map(m => (
             <button key={m.id} type="button" aria-pressed={mode === m.id} onClick={() => setMode(m.id)}>
               {m.label}

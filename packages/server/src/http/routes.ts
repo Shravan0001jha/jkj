@@ -1,12 +1,13 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { API } from '@jkj/shared';
-import type { Attachment, CreateAgentRequest } from '@jkj/shared';
+import type { Attachment, CreateAgentRequest, PermissionMode } from '@jkj/shared';
 import type { Config } from '../config.js';
 import * as projects from '../services/projects.js';
 import * as agents from '../services/agents.js';
 import * as context from '../services/context.js';
 import * as mcp from '../services/mcp.js';
 import * as activity from '../services/activity.js';
+import { browse } from '../services/browse.js';
 import { findClaudeHome } from '../runtime/claude-home.js';
 import { BadRequest, statusOf } from '../util/errors.js';
 
@@ -45,6 +46,30 @@ export function createRouter(config: Config) {
       method: 'GET',
       match: p => p === API.projects,
       handler: async (_req, res) => json(res, 200, await projects.listProjects()),
+    },
+    {
+      method: 'GET',
+      match: p => p === '/api/browse',
+      handler: (_req, res, url) =>
+        json(res, 200, browse(url.searchParams.get('path') ?? undefined)),
+    },
+    {
+      method: 'POST',
+      match: p => p === API.projects,
+      handler: async (req, res) => {
+        const body = await readJson(req);
+        const path = typeof body['path'] === 'string' ? body['path'] : '';
+        if (!path.trim()) throw new BadRequest('Which directory?');
+        json(res, 201, projects.addProject(path));
+      },
+    },
+    {
+      method: 'DELETE',
+      match: p => p.startsWith('/api/projects/'),
+      handler: (_req, res, url) => {
+        projects.removeProject(decodeURIComponent(url.pathname.slice('/api/projects/'.length)));
+        json(res, 200, { ok: true });
+      },
     },
     {
       method: 'GET',
@@ -177,6 +202,10 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
+const MODES: PermissionMode[] = ['ask', 'auto', 'acceptEdits', 'plan', 'dontAsk'];
+const isMode = (value: unknown): value is PermissionMode =>
+  typeof value === 'string' && (MODES as string[]).includes(value);
+
 /** Attachments are decoded on the server, so the wire is checked first. */
 function validateMessage(body: Record<string, unknown>): { text: string; attachments: Attachment[] } {
   const text = typeof body['text'] === 'string' ? body['text'].trim() : '';
@@ -208,7 +237,7 @@ function validateCreate(body: Record<string, unknown>): CreateAgentRequest {
     task,
     model: typeof body['model'] === 'string' && body['model'] ? body['model'] : 'sonnet',
     workspace: 'branch',
-    permissionMode: mode === 'acceptEdits' || mode === 'plan' ? mode : 'default',
+    permissionMode: isMode(mode) ? mode : 'ask',
     attachments: validateMessage({ text: task, attachments: body['attachments'] }).attachments,
   };
 }

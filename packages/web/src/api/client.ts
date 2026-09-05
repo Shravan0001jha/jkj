@@ -29,6 +29,12 @@ export const getContext = (projectId: string) => request<ContextResponse>(API.co
 export const getMcp = () => request<McpListResponse>(API.mcp);
 export const getActivity = () => request<ActivityEvent[]>(API.activity);
 
+export const addProject = (path: string) =>
+  request<Project>(API.projects, { method: 'POST', body: JSON.stringify({ path }) });
+
+export const removeProject = (id: string) =>
+  request<{ ok: true }>(API.project(encodeURIComponent(id)), { method: 'DELETE' });
+
 export const createAgent = (body: CreateAgentRequest) =>
   request<Agent>(API.agents, { method: 'POST', body: JSON.stringify(body) });
 

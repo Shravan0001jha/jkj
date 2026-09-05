@@ -1,7 +1,7 @@
 import { useRef, useSyncExternalStore } from 'react';
 import type {
   ActivityEvent, Agent, ApprovalDecision, Attachment, ContextResponse,
-  LogEntry, McpServer, Project, ServerEvent,
+  LogEntry, McpServer, PermissionMode, Project, ServerEvent,
 } from '@jkj/shared';
 import * as api from '../api/client.js';
 import { sendCommand, type SocketStatus } from '../api/socket.js';
@@ -41,6 +41,7 @@ export interface AppState {
   /** Set when this machine has no Claude Code state to read. */
   claudeHome: string | null;
   newAgentOpen: boolean;
+  addProjectOpen: boolean;
   toast: string | null;
 }
 
@@ -61,6 +62,7 @@ let state: AppState = {
   error: null,
   claudeHome: null,
   newAgentOpen: false,
+  addProjectOpen: false,
   toast: null,
 };
 
@@ -264,6 +266,44 @@ export function openCentralContext(): void {
 
 export const setNewAgentOpen = (open: boolean): void => set({ newAgentOpen: open });
 
+export const setAddProjectOpen = (open: boolean): void => set({ addProjectOpen: open });
+
+/** A directory Claude Code has never run in has nothing to discover. */
+export async function addProject(path: string): Promise<void> {
+  try {
+    const project = await api.addProject(path);
+    const known = state.projects.some(p => p.id === project.id);
+    set({
+      projects: known ? state.projects : [...state.projects, project].sort((a, b) => a.name.localeCompare(b.name)),
+      selectedProjectId: project.id,
+      addProjectOpen: false,
+      openAgentId: null,
+    });
+    void loadContext(project.id);
+  } catch (err) {
+    showToast(message(err));
+  }
+}
+
+/** Forgets a directory. Nothing on disk is touched, sessions included. */
+export async function forgetProject(id: string): Promise<void> {
+  try {
+    await api.removeProject(id);
+    const remaining = state.projects.filter(p => p.id !== id);
+    set({
+      projects: remaining,
+      selectedProjectId: state.selectedProjectId === id ? remaining[0]?.id ?? null : state.selectedProjectId,
+    });
+  } catch (err) {
+    showToast(message(err));
+  }
+}
+
+/** Change how much a running session asks before touching your machine. */
+export function setPermissionMode(agentId: string, mode: PermissionMode): void {
+  if (!sendCommand({ type: 'agent.mode', agentId, mode })) showToast('Not connected to the server.');
+}
+
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 export function showToast(message: string): void {
   set({ toast: message });
@@ -323,7 +363,7 @@ const NOT_OURS = 'That session is open in a terminal. Close it there, then conti
 export async function createSession(
   task: string,
   model: string,
-  permissionMode: 'default' | 'acceptEdits' | 'plan',
+  permissionMode: PermissionMode,
   attachments: Attachment[] = [],
 ): Promise<void> {
   const projectId = state.selectedProjectId;

@@ -1,4 +1,4 @@
-import { useStore } from '../state/store.js';
+import { useStore, setAddProjectOpen } from '../state/store.js';
 
 /**
  * What the first run looks like when there is nothing to show. Each case says
@@ -44,9 +44,11 @@ export function EmptyWorkspace() {
     <>
       <div className="sec-h"><h2>No sessions yet</h2></div>
       <p className="lede">
-        Found Claude Code at <code>{claudeHome}</code>, but no sessions to show. Run{' '}
-        <code>claude</code> in a project and it will appear here.
+        Found Claude Code at <code>{claudeHome}</code>, but no sessions to show. Add a directory
+        and start one from here, or run <code>claude</code> in a project and it will appear on
+        its own.
       </p>
+      <button className="btn primary" onClick={() => setAddProjectOpen(true)}>＋ Add a project</button>
     </>
   );
 }

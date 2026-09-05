@@ -4,6 +4,7 @@ import { findClaudeHome, readConfig, type ClaudeHome } from '../runtime/claude-h
 import { readLiveSessions, type LiveSession } from '../runtime/live-sessions.js';
 import { listSessionFiles, readSession, type SessionDetail, type SessionFile } from '../runtime/session-reader.js';
 import { listRunAgents, ownedSessionIds } from './runs.js';
+import { addedPaths, toProject } from './projects.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -62,7 +63,7 @@ async function build(): Promise<Snapshot> {
     fileById.set(detail.sessionId, file);
   }
 
-  const projects = buildProjects(files, details, config.projects ?? {});
+  const projects = withAdded(buildProjects(files, details, config.projects ?? {}));
 
   // Sessions JKJ is driving come from memory, not disk — the file it is
   // writing is incomplete, and the in-memory copy is the live one.
@@ -75,6 +76,20 @@ async function build(): Promise<Snapshot> {
   log.info('workspace', `${projects.length} projects, ${agents.length} agents, ${live.size} live`);
 
   return { home, projects, agents, files: fileById, details, builtAt: Date.now() };
+}
+
+/**
+ * Directories added by hand that Claude Code has no sessions for yet. They use
+ * the same id a discovered project would, so the moment a session starts there
+ * the two become one row rather than two.
+ */
+function withAdded(discovered: Project[]): Project[] {
+  const known = new Set(discovered.map(p => p.id));
+  const extra = addedPaths()
+    .map(toProject)
+    .filter(project => !known.has(project.id));
+
+  return [...discovered, ...extra].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** listSessionFiles returns newest first, so taking the first N per key keeps the newest. */

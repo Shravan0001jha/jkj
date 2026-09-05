@@ -1,4 +1,4 @@
-import { useStore, selectProject, openCentralContext, contextLayer } from '../state/store.js';
+import { useStore, selectProject, openCentralContext, contextLayer, setAddProjectOpen } from '../state/store.js';
 import { statusColor } from '../lib/format.js';
 
 /**
@@ -40,7 +40,12 @@ export function ProjectRail() {
         </span>
       </button>
 
-      <h3>Projects</h3>
+      <div className="railhead">
+        <h3>Projects</h3>
+        <button className="btn sm ghost" onClick={() => setAddProjectOpen(true)} title="Add a directory">
+          ＋
+        </button>
+      </div>
       {projects.map(project => {
         const own = agents.filter(a => a.projectId === project.id && !a.parentAgentId);
         // A dot per live session. Past sessions are a count, not a row of
@@ -66,6 +71,9 @@ export function ProjectRail() {
           </button>
         );
       })}
+      <p className="railnote">
+        Every directory Claude Code has run in appears here on its own.
+      </p>
     </nav>
   );
 }

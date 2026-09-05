@@ -11,6 +11,17 @@ export type AgentStatus =
   | 'done'      // finished cleanly
   | 'error';    // stopped on a failure or a denied permission
 
+/**
+ * How much a session asks before touching your machine.
+ *
+ *   ask          every tool call waits for you
+ *   auto         a classifier decides, and only the risky calls reach you
+ *   acceptEdits  file edits run; commands still ask
+ *   plan         reads and reasons, changes nothing
+ *   dontAsk      nothing is asked at all
+ */
+export type PermissionMode = 'ask' | 'auto' | 'acceptEdits' | 'plan' | 'dontAsk';
+
 /** How an agent gets a place on disk to work in. */
 export type WorkspaceMode =
   | 'worktree'  // its own git worktree — safe to run in parallel
@@ -70,6 +81,10 @@ export interface Agent {
   usage: Usage;
   /** Turns exchanged, when the source can report it. */
   messageCount?: number;
+  /** Only meaningful for a session JKJ drives. */
+  permissionMode?: PermissionMode;
+  /** Tools you have said to stop asking about, this session. */
+  alwaysAllowed?: string[];
   /**
    * True when JKJ started this session and owns the process, so it can be
    * messaged and interrupted. Sessions started in a terminal are read-only —

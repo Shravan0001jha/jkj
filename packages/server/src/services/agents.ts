@@ -1,4 +1,6 @@
-import type { Agent, ApprovalDecision, Attachment, CreateAgentRequest, LogEntry } from '@jkj/shared';
+import type {
+  Agent, ApprovalDecision, Attachment, CreateAgentRequest, LogEntry, PermissionMode,
+} from '@jkj/shared';
 import { getSnapshot } from './workspace.js';
 import { readSession } from '../runtime/session-reader.js';
 import * as runs from './runs.js';
@@ -93,6 +95,9 @@ export const interruptAgent = (agentId: string): Promise<void> => runs.interrupt
 
 export const resolveApproval = (agentId: string, decision: ApprovalDecision): void =>
   runs.resolveApproval(agentId, decision);
+
+export const setPermissionMode = (agentId: string, mode: PermissionMode): Promise<void> =>
+  runs.setPermissionMode(agentId, mode);
 
 /**
  * Closing a run releases the process. The transcript stays on disk, where the

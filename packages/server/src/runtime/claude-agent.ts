@@ -1,4 +1,9 @@
-import { query, type Options, type PermissionResult, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  type Options, type PermissionMode as SdkPermissionMode, type PermissionResult,
+  type PermissionUpdate, type Query, type SDKUserMessage,
+} from '@anthropic-ai/claude-agent-sdk';
+import type { PermissionMode } from '@jkj/shared';
 
 /**
  * The one place JKJ touches the Claude Agent SDK.
@@ -13,15 +18,29 @@ export interface PermissionRequest {
   input: Record<string, unknown>;
   /** The sentence the CLI would show, when it offers one. */
   title: string;
+  /** Rules that would stop this prompt returning. Empty when there are none. */
+  suggestions: readonly unknown[];
 }
+
+/** JKJ's four modes, in the SDK's vocabulary. */
+export const SDK_MODES: Record<PermissionMode, SdkPermissionMode> = {
+  ask: 'default',
+  auto: 'auto',
+  acceptEdits: 'acceptEdits',
+  plan: 'plan',
+  dontAsk: 'bypassPermissions',
+};
 
 export interface RunEvents {
   /** Fires once the SDK has a session id, which is also its file on disk. */
   onSessionId(sessionId: string): void;
   onText(text: string): void;
   onToolUse(tool: string, input: Record<string, unknown>): void;
-  /** Resolve the returned promise to let the tool run, or reject the request. */
-  onPermission(request: PermissionRequest): Promise<'allow' | 'deny'>;
+  /**
+   * Resolve to let the tool run. 'always' also stops the session asking about
+   * that tool again — the SDK hands us the rules that would achieve it.
+   */
+  onPermission(request: PermissionRequest): Promise<'allow' | 'always' | 'deny'>;
   onUsage(inputTokens: number, outputTokens: number): void;
   onDone(summary: string): void;
   onError(message: string): void;
@@ -39,6 +58,8 @@ export interface RunHandle {
   send(text: string, images?: RunImage[]): void;
   /** Abort the current turn. Files already written stay written. */
   interrupt(): Promise<void>;
+  /** Change how much the session asks. Rejects if the CLI refuses the mode. */
+  setMode(mode: PermissionMode): Promise<void>;
   /** Stop the run and release the process. */
   close(): void;
 }
@@ -51,7 +72,7 @@ export interface RunOptions {
   images?: RunImage[];
   /** Continue an existing session by id rather than starting a new one. */
   resume?: string;
-  permissionMode?: 'default' | 'acceptEdits' | 'plan';
+  permissionMode?: PermissionMode;
 }
 
 export function startRun(options: RunOptions, events: RunEvents): RunHandle {
@@ -61,7 +82,11 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
   const sdkOptions: Options = {
     cwd: options.cwd,
     model: options.model,
-    permissionMode: options.permissionMode ?? 'default',
+    permissionMode: SDK_MODES[options.permissionMode ?? 'ask'],
+    // Makes "don't ask" selectable later without making it the default. The
+    // CLI refuses to switch into it otherwise, which reads as a broken
+    // control rather than the deliberate rail it is.
+    allowDangerouslySkipPermissions: true,
     ...(options.resume ? { resume: options.resume } : {}),
 
     // Every tool call routes through the browser unless the mode auto-allows.
@@ -72,11 +97,20 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
         // The CLI writes a proper sentence when it has one. Otherwise say
         // which of your things is about to be touched, not just the verb.
         title: meta.title ?? describeRequest(toolName, toolInput),
+        suggestions: meta.suggestions ?? [],
       });
 
-      return decision === 'allow'
-        ? { behavior: 'allow', updatedInput: toolInput }
-        : { behavior: 'deny', message: 'Denied from JKJ.' };
+      if (decision === 'deny') return { behavior: 'deny', message: 'Denied from JKJ.' };
+
+      return {
+        behavior: 'allow',
+        updatedInput: toolInput,
+        // 'always' is the CLI's own suggestion applied: the rules it offers
+        // are exactly the ones that stop this prompt coming back.
+        ...(decision === 'always' && meta.suggestions?.length
+          ? { updatedPermissions: meta.suggestions as PermissionUpdate[] }
+          : {}),
+      };
     },
   };
 
@@ -92,6 +126,10 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
         events.onError(describe(err));
       }
     },
+    // Deliberately not swallowed: the CLI refuses some modes depending on how
+    // it was launched, and a refusal the caller cannot see becomes a UI that
+    // claims a mode it does not have.
+    setMode: mode => stream.setPermissionMode(SDK_MODES[mode]),
     close: () => input.end(),
   };
 }

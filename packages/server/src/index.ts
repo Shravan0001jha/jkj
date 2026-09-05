@@ -2,12 +2,15 @@ import type { Config } from './config.js';
 import { createHttpServer, listen } from './http/server.js';
 import { attachSocket } from './ws/hub.js';
 import { findClaudeHome } from './runtime/claude-home.js';
+import { configureProjects } from './services/projects.js';
 import { log } from './util/logger.js';
 
 /**
  * Boot sequence. Everything JKJ starts, starts here, in this order.
  */
 export async function start(config: Config): Promise<void> {
+  configureProjects(config.dataDir);
+
   const home = findClaudeHome();
   if (home.present) {
     log.info('boot', `reading Claude Code state from ${home.configDir}`);

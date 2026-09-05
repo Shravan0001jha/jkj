@@ -1,4 +1,7 @@
-import type { Agent, ApprovalDecision, Attachment, CreateAgentRequest, LogEntry, LogKind } from '@jkj/shared';
+import type {
+  Agent, ApprovalDecision, Attachment, CreateAgentRequest,
+  LogEntry, LogKind, PermissionMode,
+} from '@jkj/shared';
 import { startRun, type RunHandle, type RunImage } from '../runtime/claude-agent.js';
 import { getSnapshot } from './workspace.js';
 import { BadRequest } from '../util/errors.js';
@@ -19,7 +22,12 @@ interface Run {
   /** The session file this run is writing, once the SDK reports it. */
   sessionId?: string;
   /** Set while a tool call is parked waiting for the browser to answer. */
-  pending?: { decide: (decision: 'allow' | 'deny') => void };
+  pending?: {
+    tool: string;
+    /** False when the CLI offered no rule that would stop the prompt. */
+    canAlways: boolean;
+    decide: (decision: 'allow' | 'always' | 'deny') => void;
+  };
   /** Images sent into this run, keyed by the entry that shows them. */
   images: Map<string, { mediaType: string; data: Buffer }>;
 }
@@ -66,7 +74,7 @@ export async function createRun(request: CreateAgentRequest): Promise<Agent> {
     cwd: project.path,
     workspace: request.workspace,
     prompt: request.task,
-    permissionMode: request.permissionMode ?? 'default',
+    permissionMode: request.permissionMode ?? 'ask',
     attachments: request.attachments,
   });
 }
@@ -96,7 +104,7 @@ export async function resumeRun(
     cwd: agent.cwd,
     workspace: agent.workspace,
     prompt: text,
-    permissionMode: 'default',
+    permissionMode: 'ask',
     attachments,
     resume: agent.id,
     history,
@@ -111,7 +119,7 @@ interface SpawnOptions {
   cwd: string;
   workspace: Agent['workspace'];
   prompt: string;
-  permissionMode: 'default' | 'acceptEdits' | 'plan';
+  permissionMode: PermissionMode;
   attachments?: Attachment[];
   /** Session id to continue, when this is not a fresh conversation. */
   resume?: string;
@@ -135,6 +143,8 @@ function spawn(options: SpawnOptions): Agent {
     startedAt: new Date().toISOString(),
     messageCount: 1,
     driven: true,
+    permissionMode: options.permissionMode,
+    alwaysAllowed: [],
     usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
   };
 
@@ -173,7 +183,7 @@ function spawn(options: SpawnOptions): Agent {
 
       onToolUse: (tool, input) => append(run, kindForTool(tool), tool, describeInput(tool, input)),
 
-      onPermission: request2 => new Promise<'allow' | 'deny'>(resolve => {
+      onPermission: request2 => new Promise<'allow' | 'always' | 'deny'>(resolve => {
         update(run, {
           status: 'waiting',
           approval: {
@@ -185,9 +195,17 @@ function spawn(options: SpawnOptions): Agent {
           },
         });
         run.pending = {
+          canAlways: request2.suggestions.length > 0,
+          tool: request2.tool,
           decide: decision => {
             run.pending = undefined;
-            update(run, { status: decision === 'allow' ? 'running' : 'running', approval: undefined });
+            update(run, {
+              status: 'running',
+              approval: undefined,
+              ...(decision === 'always'
+                ? { alwaysAllowed: [...new Set([...(run.agent.alwaysAllowed ?? []), request2.tool])] }
+                : {}),
+            });
             resolve(decision);
           },
         };
@@ -294,14 +312,51 @@ export async function interruptRun(agentId: string): Promise<void> {
 
 export function resolveApproval(agentId: string, decision: ApprovalDecision): void {
   const run = require$(agentId);
-  if (!run.pending) throw new Error('That request has already been answered.');
+  const pending = run.pending;
+  if (!pending) throw new BadRequest('That request has already been answered.');
 
-  // 'always' is treated as this once: persisting a rule would edit the
-  // permission settings a running CLI also reads, which JKJ does not do yet.
-  run.pending.decide(decision === 'deny' ? 'deny' : 'allow');
-  append(run, 'system', decision === 'deny' ? 'Denied' : 'Allowed',
-    decision === 'deny' ? 'You denied the request.' : 'You allowed the request.');
+  // 'always' applies the rules the CLI itself suggested, which is what stops
+  // the prompt coming back. Without a suggestion there is nothing to apply,
+  // so it degrades to allowing this one rather than silently doing nothing.
+  const applied: ApprovalDecision = decision === 'always' && !pending.canAlways ? 'once' : decision;
+  pending.decide(applied === 'deny' ? 'deny' : applied === 'always' ? 'always' : 'allow');
+
+  append(run, 'system',
+    applied === 'deny' ? 'Denied' : 'Allowed',
+    applied === 'deny' ? 'You denied the request.'
+      : applied === 'always' ? `You allowed ${pending.tool} for the rest of this session.`
+      : 'You allowed the request.');
 }
+
+/**
+ * Change how much a running session asks.
+ *
+ * The CLI refuses some modes depending on how it was launched, so the mode is
+ * only recorded once it has actually taken — announcing a change that did not
+ * happen is worse than reporting the refusal.
+ */
+export async function setPermissionMode(agentId: string, mode: PermissionMode): Promise<void> {
+  const run = require$(agentId);
+
+  try {
+    await run.handle.setMode(mode);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    append(run, 'error', 'Permissions', `Still asking: ${reason}`);
+    throw new BadRequest(reason);
+  }
+
+  update(run, { permissionMode: mode });
+  append(run, 'system', 'Permissions', MODE_NOTE[mode]);
+}
+
+const MODE_NOTE: Record<PermissionMode, string> = {
+  ask: 'Every tool call will wait for you.',
+  auto: 'A classifier decides now; only the risky calls will reach you.',
+  acceptEdits: 'File edits will run without asking. Commands still ask.',
+  plan: 'The session will read and reason, but change nothing.',
+  dontAsk: 'Nothing will be asked. Everything runs.',
+};
 
 export function closeRun(agentId: string): void {
   const run = runs.get(agentId);

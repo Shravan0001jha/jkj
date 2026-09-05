@@ -13,12 +13,20 @@ export function ApprovalPrompt({ agent, approval }: { agent: Agent; approval: Pe
       <pre>{approval.tool}  {approval.input}</pre>
       <div className="row">
         <button className="btn primary sm" onClick={() => resolveApproval(agent.id, 'once')}>
-          Allow
+          Allow once
+        </button>
+        <button className="btn sm" onClick={() => resolveApproval(agent.id, 'always')}>
+          Always allow {approval.tool}
         </button>
         <button className="btn sm danger" onClick={() => resolveApproval(agent.id, 'deny')}>
           Deny
         </button>
       </div>
+      {(agent.alwaysAllowed?.length ?? 0) > 0 && (
+        <div className="allowed">
+          No longer asking about: {agent.alwaysAllowed!.join(', ')}
+        </div>
+      )}
     </div>
   );
 }
