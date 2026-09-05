@@ -28,7 +28,7 @@ projects, with one place to keep the context you would otherwise repeat.
 ## Setup
 
 ```bash
-git clone https://github.com/<your-org>/jkj.git
+git clone https://github.com/Shravan0001jha/jkj.git
 cd jkj
 npm install
 ```
