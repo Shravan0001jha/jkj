@@ -10,7 +10,10 @@ export function ProjectRail() {
   const agents = useStore(s => s.agents);
   const selectedId = useStore(s => s.selectedProjectId);
   const user = useStore(s => contextLayer(s, 'user'));
-  const layerCount = useStore(s => s.context?.layers.filter(l => l.tokens > 0).length ?? 0);
+  // Only the files a session is actually given; the memory notes behind the
+  // index are recalled when relevant and would inflate this into nonsense.
+  const layerCount = useStore(s =>
+    s.context?.layers.filter(l => l.counted && l.tokens > 0).length ?? 0);
   const totalTokens = useStore(s => s.context?.totalTokens ?? 0);
   const centralFocused = useStore(s => s.tab === 'context' && s.focusCentral);
 

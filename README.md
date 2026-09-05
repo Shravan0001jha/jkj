@@ -19,13 +19,17 @@ window.
 - **Real transcripts.** The prompts you wrote, the model's replies, and every
   tool call it made, with subagent runs linked from the session that spawned
   them.
-- **Every context file, in one place.** Four things reach a session, from
-  three different directories: your own `~/.claude/CLAUDE.md`, the memory
-  Claude keeps per project, the repo's committed `CLAUDE.md`, and your
-  uncommitted `CLAUDE.local.md`. JKJ shows all four with their real paths and
-  what each costs, and edits them in place — so what you write is what the CLI
-  reads next time, with or without JKJ running. The memory Claude maintains is
-  shown read-only, because an edit there would be overwritten mid-session.
+- **Every context file, in one place, all editable.** Your own
+  `~/.claude/CLAUDE.md`, the memory Claude keeps for the project and the notes
+  behind it, every `CLAUDE.md` from the repo *and the directories above it*,
+  and your uncommitted `CLAUDE.local.md`. Each shows its real path and what it
+  costs, and edits are written straight to disk — so what you write is what
+  the CLI reads next time, with or without JKJ running.
+
+  A nested package inherits the root's `CLAUDE.md`, which is why the chain is
+  walked rather than one file read. The budget counts only what a session is
+  actually given: memory notes are recalled when relevant, so they are listed
+  but not added up.
 - **MCP configuration.** Every server the CLI knows about, where it was
   defined, and which projects enable it.
 
@@ -121,8 +125,8 @@ Nothing is hardcoded to one machine or one operating system. JKJ looks for:
 | Running sessions | `<config>/sessions/*.json` |
 | Settings | `<config>/.claude.json`, else `~/.claude.json` |
 | Your context | `<config>/CLAUDE.md` |
-| Claude's memory | `<config>/projects/<key>/memory/MEMORY.md` |
-| Project context | `<repo>/CLAUDE.md` |
+| Claude's memory | `<config>/projects/<key>/memory/` |
+| Project context | `CLAUDE.md` in the repo and every directory above it |
 | Your project notes | `<repo>/CLAUDE.local.md` |
 | Project MCP servers | `<repo>/.mcp.json` |
 

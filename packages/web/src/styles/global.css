@@ -422,14 +422,22 @@ button, input, textarea, select { font: inherit; color: inherit; }
   gap: 18px; align-items: start; min-width: 0;
 }
 .doc {
-  margin-bottom: 16px; min-width: 0; overflow: hidden;
+  margin-bottom: 10px; min-width: 0; overflow: hidden;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
 }
 .doc.hero { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .doc .dh2 {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 13px;
-  background: var(--surface-2); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  box-sizing: border-box; width: 100%; padding: 10px 13px;
+  text-align: left; cursor: pointer; font: inherit; color: inherit;
+  background: var(--surface-2); border: 0; border-bottom: 1px solid var(--line);
 }
+.doc .dh2:hover { background: var(--surface-3); }
+.doc.hero .dh2:hover { filter: brightness(1.1); }
+.doc .caretmark { flex: none; color: var(--ink-3); font-family: var(--mono); font-size: 10px; }
+.doc.inherited { border-style: dashed; }
+.pill.faint { opacity: 0.6; }
+.leg .legname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .doc.hero .dh2 { background: var(--accent-soft); }
 .doc .dh2 h3 { margin: 0; font-size: 13.5px; font-weight: 700; }
 .doc .dh2 .scope {
@@ -438,7 +446,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 .doc.hero .dh2 .scope { color: var(--accent-ink); }
 .doc textarea {
-  display: block; width: 100%; min-height: 170px; padding: 13px 15px; resize: vertical;
+  display: block; width: 100%; padding: 13px 15px; resize: vertical;
   background: var(--surface); border: 0;
   font-family: var(--doc); font-size: 15.5px; line-height: 1.6;
 }

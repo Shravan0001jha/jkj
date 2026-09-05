@@ -126,14 +126,10 @@ export function createRouter(config: Config) {
       match: p => p === '/api/context',
       handler: async (req, res, url) => {
         const body = await readJson(req);
-        const scope = body['scope'];
-        if (typeof scope !== 'string') throw new BadRequest('Which layer?');
+        const id = body['id'];
+        if (typeof id !== 'string' || !id) throw new BadRequest('Which context file?');
         const text = typeof body['body'] === 'string' ? body['body'] : '';
-        json(res, 200, await context.saveContext(
-          url.searchParams.get('projectId') ?? '',
-          scope as never,
-          text,
-        ));
+        json(res, 200, await context.saveContext(url.searchParams.get('projectId') ?? '', id, text));
       },
     },
     {

@@ -7,11 +7,13 @@ import { useLayoutEffect, useRef } from 'react';
  * clipped last line reads as a rendering fault, not as "there is more".
  */
 export function GrowTextarea({
-  value, onChange, minHeight = 170, ...rest
+  value, onChange, minHeight = 170, maxHeight = 420, ...rest
 }: {
   value: string;
   onChange: (value: string) => void;
   minHeight?: number;
+  /** Past this it scrolls: a page-tall textarea is worse than a short one. */
+  maxHeight?: number;
 } & Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, 'value' | 'onChange'>) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -19,8 +21,8 @@ export function GrowTextarea({
     const el = ref.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.max(minHeight, el.scrollHeight)}px`;
-  }, [value, minHeight]);
+    el.style.height = `${Math.min(maxHeight, Math.max(minHeight, el.scrollHeight))}px`;
+  }, [value, minHeight, maxHeight]);
 
   return (
     <textarea

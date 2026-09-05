@@ -1,6 +1,6 @@
 import { useRef, useSyncExternalStore } from 'react';
 import type {
-  ActivityEvent, Agent, ApprovalDecision, Attachment, ContextResponse, ContextScope,
+  ActivityEvent, Agent, ApprovalDecision, Attachment, ContextResponse,
   LogEntry, McpServer, Project, ServerEvent,
 } from '@jkj/shared';
 import * as api from '../api/client.js';
@@ -120,9 +120,9 @@ export const agentById = (s: AppState, id: string | null): Agent | undefined =>
 export const transcriptOf = (s: AppState, agentId: string): LogEntry[] =>
   s.transcripts[agentId] ?? [];
 
-/** One layer of the selected project's context, or an empty stand-in. */
-export const contextLayer = (s: AppState, scope: ContextScope) =>
-  s.context?.layers.find(l => l.id === scope);
+/** One layer of the selected project's context, by its id. */
+export const contextLayer = (s: AppState, id: string) =>
+  s.context?.layers.find(l => l.id === id);
 
 /* ---------- loading ---------- */
 
@@ -297,7 +297,7 @@ function debounceSave(key: string, save: () => Promise<unknown>): void {
   }, 700));
 }
 
-export function editContext(scope: ContextScope, body: string): void {
+export function editContext(id: string, body: string): void {
   const context = state.context;
   if (!context) return;
 
@@ -305,11 +305,11 @@ export function editContext(scope: ContextScope, body: string): void {
     context: {
       ...context,
       layers: context.layers.map(layer =>
-        layer.id === scope ? { ...layer, body, tokens: Math.round(body.length / 3.6) } : layer),
+        layer.id === id ? { ...layer, body, tokens: Math.round(body.length / 3.6) } : layer),
     },
   });
 
-  debounceSave(scope, () => api.putContext(context.projectId, scope, body));
+  debounceSave(id, () => api.putContext(context.projectId, id, body));
 }
 
 /* ---------- driving a session ---------- */

@@ -15,11 +15,13 @@ export function AssembledPreview() {
 
   if (!project || !context) return null;
 
-  const present = context.layers.filter(layer => layer.tokens > 0);
+  // Only files with something in them earn a row; the rest would be a legend
+  // of zeroes on a project that has barely any context at all.
+  const present = context.layers.filter(layer => layer.counted && layer.tokens > 0);
   const total = context.totalTokens;
 
   const text = context.layers
-    .filter(layer => layer.body.trim())
+    .filter(layer => layer.counted && layer.body.trim())
     .map(layer => `# ${layer.label}\n${layer.body.trim()}`)
     .join('\n\n') || 'Nothing yet — a session in this project starts with no context of its own.';
 
@@ -42,13 +44,14 @@ export function AssembledPreview() {
       </div>
 
       <div className="leg">
-        {context.layers.map((layer, i) => (
-          <div key={layer.id} style={{ opacity: layer.tokens > 0 ? 1 : 0.45 }}>
-            <i style={{ background: layer.tokens > 0 ? COLORS[i % COLORS.length] : 'var(--surface-3)' }} />
-            {layer.label}
+        {present.map((layer, i) => (
+          <div key={layer.id}>
+            <i style={{ background: COLORS[i % COLORS.length] }} />
+            <span className="legname">{layer.label}</span>
             <b>{layer.tokens} tok</b>
           </div>
         ))}
+        {present.length === 0 && <div><i style={{ background: 'var(--surface-3)' }} />Nothing yet</div>}
         <div className="total"><i />Total<b>{total} tok</b></div>
       </div>
 

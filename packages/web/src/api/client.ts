@@ -1,6 +1,6 @@
 import { API } from '@jkj/shared';
 import type {
-  ActivityEvent, Agent, Attachment, ContextLayer, ContextResponse, ContextScope,
+  ActivityEvent, Agent, Attachment, ContextLayer, ContextResponse,
   CreateAgentRequest, HealthResponse, LogEntry, McpListResponse, Project,
 } from '@jkj/shared';
 
@@ -47,8 +47,8 @@ export const postMessage = (agentId: string, text: string, attachments: Attachme
 export const archiveAgent = (agentId: string) =>
   request<{ ok: true }>(API.agent(encodeURIComponent(agentId)), { method: 'DELETE' });
 
-export const putContext = (projectId: string, scope: ContextScope, body: string) =>
+export const putContext = (projectId: string, id: string, body: string) =>
   request<ContextLayer>(`/api/context?projectId=${encodeURIComponent(projectId)}`, {
     method: 'PUT',
-    body: JSON.stringify({ scope, body }),
+    body: JSON.stringify({ id, body }),
   });
