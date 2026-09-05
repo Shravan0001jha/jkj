@@ -3,6 +3,7 @@ import type { Agent, Attachment } from '@jkj/shared';
 import { sendMessage, showToast } from '../../state/store.js';
 import { readFile } from '../../lib/attachments.js';
 import { AttachmentTray } from './AttachmentTray.js';
+import { GrowTextarea } from '../../components/GrowTextarea.js';
 
 /**
  * Steer a session, with whatever it needs to see.
@@ -16,7 +17,7 @@ export function Composer({ agent }: { agent: Agent }) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const openElsewhere = !agent.driven && (agent.status === 'running' || agent.status === 'waiting');
@@ -25,7 +26,7 @@ export function Composer({ agent }: { agent: Agent }) {
   const resuming = !agent.driven && canSend;
 
   useEffect(() => {
-    if (canSend) inputRef.current?.focus();
+    if (canSend) boxRef.current?.querySelector('textarea')?.focus();
   }, [agent.id, canSend]);
 
   // A new conversation starts with an empty tray.
@@ -45,8 +46,7 @@ export function Composer({ agent }: { agent: Agent }) {
     }
   };
 
-  const submit = async (e: React.FormEvent): Promise<void> => {
-    e.preventDefault();
+  const send = async (): Promise<void> => {
     const value = text.trim();
     if ((!value && attachments.length === 0) || busy) return;
 
@@ -56,6 +56,19 @@ export function Composer({ agent }: { agent: Agent }) {
     setAttachments([]);
     await sendMessage(agent.id, value, sending);
     setBusy(false);
+  };
+
+  const submit = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    await send();
+  };
+
+  // Enter sends, because that is what a chat box does. A message long enough
+  // to want paragraphs gets them with shift.
+  const onKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    void send();
   };
 
   if (!canSend) {
@@ -72,6 +85,7 @@ export function Composer({ agent }: { agent: Agent }) {
 
   return (
     <div
+      ref={boxRef}
       className={`composerwrap${dragging ? ' dropping' : ''}`}
       onDragOver={e => { e.preventDefault(); setDragging(true); }}
       onDragLeave={() => setDragging(false)}
@@ -104,10 +118,10 @@ export function Composer({ agent }: { agent: Agent }) {
           onChange={e => { void take(e.target.files); e.target.value = ''; }}
         />
 
-        <input
-          ref={inputRef}
+        <GrowTextarea
           value={text}
-          onChange={e => setText(e.target.value)}
+          onChange={setText}
+          onKeyDown={onKeyDown}
           onPaste={e => {
             const files = Array.from(e.clipboardData.files);
             if (files.length === 0) return;
@@ -116,7 +130,9 @@ export function Composer({ agent }: { agent: Agent }) {
           }}
           placeholder={resuming ? 'Continue this session…' : `Message ${agent.name}…`}
           aria-label="Message this session"
-          autoComplete="off"
+          rows={1}
+          minHeight={38}
+          maxHeight={220}
           disabled={busy}
         />
 
@@ -130,7 +146,9 @@ export function Composer({ agent }: { agent: Agent }) {
       </form>
 
       <div className="hintline">
-        {dragging ? 'Drop to attach' : 'Paste a screenshot, drop a file, or use ＋'}
+        {dragging
+          ? 'Drop to attach'
+          : 'Enter to send · Shift+Enter for a new line · paste a screenshot or drop a file'}
       </div>
     </div>
   );

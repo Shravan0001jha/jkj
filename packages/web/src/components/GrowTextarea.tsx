@@ -20,8 +20,15 @@ export function GrowTextarea({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+
     el.style.height = 'auto';
-    el.style.height = `${Math.min(maxHeight, Math.max(minHeight, el.scrollHeight))}px`;
+    // scrollHeight measures the content box, but the element is sized with
+    // border-box, so the border has to be added back or the last line is
+    // clipped by exactly the border width.
+    const chrome = el.offsetHeight - el.clientHeight;
+    const wanted = el.scrollHeight + chrome;
+
+    el.style.height = `${Math.min(maxHeight, Math.max(minHeight, wanted))}px`;
   }, [value, minHeight, maxHeight]);
 
   return (
