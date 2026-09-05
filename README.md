@@ -4,8 +4,10 @@ A local control plane for Claude Code. Run `jkj`, and a page opens in your
 browser where you can start and steer many agents at once, across many
 projects, with one place to keep the context you would otherwise repeat.
 
-> **Status: early.** The UI shell and the client/server pipe are in place.
-> Agents are not yet wired to a real runtime. See [Roadmap](#roadmap).
+> **Status: early.** The full interface is built and interactive, but it runs
+> on fabricated data — agents are not yet wired to a real runtime. Everything
+> fake lives in `packages/web/src/mock/`; deleting that folder is the whole
+> migration. See [Roadmap](#roadmap).
 
 ## What it does
 
@@ -49,9 +51,14 @@ That starts two processes:
 **Open http://127.0.0.1:5317.** Vite proxies `/api` and `/ws` through to the
 server, so the browser only ever talks to one origin.
 
-You should see the *Connection* panel report `ok` for both REST and the
-WebSocket. If either says `unreachable`, the server did not start — check the
-`server` lines in your terminal.
+You should see three projects in the left rail and a grid of agents that
+advances on its own. Open an agent's chat, approve the request the
+`lock-free-migration` agent is blocked on, edit the central context and watch
+the assembled prompt change, or restart an MCP server.
+
+The data is fabricated. `packages/web/src/mock/fixtures.ts` is the seed and
+`simulator.ts` is the timer that advances it; no component imports from that
+folder, so replacing it with live data is a change to `App.tsx` alone.
 
 ## Running the built app
 
@@ -101,9 +108,11 @@ Inside `packages/web/src`:
 App.tsx               Composes the screens
 api/client.ts         One function per REST endpoint
 api/socket.ts         The single WebSocket connection
-state/store.ts        Client state
-components/           Shared UI pieces
+state/store.ts        Client state and every action the UI can take
+mock/                 Fabricated seed data and the stream simulator
+components/           Shared UI pieces: shell, rail, tabs, modal, toast
 features/             One folder per tab: agents, context, mcp, activity
+lib/format.ts         Pure formatting helpers
 styles/tokens.css     Every colour and font, light and dark
 ```
 
@@ -126,6 +135,7 @@ styles/tokens.css     Every colour and font, light and dark
 - [x] Repo, workspaces, build pipeline
 - [x] Server skeleton: REST, WebSocket, service boundaries
 - [x] Web shell and a connection check
+- [x] The full interface, running on fabricated data
 - [ ] Projects: add a directory, read its branch, import `CLAUDE.md`
 - [ ] Agents: create, run against the Claude Agent SDK, stream the transcript
 - [ ] Git worktree per agent
