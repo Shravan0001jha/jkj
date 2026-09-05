@@ -118,26 +118,22 @@ export function createRouter(config: Config) {
     {
       method: 'GET',
       match: p => p === '/api/context',
-      handler: async (_req, res, url) => {
-        const projectId = url.searchParams.get('projectId') ?? '';
-        json(res, 200, {
-          central: context.getCentralContext(),
-          project: await context.getProjectContext(projectId),
-          assembled: await context.assembleContext(projectId),
-        });
-      },
+      handler: async (_req, res, url) =>
+        json(res, 200, await context.readContext(url.searchParams.get('projectId') ?? '')),
     },
     {
       method: 'PUT',
       match: p => p === '/api/context',
       handler: async (req, res, url) => {
         const body = await readJson(req);
-        const text = typeof body.body === 'string' ? body.body : '';
-        const projectId = url.searchParams.get('projectId');
-
-        json(res, 200, body.scope === 'central'
-          ? context.setCentralContext(text)
-          : await context.setProjectContext(projectId ?? '', text));
+        const scope = body['scope'];
+        if (typeof scope !== 'string') throw new BadRequest('Which layer?');
+        const text = typeof body['body'] === 'string' ? body['body'] : '';
+        json(res, 200, await context.saveContext(
+          url.searchParams.get('projectId') ?? '',
+          scope as never,
+          text,
+        ));
       },
     },
     {

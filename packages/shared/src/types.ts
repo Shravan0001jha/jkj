@@ -129,27 +129,6 @@ export interface McpCatalogEntry {
   toolCount: number;
 }
 
-/**
- * Context comes in exactly two layers. Central is written once and reaches
- * every agent; project context is scoped to one repo. Resist adding a third.
- */
-export type ContextScope = 'central' | 'project';
-
-export interface ContextDoc {
-  scope: ContextScope;
-  /** null for the central doc. */
-  projectId: string | null;
-  body: string;
-  updatedAt: string;
-}
-
-/** Breakdown of the prompt a new agent would receive right now. */
-export interface AssembledContext {
-  text: string;
-  segments: { label: string; tokens: number }[];
-  totalTokens: number;
-}
-
 export interface ActivityEvent {
   id: string;
   at: string;

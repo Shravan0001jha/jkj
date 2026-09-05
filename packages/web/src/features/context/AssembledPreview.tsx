@@ -1,56 +1,52 @@
-import { useStore, currentProject, projectContext } from '../../state/store.js';
-import { estimateTokens } from '../../lib/format.js';
+import { useStore, currentProject } from '../../state/store.js';
+
+const COLORS = ['var(--accent)', 'var(--run)', 'var(--done)', 'var(--wait)'];
 
 /**
- * The two documents a new session in this project will be given, and what
- * they cost. Only what JKJ can actually measure is shown — the CLI's own
- * system prompt and tool schemas are not ours to count.
+ * What the layers add up to.
+ *
+ * Only what JKJ can measure is shown. The CLI's own system prompt and tool
+ * schemas are not ours to count, and inventing a number for them would make
+ * the total look authoritative when it is not.
  */
 export function AssembledPreview() {
   const project = useStore(currentProject);
-  const central = useStore(s => s.central.body);
-  const projectBody = useStore(s => projectContext(s, s.selectedProjectId).body);
+  const context = useStore(s => s.context);
 
-  if (!project) return null;
+  if (!project || !context) return null;
 
-  const segments = [
-    { label: 'Central context', tokens: estimateTokens(central), color: 'var(--accent)' },
-    { label: 'Project context', tokens: estimateTokens(projectBody), color: 'var(--run)' },
-  ];
-  const total = segments.reduce((n, s) => n + s.tokens, 0);
+  const present = context.layers.filter(layer => layer.tokens > 0);
+  const total = context.totalTokens;
 
-  const text = [
-    `# ${project.name}`,
-    `${project.path} (${project.branch})`,
-    '',
-    '## Central',
-    central.trim() || '(empty)',
-    '',
-    '## Project',
-    projectBody.trim() || '(empty)',
-  ].join('\n');
+  const text = context.layers
+    .filter(layer => layer.body.trim())
+    .map(layer => `# ${layer.label}\n${layer.body.trim()}`)
+    .join('\n\n') || 'Nothing yet — a session in this project starts with no context of its own.';
 
   return (
     <aside className="preview">
       <div className="ph">
         <h3>What a session inherits</h3>
-        <p>Both files are read by the CLI itself, with or without JKJ running.</p>
+        <p>These files are read by the CLI itself, with or without JKJ running.</p>
       </div>
 
       <div className="bar">
         {total > 0
-          ? segments.map(s => (
-              <span key={s.label} style={{ width: `${(s.tokens / total) * 100}%`, background: s.color }} />
+          ? present.map((layer, i) => (
+              <span
+                key={layer.id}
+                style={{ width: `${(layer.tokens / total) * 100}%`, background: COLORS[i % COLORS.length] }}
+              />
             ))
           : <span style={{ width: '100%', background: 'var(--surface-3)' }} />}
       </div>
 
       <div className="leg">
-        {segments.map(s => (
-          <div key={s.label}>
-            <i style={{ background: s.color }} />
-            {s.label}
-            <b>{s.tokens} tok</b>
+        {context.layers.map((layer, i) => (
+          <div key={layer.id} style={{ opacity: layer.tokens > 0 ? 1 : 0.45 }}>
+            <i style={{ background: layer.tokens > 0 ? COLORS[i % COLORS.length] : 'var(--surface-3)' }} />
+            {layer.label}
+            <b>{layer.tokens} tok</b>
           </div>
         ))}
         <div className="total"><i />Total<b>{total} tok</b></div>

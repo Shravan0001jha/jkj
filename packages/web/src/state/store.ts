@@ -1,7 +1,7 @@
 import { useRef, useSyncExternalStore } from 'react';
 import type {
-  ActivityEvent, Agent, ApprovalDecision, Attachment, ContextDoc, LogEntry,
-  McpServer, Project, ServerEvent,
+  ActivityEvent, Agent, ApprovalDecision, Attachment, ContextResponse, ContextScope,
+  LogEntry, McpServer, Project, ServerEvent,
 } from '@jkj/shared';
 import * as api from '../api/client.js';
 import { sendCommand, type SocketStatus } from '../api/socket.js';
@@ -26,8 +26,8 @@ export interface AppState {
   agents: Agent[];
   transcripts: Record<string, LogEntry[]>;
   mcpInstalled: McpServer[];
-  central: ContextDoc;
-  projectContexts: Record<string, ContextDoc>;
+  /** Every context layer for the selected project, as it is on disk. */
+  context: ContextResponse | null;
   activity: ActivityEvent[];
 
   /* ui */
@@ -44,15 +44,12 @@ export interface AppState {
   toast: string | null;
 }
 
-const EMPTY_DOC: ContextDoc = { scope: 'central', projectId: null, body: '', updatedAt: '' };
-
 let state: AppState = {
   projects: [],
   agents: [],
   transcripts: {},
   mcpInstalled: [],
-  central: EMPTY_DOC,
-  projectContexts: {},
+  context: null,
   activity: [],
 
   selectedProjectId: null,
@@ -123,21 +120,9 @@ export const agentById = (s: AppState, id: string | null): Agent | undefined =>
 export const transcriptOf = (s: AppState, agentId: string): LogEntry[] =>
   s.transcripts[agentId] ?? [];
 
-/** Blank documents are cached so the selector keeps returning one object. */
-const blankDocs = new Map<string, ContextDoc>();
-
-export function projectContext(s: AppState, projectId: string | null): ContextDoc {
-  if (!projectId) return EMPTY_DOC;
-  const existing = s.projectContexts[projectId];
-  if (existing) return existing;
-
-  let blank = blankDocs.get(projectId);
-  if (!blank) {
-    blank = { scope: 'project', projectId, body: '', updatedAt: '' };
-    blankDocs.set(projectId, blank);
-  }
-  return blank;
-}
+/** One layer of the selected project's context, or an empty stand-in. */
+export const contextLayer = (s: AppState, scope: ContextScope) =>
+  s.context?.layers.find(l => l.id === scope);
 
 /* ---------- loading ---------- */
 
@@ -176,8 +161,7 @@ export async function loadTranscript(agentId: string): Promise<void> {
 
 export async function loadContext(projectId: string): Promise<void> {
   try {
-    const { central, project } = await api.getContext(projectId);
-    set({ central, projectContexts: { ...state.projectContexts, [projectId]: project } });
+    set({ context: await api.getContext(projectId) });
   } catch (err) {
     set({ error: message(err) });
   }
@@ -258,7 +242,13 @@ export function selectProject(projectId: string): void {
   void loadContext(projectId);
 }
 
-export const setTab = (tab: TabId): void => set({ tab });
+export function setTab(tab: TabId): void {
+  set({ tab });
+  // These files are edited outside JKJ all the time — by you in an editor, by
+  // Claude as it learns. Re-read them whenever the tab is opened rather than
+  // showing whatever was true when the page loaded.
+  if (tab === 'context' && state.selectedProjectId) void loadContext(state.selectedProjectId);
+}
 
 export function openAgent(agentId: string): void {
   set({ openAgentId: agentId, tab: 'agents' });
@@ -267,7 +257,10 @@ export function openAgent(agentId: string): void {
 
 export const closeAgent = (): void => set({ openAgentId: null });
 
-export const openCentralContext = (): void => set({ tab: 'context', focusCentral: true });
+export function openCentralContext(): void {
+  set({ tab: 'context', focusCentral: true });
+  if (state.selectedProjectId) void loadContext(state.selectedProjectId);
+}
 
 export const setNewAgentOpen = (open: boolean): void => set({ newAgentOpen: open });
 
@@ -304,19 +297,19 @@ function debounceSave(key: string, save: () => Promise<unknown>): void {
   }, 700));
 }
 
-export function setCentralContext(body: string): void {
-  set({ central: { ...state.central, scope: 'central', projectId: null, body } });
-  debounceSave('central', () => api.putContext('central', body));
-}
+export function editContext(scope: ContextScope, body: string): void {
+  const context = state.context;
+  if (!context) return;
 
-export function setProjectContextBody(projectId: string, body: string): void {
   set({
-    projectContexts: {
-      ...state.projectContexts,
-      [projectId]: { scope: 'project', projectId, body, updatedAt: new Date().toISOString() },
+    context: {
+      ...context,
+      layers: context.layers.map(layer =>
+        layer.id === scope ? { ...layer, body, tokens: Math.round(body.length / 3.6) } : layer),
     },
   });
-  debounceSave(`project:${projectId}`, () => api.putContext('project', body, projectId));
+
+  debounceSave(scope, () => api.putContext(context.projectId, scope, body));
 }
 
 /* ---------- driving a session ---------- */

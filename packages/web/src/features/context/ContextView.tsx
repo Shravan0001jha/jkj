@@ -1,87 +1,107 @@
 import { useEffect, useRef } from 'react';
-import {
-  useStore, currentProject, projectContext, setCentralContext, setProjectContextBody,
-} from '../../state/store.js';
-import { estimateTokens } from '../../lib/format.js';
-import { AssembledPreview } from './AssembledPreview.js';
+import type { ContextLayer } from '@jkj/shared';
+import { useStore, currentProject, editContext } from '../../state/store.js';
 import { GrowTextarea } from '../../components/GrowTextarea.js';
+import { AssembledPreview } from './AssembledPreview.js';
 
 /**
- * Two documents, one preview.
+ * Every file that reaches a session in this project, in the order it arrives.
  *
- * These are the real CLAUDE.md files, not a JKJ store — what you type here is
- * what the CLI reads next time it starts. Saves are debounced; there is no
- * save button because there is no draft state to lose.
+ * Two of them are yours, one is the repo's, and one is written by Claude. The
+ * point of showing all four is that the preview beside them is the prompt —
+ * if this page and the model ever disagree, this page is the bug.
  */
 export function ContextView() {
   const project = useStore(currentProject);
-  const central = useStore(s => s.central.body);
-  const projectDoc = useStore(s => projectContext(s, s.selectedProjectId));
-  const projects = useStore(s => s.projects);
-  const claudeHome = useStore(s => s.claudeHome);
+  const context = useStore(s => s.context);
   const focusCentral = useStore(s => s.focusCentral);
-  const centralRef = useRef<HTMLDivElement>(null);
+  const firstRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    if (focusCentral) centralRef.current?.querySelector('textarea')?.focus();
-  }, [focusCentral]);
+    if (focusCentral) firstRef.current?.querySelector('textarea')?.focus();
+  }, [focusCentral, context]);
 
   if (!project) return null;
+  if (!context) return <p className="lede">Reading your context files…</p>;
 
   return (
     <>
       <div className="sec-h">
         <h2>Context</h2>
-        <p>Two layers. The central one is written once and reaches every session on this machine.</p>
+        <p>Everything a session in {project.name} is told before it reads a single file.</p>
       </div>
 
       <div className="ctxwrap">
         <div>
-          <article className="doc hero" ref={centralRef}>
-            <div className="dh2">
-              <h3>How I like things</h3>
-              <span className="scope">central · all projects</span>
-            </div>
-            <GrowTextarea
-              value={central}
-              onChange={setCentralContext}
-              aria-label="Central context"
-              placeholder="Nothing here yet. Whatever you write is read by every session you start."
+          {context.layers.map((layer, index) => (
+            <LayerCard
+              key={layer.id}
+              layer={layer}
+              hero={index === 0}
+              ref={index === 0 ? firstRef : undefined}
             />
-            <div className="inherits">
-              Inherited by {projects.map(p => <span className="chip" key={p.id}>{p.name}</span>)}
-            </div>
-            <div className="df">
-              <span>{claudeHome ?? '~/.claude'}/CLAUDE.md</span>
-              <span style={{ marginLeft: 'auto' }}>{estimateTokens(central)} tok</span>
-            </div>
-          </article>
+          ))}
 
-          <article className="doc">
-            <div className="dh2">
-              <h3>{project.name}</h3>
-              <span className="scope">project</span>
-            </div>
-            <GrowTextarea
-              value={projectDoc.body}
-              onChange={body => setProjectContextBody(project.id, body)}
-              aria-label={`${project.name} context`}
-              placeholder="No CLAUDE.md in this repo yet. Type here to create one."
-            />
-            <div className="df">
-              <span>{project.path}/CLAUDE.md</span>
-              <span style={{ marginLeft: 'auto' }}>{estimateTokens(projectDoc.body)} tok</span>
-            </div>
-          </article>
-
-          <p className="muted narrow">
-            Edits are written to disk a moment after you stop typing. Sessions already running keep
-            the context they started with.
-          </p>
+          {context.memoryFiles.length > 0 && (
+            <article className="doc">
+              <div className="dh2">
+                <h3>Memory notes</h3>
+                <span className="scope">{context.memoryFiles.length} files</span>
+              </div>
+              <div className="memlist">
+                {context.memoryFiles.map(file => (
+                  <span className="chip" key={file.name} title={`${file.bytes} bytes`}>{file.name}</span>
+                ))}
+              </div>
+              <div className="df">
+                <span>Claude writes these as it learns. The index above is what a session reads.</span>
+              </div>
+            </article>
+          )}
         </div>
 
         <AssembledPreview />
       </div>
     </>
   );
+}
+
+/** One file: what it is, where it lives, and whether you may change it. */
+const LayerCard = ({ layer, hero, ref }: {
+  layer: ContextLayer;
+  hero: boolean;
+  ref?: React.Ref<HTMLElement>;
+}) => (
+  <article className={`doc${hero ? ' hero' : ''}`} ref={ref}>
+    <div className="dh2">
+      <h3>{layer.label}</h3>
+      <span className="scope">{layer.editable ? layer.id : 'read-only'}</span>
+      <span className="pill idle" style={{ marginLeft: 'auto' }}>
+        <i />{layer.exists ? `${layer.tokens} tok` : 'not created yet'}
+      </span>
+    </div>
+
+    {layer.editable ? (
+      <GrowTextarea
+        value={layer.body}
+        onChange={body => editContext(layer.id, body)}
+        aria-label={layer.label}
+        placeholder={`Nothing here yet. ${layer.summary}`}
+        minHeight={layer.body ? 150 : 90}
+      />
+    ) : (
+      <pre className="readonlydoc">{layer.body || 'Nothing remembered for this project yet.'}</pre>
+    )}
+
+    <div className="df">
+      <span>{layer.summary}</span>
+      <span style={{ marginLeft: 'auto' }} title={layer.path}>{shortenPath(layer.path)}</span>
+    </div>
+  </article>
+);
+
+/** Home is where most of these live, so the tilde earns its space. */
+function shortenPath(path: string): string {
+  const home = path.match(/^\/(Users|home)\/[^/]+/)?.[0];
+  return home ? path.replace(home, '~') : path;
 }

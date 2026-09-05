@@ -6,8 +6,7 @@
  * breaks the build rather than production.
  */
 import type {
-  Agent, ActivityEvent, AssembledContext, ContextDoc,
-  LogEntry, McpCatalogEntry, McpServer, Project, WorkspaceMode,
+  Agent, ActivityEvent, LogEntry, McpCatalogEntry, McpServer, Project, WorkspaceMode,
 } from './types.js';
 
 /** Sent by the server, consumed by the UI. */
@@ -39,12 +38,6 @@ export interface CreateAgentRequest {
   /** How tool calls are handled. 'default' asks you; 'acceptEdits' does not. */
   permissionMode?: 'default' | 'acceptEdits' | 'plan';
   attachments?: Attachment[];
-}
-
-export interface ContextResponse {
-  central: ContextDoc;
-  project: ContextDoc;
-  assembled: AssembledContext;
 }
 
 /**

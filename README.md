@@ -19,9 +19,13 @@ window.
 - **Real transcripts.** The prompts you wrote, the model's replies, and every
   tool call it made, with subagent runs linked from the session that spawned
   them.
-- **Context in two layers.** `~/.claude/CLAUDE.md` for how you like things,
-  and each repo's own `CLAUDE.md`. JKJ edits those files directly, so what you
-  write is what the CLI reads next time — with or without JKJ running.
+- **Every context file, in one place.** Four things reach a session, from
+  three different directories: your own `~/.claude/CLAUDE.md`, the memory
+  Claude keeps per project, the repo's committed `CLAUDE.md`, and your
+  uncommitted `CLAUDE.local.md`. JKJ shows all four with their real paths and
+  what each costs, and edits them in place — so what you write is what the CLI
+  reads next time, with or without JKJ running. The memory Claude maintains is
+  shown read-only, because an edit there would be overwritten mid-session.
 - **MCP configuration.** Every server the CLI knows about, where it was
   defined, and which projects enable it.
 
@@ -116,8 +120,10 @@ Nothing is hardcoded to one machine or one operating system. JKJ looks for:
 | Session transcripts | `<config>/projects/<encoded path>/<session id>.jsonl` |
 | Running sessions | `<config>/sessions/*.json` |
 | Settings | `<config>/.claude.json`, else `~/.claude.json` |
-| Central context | `<config>/CLAUDE.md` |
+| Your context | `<config>/CLAUDE.md` |
+| Claude's memory | `<config>/projects/<key>/memory/MEMORY.md` |
 | Project context | `<repo>/CLAUDE.md` |
+| Your project notes | `<repo>/CLAUDE.local.md` |
 | Project MCP servers | `<repo>/.mcp.json` |
 
 Missing files mean "not configured", never an error. Record shapes have
@@ -190,7 +196,7 @@ styles/tokens.css     Every colour and font, light and dark
 - [x] The full interface
 - [x] Read real projects, sessions and transcripts from disk
 - [x] Live sessions separated from ended ones, updated over the socket
-- [x] Context: edit the real `CLAUDE.md` files both layers live in
+- [x] Context: every layer the CLI loads, edited in place
 - [x] MCP: read every configured server and where it came from
 - [x] Start a session from JKJ and stream it live
 - [x] Steer a running session, and interrupt it

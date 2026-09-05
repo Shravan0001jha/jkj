@@ -1,5 +1,5 @@
-import { useStore, selectProject, openCentralContext } from '../state/store.js';
-import { estimateTokens, statusColor } from '../lib/format.js';
+import { useStore, selectProject, openCentralContext, contextLayer } from '../state/store.js';
+import { statusColor } from '../lib/format.js';
 
 /**
  * The left rail. Central context sits above the project list on purpose — it
@@ -9,10 +9,12 @@ export function ProjectRail() {
   const projects = useStore(s => s.projects);
   const agents = useStore(s => s.agents);
   const selectedId = useStore(s => s.selectedProjectId);
-  const central = useStore(s => s.central.body);
+  const user = useStore(s => contextLayer(s, 'user'));
+  const layerCount = useStore(s => s.context?.layers.filter(l => l.tokens > 0).length ?? 0);
+  const totalTokens = useStore(s => s.context?.totalTokens ?? 0);
   const centralFocused = useStore(s => s.tab === 'context' && s.focusCentral);
 
-  const firstLine = central.split('\n').find(l => l.trim()) ?? '';
+  const firstLine = (user?.body ?? '').split('\n').find(l => l.trim()) ?? '';
 
   return (
     <nav className="rail" aria-label="Workspace">
@@ -28,10 +30,10 @@ export function ProjectRail() {
         <p>
           {firstLine
             ? `${firstLine.slice(0, 78)}${firstLine.length > 78 ? '…' : ''}`
-            : 'Empty — write it once and every session picks it up.'}
+            : 'Nothing of your own yet — but Claude keeps memory of its own.'}
         </p>
         <span className="cm">
-          {central ? `${estimateTokens(central)} tok · ` : ''}every session, every project
+          {layerCount} {layerCount === 1 ? 'layer' : 'layers'} · {totalTokens} tok
         </span>
       </button>
 
