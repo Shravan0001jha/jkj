@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useStore, transcriptOf, openAgent, loadTranscript } from '../../state/store.js';
 import { TranscriptEntry } from './TranscriptEntry.js';
 
@@ -16,13 +16,24 @@ export function Transcript({ agentId }: { agentId: string }) {
     if (!loaded) void loadTranscript(agentId);
   }, [agentId, loaded]);
 
-  // Follow the stream, but only when the reader is already at the bottom.
+  // A conversation opens where it left off, not at its beginning. Done
+  // before paint so the newest message is simply there, with no visible jump.
+  const landed = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (!box || entries.length === 0 || landed.current === agentId) return;
+    landed.current = agentId;
+    box.scrollTop = box.scrollHeight;
+  }, [agentId, entries.length]);
+
+  // After that, follow the stream only while the reader is already at the
+  // bottom — yanking the view mid-read is worse than falling behind.
   useEffect(() => {
     const box = boxRef.current;
-    if (!box) return;
-    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 160;
+    if (!box || landed.current !== agentId) return;
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 200;
     if (atBottom) box.scrollTop = box.scrollHeight;
-  }, [entries.length]);
+  }, [agentId, entries.length]);
 
   // Subagent runs are listed once, after the transcript, because the records
   // do not say which Task call each one came from.

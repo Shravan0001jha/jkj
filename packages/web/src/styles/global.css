@@ -157,7 +157,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
   font-size: 12.5px; font-weight: 500;
 }
 .btn:hover { background: var(--surface-2); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fbfcf6; font-weight: 600; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fdfdff; font-weight: 600; }
 .btn.primary:hover { filter: brightness(1.08); }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
 .btn.ghost:hover { background: var(--surface-2); color: var(--ink); }
@@ -165,9 +165,9 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .btn.sm { padding: 3px 8px; font-size: 11.5px; }
 .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
 
-:root[data-theme="dark"] .btn.primary { color: #12150e; }
+:root[data-theme="dark"] .btn.primary { color: #14161b; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .btn.primary { color: #12150e; }
+  :root:not([data-theme="light"]) .btn.primary { color: #14161b; }
 }
 
 /* ---------- pills ---------- */
@@ -202,7 +202,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .card .stripe { height: 2px; background: var(--line); }
 .card.s-running .stripe { background: var(--run); }
 .card.s-waiting .stripe { background: var(--wait); }
-.card.s-done .stripe { background: var(--done); }
+.card.s-done .stripe { background: var(--line-strong); }
 .card.s-error .stripe { background: var(--err); }
 .card .top {
   display: flex; justify-content: space-between; align-items: flex-start;
@@ -316,7 +316,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .ln.read .k { background: var(--run-soft); color: var(--run); }
 .ln.edit .k { background: var(--accent-soft); color: var(--accent-ink); }
 .ln.bash .k { background: var(--wait-soft); color: var(--wait); }
-.ln.task .k { background: var(--done-soft); color: var(--done); }
+.ln.task .k { background: var(--accent-soft); color: var(--accent-ink); }
 .ln.error .k, .ln.system .k { background: var(--err-soft); color: var(--err); }
 .ln .v { min-width: 0; color: var(--ink-2); word-break: break-word; }
 
@@ -405,6 +405,15 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .composer input {
   flex: 1; min-width: 0; padding: 8px 11px; font-size: 13px;
   background: var(--bg); border: 1px solid var(--line-strong); border-radius: var(--radius);
+}
+.composer.readonly {
+  align-items: center; padding: 13px 16px;
+  font-size: 12px; color: var(--ink-3); background: var(--surface-2);
+}
+.composer.readonly code {
+  padding: 2px 6px; margin-left: 2px; border-radius: 3px;
+  background: var(--surface-3); color: var(--ink-2);
+  font-family: var(--mono); font-size: 11px; white-space: nowrap;
 }
 
 /* ---------- context ---------- */
@@ -521,7 +530,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
   background: var(--line-strong); border: 2px solid var(--bg);
 }
 .fitem.run::before { background: var(--run); }
-.fitem.done::before { background: var(--done); }
+.fitem.done::before { background: var(--line-strong); }
 .fitem.wait::before { background: var(--wait); }
 .fitem.err::before { background: var(--err); }
 .fitem .ft {

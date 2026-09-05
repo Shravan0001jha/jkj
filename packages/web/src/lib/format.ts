@@ -26,14 +26,24 @@ export const fmtCost = (usd: number): string => `$${usd.toFixed(2)}`;
 /** Rough enough for a budget bar. The server owns the real count. */
 export const estimateTokens = (text: string): number => Math.round(text.length / 3.6);
 
-/** Status drives the stripe on a card and the dot in a list. */
+/**
+ * Status drives the stripe on a card and the dot in a list.
+ *
+ * A session that ended is neutral, not green: it stopped, which says nothing
+ * about whether it went well. Colour is spent on the three states that want
+ * your attention — working, waiting on you, failed.
+ */
 export const statusColor: Record<AgentStatus, string> = {
   running: 'var(--run)',
   waiting: 'var(--wait)',
-  done: 'var(--done)',
+  done: 'var(--line-strong)',
   error: 'var(--err)',
   idle: 'var(--line-strong)',
 };
+
+/** Which pill a status wears. Ended sessions take the quiet one. */
+export const statusTone = (status: AgentStatus): string =>
+  status === 'done' ? 'idle' : status;
 
 /** MCP health maps onto the same three semantic colours as agent status. */
 export const healthPill: Record<McpHealth, { cls: string; label: string }> = {

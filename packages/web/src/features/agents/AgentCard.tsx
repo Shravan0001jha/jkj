@@ -1,6 +1,6 @@
 import type { Agent } from '@jkj/shared';
 import { useStore, openAgent } from '../../state/store.js';
-import { ago, fmtTokens } from '../../lib/format.js';
+import { ago, fmtTokens, statusTone } from '../../lib/format.js';
 import { Pill } from '../../components/Pill.js';
 
 /** One session at a glance. The whole card opens its transcript. */
@@ -16,7 +16,7 @@ export function AgentCard({ agent }: { agent: Agent }) {
           <div className="an">{agent.name}</div>
           <div className="am">{agent.model}</div>
         </div>
-        <Pill tone={agent.status}>{live ? agent.status : 'ended'}</Pill>
+        <Pill tone={statusTone(agent.status)}>{live ? agent.status : 'ended'}</Pill>
       </div>
 
       <div className="task">{agent.task}</div>

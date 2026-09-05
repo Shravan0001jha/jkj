@@ -1,29 +1,36 @@
 /*
  * Design tokens. Every colour in the app comes from here — no literals in
  * component styles, so both themes stay correct by construction.
+ *
+ * Neutrals are a cool graphite: a faint blue bias rather than a true grey, so
+ * the surfaces read as chosen rather than defaulted. The accent is a
+ * periwinkle that sits apart from all four status colours, which is what lets
+ * "selected" and "working" mean different things at a glance.
  */
 :root {
-  --bg: #f2f3ef;
+  --bg: #f4f5f7;
   --surface: #ffffff;
-  --surface-2: #e9ebe4;
-  --surface-3: #dfe2d8;
-  --line: #d6d9ce;
-  --line-strong: #bec3b2;
-  --ink: #1a1d17;
-  --ink-2: #4a4f44;
-  --ink-3: #787e6d;
-  --accent: #6b7f1e;
-  --accent-soft: #e4eac5;
-  --accent-ink: #4c5a13;
+  --surface-2: #eceef1;
+  --surface-3: #e1e4e9;
+  --line: #dcdfe4;
+  --line-strong: #c0c5ce;
+  --ink: #16181c;
+  --ink-2: #464b53;
+  --ink-3: #757c86;
 
-  --run: #2c6fa8;
-  --run-soft: #dceaf6;
-  --wait: #a86d08;
-  --wait-soft: #f7ebd1;
-  --err: #a63d28;
-  --err-soft: #f6dfd9;
-  --done: #3b7550;
-  --done-soft: #ddebe1;
+  --accent: #4b57cc;
+  --accent-soft: #e2e4fa;
+  --accent-ink: #3b46ad;
+
+  /* Status. Separate from the accent on purpose. */
+  --run: #10788f;
+  --run-soft: #d8eef3;
+  --wait: #9a6410;
+  --wait-soft: #f8ecd6;
+  --err: #b03f2c;
+  --err-soft: #f9e0da;
+  --done: #2f7a4c;
+  --done-soft: #dceee3;
 
   --ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -33,50 +40,52 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #12150e;
-    --surface: #1a1e15;
-    --surface-2: #22271d;
-    --surface-3: #2b3125;
-    --line: #2f3529;
-    --line-strong: #48503c;
-    --ink: #ecefe3;
-    --ink-2: #b2b9a6;
-    --ink-3: #828978;
-    --accent: #b8ce55;
-    --accent-soft: #2c3517;
-    --accent-ink: #c9dc74;
+    --bg: #131417;
+    --surface: #191b1f;
+    --surface-2: #212429;
+    --surface-3: #2a2e35;
+    --line: #2b2f36;
+    --line-strong: #454a53;
+    --ink: #e8eaee;
+    --ink-2: #abb1ba;
+    --ink-3: #7b828d;
 
-    --run: #6facde;
-    --run-soft: #15283a;
-    --wait: #dfa640;
-    --wait-soft: #372911;
-    --err: #e27a60;
-    --err-soft: #391e18;
-    --done: #70be89;
-    --done-soft: #152f1e;
+    --accent: #8b95fa;
+    --accent-soft: #262a44;
+    --accent-ink: #a3abfb;
+
+    --run: #56b6cd;
+    --run-soft: #122c33;
+    --wait: #dfa64c;
+    --wait-soft: #33280f;
+    --err: #e28067;
+    --err-soft: #38201a;
+    --done: #6fc08e;
+    --done-soft: #14301f;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #12150e;
-  --surface: #1a1e15;
-  --surface-2: #22271d;
-  --surface-3: #2b3125;
-  --line: #2f3529;
-  --line-strong: #48503c;
-  --ink: #ecefe3;
-  --ink-2: #b2b9a6;
-  --ink-3: #828978;
-  --accent: #b8ce55;
-  --accent-soft: #2c3517;
-  --accent-ink: #c9dc74;
+  --bg: #131417;
+  --surface: #191b1f;
+  --surface-2: #212429;
+  --surface-3: #2a2e35;
+  --line: #2b2f36;
+  --line-strong: #454a53;
+  --ink: #e8eaee;
+  --ink-2: #abb1ba;
+  --ink-3: #7b828d;
 
-  --run: #6facde;
-  --run-soft: #15283a;
-  --wait: #dfa640;
-  --wait-soft: #372911;
-  --err: #e27a60;
-  --err-soft: #391e18;
-  --done: #70be89;
-  --done-soft: #152f1e;
+  --accent: #8b95fa;
+  --accent-soft: #262a44;
+  --accent-ink: #a3abfb;
+
+  --run: #56b6cd;
+  --run-soft: #122c33;
+  --wait: #dfa64c;
+  --wait-soft: #33280f;
+  --err: #e28067;
+  --err-soft: #38201a;
+  --done: #6fc08e;
+  --done-soft: #14301f;
 }

@@ -279,9 +279,13 @@ export function showToast(message: string): void {
 
 export function toggleTheme(): void {
   const root = document.documentElement;
-  const current = root.getAttribute('data-theme');
-  const dark = current ? current === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-  root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  const next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  root.setAttribute('data-theme', next);
+  try {
+    localStorage.setItem('jkj:theme', next);
+  } catch {
+    // Not being able to remember the choice is not a reason to refuse it.
+  }
 }
 
 /* ---------- context edits ---------- */

@@ -3,7 +3,7 @@ import {
   useStore, currentProject, closeAgent, openAgent, openCentralContext,
   interruptAgent, archiveAgent, showToast, agentById,
 } from '../../state/store.js';
-import { ago, fmtTokens } from '../../lib/format.js';
+import { ago, fmtTokens, statusTone } from '../../lib/format.js';
 import { Pill } from '../../components/Pill.js';
 import { Transcript } from './Transcript.js';
 import { Composer } from './Composer.js';
@@ -39,7 +39,7 @@ export function AgentChat({ agent }: { agent: Agent }) {
       <div className="dhead">
         <div className="r1">
           <h2>{agent.name}</h2>
-          <Pill tone={isSubagent ? 'done' : agent.status}>
+          <Pill tone={isSubagent ? 'idle' : statusTone(agent.status)}>
             {isSubagent ? 'subagent' : live ? agent.status : 'ended'}
           </Pill>
           {agent.driven && <Pill tone="idle">driven by JKJ</Pill>}
