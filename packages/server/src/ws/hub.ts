@@ -1,81 +1,107 @@
 import type { Server } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { ClientCommand, ServerEvent } from '@jkj/shared';
+import type { Agent, ClientCommand, ServerEvent } from '@jkj/shared';
 import { API } from '@jkj/shared';
-import * as agents from '../services/agents.js';
-import * as projects from '../services/projects.js';
-import * as mcp from '../services/mcp.js';
+import { getSnapshot } from '../services/workspace.js';
+import { listInstalled } from '../services/mcp.js';
 import { log } from '../util/logger.js';
 
 /**
  * The socket hub.
  *
- * One connection per open tab. Every client gets every event for now; when
- * that becomes wasteful, filter on the projectId from the `subscribe`
- * command, which clients already send.
+ * Claude Code writes its state to disk; nothing notifies us when it changes.
+ * So the hub re-reads the snapshot on a timer and pushes only what differs,
+ * which keeps every open tab current without any client polling.
  */
+
+const POLL_MS = 2500;
 
 export function attachSocket(server: Server, version: string): void {
   const wss = new WebSocketServer({ server, path: API.socket });
   const clients = new Set<WebSocket>();
+  let previous = new Map<string, string>();   // agent id -> fingerprint
+  let timer: ReturnType<typeof setInterval> | null = null;
 
   const broadcast = (event: ServerEvent): void => {
     const payload = JSON.stringify(event);
     for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(payload);
   };
 
-  // Anything the agent service does reaches every open tab.
-  agents.onAgentEvent(({ agent, entry, removedId }) => {
-    if (agent) broadcast({ type: 'agent.updated', agent });
-    if (entry) broadcast({ type: 'agent.log', entry });
-    if (removedId) broadcast({ type: 'agent.removed', agentId: removedId });
-  });
+  async function poll(): Promise<void> {
+    if (clients.size === 0) return;
+    try {
+      const { agents } = await getSnapshot(true);
+      const next = new Map(agents.map(a => [a.id, fingerprint(a)]));
 
-  wss.on('connection', ws => {
+      for (const agent of agents) {
+        if (previous.get(agent.id) !== next.get(agent.id)) broadcast({ type: 'agent.updated', agent });
+      }
+      for (const id of previous.keys()) {
+        if (!next.has(id)) broadcast({ type: 'agent.removed', agentId: id });
+      }
+      previous = next;
+    } catch (err) {
+      log.warn('ws', `poll failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  wss.on('connection', async ws => {
     clients.add(ws);
     log.info('ws', `client connected (${clients.size} open)`);
 
     send(ws, { type: 'hello', version, startedAt: new Date().toISOString() });
-    send(ws, {
-      type: 'snapshot',
-      projects: projects.listProjects(),
-      agents: agents.listAgents(),
-      mcp: mcp.listInstalled(),
-    });
+
+    try {
+      const snapshot = await getSnapshot();
+      previous = new Map(snapshot.agents.map(a => [a.id, fingerprint(a)]));
+      send(ws, {
+        type: 'snapshot',
+        projects: snapshot.projects,
+        agents: snapshot.agents,
+        mcp: await listInstalled(),
+      });
+    } catch (err) {
+      send(ws, { type: 'error', message: err instanceof Error ? err.message : 'Could not read your sessions' });
+    }
+
+    if (!timer) timer = setInterval(() => void poll(), POLL_MS);
 
     ws.on('message', raw => {
-      let cmd: ClientCommand;
+      let command: ClientCommand;
       try {
-        cmd = JSON.parse(String(raw)) as ClientCommand;
+        command = JSON.parse(String(raw)) as ClientCommand;
       } catch {
         return send(ws, { type: 'error', message: 'Malformed command' });
       }
-      handleCommand(cmd);
+      handleCommand(ws, command);
     });
 
     ws.on('close', () => {
       clients.delete(ws);
       log.info('ws', `client disconnected (${clients.size} open)`);
+      if (clients.size === 0 && timer) {
+        clearInterval(timer);
+        timer = null;
+      }
     });
   });
 }
 
-/** One switch, one line per command. Keep the bodies in the services. */
-function handleCommand(cmd: ClientCommand): void {
-  switch (cmd.type) {
-    case 'subscribe':
-      // TODO: remember which project this client cares about and filter events.
-      break;
-    case 'agent.message':
-      agents.sendMessage(cmd.agentId, cmd.text);
-      break;
-    case 'agent.interrupt':
-      agents.interruptAgent(cmd.agentId);
-      break;
-    case 'agent.approve':
-      agents.resolveApproval(cmd.agentId, cmd.approvalId, cmd.decision);
-      break;
-  }
+/**
+ * Every command is a write, and JKJ cannot write to a running session yet.
+ * Saying so is better than accepting the command and dropping it.
+ */
+function handleCommand(ws: WebSocket, command: ClientCommand): void {
+  if (command.type === 'subscribe') return;
+  send(ws, {
+    type: 'error',
+    message: 'JKJ can read your sessions but not drive them yet.',
+  });
+}
+
+/** Cheap change detection — the fields the UI actually renders. */
+function fingerprint(agent: Agent): string {
+  return [agent.status, agent.name, agent.task, agent.usage.inputTokens, agent.usage.outputTokens].join('|');
 }
 
 function send(ws: WebSocket, event: ServerEvent): void {

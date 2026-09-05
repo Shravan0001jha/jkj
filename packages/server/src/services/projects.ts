@@ -1,60 +1,26 @@
 import type { Project } from '@jkj/shared';
-import { createMemoryStore } from '../store/db.js';
+import { getSnapshot } from './workspace.js';
 
 /**
- * Projects — a project is just a directory on disk that JKJ watches.
- *
- * Every function here is the real signature we will keep. Only the bodies
- * change when we wire this to git and the filesystem.
+ * Projects are discovered, not registered: every directory Claude Code has a
+ * session for is a project. Adding one means starting a session in it.
  */
 
-const store = createMemoryStore<Project>([
-  // Placeholder row so the UI has something to render before you add a repo.
-  {
-    id: 'example',
-    name: 'example-project',
-    path: '~/code/example-project',
-    branch: 'main',
-    enabledMcpServers: ['filesystem'],
-  },
-]);
-
-export function listProjects(): Project[] {
-  return store.all();
+export async function listProjects(): Promise<Project[]> {
+  return (await getSnapshot()).projects;
 }
 
-export function getProject(id: string): Project | undefined {
-  return store.get(id);
+export async function getProject(id: string): Promise<Project | undefined> {
+  return (await getSnapshot()).projects.find(p => p.id === id);
 }
 
 /**
- * Register a directory as a project.
+ * Enable or disable an MCP server for one project.
  *
- * TODO:
- *   - verify the path exists and is a git repo (`git rev-parse --show-toplevel`)
- *   - read the current branch
- *   - import an existing CLAUDE.md into the project context doc if present
+ * TODO: write back to the `projects[path].mcpServers` map in the Claude Code
+ * settings file. Until JKJ can do that safely — the file is shared with a
+ * running CLI — this is read-only.
  */
-export function addProject(path: string): Project {
-  const name = path.split('/').filter(Boolean).pop() ?? 'project';
-  return store.put({
-    id: name,
-    name,
-    path,
-    branch: 'main',
-    enabledMcpServers: [],
-  });
-}
-
-export function removeProject(id: string): void {
-  store.remove(id);
-}
-
-/** Enable or disable one MCP server for one project. */
-export function setMcpEnabled(projectId: string, serverId: string, enabled: boolean): Project | undefined {
-  const project = store.get(projectId);
-  if (!project) return undefined;
-  const set = new Set(project.enabledMcpServers);
-  enabled ? set.add(serverId) : set.delete(serverId);
-  return store.put({ ...project, enabledMcpServers: [...set] });
+export function setMcpEnabled(): never {
+  throw new Error('JKJ is read-only for now: change MCP servers with the claude CLI.');
 }

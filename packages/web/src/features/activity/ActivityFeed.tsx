@@ -6,7 +6,7 @@ const TONE: Record<string, string> = {
   started: 'run', finished: 'done', failed: 'err', waiting: 'wait', info: 'info',
 };
 
-/** One chronological feed across every project. */
+/** Every session across every project, most recently active first. */
 export function ActivityFeed() {
   const activity = useStore(s => s.activity);
   const projects = useStore(s => s.projects);
@@ -16,10 +16,11 @@ export function ActivityFeed() {
     <>
       <div className="sec-h">
         <h2>Activity</h2>
-        <p>Every project, newest first.</p>
+        <p>Every session on this machine, most recently active first.</p>
       </div>
 
       <div className="feed">
+        {activity.length === 0 && <p className="lede">Nothing recorded yet.</p>}
         {activity.map(event => (
           <div className={`fitem ${TONE[event.kind]}`} key={event.id}>
             <div className="ft">{hhmm(event.at)} · {nameOf(event.projectId)}</div>

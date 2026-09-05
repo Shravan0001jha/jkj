@@ -7,6 +7,8 @@ import { Toast } from './Toast.js';
 /** The frame every screen sits in: title bar, left rail, tabs, content. */
 export function AppShell({ children }: { children: ReactNode }) {
   const agents = useStore(s => s.agents.filter(a => !a.parentAgentId));
+  const connection = useStore(s => s.connection);
+
   const running = agents.filter(a => a.status === 'running').length;
   const waiting = agents.filter(a => a.status === 'waiting').length;
 
@@ -17,13 +19,17 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Mark />
           <b>JKJ</b>
         </div>
+
         <div className="runcount">
-          <span className="beacon" />
-          <span>{running} running · {waiting} waiting on you · {agents.length} total</span>
+          <span className={`beacon ${connection}`} />
+          {connection === 'open'
+            ? <span>{running} working · {waiting} waiting on you · {agents.length} sessions</span>
+            : <span>{connection === 'connecting' ? 'connecting…' : 'server offline'}</span>}
         </div>
+
         <div className="spacer" />
         <button className="btn ghost" onClick={toggleTheme}>Theme</button>
-        <button className="btn primary" onClick={() => setNewAgentOpen(true)}>＋ New agent</button>
+        <button className="btn primary" onClick={() => setNewAgentOpen(true)}>＋ New session</button>
       </header>
 
       <div className="main">

@@ -1,77 +1,55 @@
-import { useStore, currentProject, toggleMcp, restartMcp, installMcp } from '../../state/store.js';
+import { useStore, currentProject, toggleMcp } from '../../state/store.js';
 import { healthPill } from '../../lib/format.js';
 
 /**
- * MCP servers are installed once for the machine and switched on per
- * project — so health and the toggle sit on the same row, at different
- * scopes, and the row says which is which.
+ * MCP servers as Claude Code has them configured. JKJ reads the same files
+ * the CLI does; it does not connect to the servers, so it reports what it can
+ * see and says so rather than showing a health it did not measure.
  */
 export function McpView() {
   const project = useStore(currentProject);
   const installed = useStore(s => s.mcpInstalled);
-  const catalog = useStore(s => s.mcpCatalog);
-  const busyId = useStore(s => s.busyMcpId);
 
   return (
     <>
       <div className="sec-h">
         <h2>MCP servers</h2>
-        <p>Installed once, switched on per project. The toggle affects {project.name} only.</p>
+        <p>Read from your Claude Code configuration. Edit them with the CLI.</p>
       </div>
 
-      <div className="mcp">
-        {installed.map(server => {
-          const busy = busyId === server.id;
-          const health = busy ? healthPill.starting : healthPill[server.health];
-          const enabled = project.enabledMcpServers.includes(server.id);
-          const severity = server.health === 'healthy' ? 'ok' : server.health === 'degraded' ? 'warn' : 'down';
+      {installed.length === 0 ? (
+        <p className="lede">
+          No MCP servers configured. Add one with <code>claude mcp add</code>, or drop a{' '}
+          <code>.mcp.json</code> in a project.
+        </p>
+      ) : (
+        <div className="mcp">
+          {installed.map(server => {
+            const health = healthPill[server.health];
+            const enabledHere = project?.enabledMcpServers.includes(server.id) ?? false;
 
-          return (
-            <div className={`mrow ${severity}`} key={server.id}>
-              <div className="mi">
-                <div className="mn">{server.name}</div>
-                <div className="md">
-                  {server.source} · {server.transport}{server.note ? ` · ${server.note}` : ''}
+            return (
+              <div className="mrow" key={server.id}>
+                <div className="mi">
+                  <div className="mn">{server.name}</div>
+                  <div className="md">{server.source} · {server.transport}{server.note ? ` · ${server.note}` : ''}</div>
                 </div>
+                <span className={`pill ${health.cls}`}><i />{health.label}</span>
+                <span className={`pill ${enabledHere ? 'done' : 'idle'}`}>
+                  <i />{enabledHere ? `on in ${project?.name}` : 'not in this project'}
+                </span>
+                <button className="btn sm ghost" onClick={toggleMcp}>Change</button>
               </div>
-              <div className="tools">{server.toolCount} tools</div>
-              <span className={`pill ${health.cls}`}><i />{busy ? 'restarting' : health.label}</span>
-              <button className="btn sm ghost" disabled={busy} onClick={() => restartMcp(server.id)}>
-                {busy ? '…' : '↻ Restart'}
-              </button>
-              <button
-                className="sw"
-                role="switch"
-                aria-checked={enabled}
-                aria-label={`Enable ${server.name} for ${project.name}`}
-                onClick={() => toggleMcp(project.id, server.id)}
-              />
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
-      <div className="sec-h" style={{ marginTop: 26 }}>
-        <h2>Catalog</h2>
-        <p>Curated servers, verified to start.</p>
-      </div>
-
-      <div className="cat">
-        {catalog.map(entry => (
-          <div className="catitem" key={entry.id}>
-            <div className="cn">{entry.name}</div>
-            <p>{entry.description} · {entry.toolCount} tools</p>
-            <button
-              className="btn sm"
-              disabled={busyId === entry.id}
-              onClick={() => installMcp(entry.id)}
-            >
-              {busyId === entry.id ? 'Installing…' : 'Install'}
-            </button>
-          </div>
-        ))}
-        {catalog.length === 0 && <p className="muted">Everything in the catalog is installed.</p>}
-      </div>
+      <p className="muted narrow" style={{ marginTop: 16 }}>
+        Health stays unprobed because JKJ never starts these servers — the CLI owns them. Once
+        JKJ runs sessions itself, it will connect and report the real state, along with the tools
+        each one registers.
+      </p>
     </>
   );
 }

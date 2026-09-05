@@ -2,49 +2,47 @@ import { useStore, currentProject, projectContext } from '../../state/store.js';
 import { estimateTokens } from '../../lib/format.js';
 
 /**
- * The exact prompt a new agent would receive, and what each part costs.
- *
- * If this preview and the real prompt ever disagree, the preview is the bug —
- * so it is built from the same pieces rather than described separately.
+ * The two documents a new session in this project will be given, and what
+ * they cost. Only what JKJ can actually measure is shown — the CLI's own
+ * system prompt and tool schemas are not ours to count.
  */
 export function AssembledPreview() {
   const project = useStore(currentProject);
   const central = useStore(s => s.central.body);
   const projectBody = useStore(s => projectContext(s, s.selectedProjectId).body);
-  const mcpNames = useStore(s =>
-    s.mcpInstalled.filter(m => project.enabledMcpServers.includes(m.id)).map(m => m.name));
+
+  if (!project) return null;
 
   const segments = [
-    { label: 'System + tools', tokens: 2100, color: 'var(--line-strong)' },
     { label: 'Central context', tokens: estimateTokens(central), color: 'var(--accent)' },
     { label: 'Project context', tokens: estimateTokens(projectBody), color: 'var(--run)' },
-    { label: 'MCP tool schemas', tokens: mcpNames.length * 240, color: 'var(--wait)' },
   ];
   const total = segments.reduce((n, s) => n + s.tokens, 0);
 
   const text = [
-    '# How I like things',
-    central.trim(),
+    `# ${project.name}`,
+    `${project.path} (${project.branch})`,
     '',
-    `# Project: ${project.name}`,
-    `Repo: ${project.path} (${project.branch})`,
-    projectBody.trim(),
+    '## Central',
+    central.trim() || '(empty)',
     '',
-    '# Tools available',
-    mcpNames.join(', ') || 'none',
+    '## Project',
+    projectBody.trim() || '(empty)',
   ].join('\n');
 
   return (
     <aside className="preview">
       <div className="ph">
-        <h3>Assembled prompt</h3>
-        <p>Exactly what a new agent in {project.name} receives.</p>
+        <h3>What a session inherits</h3>
+        <p>Both files are read by the CLI itself, with or without JKJ running.</p>
       </div>
 
       <div className="bar">
-        {segments.map(s => (
-          <span key={s.label} style={{ width: `${(s.tokens / total) * 100}%`, background: s.color }} />
-        ))}
+        {total > 0
+          ? segments.map(s => (
+              <span key={s.label} style={{ width: `${(s.tokens / total) * 100}%`, background: s.color }} />
+            ))
+          : <span style={{ width: '100%', background: 'var(--surface-3)' }} />}
       </div>
 
       <div className="leg">
@@ -55,11 +53,7 @@ export function AssembledPreview() {
             <b>{s.tokens} tok</b>
           </div>
         ))}
-        <div className="total">
-          <i />
-          Total
-          <b>{total} tok</b>
-        </div>
+        <div className="total"><i />Total<b>{total} tok</b></div>
       </div>
 
       <pre className="assembled">{text}</pre>

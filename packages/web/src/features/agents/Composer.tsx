@@ -1,22 +1,20 @@
 import { useState } from 'react';
 import type { Agent } from '@jkj/shared';
-import { sendMessage, showToast } from '../../state/store.js';
+import { sendMessage } from '../../state/store.js';
 
-/** Steer a running agent without stopping it. */
+/**
+ * Steering a live session is the next thing JKJ learns to do. The box is here
+ * so its shape is settled; today it explains why it cannot send.
+ */
 export function Composer({ agent }: { agent: Agent }) {
   const [text, setText] = useState('');
-  const isSubagent = Boolean(agent.parentAgentId);
+  const live = agent.status === 'running' || agent.status === 'waiting';
 
-  const submit = (e: React.FormEvent) => {
+  const submit = (e: React.FormEvent): void => {
     e.preventDefault();
-    const value = text.trim();
-    if (!value) return;
+    if (!text.trim()) return;
     setText('');
-    if (isSubagent) {
-      showToast('Re-running the subagent with your brief.');
-      return;
-    }
-    sendMessage(agent.id, value);
+    sendMessage();
   };
 
   return (
@@ -24,11 +22,12 @@ export function Composer({ agent }: { agent: Agent }) {
       <input
         value={text}
         onChange={e => setText(e.target.value)}
-        placeholder={isSubagent ? 'Re-run this subagent with a different brief…' : `Message ${agent.name}…`}
-        aria-label="Message this agent"
+        placeholder={live ? `Message ${agent.name}…` : 'This session has ended'}
+        aria-label="Message this session"
         autoComplete="off"
+        disabled={!live}
       />
-      <button className="btn sm primary" type="submit">Send</button>
+      <button className="btn sm primary" type="submit" disabled={!live}>Send</button>
     </form>
   );
 }

@@ -54,6 +54,8 @@ export interface HealthResponse {
   name: 'jkj';
   version: string;
   uptimeSeconds: number;
+  /** Where Claude Code state was found, or null if this machine has none. */
+  claudeHome: string | null;
 }
 
 /** Every REST route in one place, so the client can never guess a path. */

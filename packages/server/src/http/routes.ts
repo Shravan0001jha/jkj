@@ -5,74 +5,96 @@ import * as projects from '../services/projects.js';
 import * as agents from '../services/agents.js';
 import * as context from '../services/context.js';
 import * as mcp from '../services/mcp.js';
+import * as activity from '../services/activity.js';
+import { findClaudeHome } from '../runtime/claude-home.js';
 
 /**
- * REST surface. One function per route, registered in a table so the list of
- * endpoints is readable at a glance.
+ * REST surface. One entry per route so the whole API is readable at a glance.
+ * Handlers translate between HTTP and a service call and decide nothing.
  */
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => void | Promise<void>;
 
+interface Route {
+  method: string;
+  match: (path: string) => boolean;
+  handler: Handler;
+}
+
 export function createRouter(config: Config) {
   const startedAt = Date.now();
 
-  const routes: { method: string; match: (p: string) => boolean; handler: Handler }[] = [
+  const routes: Route[] = [
     {
       method: 'GET',
       match: p => p === API.health,
-      handler: (_req, res) => json(res, 200, {
-        ok: true,
-        name: 'jkj',
-        version: config.version,
-        uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
-      }),
-    },
-    {
-      method: 'GET',
-      match: p => p === API.projects,
-      handler: (_req, res) => json(res, 200, projects.listProjects()),
-    },
-    {
-      method: 'GET',
-      match: p => p === API.agents,
-      handler: (_req, res, url) => json(res, 200, agents.listAgents(url.searchParams.get('projectId') ?? undefined)),
-    },
-    {
-      method: 'POST',
-      match: p => p === API.agents,
-      handler: async (req, res) => {
-        const body = await readJson(req);
-        // TODO: validate the body properly before it reaches the service.
-        json(res, 201, agents.createAgent(body));
-      },
-    },
-    {
-      method: 'GET',
-      match: p => p.startsWith('/api/agents/') && p.endsWith('/log'),
-      handler: (_req, res, url) => {
-        const id = url.pathname.split('/')[3] ?? '';
-        json(res, 200, agents.getTranscript(id));
-      },
-    },
-    {
-      method: 'GET',
-      match: p => p === '/api/context',
-      handler: (_req, res, url) => {
-        const projectId = url.searchParams.get('projectId') ?? '';
+      handler: (_req, res) => {
+        const home = findClaudeHome();
         json(res, 200, {
-          central: context.getCentralContext(),
-          project: context.getProjectContext(projectId),
-          assembled: context.assembleContext(projectId),
+          ok: true,
+          name: 'jkj',
+          version: config.version,
+          uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+          claudeHome: home.present ? home.configDir : null,
         });
       },
     },
     {
       method: 'GET',
+      match: p => p === API.projects,
+      handler: async (_req, res) => json(res, 200, await projects.listProjects()),
+    },
+    {
+      method: 'GET',
+      match: p => p === API.agents,
+      handler: async (_req, res, url) =>
+        json(res, 200, await agents.listAgents(url.searchParams.get('projectId') ?? undefined)),
+    },
+    {
+      method: 'GET',
+      match: p => p.startsWith('/api/agents/') && p.endsWith('/log'),
+      handler: async (_req, res, url) => {
+        const id = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/log'.length));
+        json(res, 200, await agents.getTranscript(id));
+      },
+    },
+    {
+      method: 'GET',
+      match: p => p === '/api/context',
+      handler: async (_req, res, url) => {
+        const projectId = url.searchParams.get('projectId') ?? '';
+        json(res, 200, {
+          central: context.getCentralContext(),
+          project: await context.getProjectContext(projectId),
+          assembled: await context.assembleContext(projectId),
+        });
+      },
+    },
+    {
+      method: 'PUT',
+      match: p => p === '/api/context',
+      handler: async (req, res, url) => {
+        const body = await readJson(req);
+        const text = typeof body.body === 'string' ? body.body : '';
+        const projectId = url.searchParams.get('projectId');
+
+        json(res, 200, body.scope === 'central'
+          ? context.setCentralContext(text)
+          : await context.setProjectContext(projectId ?? '', text));
+      },
+    },
+    {
+      method: 'GET',
       match: p => p === API.mcp,
-      handler: (_req, res) => json(res, 200, {
-        installed: mcp.listInstalled(),
+      handler: async (_req, res) => json(res, 200, {
+        installed: await mcp.listInstalled(),
         catalog: mcp.listCatalog(),
       }),
+    },
+    {
+      method: 'GET',
+      match: p => p === API.activity,
+      handler: async (_req, res) => json(res, 200, await activity.listActivity()),
     },
   ];
 
@@ -85,6 +107,7 @@ export function createRouter(config: Config) {
       json(res, 404, { error: `No route for ${req.method} ${url.pathname}` });
       return true;
     }
+
     try {
       await route.handler(req, res, url);
     } catch (err) {
@@ -105,9 +128,14 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
-async function readJson(req: IncomingMessage): Promise<any> {
+async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
   const raw = Buffer.concat(chunks).toString('utf8');
-  return raw ? JSON.parse(raw) : {};
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw new Error('Request body was not valid JSON');
+  }
 }

@@ -8,13 +8,17 @@ export function ago(iso: string): string {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m`;
-  return `${Math.floor(s / 3600)}h`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
+  if (s < 2_592_000) return `${Math.floor(s / 86_400)}d`;
+  return `${Math.floor(s / 2_592_000)}mo`;
 }
 
 export const totalTokens = (u: Usage): number => u.inputTokens + u.outputTokens;
 
 export function fmtTokens(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
 }
 
 export const fmtCost = (usd: number): string => `$${usd.toFixed(2)}`;
@@ -37,6 +41,8 @@ export const healthPill: Record<McpHealth, { cls: string; label: string }> = {
   degraded: { cls: 'waiting', label: 'degraded' },
   unreachable: { cls: 'error', label: 'unreachable' },
   starting: { cls: 'waiting', label: 'starting' },
+  // Nothing has connected to it, so nothing is claimed about it.
+  unknown: { cls: 'idle', label: 'not probed' },
 };
 
 export const slugify = (task: string): string =>

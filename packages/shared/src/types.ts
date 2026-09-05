@@ -62,9 +62,18 @@ export interface Agent {
   startedAt: string;
   endedAt?: string;
   usage: Usage;
+  /** Turns exchanged, when the source can report it. */
+  messageCount?: number;
   approval?: PendingApproval;
 }
 
+/**
+ * Token counts.
+ *
+ * `inputTokens` is new input only. Cached context is re-sent on every turn,
+ * so counting it reports tens of millions of tokens for an ordinary
+ * conversation — a number that measures the cache, not the work.
+ */
 export interface Usage {
   inputTokens: number;
   outputTokens: number;
@@ -81,8 +90,11 @@ export interface Project {
   enabledMcpServers: string[];
 }
 
-/** Health of a configured MCP server. */
-export type McpHealth = 'healthy' | 'degraded' | 'unreachable' | 'starting';
+/**
+ * Health of a configured MCP server. `unknown` is the honest answer until
+ * something has actually connected to it.
+ */
+export type McpHealth = 'healthy' | 'degraded' | 'unreachable' | 'starting' | 'unknown';
 
 export interface McpServer {
   id: string;

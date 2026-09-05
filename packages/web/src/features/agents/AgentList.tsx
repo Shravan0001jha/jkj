@@ -1,7 +1,7 @@
 import { useStore, currentProject, projectAgents, openAgent, closeAgent } from '../../state/store.js';
 import { statusColor } from '../../lib/format.js';
 
-/** The column beside an open chat, so switching conversations is one click. */
+/** The column beside an open transcript, so switching sessions is one click. */
 export function AgentList() {
   const project = useStore(currentProject);
   const agents = useStore(s => projectAgents(s, s.selectedProjectId));
@@ -10,9 +10,9 @@ export function AgentList() {
   return (
     <div className="chatlist">
       <div className="clh">
-        <b>{project.name}</b>
+        <b>{project?.name}</b>
         <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={closeAgent}>
-          All agents
+          All sessions
         </button>
       </div>
       {agents.map(a => (

@@ -1,87 +1,85 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AssembledContext, ContextDoc } from '@jkj/shared';
+import { findClaudeHome, readTextFile } from '../runtime/claude-home.js';
+import { getSnapshot } from './workspace.js';
 
 /**
- * Context — two layers and no more.
+ * Context — two layers, both of them real files Claude Code already reads.
  *
- *   central   how you like things, applied to every agent in every project
- *   project   what is true about one repo
+ *   central   <configDir>/CLAUDE.md, loaded into every session on the machine
+ *   project   <repo>/CLAUDE.md, loaded for sessions in that repo
  *
- * A third layer is the thing that turns a context manager into a filing
- * system nobody maintains. If we ever add one, it needs a real argument.
+ * JKJ edits those files rather than inventing a store of its own, so what you
+ * write here is what the CLI picks up, with or without JKJ running.
  */
 
-const DEFAULT_CENTRAL = `Answer with the change, not a description of the change.
-
-Keep explanations to two or three sentences unless asked for depth.
-Never add a comment that restates the line below it.
-`;
-
-let central: ContextDoc = {
-  scope: 'central',
-  projectId: null,
-  body: DEFAULT_CENTRAL,
-  updatedAt: new Date().toISOString(),
-};
-
-const projectDocs = new Map<string, ContextDoc>();
+export function centralContextPath(): string {
+  return join(findClaudeHome().configDir, 'CLAUDE.md');
+}
 
 export function getCentralContext(): ContextDoc {
-  // TODO: read from ~/.jkj/CENTRAL.md so it is editable outside the UI too.
-  return central;
-}
-
-export function setCentralContext(body: string): ContextDoc {
-  central = { ...central, body, updatedAt: new Date().toISOString() };
-  return central;
-}
-
-export function getProjectContext(projectId: string): ContextDoc {
-  // TODO: read from <repo>/.jkj/context.md, falling back to CLAUDE.md.
-  return projectDocs.get(projectId) ?? {
-    scope: 'project',
-    projectId,
-    body: '',
+  const path = centralContextPath();
+  return {
+    scope: 'central',
+    projectId: null,
+    body: readTextFile(path) ?? '',
     updatedAt: new Date().toISOString(),
   };
 }
 
-export function setProjectContext(projectId: string, body: string): ContextDoc {
-  const doc: ContextDoc = { scope: 'project', projectId, body, updatedAt: new Date().toISOString() };
-  projectDocs.set(projectId, doc);
-  return doc;
+export function setCentralContext(body: string): ContextDoc {
+  writeFileSync(centralContextPath(), body, 'utf8');
+  return { scope: 'central', projectId: null, body, updatedAt: new Date().toISOString() };
 }
 
-/**
- * Build the exact prompt a new agent in this project would receive, and
- * report what each part costs. The UI renders this verbatim — if the preview
- * and the real prompt ever diverge, this function is the bug.
- */
-export function assembleContext(projectId: string): AssembledContext {
-  const c = getCentralContext().body;
-  const p = getProjectContext(projectId).body;
+export async function projectContextPath(projectId: string): Promise<string | null> {
+  const project = (await getSnapshot()).projects.find(p => p.id === projectId);
+  return project ? join(project.path, 'CLAUDE.md') : null;
+}
 
-  const text = [
-    '# How I like things',
-    c.trim(),
-    '',
-    `# Project: ${projectId}`,
-    p.trim(),
-  ].join('\n');
-
-  const segments = [
-    { label: 'Central context', tokens: estimateTokens(c) },
-    { label: 'Project context', tokens: estimateTokens(p) },
-    // TODO: add 'MCP tool schemas' once the runtime reports the real count.
-  ];
-
+export async function getProjectContext(projectId: string): Promise<ContextDoc> {
+  const path = await projectContextPath(projectId);
   return {
-    text,
-    segments,
-    totalTokens: segments.reduce((n, s) => n + s.tokens, 0),
+    scope: 'project',
+    projectId,
+    body: path ? readTextFile(path) ?? '' : '',
+    updatedAt: new Date().toISOString(),
   };
 }
 
-/** Rough enough for a budget bar. Replace with the real tokenizer later. */
+export async function setProjectContext(projectId: string, body: string): Promise<ContextDoc> {
+  const path = await projectContextPath(projectId);
+  if (!path) throw new Error(`Unknown project ${projectId}`);
+  writeFileSync(path, body, 'utf8');
+  return { scope: 'project', projectId, body, updatedAt: new Date().toISOString() };
+}
+
+/** What a new session in this project would be told before it reads anything. */
+export async function assembleContext(projectId: string): Promise<AssembledContext> {
+  const central = getCentralContext().body;
+  const project = (await getProjectContext(projectId)).body;
+  const snapshot = await getSnapshot();
+  const found = snapshot.projects.find(p => p.id === projectId);
+
+  const text = [
+    '# Central preferences',
+    central.trim() || '(empty)',
+    '',
+    `# Project: ${found?.name ?? projectId}`,
+    found ? `Repo: ${found.path} (${found.branch})` : '',
+    project.trim() || '(empty)',
+  ].join('\n');
+
+  const segments = [
+    { label: 'Central context', tokens: estimateTokens(central) },
+    { label: 'Project context', tokens: estimateTokens(project) },
+  ];
+
+  return { text, segments, totalTokens: segments.reduce((n, s) => n + s.tokens, 0) };
+}
+
+/** Rough enough for a budget bar. Replace with a real tokenizer later. */
 export function estimateTokens(text: string): number {
   return Math.round(text.length / 3.6);
 }
