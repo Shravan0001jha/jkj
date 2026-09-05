@@ -575,6 +575,42 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .seg button:last-child { border-right: 0; }
 .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
 
+/* ---------- composer with attachments ---------- */
+.composerwrap { border-top: 1px solid var(--line); background: var(--surface); }
+.composerwrap.dropping { background: var(--accent-soft); }
+.composerwrap .composer { border-top: 0; padding-bottom: 4px; }
+.composerwrap .attach {
+  flex: none; width: 30px; justify-content: center;
+  border: 1px solid var(--line-strong); font-size: 15px; line-height: 1;
+}
+.hintline {
+  padding: 0 16px 9px; font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+}
+
+.tray { display: flex; flex-wrap: wrap; gap: 8px; padding: 11px 16px 0; }
+.chipfile {
+  display: flex; align-items: center; gap: 7px; padding: 4px 4px 4px 5px; max-width: 230px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.chipfile img {
+  width: 30px; height: 30px; object-fit: cover; border-radius: 3px; flex: none;
+  background: var(--surface-3);
+}
+.chipfile .doc {
+  width: 30px; height: 30px; flex: none; display: grid; place-items: center;
+  border-radius: 3px; background: var(--surface-3);
+  font-family: var(--mono); font-size: 9px; color: var(--ink-3);
+}
+.chipfile .fname {
+  font-size: 11.5px; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chipfile .x {
+  flex: none; width: 20px; height: 20px; padding: 0; cursor: pointer;
+  background: none; border: 0; border-radius: 4px; color: var(--ink-3); font-size: 11px;
+}
+.chipfile .x:hover { background: var(--surface-3); color: var(--ink); }
+
 /* ---------- working indicator ---------- */
 .working {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;

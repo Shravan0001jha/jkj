@@ -1,6 +1,6 @@
 import { API } from '@jkj/shared';
 import type {
-  ActivityEvent, Agent, ContextDoc, ContextResponse, CreateAgentRequest,
+  ActivityEvent, Agent, Attachment, ContextDoc, ContextResponse, CreateAgentRequest,
   HealthResponse, LogEntry, McpListResponse, Project,
 } from '@jkj/shared';
 
@@ -32,10 +32,16 @@ export const getActivity = () => request<ActivityEvent[]>(API.activity);
 export const createAgent = (body: CreateAgentRequest) =>
   request<Agent>(API.agents, { method: 'POST', body: JSON.stringify(body) });
 
-export const resumeAgent = (agentId: string, text: string) =>
+export const resumeAgent = (agentId: string, text: string, attachments: Attachment[] = []) =>
   request<Agent>(API.agentResume(encodeURIComponent(agentId)), {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, attachments }),
+  });
+
+export const postMessage = (agentId: string, text: string, attachments: Attachment[] = []) =>
+  request<{ ok: true }>(API.agentMessage(encodeURIComponent(agentId)), {
+    method: 'POST',
+    body: JSON.stringify({ text, attachments }),
   });
 
 export const archiveAgent = (agentId: string) =>

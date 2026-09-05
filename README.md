@@ -33,6 +33,10 @@ window.
   picks it up where it stopped, with the model's memory of the conversation
   intact. The transcript carries over, so it reads as one thread rather than a
   new window onto an old one.
+- **Attach what it needs to see.** Paste a screenshot, drop a file, or use the
+  ＋ button. Images go to the model as images; text files are inlined so it can
+  actually read them. Anything it could not read is refused with a reason
+  rather than silently dropped.
 
 ### One limitation worth knowing
 
@@ -193,6 +197,7 @@ styles/tokens.css     Every colour and font, light and dark
 - [x] Permission prompts, approved or denied from the browser
 - [x] Markdown, code blocks and pasted images in transcripts
 - [x] Continue a finished session, with its history intact
+- [x] Attach images and text files to a message
 - [ ] Remember an "always allow" decision across turns
 - [ ] Reach a session that is open in a terminal, over its peer socket
 - [ ] Fork a session onto its own git worktree

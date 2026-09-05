@@ -27,9 +27,16 @@ export interface RunEvents {
   onError(message: string): void;
 }
 
+/** An image the model should look at, already decoded from the wire. */
+export interface RunImage {
+  mediaType: string;
+  /** base64, without a data: prefix. */
+  data: string;
+}
+
 export interface RunHandle {
   /** Queue a message for the running turn, or the next one. */
-  send(text: string): void;
+  send(text: string, images?: RunImage[]): void;
   /** Abort the current turn. Files already written stay written. */
   interrupt(): Promise<void>;
   /** Stop the run and release the process. */
@@ -40,6 +47,8 @@ export interface RunOptions {
   cwd: string;
   model: string;
   prompt: string;
+  /** Images to send with the opening message. */
+  images?: RunImage[];
   /** Continue an existing session by id rather than starting a new one. */
   resume?: string;
   permissionMode?: 'default' | 'acceptEdits' | 'plan';
@@ -47,7 +56,7 @@ export interface RunOptions {
 
 export function startRun(options: RunOptions, events: RunEvents): RunHandle {
   const input = createInputQueue();
-  input.push(options.prompt);
+  input.push(options.prompt, options.images);
 
   const sdkOptions: Options = {
     cwd: options.cwd,
@@ -75,7 +84,7 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
   void consume(stream, events);
 
   return {
-    send: text => input.push(text),
+    send: (text, images) => input.push(text, images),
     interrupt: async () => {
       try {
         await stream.interrupt();
@@ -148,10 +157,22 @@ function createInputQueue() {
 
   return {
     iterable,
-    push(text: string): void {
+    push(text: string, images?: RunImage[]): void {
+      // With no images the plain string form is what the CLI itself sends;
+      // content blocks are only used when there is something to attach.
+      const content = images?.length
+        ? [
+            ...images.map(image => ({
+              type: 'image' as const,
+              source: { type: 'base64' as const, media_type: image.mediaType, data: image.data },
+            })),
+            { type: 'text' as const, text },
+          ]
+        : text;
+
       pending.push({
         type: 'user',
-        message: { role: 'user', content: text },
+        message: { role: 'user', content },
         parent_tool_use_id: null,
         session_id: '',
         origin: { kind: 'human' },

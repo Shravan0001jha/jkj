@@ -38,12 +38,32 @@ export interface CreateAgentRequest {
   workspace: WorkspaceMode;
   /** How tool calls are handled. 'default' asks you; 'acceptEdits' does not. */
   permissionMode?: 'default' | 'acceptEdits' | 'plan';
+  attachments?: Attachment[];
 }
 
 export interface ContextResponse {
   central: ContextDoc;
   project: ContextDoc;
   assembled: AssembledContext;
+}
+
+/**
+ * A file sent along with a message.
+ *
+ * Images go to the model as images. Anything textual is inlined as a fenced
+ * block, because that is what the model can actually read. Binary of any
+ * other kind is refused rather than silently dropped.
+ */
+export interface Attachment {
+  name: string;
+  mediaType: string;
+  /** base64, without a data: prefix. */
+  data: string;
+}
+
+export interface SendMessageRequest {
+  text: string;
+  attachments?: Attachment[];
 }
 
 export interface McpListResponse {
@@ -68,6 +88,7 @@ export const API = {
   agent: (id: string) => `/api/agents/${id}`,
   agentLog: (id: string) => `/api/agents/${id}/log`,
   agentResume: (id: string) => `/api/agents/${id}/resume`,
+  agentMessage: (id: string) => `/api/agents/${id}/message`,
   agentImage: (id: string, ref: string) =>
     `/api/agents/${id}/image?ref=${encodeURIComponent(ref)}`,
   context: (projectId: string) => `/api/context?projectId=${encodeURIComponent(projectId)}`,

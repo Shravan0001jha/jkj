@@ -1,6 +1,6 @@
 import { useRef, useSyncExternalStore } from 'react';
 import type {
-  ActivityEvent, Agent, ApprovalDecision, ContextDoc, LogEntry,
+  ActivityEvent, Agent, ApprovalDecision, Attachment, ContextDoc, LogEntry,
   McpServer, Project, ServerEvent,
 } from '@jkj/shared';
 import * as api from '../api/client.js';
@@ -331,12 +331,15 @@ export async function createSession(
   task: string,
   model: string,
   permissionMode: 'default' | 'acceptEdits' | 'plan',
+  attachments: Attachment[] = [],
 ): Promise<void> {
   const projectId = state.selectedProjectId;
   if (!projectId) return;
 
   try {
-    const agent = await api.createAgent({ projectId, task, model, workspace: 'branch', permissionMode });
+    const agent = await api.createAgent({
+      projectId, task, model, workspace: 'branch', permissionMode, attachments,
+    });
     set({
       agents: [agent, ...state.agents],
       openAgentId: agent.id,
@@ -359,26 +362,33 @@ export async function createSession(
  * next turn. A session still open in a terminal is the only one that cannot
  * be typed into, and it says so instead of offering a box.
  */
-export async function sendMessage(agentId: string, text: string): Promise<void> {
+export async function sendMessage(
+  agentId: string,
+  text: string,
+  attachments: Attachment[] = [],
+): Promise<void> {
   const agent = agentById(state, agentId);
   if (!agent) return;
 
-  if (agent.driven) {
-    if (!sendCommand({ type: 'agent.message', agentId, text })) showToast('Not connected to the server.');
-    return;
-  }
-
-  if (agent.status === 'running' || agent.status === 'waiting') return showToast(NOT_OURS);
-
   try {
-    const resumed = await api.resumeAgent(agentId, text);
+    if (agent.driven) {
+      // Sent over REST rather than the socket: attachments are far larger
+      // than anything else the socket carries, and one path is easier to
+      // trust than a fast one beside a slow one.
+      await api.postMessage(agentId, text, attachments);
+      return;
+    }
+
+    if (agent.status === 'running' || agent.status === 'waiting') return showToast(NOT_OURS);
+
+    const resumed = await api.resumeAgent(agentId, text, attachments);
     set({
       agents: [resumed, ...state.agents.filter(a => a.id !== agentId)],
       openAgentId: resumed.id,
     });
     await loadTranscript(resumed.id);
   } catch (err) {
-    showToast(`Could not continue it: ${message(err)}`);
+    showToast(message(err));
   }
 }
 

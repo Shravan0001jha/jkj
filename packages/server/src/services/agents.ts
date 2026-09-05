@@ -1,4 +1,4 @@
-import type { Agent, ApprovalDecision, CreateAgentRequest, LogEntry } from '@jkj/shared';
+import type { Agent, ApprovalDecision, Attachment, CreateAgentRequest, LogEntry } from '@jkj/shared';
 import { getSnapshot } from './workspace.js';
 import { readSession } from '../runtime/session-reader.js';
 import * as runs from './runs.js';
@@ -51,6 +51,10 @@ export async function getImage(
   agentId: string,
   ref: string,
 ): Promise<{ mediaType: string; data: Buffer } | null> {
+  // A driven run keeps its images in memory; nothing has been written yet.
+  const live = runs.getRunImage(agentId, ref);
+  if (live) return live;
+
   const sessionId = agentId.split('::')[0];
   if (!sessionId) return null;
 
@@ -70,15 +74,20 @@ export const createAgent = (request: CreateAgentRequest): Promise<Agent> => runs
  * Continue a session that has ended. The transcript on disk comes with it, so
  * the conversation carries on rather than starting a second one beside it.
  */
-export async function resumeAgent(agentId: string, text: string): Promise<Agent> {
+export async function resumeAgent(
+  agentId: string,
+  text: string,
+  attachments?: Attachment[],
+): Promise<Agent> {
   const agent = await getAgent(agentId);
   if (!agent) throw new Error('That session is no longer on disk.');
 
   const history = await getTranscript(agentId);
-  return runs.resumeRun(agent, history, text);
+  return runs.resumeRun(agent, history, text, attachments);
 }
 
-export const sendMessage = (agentId: string, text: string): void => runs.sendMessage(agentId, text);
+export const sendMessage = (agentId: string, text: string, attachments?: Attachment[]): void =>
+  runs.sendMessage(agentId, text, attachments);
 
 export const interruptAgent = (agentId: string): Promise<void> => runs.interruptRun(agentId);
 

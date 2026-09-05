@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { API } from '@jkj/shared';
-import type { CreateAgentRequest } from '@jkj/shared';
+import type { Attachment, CreateAgentRequest } from '@jkj/shared';
 import type { Config } from '../config.js';
 import * as projects from '../services/projects.js';
 import * as agents from '../services/agents.js';
@@ -8,6 +8,7 @@ import * as context from '../services/context.js';
 import * as mcp from '../services/mcp.js';
 import * as activity from '../services/activity.js';
 import { findClaudeHome } from '../runtime/claude-home.js';
+import { BadRequest, statusOf } from '../util/errors.js';
 
 /**
  * REST surface. One entry per route so the whole API is readable at a glance.
@@ -70,13 +71,23 @@ export function createRouter(config: Config) {
     },
     {
       method: 'POST',
+      match: p => p.startsWith('/api/agents/') && p.endsWith('/message'),
+      handler: async (req, res, url) => {
+        const id = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/message'.length));
+        const body = await readJson(req);
+        const { text, attachments } = validateMessage(body);
+        agents.sendMessage(id, text, attachments);
+        json(res, 202, { ok: true });
+      },
+    },
+    {
+      method: 'POST',
       match: p => p.startsWith('/api/agents/') && p.endsWith('/resume'),
       handler: async (req, res, url) => {
         const id = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/resume'.length));
         const body = await readJson(req);
-        const text = typeof body['text'] === 'string' ? body['text'].trim() : '';
-        if (!text) throw new Error('Say what to continue with.');
-        json(res, 201, await agents.resumeAgent(id, text));
+        const { text, attachments } = validateMessage(body);
+        json(res, 201, await agents.resumeAgent(id, text, attachments));
       },
     },
     {
@@ -157,7 +168,7 @@ export function createRouter(config: Config) {
     try {
       await route.handler(req, res, url);
     } catch (err) {
-      json(res, 500, { error: err instanceof Error ? err.message : 'Unknown error' });
+      json(res, statusOf(err), { error: err instanceof Error ? err.message : 'Unknown error' });
     }
     return true;
   };
@@ -174,12 +185,30 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
+/** Attachments are decoded on the server, so the wire is checked first. */
+function validateMessage(body: Record<string, unknown>): { text: string; attachments: Attachment[] } {
+  const text = typeof body['text'] === 'string' ? body['text'].trim() : '';
+  const raw = Array.isArray(body['attachments']) ? body['attachments'] : [];
+
+  const attachments: Attachment[] = raw.map(item => {
+    const file = item as Record<string, unknown>;
+    const data = typeof file['data'] === 'string' ? file['data'] : '';
+    const mediaType = typeof file['mediaType'] === 'string' ? file['mediaType'] : '';
+    const name = typeof file['name'] === 'string' ? file['name'] : 'attachment';
+    if (!data || !mediaType) throw new BadRequest(`${name} arrived without any content.`);
+    return { name, mediaType, data };
+  });
+
+  if (!text && attachments.length === 0) throw new BadRequest('Nothing to send.');
+  return { text: text || 'See the attached file.', attachments };
+}
+
 /** A request body is untrusted until every field has been checked. */
 function validateCreate(body: Record<string, unknown>): CreateAgentRequest {
   const task = typeof body['task'] === 'string' ? body['task'].trim() : '';
   const projectId = typeof body['projectId'] === 'string' ? body['projectId'] : '';
-  if (!task) throw new Error('A session needs something to do.');
-  if (!projectId) throw new Error('A session needs a project to run in.');
+  if (!task) throw new BadRequest('A session needs something to do.');
+  if (!projectId) throw new BadRequest('A session needs a project to run in.');
 
   const mode = body['permissionMode'];
   return {
@@ -188,17 +217,28 @@ function validateCreate(body: Record<string, unknown>): CreateAgentRequest {
     model: typeof body['model'] === 'string' && body['model'] ? body['model'] : 'sonnet',
     workspace: 'branch',
     permissionMode: mode === 'acceptEdits' || mode === 'plan' ? mode : 'default',
+    attachments: validateMessage({ text: task, attachments: body['attachments'] }).attachments,
   };
 }
 
+/** Attachments arrive base64-encoded, so bodies are large but not unbounded. */
+const MAX_BODY_BYTES = 32 * 1024 * 1024;
+
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let size = 0;
+
+  for await (const chunk of req) {
+    size += (chunk as Buffer).byteLength;
+    if (size > MAX_BODY_BYTES) throw new BadRequest('That is too large to send. Keep attachments under about 24 MB.');
+    chunks.push(chunk as Buffer);
+  }
+
   const raw = Buffer.concat(chunks).toString('utf8');
   if (!raw) return {};
   try {
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
-    throw new Error('Request body was not valid JSON');
+    throw new BadRequest('Request body was not valid JSON');
   }
 }
