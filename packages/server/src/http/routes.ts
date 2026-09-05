@@ -69,6 +69,17 @@ export function createRouter(config: Config) {
       },
     },
     {
+      method: 'POST',
+      match: p => p.startsWith('/api/agents/') && p.endsWith('/resume'),
+      handler: async (req, res, url) => {
+        const id = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/resume'.length));
+        const body = await readJson(req);
+        const text = typeof body['text'] === 'string' ? body['text'].trim() : '';
+        if (!text) throw new Error('Say what to continue with.');
+        json(res, 201, await agents.resumeAgent(id, text));
+      },
+    },
+    {
       method: 'DELETE',
       match: p => p.startsWith('/api/agents/') && !p.includes('/', '/api/agents/'.length),
       handler: (_req, res, url) => {

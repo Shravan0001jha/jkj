@@ -9,19 +9,28 @@ import { sendMessage } from '../../state/store.js';
 export function Composer({ agent }: { agent: Agent }) {
   const [text, setText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const canSend = agent.driven === true;
+  const [busy, setBusy] = useState(false);
 
-  // Opening a session you can drive should leave the cursor where you type.
+  // A session still open in a terminal is the only unreachable kind: that
+  // process owns its input. A finished one is picked back up on send.
+  const openElsewhere = !agent.driven && (agent.status === 'running' || agent.status === 'waiting');
+  const isSubagent = Boolean(agent.parentAgentId);
+  const canSend = !openElsewhere && !isSubagent;
+  const resuming = !agent.driven && canSend;
+
+  // Opening a session you can type into should leave the cursor in the box.
   useEffect(() => {
     if (canSend) inputRef.current?.focus();
   }, [agent.id, canSend]);
 
-  const submit = (e: React.FormEvent): void => {
+  const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     const value = text.trim();
-    if (!value) return;
+    if (!value || busy) return;
     setText('');
-    sendMessage(agent.id, value);
+    setBusy(true);
+    await sendMessage(agent.id, value);
+    setBusy(false);
   };
 
   // A disabled box that swallows clicks reads as a broken control. Say what
@@ -30,24 +39,29 @@ export function Composer({ agent }: { agent: Agent }) {
     return (
       <div className="composer readonly">
         <span>
-          Started in a terminal, so only that terminal can type into it. Continue it there with{' '}
-          <code>claude --resume {agent.id}</code>
+          {isSubagent
+            ? 'A subagent run is part of its parent session. Continue the parent instead.'
+            : <>This session is open in a terminal right now, so that terminal owns its input.
+                Close it there and it becomes continuable here.</>}
         </span>
       </div>
     );
   }
 
   return (
-    <form className="composer" onSubmit={submit}>
+    <form className="composer" onSubmit={e => void submit(e)}>
       <input
         ref={inputRef}
         value={text}
         onChange={e => setText(e.target.value)}
-        placeholder={`Message ${agent.name}…`}
+        placeholder={resuming ? 'Continue this session…' : `Message ${agent.name}…`}
         aria-label="Message this session"
         autoComplete="off"
+        disabled={busy}
       />
-      <button className="btn sm primary" type="submit" disabled={!text.trim()}>Send</button>
+      <button className="btn sm primary" type="submit" disabled={!text.trim() || busy}>
+        {busy ? 'Continuing…' : resuming ? 'Continue' : 'Send'}
+      </button>
     </form>
   );
 }

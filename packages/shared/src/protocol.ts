@@ -67,6 +67,7 @@ export const API = {
   agents: '/api/agents',
   agent: (id: string) => `/api/agents/${id}`,
   agentLog: (id: string) => `/api/agents/${id}/log`,
+  agentResume: (id: string) => `/api/agents/${id}/resume`,
   agentImage: (id: string, ref: string) =>
     `/api/agents/${id}/image?ref=${encodeURIComponent(ref)}`,
   context: (projectId: string) => `/api/context?projectId=${encodeURIComponent(projectId)}`,

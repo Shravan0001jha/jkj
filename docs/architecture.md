@@ -40,6 +40,34 @@ exactly the bug this note exists to prevent recurring.
 the UI renders what it is told. The UI never mutates its own copy of an agent
 and hopes the server agrees.
 
+## Reaching a session open in a terminal
+
+While a session runs in a terminal, that process owns its stdin, so JKJ cannot
+type into it. A finished session has no such owner, which is why continuing
+one is straightforward: the SDK is asked to `resume` the session id and the
+conversation carries on.
+
+There is a second door. Every running session opens a Unix socket —
+`/tmp/cc-socks/<pid>.sock` — and writes a peer token beside it in
+`<config>/sessions/<pid>.<hash>.key`. The descriptor advertises
+`peerProtocol: 1` and a feature list. This is how Claude Code sessions message
+each other on one machine.
+
+JKJ does not speak it, on purpose:
+
+- Neither the Agent SDK nor the CLI exposes it. The framing — an auth
+  handshake, `<peer-message …>` envelopes, pid-domain checks, capability
+  negotiation — is internal and unversioned, so an implementation would be
+  reverse-engineered and could break silently on any release.
+- The semantics differ from typing. A peer message arrives as another agent
+  addressing that session, not as the person at the keyboard, so two parties
+  end up steering one conversation.
+
+`claude --bg` is the supported alternative worth exploring first: background
+sessions have real `attach`, `logs` and `stop` commands, and
+`claude agents --json` lists them, so the same session could be driven from
+JKJ and picked up in a terminal.
+
 ## Open questions
 
 - **Parallel agents on one repo.** A git worktree per agent is the plan. Open:

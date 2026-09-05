@@ -66,6 +66,18 @@ export async function getImage(
 
 export const createAgent = (request: CreateAgentRequest): Promise<Agent> => runs.createRun(request);
 
+/**
+ * Continue a session that has ended. The transcript on disk comes with it, so
+ * the conversation carries on rather than starting a second one beside it.
+ */
+export async function resumeAgent(agentId: string, text: string): Promise<Agent> {
+  const agent = await getAgent(agentId);
+  if (!agent) throw new Error('That session is no longer on disk.');
+
+  const history = await getTranscript(agentId);
+  return runs.resumeRun(agent, history, text);
+}
+
 export const sendMessage = (agentId: string, text: string): void => runs.sendMessage(agentId, text);
 
 export const interruptAgent = (agentId: string): Promise<void> => runs.interruptRun(agentId);

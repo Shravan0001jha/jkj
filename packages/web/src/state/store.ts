@@ -324,7 +324,7 @@ export function setProjectContextBody(projectId: string, body: string): void {
  * Only sessions JKJ started can be driven. One started in a terminal belongs
  * to that process, and nothing here can type into it.
  */
-const NOT_OURS = 'JKJ can read this session but not drive it — it was started in a terminal.';
+const NOT_OURS = 'That session is open in a terminal. Close it there, then continue it here.';
 
 export async function createSession(
   task: string,
@@ -348,10 +348,33 @@ export async function createSession(
   }
 }
 
-export function sendMessage(agentId: string, text: string): void {
+/**
+ * One box, two behaviours. A session JKJ drives takes the message straight
+ * away; a finished one is picked back up first, and the message becomes its
+ * next turn. A session still open in a terminal is the only one that cannot
+ * be typed into, and it says so instead of offering a box.
+ */
+export async function sendMessage(agentId: string, text: string): Promise<void> {
   const agent = agentById(state, agentId);
-  if (!agent?.driven) return showToast(NOT_OURS);
-  if (!sendCommand({ type: 'agent.message', agentId, text })) showToast('Not connected to the server.');
+  if (!agent) return;
+
+  if (agent.driven) {
+    if (!sendCommand({ type: 'agent.message', agentId, text })) showToast('Not connected to the server.');
+    return;
+  }
+
+  if (agent.status === 'running' || agent.status === 'waiting') return showToast(NOT_OURS);
+
+  try {
+    const resumed = await api.resumeAgent(agentId, text);
+    set({
+      agents: [resumed, ...state.agents.filter(a => a.id !== agentId)],
+      openAgentId: resumed.id,
+    });
+    await loadTranscript(resumed.id);
+  } catch (err) {
+    showToast(`Could not continue it: ${message(err)}`);
+  }
 }
 
 export function interruptAgent(agentId: string): void {

@@ -32,6 +32,12 @@ export const getActivity = () => request<ActivityEvent[]>(API.activity);
 export const createAgent = (body: CreateAgentRequest) =>
   request<Agent>(API.agents, { method: 'POST', body: JSON.stringify(body) });
 
+export const resumeAgent = (agentId: string, text: string) =>
+  request<Agent>(API.agentResume(encodeURIComponent(agentId)), {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+
 export const archiveAgent = (agentId: string) =>
   request<{ ok: true }>(API.agent(encodeURIComponent(agentId)), { method: 'DELETE' });
 

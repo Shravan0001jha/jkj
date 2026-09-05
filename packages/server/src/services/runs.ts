@@ -55,35 +55,94 @@ export async function createRun(request: CreateAgentRequest): Promise<Agent> {
   const project = (await getSnapshot()).projects.find(p => p.id === request.projectId);
   if (!project) throw new Error(`Unknown project ${request.projectId}`);
 
+  return spawn({
+    projectId: project.id,
+    name: title(request.task),
+    task: request.task,
+    model: request.model,
+    cwd: project.path,
+    workspace: request.workspace,
+    prompt: request.task,
+    permissionMode: request.permissionMode ?? 'default',
+  });
+}
+
+/**
+ * Pick a finished session back up.
+ *
+ * The SDK continues the original conversation, so the model still has
+ * everything that was said. The transcript already on disk is carried into
+ * the run so the reader sees one continuous conversation rather than a new
+ * window onto an old one.
+ */
+export async function resumeRun(agent: Agent, history: LogEntry[], text: string): Promise<Agent> {
+  if (agent.driven) throw new Error('That session is already running here.');
+  if (agent.parentAgentId) throw new Error('A subagent run cannot be resumed on its own.');
+
+  return spawn({
+    projectId: agent.projectId,
+    name: agent.name,
+    task: agent.task,
+    model: agent.model,
+    cwd: agent.cwd,
+    workspace: agent.workspace,
+    prompt: text,
+    permissionMode: 'default',
+    resume: agent.id,
+    history,
+  });
+}
+
+interface SpawnOptions {
+  projectId: string;
+  name: string;
+  task: string;
+  model: string;
+  cwd: string;
+  workspace: Agent['workspace'];
+  prompt: string;
+  permissionMode: 'default' | 'acceptEdits' | 'plan';
+  /** Session id to continue, when this is not a fresh conversation. */
+  resume?: string;
+  /** Transcript to carry over, so a resumed session reads continuously. */
+  history?: LogEntry[];
+}
+
+function spawn(options: SpawnOptions): Agent {
   // Until the SDK reports one, the run needs an id of its own.
   const id = `run_${Math.random().toString(36).slice(2, 10)}`;
 
   const agent: Agent = {
     id,
-    projectId: project.id,
-    name: title(request.task),
-    task: request.task,
-    model: request.model,
+    projectId: options.projectId,
+    name: options.name,
+    task: options.task,
+    model: options.model,
     status: 'running',
-    workspace: request.workspace,
-    cwd: project.path,
+    workspace: options.workspace,
+    cwd: options.cwd,
     startedAt: new Date().toISOString(),
     messageCount: 1,
     driven: true,
     usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
   };
 
-  const run: Run = { agent, entries: [], handle: undefined as unknown as RunHandle };
+  const run: Run = {
+    agent,
+    entries: (options.history ?? []).map(e => ({ ...e, agentId: id })),
+    handle: undefined as unknown as RunHandle,
+  };
   runs.set(id, run);
 
-  append(run, 'user', '', request.task);
+  append(run, 'user', '', options.prompt);
 
   run.handle = startRun(
     {
-      cwd: project.path,
-      model: request.model,
-      prompt: request.task,
-      permissionMode: request.permissionMode ?? 'default',
+      cwd: options.cwd,
+      model: options.model,
+      prompt: options.prompt,
+      permissionMode: options.permissionMode,
+      ...(options.resume ? { resume: options.resume } : {}),
     },
     {
       onSessionId: sessionId => {

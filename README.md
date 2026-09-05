@@ -29,12 +29,21 @@ window.
   process: you steer it mid-run, approve or deny each tool call, and interrupt
   it. Transcripts stream as they happen.
 
+- **Continue anything that has finished.** Type into a past session and JKJ
+  picks it up where it stopped, with the model's memory of the conversation
+  intact. The transcript carries over, so it reads as one thread rather than a
+  new window onto an old one.
+
 ### One limitation worth knowing
 
-**A session started in a terminal can only be read.** That process owns its
-own input, and nothing outside it can type there — not JKJ, not anything else.
-So the sessions JKJ can drive are the ones it started, which are marked
-*driven by JKJ* in the interface. Everything else is history you can browse.
+**A session open in a terminal right now can only be read.** That process owns
+its input while it runs. Close it there and it becomes continuable here like
+any other finished session.
+
+Claude Code does expose a local socket that lets sessions message each other,
+so this is a choice rather than a wall — see
+[docs/architecture.md](docs/architecture.md) for why JKJ does not speak it
+yet.
 
 ## Requirements
 
@@ -183,8 +192,9 @@ styles/tokens.css     Every colour and font, light and dark
 - [x] Steer a running session, and interrupt it
 - [x] Permission prompts, approved or denied from the browser
 - [x] Markdown, code blocks and pasted images in transcripts
+- [x] Continue a finished session, with its history intact
 - [ ] Remember an "always allow" decision across turns
-- [ ] Resume a past session into a driven one
+- [ ] Reach a session that is open in a terminal, over its peer socket
 - [ ] Fork a session onto its own git worktree
 - [ ] Probe MCP servers for real health and tool counts
 - [ ] Git worktree per session, so parallel work cannot collide
