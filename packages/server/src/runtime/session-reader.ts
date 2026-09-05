@@ -43,6 +43,11 @@ export interface SessionDetail extends SessionSummary {
   entries: LogEntry[];
   /** Subagent runs found in this session, in the order they were spawned. */
   subagents: { id: string; name: string; task: string; entries: LogEntry[] }[];
+  /**
+   * Image bytes, keyed by the ref on the entry that shows them. Kept here and
+   * served from their own route so transcripts stay small.
+   */
+  images: Map<string, { mediaType: string; data: Buffer }>;
 }
 
 /** Keep the transcript bounded — some sessions run to tens of thousands of lines. */
@@ -120,6 +125,7 @@ async function parseSession(file: SessionFile): Promise<SessionDetail | null> {
   const entries: LogEntry[] = [];
   const sidechain: LogEntry[] = [];
   const taskNames: { name: string; task: string }[] = [];
+  const images = new Map<string, { mediaType: string; data: Buffer }>();
 
   try {
     const stream = createInterface({ input: createReadStream(file.file, { encoding: 'utf8' }), crlfDelay: Infinity });
@@ -136,7 +142,7 @@ async function parseSession(file: SessionFile): Promise<SessionDetail | null> {
 
       absorbMetadata(record, state);
 
-      const produced = toEntries(record, file.sessionId);
+      const produced = toEntries(record, file.sessionId, images);
       if (produced.length === 0) continue;
 
       state.messageCount += 1;
@@ -169,6 +175,7 @@ async function parseSession(file: SessionFile): Promise<SessionDetail | null> {
     hasSubagents: sidechain.length > 0,
     entries: entries.slice(-MAX_ENTRIES),
     subagents: groupSubagents(sidechain, taskNames),
+    images,
   };
 }
 
@@ -236,7 +243,11 @@ function describeToolInput(tool: string, input: Record<string, unknown>): string
 }
 
 /** Turn one record into zero or more transcript entries. */
-function toEntries(record: Record<string, unknown>, sessionId: string): LogEntry[] {
+function toEntries(
+  record: Record<string, unknown>,
+  sessionId: string,
+  images: Map<string, { mediaType: string; data: Buffer }>,
+): LogEntry[] {
   const type = str(record['type']);
   if (type !== 'user' && type !== 'assistant') return [];
   if (record['isMeta'] === true) return [];
@@ -251,8 +262,10 @@ function toEntries(record: Record<string, unknown>, sessionId: string): LogEntry
 
   // Older records put a bare string here; newer ones use content blocks.
   if (typeof content === 'string') {
-    if (content.trim()) {
-      out.push(entry(`${uuid}:0`, sessionId, at, type === 'user' ? 'user' : 'assistant', '', content));
+    const cleaned = type === 'user' ? cleanUserText(content) : { kind: 'user' as LogKind, text: content };
+    if (cleaned && cleaned.text.trim()) {
+      out.push(entry(`${uuid}:0`, sessionId, at,
+        type === 'user' ? cleaned.kind : 'assistant', cleaned.label ?? '', cleaned.text));
     }
     return out;
   }
@@ -267,15 +280,35 @@ function toEntries(record: Record<string, unknown>, sessionId: string): LogEntry
     switch (str(block['type'])) {
       case 'text': {
         const text = str(block['text']);
-        if (text?.trim()) {
-          out.push(entry(id, sessionId, at, type === 'user' ? 'user' : 'assistant', '', text));
+        if (!text?.trim()) break;
+
+        if (type === 'assistant') {
+          out.push(entry(id, sessionId, at, 'assistant', '', text));
+          break;
         }
+        const cleaned = cleanUserText(text);
+        if (cleaned) out.push(entry(id, sessionId, at, cleaned.kind, cleaned.label ?? '', cleaned.text));
         break;
       }
       case 'tool_use': {
         const tool = str(block['name']) ?? 'tool';
         const input = obj(block['input']) ?? {};
         out.push(entry(id, sessionId, at, kindForTool(tool), tool, describeToolInput(tool, input)));
+        break;
+      }
+      case 'image': {
+        // Pasted images arrive as base64 in the record. Decode once, hand the
+        // entry a reference, and let the image route serve the bytes.
+        const source = obj(block['source']);
+        const data = str(source?.['data']);
+        if (!data) break;
+
+        const mediaType = str(source?.['media_type']) ?? 'image/png';
+        images.set(id, { mediaType, data: Buffer.from(data, 'base64') });
+
+        const line = entry(id, sessionId, at, 'image', '', 'Pasted image');
+        line.image = { mediaType, ref: id };
+        out.push(line);
         break;
       }
       case 'tool_result': {
@@ -291,6 +324,31 @@ function toEntries(record: Record<string, unknown>, sessionId: string): LogEntry
   });
 
   return out;
+}
+
+/**
+ * A "user" record is not always something a person typed. The CLI puts slash
+ * commands, their output, injected reminders and background notifications in
+ * the same place. Showing those verbatim buries the actual conversation, so
+ * each is either reduced to one line or dropped.
+ */
+function cleanUserText(raw: string): { kind: LogKind; label?: string; text: string } | null {
+  const text = raw.trim();
+
+  const command = /^<command-name>([^<]+)<\/command-name>/.exec(text);
+  if (command) return { kind: 'system', label: 'Command', text: command[1]!.trim() };
+
+  // Command output, queued work and hook chatter are machinery, not dialogue.
+  if (/^<(local-command-stdout|command-message|command-args|task-notification)>/.test(text)) return null;
+
+  // Reminders are injected around what the person actually wrote.
+  const withoutReminders = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+  if (!withoutReminders) return null;
+
+  // Tool results the CLI feeds back in are already shown as their tool call.
+  if (/^<(tool_use_error|function_results)>/.test(withoutReminders)) return null;
+
+  return { kind: 'user', text: withoutReminders };
 }
 
 function collectTasks(record: Record<string, unknown>): { name: string; task: string }[] {

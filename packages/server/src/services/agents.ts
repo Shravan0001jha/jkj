@@ -41,6 +41,22 @@ export async function getTranscript(agentId: string): Promise<LogEntry[]> {
   return (sub?.entries ?? []).map(e => ({ ...e, agentId }));
 }
 
+/** The bytes behind an image entry, or null if the reference is unknown. */
+export async function getImage(
+  agentId: string,
+  ref: string,
+): Promise<{ mediaType: string; data: Buffer } | null> {
+  const sessionId = agentId.split('::')[0];
+  if (!sessionId) return null;
+
+  const snapshot = await getSnapshot();
+  const file = snapshot.files.get(sessionId);
+  if (!file) return null;
+
+  const detail = await readSession(file);
+  return detail?.images.get(ref) ?? null;
+}
+
 /* ---------- writes, not yet available ---------- */
 
 const READ_ONLY = 'JKJ can read your sessions but not drive them yet.';

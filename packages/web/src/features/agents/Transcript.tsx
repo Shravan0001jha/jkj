@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useStore, transcriptOf, openAgent, loadTranscript } from '../../state/store.js';
-import { hhmm } from '../../lib/format.js';
+import { TranscriptEntry } from './TranscriptEntry.js';
 
 /**
  * The scrolling transcript. Tool calls read as a log, prose reads as chat,
@@ -31,31 +31,9 @@ export function Transcript({ agentId }: { agentId: string }) {
       {!loaded && <div className="muted">Reading transcript…</div>}
       {loaded && entries.length === 0 && <div className="muted">This session has no readable messages.</div>}
 
-      {entries.map(entry => {
-        if (entry.kind === 'user') {
-          return (
-            <div className="ln me" key={entry.id}>
-              <span className="t">{hhmm(entry.at)}</span>
-              <span className="v">{entry.text}</span>
-            </div>
-          );
-        }
-        if (entry.kind === 'assistant') {
-          return (
-            <div className="ln say" key={entry.id}>
-              <span className="t">{hhmm(entry.at)}</span>
-              <span className="v">{entry.text}</span>
-            </div>
-          );
-        }
-        return (
-          <div className={`ln ${entry.kind}`} key={entry.id}>
-            <span className="t">{hhmm(entry.at)}</span>
-            <span className="k">{entry.label}</span>
-            <span className="v">{entry.text}</span>
-          </div>
-        );
-      })}
+      {entries.map(entry => (
+        <TranscriptEntry key={entry.id} entry={entry} agentId={agentId} />
+      ))}
 
       {subagents.length > 0 && (
         <div className="subtree">

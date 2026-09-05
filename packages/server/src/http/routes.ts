@@ -60,6 +60,23 @@ export function createRouter(config: Config) {
     },
     {
       method: 'GET',
+      match: p => p.startsWith('/api/agents/') && p.endsWith('/image'),
+      handler: async (_req, res, url) => {
+        const id = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/image'.length));
+        const image = await agents.getImage(id, url.searchParams.get('ref') ?? '');
+        if (!image) return json(res, 404, { error: 'No such image' });
+
+        res.writeHead(200, {
+          'content-type': image.mediaType,
+          'content-length': image.data.byteLength,
+          // The bytes for a given ref never change, so let the browser keep them.
+          'cache-control': 'private, max-age=86400, immutable',
+        });
+        res.end(image.data);
+      },
+    },
+    {
+      method: 'GET',
       match: p => p === '/api/context',
       handler: async (_req, res, url) => {
         const projectId = url.searchParams.get('projectId') ?? '';

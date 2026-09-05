@@ -29,11 +29,17 @@ export interface LogEntry {
   text: string;
   /** Set when this entry represents a subagent run. */
   subagentId?: string;
+  /**
+   * Set when this entry is an image. The bytes are fetched separately rather
+   * than inlined, so a transcript stays small enough to send on every poll.
+   */
+  image?: { mediaType: string; ref: string };
 }
 
 export type LogKind =
   | 'assistant'  // prose from the agent
   | 'user'       // something you typed
+  | 'image'      // an image pasted into the conversation
   | 'read' | 'edit' | 'bash' | 'search' | 'task' | 'tool'
   | 'error'
   | 'system';    // JKJ itself speaking (interrupted, restarted, …)
