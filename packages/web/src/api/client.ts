@@ -1,6 +1,6 @@
 import { API } from '@jkj/shared';
 import type {
-  ActivityEvent, Agent, ContextDoc, ContextResponse,
+  ActivityEvent, Agent, ContextDoc, ContextResponse, CreateAgentRequest,
   HealthResponse, LogEntry, McpListResponse, Project,
 } from '@jkj/shared';
 
@@ -28,6 +28,12 @@ export const getTranscript = (agentId: string) => request<LogEntry[]>(API.agentL
 export const getContext = (projectId: string) => request<ContextResponse>(API.context(projectId));
 export const getMcp = () => request<McpListResponse>(API.mcp);
 export const getActivity = () => request<ActivityEvent[]>(API.activity);
+
+export const createAgent = (body: CreateAgentRequest) =>
+  request<Agent>(API.agents, { method: 'POST', body: JSON.stringify(body) });
+
+export const archiveAgent = (agentId: string) =>
+  request<{ ok: true }>(API.agent(encodeURIComponent(agentId)), { method: 'DELETE' });
 
 export const putContext = (scope: 'central' | 'project', body: string, projectId?: string) =>
   request<ContextDoc>(

@@ -36,6 +36,8 @@ export interface CreateAgentRequest {
   task: string;
   model: string;
   workspace: WorkspaceMode;
+  /** How tool calls are handled. 'default' asks you; 'acceptEdits' does not. */
+  permissionMode?: 'default' | 'acceptEdits' | 'plan';
 }
 
 export interface ContextResponse {

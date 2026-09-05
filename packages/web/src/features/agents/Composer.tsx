@@ -3,31 +3,36 @@ import type { Agent } from '@jkj/shared';
 import { sendMessage } from '../../state/store.js';
 
 /**
- * Steering a live session is the next thing JKJ learns to do. The box is here
- * so its shape is settled; today it explains why it cannot send.
+ * Steer a session JKJ started. One started in a terminal owns its own input,
+ * so the box says why it is closed rather than pretending to send.
  */
 export function Composer({ agent }: { agent: Agent }) {
   const [text, setText] = useState('');
-  const live = agent.status === 'running' || agent.status === 'waiting';
+  const canSend = agent.driven === true;
 
   const submit = (e: React.FormEvent): void => {
     e.preventDefault();
-    if (!text.trim()) return;
+    const value = text.trim();
+    if (!value) return;
     setText('');
-    sendMessage();
+    sendMessage(agent.id, value);
   };
+
+  const placeholder = canSend
+    ? `Message ${agent.name}…`
+    : 'Started in a terminal — JKJ can read it, but only that terminal can type into it';
 
   return (
     <form className="composer" onSubmit={submit}>
       <input
         value={text}
         onChange={e => setText(e.target.value)}
-        placeholder={live ? `Message ${agent.name}…` : 'This session has ended'}
+        placeholder={placeholder}
         aria-label="Message this session"
         autoComplete="off"
-        disabled={!live}
+        disabled={!canSend}
       />
-      <button className="btn sm primary" type="submit" disabled={!live}>Send</button>
+      <button className="btn sm primary" type="submit" disabled={!canSend}>Send</button>
     </form>
   );
 }

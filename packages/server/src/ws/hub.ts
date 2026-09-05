@@ -4,6 +4,8 @@ import type { Agent, ClientCommand, ServerEvent } from '@jkj/shared';
 import { API } from '@jkj/shared';
 import { getSnapshot } from '../services/workspace.js';
 import { listInstalled } from '../services/mcp.js';
+import * as agents from '../services/agents.js';
+import { onRunEvent } from '../services/runs.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -26,6 +28,12 @@ export function attachSocket(server: Server, version: string): void {
     const payload = JSON.stringify(event);
     for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(payload);
   };
+
+  // A session JKJ drives reports itself; there is nothing to poll for.
+  onRunEvent(({ agent, entry }) => {
+    if (agent) broadcast({ type: 'agent.updated', agent });
+    if (entry) broadcast({ type: 'agent.log', entry });
+  });
 
   async function poll(): Promise<void> {
     if (clients.size === 0) return;
@@ -88,15 +96,27 @@ export function attachSocket(server: Server, version: string): void {
 }
 
 /**
- * Every command is a write, and JKJ cannot write to a running session yet.
- * Saying so is better than accepting the command and dropping it.
+ * Commands only apply to sessions JKJ started. The services throw a sentence
+ * worth showing when they do not, which is better than a silent no-op.
  */
 function handleCommand(ws: WebSocket, command: ClientCommand): void {
-  if (command.type === 'subscribe') return;
-  send(ws, {
-    type: 'error',
-    message: 'JKJ can read your sessions but not drive them yet.',
-  });
+  try {
+    switch (command.type) {
+      case 'subscribe':
+        break;
+      case 'agent.message':
+        agents.sendMessage(command.agentId, command.text);
+        break;
+      case 'agent.interrupt':
+        void agents.interruptAgent(command.agentId);
+        break;
+      case 'agent.approve':
+        agents.resolveApproval(command.agentId, command.decision);
+        break;
+    }
+  } catch (err) {
+    send(ws, { type: 'error', message: err instanceof Error ? err.message : 'Command failed' });
+  }
 }
 
 /** Cheap change detection — the fields the UI actually renders. */

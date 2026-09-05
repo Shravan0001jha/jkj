@@ -1,52 +1,182 @@
-import type { Agent } from '@jkj/shared';
+import { query, type Options, type PermissionResult, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 /**
  * The one place JKJ touches the Claude Agent SDK.
  *
- * Everything above this file speaks in domain types. Everything below it is
- * SDK-shaped. Keeping that boundary here means an SDK upgrade is a one-file
- * change, and tests can substitute a fake runtime.
+ * Everything above this file speaks in domain types; everything below it is
+ * SDK-shaped. Keeping the boundary here means an SDK upgrade is a one-file
+ * change and tests can substitute a fake runtime.
  */
 
-export interface RuntimeEvents {
+export interface PermissionRequest {
+  tool: string;
+  input: Record<string, unknown>;
+  /** The sentence the CLI would show, when it offers one. */
+  title: string;
+}
+
+export interface RunEvents {
+  /** Fires once the SDK has a session id, which is also its file on disk. */
+  onSessionId(sessionId: string): void;
   onText(text: string): void;
-  onToolUse(tool: string, input: string): void;
-  onPermissionRequest(tool: string, input: string, reason: string): void;
-  onSubagentStart(name: string, task: string): void;
+  onToolUse(tool: string, input: Record<string, unknown>): void;
+  /** Resolve the returned promise to let the tool run, or reject the request. */
+  onPermission(request: PermissionRequest): Promise<'allow' | 'deny'>;
   onUsage(inputTokens: number, outputTokens: number): void;
-  onDone(): void;
+  onDone(summary: string): void;
   onError(message: string): void;
 }
 
-export interface RuntimeHandle {
-  /** Push a message from the user into the running turn. */
+export interface RunHandle {
+  /** Queue a message for the running turn, or the next one. */
   send(text: string): void;
-  /** Answer a pending permission request. */
-  resolvePermission(decision: 'once' | 'always' | 'deny'): void;
-  /** Abort the current turn. The worktree is left alone. */
-  interrupt(): void;
+  /** Abort the current turn. Files already written stay written. */
+  interrupt(): Promise<void>;
+  /** Stop the run and release the process. */
+  close(): void;
+}
+
+export interface RunOptions {
+  cwd: string;
+  model: string;
+  prompt: string;
+  /** Continue an existing session by id rather than starting a new one. */
+  resume?: string;
+  permissionMode?: 'default' | 'acceptEdits' | 'plan';
+}
+
+export function startRun(options: RunOptions, events: RunEvents): RunHandle {
+  const input = createInputQueue();
+  input.push(options.prompt);
+
+  const sdkOptions: Options = {
+    cwd: options.cwd,
+    model: options.model,
+    permissionMode: options.permissionMode ?? 'default',
+    ...(options.resume ? { resume: options.resume } : {}),
+
+    // Every tool call routes through the browser unless the mode auto-allows.
+    canUseTool: async (toolName, toolInput, meta): Promise<PermissionResult> => {
+      const decision = await events.onPermission({
+        tool: toolName,
+        input: toolInput,
+        // The CLI writes a proper sentence when it has one. Otherwise say
+        // which of your things is about to be touched, not just the verb.
+        title: meta.title ?? describeRequest(toolName, toolInput),
+      });
+
+      return decision === 'allow'
+        ? { behavior: 'allow', updatedInput: toolInput }
+        : { behavior: 'deny', message: 'Denied from JKJ.' };
+    },
+  };
+
+  const stream: Query = query({ prompt: input.iterable, options: sdkOptions });
+  void consume(stream, events);
+
+  return {
+    send: text => input.push(text),
+    interrupt: async () => {
+      try {
+        await stream.interrupt();
+      } catch (err) {
+        events.onError(describe(err));
+      }
+    },
+    close: () => input.end(),
+  };
+}
+
+/** Translate the SDK's message stream into the events above. */
+async function consume(stream: Query, events: RunEvents): Promise<void> {
+  try {
+    for await (const message of stream) {
+      switch (message.type) {
+        case 'system':
+          if ('session_id' in message && message.session_id) events.onSessionId(message.session_id);
+          break;
+
+        case 'assistant': {
+          for (const block of message.message.content) {
+            if (block.type === 'text' && block.text.trim()) {
+              events.onText(block.text);
+            } else if (block.type === 'tool_use') {
+              events.onToolUse(block.name, (block.input ?? {}) as Record<string, unknown>);
+            }
+          }
+          const usage = message.message.usage;
+          if (usage) events.onUsage(usage.input_tokens ?? 0, usage.output_tokens ?? 0);
+          break;
+        }
+
+        case 'result':
+          // The end of a turn, not the end of the session. With streaming
+          // input the query keeps running and waits for the next message —
+          // returning here would make every session answer exactly once.
+          events.onDone('subtype' in message ? String(message.subtype) : 'done');
+          break;
+
+        default:
+          break;   // partials, hooks, progress: nothing the transcript needs
+      }
+    }
+    events.onDone('done');
+  } catch (err) {
+    events.onError(describe(err));
+  }
 }
 
 /**
- * Start an agent run.
- *
- * TODO:
- *   - import { query } from '@anthropic-ai/claude-agent-sdk'
- *   - pass: cwd = agent.cwd, model = agent.model,
- *           systemPrompt = assembleContext(agent.projectId).text,
- *           mcpServers = the project's enabled servers,
- *           canUseTool = a callback that raises onPermissionRequest and
- *                        awaits the user's decision
- *   - iterate the async stream and translate each SDK message into the
- *     RuntimeEvents callbacks above
+ * Streaming input is an async iterable the SDK pulls from, so follow-up
+ * messages need somewhere to wait. This is a queue with one reader: push
+ * hands a waiting reader its value, or parks the value until one arrives.
  */
-export function startRun(agent: Agent, events: RuntimeEvents): RuntimeHandle {
-  void agent;
-  void events;
+function createInputQueue() {
+  const pending: SDKUserMessage[] = [];
+  let notify: (() => void) | null = null;
+  let done = false;
+
+  const iterable = (async function* (): AsyncGenerator<SDKUserMessage> {
+    while (!done) {
+      if (pending.length === 0) {
+        await new Promise<void>(resolve => { notify = resolve; });
+        continue;
+      }
+      yield pending.shift()!;
+    }
+  })();
 
   return {
-    send: () => { /* TODO: forward to the SDK input stream */ },
-    resolvePermission: () => { /* TODO: resolve the pending canUseTool promise */ },
-    interrupt: () => { /* TODO: abort the SDK query */ },
+    iterable,
+    push(text: string): void {
+      pending.push({
+        type: 'user',
+        message: { role: 'user', content: text },
+        parent_tool_use_id: null,
+        session_id: '',
+        origin: { kind: 'human' },
+      } as SDKUserMessage);
+      notify?.();
+      notify = null;
+    },
+    end(): void {
+      done = true;
+      notify?.();
+      notify = null;
+    },
   };
 }
+
+/** A readable sentence for a permission prompt the CLI did not phrase. */
+function describeRequest(tool: string, input: Record<string, unknown>): string {
+  const path = typeof input['file_path'] === 'string' ? input['file_path'] : null;
+  const command = typeof input['command'] === 'string' ? input['command'] : null;
+
+  if (tool === 'Bash' && command) return `Run a command in your shell: ${truncate(command)}`;
+  if (path) return `${tool} wants to touch ${path}`;
+  return `${tool} wants to run on your machine`;
+}
+
+const truncate = (text: string): string => (text.length > 120 ? `${text.slice(0, 120)}…` : text);
+
+const describe = (err: unknown): string => (err instanceof Error ? err.message : String(err));

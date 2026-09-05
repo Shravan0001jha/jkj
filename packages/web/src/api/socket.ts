@@ -1,5 +1,5 @@
 import { API } from '@jkj/shared';
-import type { ServerEvent } from '@jkj/shared';
+import type { ClientCommand, ServerEvent } from '@jkj/shared';
 
 /**
  * One socket for the whole app.
@@ -10,6 +10,19 @@ import type { ServerEvent } from '@jkj/shared';
  */
 
 export type SocketStatus = 'connecting' | 'open' | 'closed';
+
+/**
+ * The live connection, so commands can be sent from anywhere without
+ * threading a socket through every component. One page, one socket.
+ */
+let current: WebSocket | null = null;
+
+/** Returns false when there is no open connection to send on. */
+export function sendCommand(command: ClientCommand): boolean {
+  if (current?.readyState !== WebSocket.OPEN) return false;
+  current.send(JSON.stringify(command));
+  return true;
+}
 
 export function connect(
   onEvent: (event: ServerEvent) => void,
@@ -26,6 +39,7 @@ export function connect(
 
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     socket = new WebSocket(`${proto}://${location.host}${API.socket}`);
+    current = socket;
 
     socket.onopen = () => { attempt = 0; onStatus('open'); };
     socket.onmessage = e => {

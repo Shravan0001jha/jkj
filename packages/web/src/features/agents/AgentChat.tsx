@@ -1,12 +1,13 @@
 import type { Agent } from '@jkj/shared';
 import {
   useStore, currentProject, closeAgent, openAgent, openCentralContext,
-  interruptAgent, archiveAgent, forkAgent, showToast, agentById,
+  interruptAgent, archiveAgent, showToast, agentById,
 } from '../../state/store.js';
 import { ago, fmtTokens } from '../../lib/format.js';
 import { Pill } from '../../components/Pill.js';
 import { Transcript } from './Transcript.js';
 import { Composer } from './Composer.js';
+import { ApprovalPrompt } from './ApprovalPrompt.js';
 
 /**
  * One session's transcript. Works for a session and for a subagent run inside
@@ -41,6 +42,7 @@ export function AgentChat({ agent }: { agent: Agent }) {
           <Pill tone={isSubagent ? 'done' : agent.status}>
             {isSubagent ? 'subagent' : live ? agent.status : 'ended'}
           </Pill>
+          {agent.driven && <Pill tone="idle">driven by JKJ</Pill>}
         </div>
         <p className="task">{agent.task}</p>
 
@@ -67,21 +69,31 @@ export function AgentChat({ agent }: { agent: Agent }) {
           </button>
         ) : (
           <>
-            <button className="btn sm" disabled={!live} onClick={interruptAgent}>⏸ Interrupt</button>
-            <button className="btn sm" onClick={forkAgent}>Fork session</button>
             <button
               className="btn sm"
-              onClick={() => showToast(`Resume it with:  claude --resume ${agent.id}`)}
+              disabled={agent.status !== 'running' || !agent.driven}
+              onClick={() => interruptAgent(agent.id)}
             >
-              Resume command
+              ⏸ Interrupt
             </button>
-            <button className="btn sm danger" style={{ marginLeft: 'auto' }} onClick={archiveAgent}>
-              Archive
-            </button>
+            {agent.driven ? (
+              <button className="btn sm danger" style={{ marginLeft: 'auto' }} onClick={() => void archiveAgent(agent.id)}>
+                Close session
+              </button>
+            ) : (
+              <button
+                className="btn sm"
+                onClick={() => showToast(`Continue it in a terminal with:  claude --resume ${agent.id}`)}
+              >
+                Resume command
+              </button>
+            )}
           </>
         )}
         <button className="btn sm ghost" onClick={openCentralContext}>Context</button>
       </div>
+
+      {agent.approval && <ApprovalPrompt agent={agent} approval={agent.approval} />}
 
       <Transcript agentId={agent.id} />
       <Composer agent={agent} />

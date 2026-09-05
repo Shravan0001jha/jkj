@@ -5,8 +5,8 @@ browser where you can start and steer many agents at once, across many
 projects, with one place to keep the context you would otherwise repeat.
 
 > **Status: early but real.** JKJ reads your actual Claude Code sessions,
-> projects, context files and MCP configuration. It cannot yet start or steer
-> a session — that is the next milestone. See [Roadmap](#roadmap).
+> projects, context files and MCP configuration, and it can start and drive
+> sessions of its own. See [Roadmap](#roadmap).
 
 ## What it does
 
@@ -25,11 +25,16 @@ window.
 - **MCP configuration.** Every server the CLI knows about, where it was
   defined, and which projects enable it.
 
-### What it does not do yet
+- **Sessions you can drive.** Start one from the browser and JKJ owns the
+  process: you steer it mid-run, approve or deny each tool call, and interrupt
+  it. Transcripts stream as they happen.
 
-Starting, steering, interrupting or forking a session all belong to the CLI
-for now. JKJ is read-only, and the buttons for those say so rather than
-pretending. Making them work is the next milestone.
+### One limitation worth knowing
+
+**A session started in a terminal can only be read.** That process owns its
+own input, and nothing outside it can type there — not JKJ, not anything else.
+So the sessions JKJ can drive are the ones it started, which are marked
+*driven by JKJ* in the interface. Everything else is history you can browse.
 
 ## Requirements
 
@@ -133,7 +138,8 @@ ws/hub.ts             WebSocket fan-out; re-reads state and pushes changes
 services/             Domain logic: workspace, projects, agents, context, mcp
 runtime/claude-home   Locating Claude Code's files, portably
 runtime/session-*     Reading session transcripts and live descriptors
-runtime/claude-agent  Where driving a session will live (stubbed)
+runtime/claude-agent  The only file that touches the Claude Agent SDK
+services/runs         Sessions JKJ started, and the commands that drive them
 ```
 
 Inside `packages/web/src`:
@@ -173,17 +179,26 @@ styles/tokens.css     Every colour and font, light and dark
 - [x] Live sessions separated from ended ones, updated over the socket
 - [x] Context: edit the real `CLAUDE.md` files both layers live in
 - [x] MCP: read every configured server and where it came from
-- [ ] Start a session from JKJ
-- [ ] Steer, interrupt and fork a running session
-- [ ] Permission prompts and approvals
+- [x] Start a session from JKJ and stream it live
+- [x] Steer a running session, and interrupt it
+- [x] Permission prompts, approved or denied from the browser
+- [x] Markdown, code blocks and pasted images in transcripts
+- [ ] Remember an "always allow" decision across turns
+- [ ] Resume a past session into a driven one
+- [ ] Fork a session onto its own git worktree
 - [ ] Probe MCP servers for real health and tool counts
 - [ ] Git worktree per session, so parallel work cannot collide
 - [ ] Auth token on the local URL
 
 ## Security
 
-JKJ binds to `127.0.0.1` only, and today it only reads — the one exception is
-the Context tab, which writes the `CLAUDE.md` files you edit.
+JKJ binds to `127.0.0.1` only.
+
+Sessions it drives run tools on your machine. In the default permission mode
+every tool call waits for you to approve it in the browser; the other modes
+loosen that deliberately, and the New session dialog says what each one gives
+away. The Context tab writes the `CLAUDE.md` files you edit. Everything else
+is read-only.
 
 Your session transcripts contain everything you have ever asked Claude Code,
 including whatever it read from your files. Do not expose this to a network

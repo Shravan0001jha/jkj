@@ -70,6 +70,12 @@ export interface Agent {
   usage: Usage;
   /** Turns exchanged, when the source can report it. */
   messageCount?: number;
+  /**
+   * True when JKJ started this session and owns the process, so it can be
+   * messaged and interrupted. Sessions started in a terminal are read-only —
+   * that process owns its own input and nothing outside it can type there.
+   */
+  driven?: boolean;
   approval?: PendingApproval;
 }
 

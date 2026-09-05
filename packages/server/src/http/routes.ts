@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { API } from '@jkj/shared';
+import type { CreateAgentRequest } from '@jkj/shared';
 import type { Config } from '../config.js';
 import * as projects from '../services/projects.js';
 import * as agents from '../services/agents.js';
@@ -56,6 +57,23 @@ export function createRouter(config: Config) {
       handler: async (_req, res, url) => {
         const id = decodeURIComponent(url.pathname.slice('/api/agents/'.length, -'/log'.length));
         json(res, 200, await agents.getTranscript(id));
+      },
+    },
+    {
+      method: 'POST',
+      match: p => p === API.agents,
+      handler: async (req, res) => {
+        const body = await readJson(req);
+        const request = validateCreate(body);
+        json(res, 201, await agents.createAgent(request));
+      },
+    },
+    {
+      method: 'DELETE',
+      match: p => p.startsWith('/api/agents/') && !p.includes('/', '/api/agents/'.length),
+      handler: (_req, res, url) => {
+        agents.archiveAgent(decodeURIComponent(url.pathname.slice('/api/agents/'.length)));
+        json(res, 200, { ok: true });
       },
     },
     {
@@ -143,6 +161,23 @@ function json(res: ServerResponse, status: number, body: unknown): void {
     'content-length': Buffer.byteLength(payload),
   });
   res.end(payload);
+}
+
+/** A request body is untrusted until every field has been checked. */
+function validateCreate(body: Record<string, unknown>): CreateAgentRequest {
+  const task = typeof body['task'] === 'string' ? body['task'].trim() : '';
+  const projectId = typeof body['projectId'] === 'string' ? body['projectId'] : '';
+  if (!task) throw new Error('A session needs something to do.');
+  if (!projectId) throw new Error('A session needs a project to run in.');
+
+  const mode = body['permissionMode'];
+  return {
+    projectId,
+    task,
+    model: typeof body['model'] === 'string' && body['model'] ? body['model'] : 'sonnet',
+    workspace: 'branch',
+    permissionMode: mode === 'acceptEdits' || mode === 'plan' ? mode : 'default',
+  };
 }
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {

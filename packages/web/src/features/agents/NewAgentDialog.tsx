@@ -1,29 +1,75 @@
-import { useStore, currentProject, setNewAgentOpen } from '../../state/store.js';
+import { useState } from 'react';
+import { useStore, currentProject, setNewAgentOpen, createSession } from '../../state/store.js';
 import { Modal } from '../../components/Modal.js';
 
-/**
- * Starting a session is the CLI's job until JKJ can own a process. Rather
- * than a form that cannot submit, this hands over the exact command.
- */
+const MODES: { id: 'default' | 'acceptEdits' | 'plan'; label: string; hint: string }[] = [
+  { id: 'default', label: 'Ask me', hint: 'Every tool call that touches your machine waits for you here.' },
+  { id: 'acceptEdits', label: 'Auto-accept edits', hint: 'File edits run without asking. Commands still ask.' },
+  { id: 'plan', label: 'Plan only', hint: 'Reads and thinks, but changes nothing until you say so.' },
+];
+
+/** Starts a session JKJ owns, which is the only kind it can then drive. */
 export function NewAgentDialog() {
   const project = useStore(currentProject);
+  const [task, setTask] = useState('');
+  const [model, setModel] = useState('sonnet');
+  const [mode, setMode] = useState<'default' | 'acceptEdits' | 'plan'>('default');
+  const [starting, setStarting] = useState(false);
+
   const close = (): void => setNewAgentOpen(false);
-  const command = project ? `cd ${project.path} && claude` : 'claude';
+
+  const start = async (): Promise<void> => {
+    if (!task.trim() || starting) return;
+    setStarting(true);
+    await createSession(task.trim(), model, mode);
+    setStarting(false);
+  };
 
   return (
     <Modal
-      title="Start a session"
+      title={`New session in ${project?.name ?? 'this project'}`}
       onClose={close}
-      footer={<button className="btn primary" onClick={close}>Got it</button>}
+      footer={
+        <>
+          <button className="btn" onClick={close}>Cancel</button>
+          <button className="btn primary" onClick={() => void start()} disabled={!task.trim() || starting}>
+            {starting ? 'Starting…' : 'Start session'}
+          </button>
+        </>
+      }
     >
-      <p className="lede" style={{ margin: 0 }}>
-        JKJ reads what the CLI writes, so sessions still start in a terminal. Run this and it
-        will appear here within a couple of seconds.
-      </p>
-      <pre className="command">{command}</pre>
-      <p className="muted" style={{ margin: 0 }}>
-        Starting and steering sessions from this window is the next thing on the roadmap.
-      </p>
+      <div className="f">
+        <label htmlFor="na-task">What should it do?</label>
+        <textarea
+          id="na-task"
+          value={task}
+          autoFocus
+          placeholder="Find why the seat-hold retry returns a 409 and fix it"
+          onChange={e => setTask(e.target.value)}
+        />
+        <div className="hint">Runs in {project?.path}</div>
+      </div>
+
+      <div className="f">
+        <label htmlFor="na-model">Model</label>
+        <select id="na-model" value={model} onChange={e => setModel(e.target.value)}>
+          <option value="sonnet">sonnet</option>
+          <option value="opus">opus</option>
+          <option value="haiku">haiku</option>
+        </select>
+      </div>
+
+      <div className="f">
+        <label>Permissions</label>
+        <div className="seg">
+          {MODES.map(m => (
+            <button key={m.id} type="button" aria-pressed={mode === m.id} onClick={() => setMode(m.id)}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <div className="hint">{MODES.find(m => m.id === mode)?.hint}</div>
+      </div>
     </Modal>
   );
 }

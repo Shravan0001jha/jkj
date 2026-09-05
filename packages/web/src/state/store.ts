@@ -1,9 +1,10 @@
 import { useRef, useSyncExternalStore } from 'react';
 import type {
-  ActivityEvent, Agent, ContextDoc, LogEntry, McpServer, Project, ServerEvent,
+  ActivityEvent, Agent, ApprovalDecision, ContextDoc, LogEntry,
+  McpServer, Project, ServerEvent,
 } from '@jkj/shared';
 import * as api from '../api/client.js';
-import type { SocketStatus } from '../api/socket.js';
+import { sendCommand, type SocketStatus } from '../api/socket.js';
 
 /**
  * Client state.
@@ -214,8 +215,23 @@ export function applyServerEvent(event: ServerEvent): void {
           ? state.agents.map(a => (a.id === event.agent.id ? event.agent : a))
           : [...state.agents, event.agent],
       });
-      // A live session keeps writing; keep the open transcript current.
-      if (state.openAgentId === event.agent.id) void loadTranscript(event.agent.id);
+      // A session JKJ drives streams its own lines, so only re-read the ones
+      // being written by a CLI somewhere else.
+      if (state.openAgentId === event.agent.id && !event.agent.driven) {
+        void loadTranscript(event.agent.id);
+      }
+      break;
+    }
+
+    case 'agent.log': {
+      const existing = state.transcripts[event.entry.agentId];
+      if (!existing) break;   // not open, so nothing to append to
+      set({
+        transcripts: {
+          ...state.transcripts,
+          [event.entry.agentId]: [...existing, event.entry],
+        },
+      });
       break;
     }
 
@@ -298,25 +314,69 @@ export function setProjectContextBody(projectId: string, body: string): void {
   debounceSave(`project:${projectId}`, () => api.putContext('project', body, projectId));
 }
 
-/* ---------- writes JKJ cannot do yet ---------- */
+/* ---------- driving a session ---------- */
 
 /**
- * These exist so the buttons that call them keep their final shape. Each one
- * explains the gap instead of pretending, and each is where a real command
- * will go once JKJ can drive a session.
+ * Only sessions JKJ started can be driven. One started in a terminal belongs
+ * to that process, and nothing here can type into it.
  */
-const READ_ONLY = 'JKJ can read your sessions but not drive them yet.';
+const NOT_OURS = 'JKJ can read this session but not drive it — it was started in a terminal.';
 
-export const sendMessage = (): void => showToast(READ_ONLY);
-export const interruptAgent = (): void => showToast(READ_ONLY);
-export const restartAgent = (): void => showToast(READ_ONLY);
-export const archiveAgent = (): void => showToast(READ_ONLY);
-export const forkAgent = (): void => showToast(READ_ONLY);
-export const resolveApproval = (): void => showToast(READ_ONLY);
+export async function createSession(
+  task: string,
+  model: string,
+  permissionMode: 'default' | 'acceptEdits' | 'plan',
+): Promise<void> {
+  const projectId = state.selectedProjectId;
+  if (!projectId) return;
+
+  try {
+    const agent = await api.createAgent({ projectId, task, model, workspace: 'branch', permissionMode });
+    set({
+      agents: [agent, ...state.agents],
+      transcripts: { ...state.transcripts, [agent.id]: [] },
+      openAgentId: agent.id,
+      tab: 'agents',
+      newAgentOpen: false,
+    });
+  } catch (err) {
+    showToast(`Could not start it: ${message(err)}`);
+  }
+}
+
+export function sendMessage(agentId: string, text: string): void {
+  const agent = agentById(state, agentId);
+  if (!agent?.driven) return showToast(NOT_OURS);
+  if (!sendCommand({ type: 'agent.message', agentId, text })) showToast('Not connected to the server.');
+}
+
+export function interruptAgent(agentId: string): void {
+  const agent = agentById(state, agentId);
+  if (!agent?.driven) return showToast(NOT_OURS);
+  sendCommand({ type: 'agent.interrupt', agentId });
+}
+
+export function resolveApproval(agentId: string, decision: ApprovalDecision): void {
+  sendCommand({ type: 'agent.approve', agentId, approvalId: '', decision });
+}
+
+export async function archiveAgent(agentId: string): Promise<void> {
+  const agent = agentById(state, agentId);
+  if (!agent?.driven) return showToast('Only sessions JKJ started can be closed from here.');
+
+  try {
+    await api.archiveAgent(agentId);
+    set({ agents: state.agents.filter(a => a.id !== agentId), openAgentId: null });
+  } catch (err) {
+    showToast(message(err));
+  }
+}
+
+export const forkAgent = (): void =>
+  showToast('Forking a session is not wired up yet.');
+
 export const toggleMcp = (): void =>
   showToast('MCP servers are configured with the claude CLI. JKJ shows them read-only.');
-export const restartMcp = (): void =>
-  showToast('Restarting a server needs JKJ to own the connection. Not yet.');
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

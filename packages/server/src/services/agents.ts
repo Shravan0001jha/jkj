@@ -1,13 +1,15 @@
-import type { Agent, LogEntry } from '@jkj/shared';
+import type { Agent, ApprovalDecision, CreateAgentRequest, LogEntry } from '@jkj/shared';
 import { getSnapshot } from './workspace.js';
 import { readSession } from '../runtime/session-reader.js';
+import * as runs from './runs.js';
 
 /**
  * Agents are Claude Code sessions.
  *
- * Reading is complete; acting on them is not. Everything that would change a
- * session throws with a plain explanation rather than pretending to work —
- * see runtime/claude-agent.ts for where that lands.
+ * Two kinds, and the difference matters: sessions JKJ started, which it can
+ * message and interrupt, and sessions started in a terminal, which it can
+ * only read. Nothing can type into someone else's terminal process, so the
+ * second kind stays read-only and says so.
  */
 
 export async function listAgents(projectId?: string): Promise<Agent[]> {
@@ -24,6 +26,9 @@ export async function getAgent(id: string): Promise<Agent | undefined> {
  * the session is read once and the right slice returned.
  */
 export async function getTranscript(agentId: string): Promise<LogEntry[]> {
+  const driven = runs.getRunTranscript(agentId);
+  if (driven) return driven;
+
   const [sessionId, subId] = agentId.split('::');
   if (!sessionId) return [];
 
@@ -57,12 +62,19 @@ export async function getImage(
   return detail?.images.get(ref) ?? null;
 }
 
-/* ---------- writes, not yet available ---------- */
+/* ---------- driving ---------- */
 
-const READ_ONLY = 'JKJ can read your sessions but not drive them yet.';
+export const createAgent = (request: CreateAgentRequest): Promise<Agent> => runs.createRun(request);
 
-export function createAgent(): never { throw new Error(READ_ONLY); }
-export function sendMessage(): never { throw new Error(READ_ONLY); }
-export function interruptAgent(): never { throw new Error(READ_ONLY); }
-export function resolveApproval(): never { throw new Error(READ_ONLY); }
-export function archiveAgent(): never { throw new Error(READ_ONLY); }
+export const sendMessage = (agentId: string, text: string): void => runs.sendMessage(agentId, text);
+
+export const interruptAgent = (agentId: string): Promise<void> => runs.interruptRun(agentId);
+
+export const resolveApproval = (agentId: string, decision: ApprovalDecision): void =>
+  runs.resolveApproval(agentId, decision);
+
+/**
+ * Closing a run releases the process. The transcript stays on disk, where the
+ * CLI wrote it, so it reappears as a past session on the next read.
+ */
+export const archiveAgent = (agentId: string): void => runs.closeRun(agentId);

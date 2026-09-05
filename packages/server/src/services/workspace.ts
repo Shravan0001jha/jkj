@@ -3,6 +3,7 @@ import type { Agent, AgentStatus, Project } from '@jkj/shared';
 import { findClaudeHome, readConfig, type ClaudeHome } from '../runtime/claude-home.js';
 import { readLiveSessions, type LiveSession } from '../runtime/live-sessions.js';
 import { listSessionFiles, readSession, type SessionDetail, type SessionFile } from '../runtime/session-reader.js';
+import { listRunAgents, ownedSessionIds } from './runs.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -62,7 +63,14 @@ async function build(): Promise<Snapshot> {
   }
 
   const projects = buildProjects(files, details, config.projects ?? {});
-  const agents = buildAgents(files, details, live, projects);
+
+  // Sessions JKJ is driving come from memory, not disk — the file it is
+  // writing is incomplete, and the in-memory copy is the live one.
+  const owned = ownedSessionIds();
+  const agents = [
+    ...listRunAgents(),
+    ...buildAgents(files, details, live, projects).filter(a => !owned.has(a.id)),
+  ];
 
   log.info('workspace', `${projects.length} projects, ${agents.length} agents, ${live.size} live`);
 

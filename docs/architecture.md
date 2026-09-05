@@ -26,6 +26,16 @@ logic testable without a socket.
 `Agent`, `LogEntry`, `PendingApproval`. Swapping SDK versions, or stubbing
 the runtime entirely in tests, is a one-file change.
 
+**Two kinds of session, one model.** Sessions read from disk and sessions JKJ
+drives arrive as the same `Agent`, distinguished by one flag. The snapshot
+puts driven sessions first and drops the disk copy of the file they are
+writing, so a live conversation never appears twice.
+
+**Streaming input never ends.** A `result` message is the end of a turn, not
+of the session — the SDK query keeps running and waits for the next message.
+Treating it as the end makes every session answer exactly once, which is
+exactly the bug this note exists to prevent recurring.
+
 **Events flow one way.** Services emit; the hub fans out to every open tab;
 the UI renders what it is told. The UI never mutates its own copy of an agent
 and hopes the server agrees.
