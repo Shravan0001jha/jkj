@@ -76,15 +76,53 @@ Once a build shows `VALID`, TestFlight notifies the internal group; the owner op
 the phone and taps **Install** / **Update**. Builds expire after 90 days; re-run the three lines
 for a new one.
 
-## Signing notes
+## Signing: what was tried and what works (status 2026-09-28)
 
-- No Apple Distribution certificate is kept on this Mac on purpose: with `-allowProvisioningUpdates`
-  plus the API key, Xcode uses cloud-managed signing (the certificate lives in Apple's
-  infrastructure; the key's App Manager role is enough). The first archive on a fresh Mac takes
-  a little longer while Xcode fetches the cloud certificate and creates the App Store profile.
-- If the archive fails with "No profiles for 'com.irisforu.workplace' were found", the bundle id
-  is not registered: `release/asc.py ensure-bundle-id`.
-- The entitlements file is empty. No push (`aps-environment`) is requested; alerts are local
-  notifications. Adding push later means an APNs key (see `~/iris-ops/mobile/apns.env` for the
-  Iris app's), the entitlement in `project.yml`, and a line in `PrivacyInfo.xcprivacy` is not
-  required for push itself.
+- The team has no Apple Distribution certificate on this Mac; distribution is signed with
+  Apple's **cloud-managed** Apple Distribution certificate (that is how the Iris app's
+  `testflight.sh` exported on 2026-09-27: `DistributionSummary.plist` says "Cloud Managed
+  Apple Distribution").
+- `SIGNING=key` (the ASC API key via `-authenticationKey*`) **fails at export**: "You haven't
+  been given access to cloud-managed distribution certificates". The key in `asc.env`
+  ("Iris Beta Invites", App Manager) lacks that permission. The other `.p8` in
+  `~/iris-ops/mobile/` is the APNs key, not an ASC key (it returns 401 against the ASC API).
+  To make the key route work, an Admin creates a new ASC team key with the Admin role, or
+  ticks "Access to Cloud Managed Distribution Certificate" on the existing key, and updates
+  `asc.env`.
+- `SIGNING=account` (default): the Apple ID signed in to Xcode on this Mac (team M9YV87TCT9)
+  has the cloud-signing access, so `archive.sh` exports without any key flags, exactly like
+  the Iris pipeline. Result of the first run: see "Current status" below.
+- Lesson recorded: `plutil -extract KEY json FILE` without `-o -` rewrites FILE in place. One
+  such verification call corrupted the archived `Info.plist` and produced the misleading
+  "IrisWorkplace.pkg has conflicting provisioning settings / 3rd Party Mac Developer Installer"
+  export error. Always inspect with `plutil -extract KEY raw -o - FILE` or `plutil -p`.
+- Push: `project.yml` now gives the target `aps-environment: development` in its
+  entitlements; automatic signing swaps it to `production` for the App Store export. The
+  Push Notifications capability is enabled on the App ID (`release/asc.py ensure-push`).
+  The APNs key for sending is `~/iris-ops/mobile/apns.env`.
+
+## Current status (2026-09-28, end of day)
+
+- App record **exists** (id 6816733689, "Iris Workplace", sku irisworkplace, en-GB); bundle id
+  registered (59D69C9ZRJ); Push Notifications capability enabled on the App ID.
+- `release/archive.sh` (default `SIGNING=account`) **works**: Release archive, export with the
+  cloud-managed Apple Distribution certificate and the "iOS Team Store Provisioning Profile:
+  com.irisforu.workplace" it created, `aps-environment=production`, `get-task-allow=false`,
+  PrivacyInfo.xcprivacy inside, `.ipa` at `build/release/IrisWorkplace.ipa`.
+- `release/upload.sh --validate` reached Apple and failed once on **ITMS-90474** (portrait-only
+  `UISupportedInterfaceOrientations` without `UIRequiresFullScreen`). Fixed in `project.yml`
+  (`UIRequiresFullScreen: true`); a re-archive + re-validate was started right after, see the
+  commit message / lead report for its result. If it has not been re-proven, run
+  `release/archive.sh && release/upload.sh --validate` first thing.
+- Internal TestFlight group "Owner" (all builds): created empty by `asc.py ensure-internal-group`.
+  The owner still has to be added: `ASC_OWNER_EMAIL=<his Apple ID email> release/asc.py
+  ensure-internal-group`, or in the browser (app > TestFlight > Internal Testing > Owner >
+  Testers +).
+- **Nothing has been uploaded.** Upload only when the owner approves:
+  `CONFIRM_UPLOAD=yes release/upload.sh --upload`.
+
+### `project.yml` changes on this branch (for the app agent to merge)
+
+    entitlements.properties:  aps-environment: development      # remote push
+    info.properties:          UIRequiresFullScreen: true        # ITMS-90474, portrait-only app
+

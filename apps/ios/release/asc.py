@@ -8,6 +8,7 @@ ASC_ENV). Nothing here uploads a build. Secrets are never printed.
     release/asc.py status                 # bundle id, app record, TestFlight groups, testers
     release/asc.py ensure-bundle-id       # register com.irisforu.workplace if it is missing
     release/asc.py ensure-internal-group  # internal TestFlight group "Owner" with the owner only
+    release/asc.py ensure-push            # Push Notifications capability on the App ID
     release/asc.py builds                 # builds ASC has for the app (processing state)
     release/asc.py get <path>             # raw GET, e.g. /v1/apps?filter[bundleId]=…
 """
@@ -218,6 +219,24 @@ def cmd_ensure_internal_group(asc: ASC) -> int:
     return 0
 
 
+def cmd_ensure_push(asc: ASC) -> int:
+    """Enable the Push Notifications capability on the App ID (needed for aps-environment)."""
+    b = bundle_id(asc)
+    if not b:
+        print("bundle id not registered; run ensure-bundle-id")
+        return 2
+    caps = asc.get_all(f"/v1/bundleIds/{b['id']}/bundleIdCapabilities")
+    if any(c["attributes"].get("capabilityType") == "PUSH_NOTIFICATIONS" for c in caps):
+        print("push notifications capability: already enabled")
+        return 0
+    status, body = asc.call("POST", "/v1/bundleIdCapabilities", {"data": {"type": "bundleIdCapabilities",
+        "attributes": {"capabilityType": "PUSH_NOTIFICATIONS"},
+        "relationships": {"bundleId": {"data": {"type": "bundleIds", "id": b["id"]}}}}})
+    _ok(status, body, "enable push capability")
+    print("push notifications capability: enabled")
+    return 0
+
+
 def cmd_builds(asc: ASC) -> int:
     a = app(asc)
     if not a:
@@ -244,6 +263,8 @@ def main(argv: list[str]) -> int:
         return cmd_ensure_bundle_id(asc)
     if cmd == "ensure-internal-group":
         return cmd_ensure_internal_group(asc)
+    if cmd == "ensure-push":
+        return cmd_ensure_push(asc)
     if cmd == "builds":
         return cmd_builds(asc)
     if cmd == "get" and len(argv) > 2:

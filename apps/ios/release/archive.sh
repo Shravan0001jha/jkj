@@ -20,15 +20,22 @@ HERE=${0:A:h}
 IOS=${HERE:h}
 cd "$IOS"
 
-ASC_ENV=${ASC_ENV:-$HOME/iris-ops/mobile/asc.env}
-if [[ ! -f "$ASC_ENV" ]]; then
-  echo "archive: $ASC_ENV not found (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_FILE)" >&2; exit 1
+# Signing route. SIGNING=account (default) uses the Apple ID signed in to Xcode on this Mac,
+# which holds the team's cloud-managed Apple Distribution certificate (how the Iris app ships).
+# SIGNING=key passes the ASC API key instead; it only works once that key has "Access to
+# Cloud Managed Distribution Certificate" (the current App Manager key does not).
+SIGNING=${SIGNING:-account}
+AUTH=()
+if [[ "$SIGNING" == "key" ]]; then
+  ASC_ENV=${ASC_ENV:-$HOME/iris-ops/mobile/asc.env}
+  [[ -f "$ASC_ENV" ]] || { echo "archive: $ASC_ENV not found (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_FILE)" >&2; exit 1; }
+  set -a; source "$ASC_ENV"; set +a
+  : "${ASC_KEY_ID:?}" "${ASC_ISSUER_ID:?}" "${ASC_KEY_FILE:?}"
+  ASC_KEY_FILE=${ASC_KEY_FILE/#\~/$HOME}
+  [[ "$ASC_KEY_FILE" = /* ]] || ASC_KEY_FILE="${ASC_ENV:h}/$ASC_KEY_FILE"
+  [[ -f "$ASC_KEY_FILE" ]] || { echo "archive: ASC_KEY_FILE does not exist" >&2; exit 1; }
+  AUTH=(-authenticationKeyPath "$ASC_KEY_FILE" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
 fi
-set -a; source "$ASC_ENV"; set +a
-: "${ASC_KEY_ID:?}" "${ASC_ISSUER_ID:?}" "${ASC_KEY_FILE:?}"
-ASC_KEY_FILE=${ASC_KEY_FILE/#\~/$HOME}
-[[ "$ASC_KEY_FILE" = /* ]] || ASC_KEY_FILE="${ASC_ENV:h}/$ASC_KEY_FILE"
-[[ -f "$ASC_KEY_FILE" ]] || { echo "archive: ASC_KEY_FILE does not exist" >&2; exit 1; }
 
 OUT=build/release
 ARCHIVE=$OUT/IrisWorkplace.xcarchive
@@ -41,7 +48,7 @@ BUILD=${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}
 if [[ -f "$LAST" ]] && (( BUILD <= $(<"$LAST") )); then BUILD=$(( $(<"$LAST") + 1 )); fi
 
 MARKETING=$(grep -E '^\s*MARKETING_VERSION:' project.yml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-echo "archive: Iris Workplace $MARKETING ($BUILD)"
+echo "archive: Iris Workplace $MARKETING ($BUILD), signing via $SIGNING"
 
 xcodegen generate -q
 rm -rf "$ARCHIVE" "$EXPORT_DIR"
@@ -50,10 +57,7 @@ xcodebuild archive \
   -project IrisWorkplace.xcodeproj -scheme IrisWorkplace -configuration Release \
   -destination 'generic/platform=iOS' \
   -archivePath "$ARCHIVE" \
-  -allowProvisioningUpdates \
-  -authenticationKeyPath "$ASC_KEY_FILE" \
-  -authenticationKeyID "$ASC_KEY_ID" \
-  -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+  -allowProvisioningUpdates "${AUTH[@]}" \
   CURRENT_PROJECT_VERSION="$BUILD" \
   2>&1 | tee "$OUT/archive.log" | grep -E "error:|warning: .*(icon|privacy|sign)|ARCHIVE (SUCCEEDED|FAILED)" || true
 grep -q "ARCHIVE SUCCEEDED" "$OUT/archive.log" || { echo "archive: failed, see $OUT/archive.log" >&2; exit 1; }
@@ -67,10 +71,7 @@ xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
   -exportOptionsPlist "$HERE/ExportOptions.plist" \
   -exportPath "$EXPORT_DIR" \
-  -allowProvisioningUpdates \
-  -authenticationKeyPath "$ASC_KEY_FILE" \
-  -authenticationKeyID "$ASC_KEY_ID" \
-  -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+  -allowProvisioningUpdates "${AUTH[@]}" \
   2>&1 | tee "$OUT/export.log" | grep -E "error:|EXPORT (SUCCEEDED|FAILED)" || true
 grep -q "EXPORT SUCCEEDED" "$OUT/export.log" || { echo "archive: export failed, see $OUT/export.log" >&2; exit 1; }
 
