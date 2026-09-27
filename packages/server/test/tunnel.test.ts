@@ -91,9 +91,11 @@ test('the tunnel authenticates, proxies HTTP and sockets to loopback, relays Tel
     await new Promise(r => setTimeout(r, 50));
     assert.deepEqual(notified, ['Your Iris Workplace code: 123456']);
 
-    // Liveness and reconnect.
+    // Liveness and reconnect: the relay's ping is answered, and it counts as life (the Mac never pings).
+    (tunnel as unknown as { lastPong: number }).lastPong = Date.now() - 60_000;
     relay.send({ type: 'ping' });
     await relay.next(f => f.type === 'pong');
+    assert.ok(Date.now() - (tunnel as unknown as { lastPong: number }).lastPong < 1000, 'a ping refreshes liveness');
     relay.dropMac();
     await new Promise(r => setTimeout(r, 30));
     await relay.connected();

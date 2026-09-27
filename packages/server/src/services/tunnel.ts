@@ -158,6 +158,8 @@ export class Tunnel {
   private async handle(raw: string): Promise<void> {
     let frame: Frame;
     try { frame = JSON.parse(raw) as Frame; } catch { return; }
+    // Any frame from the relay is proof the socket is alive; the relay pings, the Mac only answers.
+    this.lastPong = Date.now();
 
     switch (frame.type) {
       case 'ping': this.send({ type: 'pong' }); break;
