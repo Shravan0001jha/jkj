@@ -19,7 +19,8 @@
       ],
       "escalations": [
         "ib-5"
-      ]
+      ],
+      "headline": "Blocked on the socket shape; escalated to you as ib-5."
     },
     {
       "id": "rt-release",
@@ -39,7 +40,8 @@
       ],
       "escalations": [
         "ib-1"
-      ]
+      ],
+      "headline": "Release 0.2.16 waits for your approval (ib-1)."
     },
     {
       "id": "rt-voice",
@@ -60,7 +62,8 @@
       ],
       "escalations": [
         "ib-2"
-      ]
+      ],
+      "headline": "Default is your call (ib-2); mis-fire numbers attached."
     },
     {
       "id": "rt-split",
@@ -80,7 +83,8 @@
       ],
       "escalations": [
         "ib-4"
-      ]
+      ],
+      "headline": "Tara agrees; the split waits for you (ib-4)."
     },
     {
       "id": "rt-lipsync",
@@ -99,7 +103,8 @@
         "rohan",
         "nikhil"
       ],
-      "escalations": []
+      "escalations": [],
+      "headline": "Resolved: word marks plus a 40 ms lead."
     }
   ]
 }

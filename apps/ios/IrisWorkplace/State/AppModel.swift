@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 enum Connection: Equatable {
     /// No credential for the current mode: relay → sign in; LAN → pair.
@@ -29,6 +30,8 @@ final class Router {
     var featureId: String?
     var pivot: PivotRows?
     var roomThreadId: String?
+    /// Set by a push's DECIDE action: the item opens with its options in view.
+    var decideItemId: String?
     var showSettings = false
     var showAlerts = false
     var showSpend = false
@@ -64,8 +67,19 @@ final class AppModel {
     private let env: [String: String]
     private let webAuth: WebAuth
     private let offlineProbeInterval: TimeInterval
+    private let pathMonitor: PathMonitoring?
+    let deviceAuth: DeviceAuth
     private var connectTask: Task<Void, Never>?
     private var offlineTask: Task<Void, Never>?
+
+    // Push (LLD-workplace-push §6): the token from APNs, and whether the relay accepted it.
+    private(set) var pushToken: String?
+    private(set) var pushRegistered = false
+    private(set) var pushProblem: String?
+    var pushPermissionDenied = false
+    /// Hooks the app installs: clear a delivered notification, keep the badge and delivered list tidy.
+    var clearNotification: ((String) -> Void)?
+    var housekeeping: ((Set<String>) -> Void)?
 
     init(relayTokens: TokenStore = Keychain.relay,
          lanTokens: TokenStore = Keychain.lan,
@@ -75,7 +89,9 @@ final class AppModel {
          makeTransport: @escaping () -> SocketTransport = { URLSessionSocketTransport() },
          webAuth: WebAuth? = nil,
          env: [String: String] = ProcessInfo.processInfo.environment,
-         offlineProbeInterval: TimeInterval = 15) {
+         offlineProbeInterval: TimeInterval = 15,
+         pathMonitor: PathMonitoring? = NetworkMonitor(),
+         deviceAuth: DeviceAuth = LocalDeviceAuth()) {
         self.relayTokens = relayTokens
         self.lanTokens = lanTokens
         self.defaults = defaults
@@ -85,6 +101,28 @@ final class AppModel {
         self.webAuth = webAuth ?? ASWebAuth()
         self.env = env
         self.offlineProbeInterval = offlineProbeInterval
+        self.pathMonitor = pathMonitor
+        self.deviceAuth = deviceAuth
+        pathMonitor?.onChange = { [weak self] satisfied in self?.networkChanged(satisfied: satisfied) }
+        pathMonitor?.start()
+        alerts.suppressLocal = { [weak self] in self?.pushRegistered ?? false }
+    }
+
+    /// Wi-Fi ↔ cellular or airplane mode: reconnect now, or say there is no network.
+    func networkChanged(satisfied: Bool) {
+        guard hasCredential else { return }
+        if satisfied {
+            switch connection {
+            case .online: socket?.reconnectNow()
+            case .unauthorized, .signedOut: break
+            default: connect()
+            }
+        } else {
+            switch connection {
+            case .unauthorized, .signedOut: break
+            default: connection = .offline(reason: "No internet connection", retryAt: nil)
+            }
+        }
     }
 
     /// The credential store for the current mode.
@@ -135,21 +173,82 @@ final class AppModel {
         relayTokens.save(token: token)
         syncCredential()
         connect()
+        Task { await registerPush() }
     }
 
-    /// A callback that reached the app outside the auth session (`.onOpenURL`).
+    /// A URL that reached the app: the sign-in callback, or a deep link (`irisworkplace://inbox/<id>`).
     @discardableResult
     func handleOpenURL(_ url: URL) -> Bool {
-        guard let token = AuthCallback.parse(url) else { return false }
-        if config.mode != .relay { useRelay(connect: false) }
-        relayTokens.save(token: token)
-        syncCredential()
-        connect()
-        return true
+        if let token = AuthCallback.parse(url) {
+            if config.mode != .relay { useRelay(connect: false) }
+            relayTokens.save(token: token)
+            syncCredential()
+            connect()
+            Task { await registerPush() }
+            return true
+        }
+        if let link = AppLink.parse(url: url) { open(link); return true }
+        return false
+    }
+
+    /// Route a deep link (from a push, a notification action or a URL).
+    func open(_ link: AppLink) {
+        switch link {
+        case .inbox(let id, let decide): router.openInbox(id); router.decideItemId = decide ? id : nil
+        case .room(let id): router.openThread(id)
+        case .employee(let id): router.talk(to: id)
+        case .office: router.tab = .office
+        }
+    }
+
+    // MARK: push
+
+    /// APNs gave a token: keep it and tell the relay (every launch and foreground; it only refreshes last_seen).
+    func pushTokenReceived(_ hex: String) {
+        pushToken = hex
+        Task { await registerPush() }
+    }
+
+    func pushTokenFailed(_ reason: String) {
+        pushProblem = reason
+        pushRegistered = false
+    }
+
+    static var pushEnvironment: PushEnvironment {
+        #if DEBUG
+        return .sandbox
+        #else
+        return .production
+        #endif
+    }
+
+    func registerPush() async {
+        guard config.mode == .relay, hasCredential, let token = pushToken, let rest else { return }
+        do {
+            _ = try await rest.registerPush(token: token, env: Self.pushEnvironment, device: UIDevice.current.model)
+            pushRegistered = true
+            pushProblem = nil
+        } catch {
+            pushRegistered = false
+            pushProblem = error.localizedDescription
+        }
+    }
+
+    /// One line for Settings: does this phone get pushes, and if not, why.
+    var pushStatusLine: String {
+        if pushPermissionDenied { return "No — notifications are off for this app in iOS Settings" }
+        if config.mode != .relay { return "No — pushes come through the relay only" }
+        if pushToken == nil { return "No — no device token yet" }
+        if pushRegistered { return "Yes" }
+        return "No — " + (pushProblem ?? "not registered with the relay yet")
     }
 
     /// Forget the relay session and go back to the sign-in screen.
     func signOut() {
+        if let token = pushToken, let rest, pushRegistered {
+            Task { try? await rest.unregisterPush(token: token) }   // best effort; the relay drops it with the session anyway
+        }
+        pushRegistered = false
         stopConnections()
         relayTokens.clear()
         syncCredential()
@@ -222,6 +321,7 @@ final class AppModel {
         case .macOffline, .accessOff, .unauthorized: connect()
         default: if socket == nil { connect() } else { socket?.reconnectNow() }
         }
+        Task { await registerPush() }
     }
 
     func background() {
@@ -284,6 +384,9 @@ final class AppModel {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(offlineProbeInterval))
                 guard !Task.isCancelled, let self else { return }
+                // Through the relay, ask its own cheap probe first; only when the Mac is back do we hit /api.
+                if self.config.mode == .relay, case .macOffline = self.connection,
+                   let h = try? await rest.relayHealth(), !h.isMacOnline { continue }
                 if case .online = await self.probe(rest) {
                     socket.start()
                     await self.loadAll()
@@ -300,6 +403,24 @@ final class AppModel {
         async let i: Void = inbox.load(rest)
         _ = await (o, i)
         syncNeedsYou()
+        if inbox.loaded { housekeeping?(Set(inbox.open.map(\.id))) }
+    }
+
+    /// The owner answered an item from this phone: the item's notification goes, the badge follows.
+    func answered(_ id: String) {
+        clearNotification?(id)
+        if inbox.loaded { housekeeping?(Set(inbox.open.map(\.id))) }
+    }
+
+    /// Answer with the device-owner gate the push LLD requires for dangerous and approval-type answers.
+    func answer(item: InboxItem, option: InboxOption, note: String?) async throws {
+        guard let rest else { throw WorkplaceError.notPaired }
+        if AnswerGate.needsDeviceOwner(item: item, option: option) {
+            let ok = await deviceAuth.verify(reason: "Confirm: \(option.label)")
+            guard ok else { throw WorkplaceError.transport("Not confirmed on this phone.") }
+        }
+        try await inbox.answer(rest, id: item.id, optionId: option.id, note: note)
+        answered(item.id)
     }
 
     private func socketState(_ s: SocketState) {
@@ -313,6 +434,9 @@ final class AppModel {
             default: break
             }
             guard let retryAt, let rest, let socket else { return }
+            // The relay says why it closed: 4401 = the session is gone, 1013 = the Mac is offline.
+            if socket.lastCloseCode == SocketClosed.unauthorized { socket.stop(); connection = .unauthorized; return }
+            if socket.lastCloseCode == SocketClosed.macOffline { socket.stop(); connection = .macOffline; waitForMac(rest, socket: socket); return }
             connection = .offline(reason: "Connection lost", retryAt: retryAt)
             // Was it the network, the Mac, or the session? One health call tells.
             Task { [weak self] in
@@ -345,8 +469,10 @@ final class AppModel {
         switch event {
         case .hello(let version, _):
             connection = .online(version: version)
-        case .inboxUpdated:
+        case .inboxUpdated(let item):
             syncNeedsYou()
+            if item.state != .open { clearNotification?(item.id) }
+            if inbox.loaded { housekeeping?(Set(inbox.open.map(\.id))) }
         case .error(let message):
             lastSocketError = message
         default:

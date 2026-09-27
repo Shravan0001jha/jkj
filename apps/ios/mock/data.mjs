@@ -205,9 +205,11 @@ export const spendEntries = [
   { at: iso(-10), employeeId: 'dev', sessionId: 's-dev-owner', source: 'subscription', basis: 'estimated', what: 'owner talk', inr: 18.4, tag: 'owner-talk' },
 ];
 
+const ownerLine = (summary, details) => ({ summary, ...(details ? { details } : {}) });
 export const inbox = [
   {
     id: 'ib-1', kind: 'approval', title: 'Approve the Mac release 0.2.16', body: 'Nikhil prepared desktop-mac 0.2.16: the errand handler, the no-false-Done guard and the tab switch fix. Notarisation is ready; the script kills the running Iris and does not relaunch it.',
+    summary: 'Nikhil asks you to release Mac 0.2.16 (errand handler, no-false-Done guard).', details: 'Notarisation ready. The script **kills the running Iris** and does not relaunch it.\n\n- 8034a09 Phone actions on the Mac\n- ce943c7 Core round 9\n- 46e43c1 Merge core round 9',
     context: { action: 'release', subject: 'desktop-mac 0.2.16', unreleased: ['8034a09 Phone actions on the Mac', 'ce943c7 Core round 9', '46e43c1 Merge core round 9'], link: 'https://github.com/Shravan0001jha/hivemind-prototype/compare/v0.2.15...feat/iris-character' },
     options: [{ id: 'approve', label: 'Release 0.2.16', danger: true }, { id: 'reject', label: 'Not yet', needsNote: true }],
     state: 'open', raisedBy: 'nikhil', createdAt: iso(-12),
@@ -218,6 +220,7 @@ export const inbox = [
   },
   {
     id: 'ib-2', kind: 'decision', title: 'Push-to-talk or wake word as the iPad default?', body: 'The definition leaves it open. Dev recommends push-to-talk by default with the wake word opt-in, because the wake word mis-fires in shared rooms.',
+    summary: 'Dev asks: push-to-talk or wake word as the iPad default? He recommends push-to-talk.', details: 'The wake word mis-fired in 3 of 20 shared-room sessions; the definition (REQ-VOICE-03) leaves the default open.',
     context: { requirement: 'REQ-VOICE-03', recommendation: 'push-to-talk' },
     options: [{ id: 'ptt', label: 'Push-to-talk default' }, { id: 'wake', label: 'Wake word default' }, { id: 'later', label: 'Decide later', needsNote: true }],
     state: 'open', raisedBy: 'dev', createdAt: iso(-33),
@@ -228,6 +231,7 @@ export const inbox = [
   },
   {
     id: 'ib-3', kind: 'cap', title: 'Tara is at her daily cap (₹150)', body: 'The mobile errand sender is half built. Raise her cap for today, or keep it and she resumes tomorrow.',
+    summary: 'Tara hit her ₹150 cap with the mobile errand sender half built. Raise it for today, or keep it.',
     context: { scope: 'employee:tara', spentInr: 150, capInr: 150 },
     options: [{ id: 'raise-today', label: 'Raise for today', needsNote: true }, { id: 'keep', label: 'Keep the cap' }],
     state: 'open', raisedBy: 'workplace', createdAt: iso(-48),
@@ -237,6 +241,7 @@ export const inbox = [
   },
   {
     id: 'ib-4', kind: 'org-change', title: 'Split "mobile" into iOS and Android, hire an Android lead', body: 'The mobile queue is at 7 and Android work keeps waiting on iOS. Asha proposes two charters and one hire from the lead template.',
+    summary: 'Asha proposes splitting mobile into iOS and Android and hiring an Android lead.', details: 'Queue at 7; Android waits on iOS every time. Two charters replace mobile; 6 map entries move; Arjun hired at ₹150/day.',
     context: { proposalId: 'op-1', kind: 'split', diff: '--- charters/mobile.md\n+++ charters/mobile-ios.md\n+++ charters/mobile-android.md\n map.yaml: 6 entries move to mobile-android' },
     options: [{ id: 'approve', label: 'Approve the split and hire' }, { id: 'reject', label: 'Reject', needsNote: true }],
     state: 'open', raisedBy: 'asha', createdAt: iso(-70),
@@ -247,6 +252,7 @@ export const inbox = [
   },
   {
     id: 'ib-5', kind: 'question', title: 'Kabir: which socket contract for Mac errands?', body: 'The experts charter has not published the Mac socket message shape yet. Kabir is blocked until it exists, or until you say to reuse the existing ask_mac shape.',
+    summary: 'Kabir is blocked: reuse ask_mac for Mac errands now, or wait for the experts contract?',
     context: { assignment: 'a-2', blockedOn: 'experts' },
     options: [{ id: 'reuse', label: 'Reuse ask_mac' }, { id: 'wait', label: 'Wait for experts' }],
     state: 'open', raisedBy: 'kabir', createdAt: iso(-29),
@@ -257,6 +263,7 @@ export const inbox = [
   },
   {
     id: 'ib-6', kind: 'release', title: 'Deploy iris-api with the errand endpoint', body: 'Done and verified; waiting on the Mac contract first.',
+    summary: 'Nikhil asked to deploy iris-api with the errand endpoint. Rejected via Telegram.',
     context: { action: 'deploy', subject: 'server-api' },
     options: [{ id: 'approve', label: 'Deploy', danger: true }, { id: 'reject', label: 'Reject', needsNote: true }],
     state: 'answered', answer: { optionId: 'reject', note: 'After the Mac contract lands.', at: iso(-20), via: 'telegram' }, raisedBy: 'nikhil', createdAt: iso(-200),
@@ -266,6 +273,7 @@ export const inbox = [
   },
   {
     id: 'ib-7', kind: 'approval', title: 'Access to the App Store Connect key for TestFlight', body: 'Tara needs the ASC key to upload a TestFlight build.',
+    summary: 'Tara asked for the App Store Connect key for TestFlight. Expired.',
     context: { action: 'new-secret', subject: 'asc-key' },
     options: [{ id: 'approve', label: 'Grant' }, { id: 'reject', label: 'Deny' }],
     state: 'expired', raisedBy: 'tara', createdAt: iso(-1500),
@@ -273,6 +281,7 @@ export const inbox = [
   },
   {
     id: 'ib-8', kind: 'question', title: 'Superseded: old socket question', body: 'Replaced by ib-5.',
+    summary: 'Old socket question, superseded by ib-5.',
     context: {}, options: [{ id: 'ok', label: 'OK' }],
     state: 'answered', answer: { optionId: 'ok', note: 'Superseded by ib-5.', at: iso(-25), via: 'workplace' }, raisedBy: 'kabir', createdAt: iso(-100),
     affects: ['kabir'],
@@ -352,7 +361,7 @@ export const logs = {
     { id: 'l-3', agentId: 's-mira-1', at: iso(-20), kind: 'read', label: 'Read', text: 'services/agent-svc/experts/whatsapp.py' },
     { id: 'l-4', agentId: 's-mira-1', at: iso(-18), kind: 'edit', label: 'Edit', text: 'services/agent-svc/experts/errand.py' },
     { id: 'l-5', agentId: 's-mira-1', at: iso(-10), kind: 'search', label: 'Grep', text: 'ask_mac' },
-    { id: 'l-6', agentId: 's-mira-1', at: iso(-6), kind: 'assistant', label: '', text: 'The expert is in. Running the errand tests now; this needs your approval because it is a shell command.' },
+    { id: 'l-6', agentId: 's-mira-1', at: iso(-6), kind: 'assistant', label: '', text: 'The expert is in. Running the errand tests now; this needs your approval because it is a shell command.', summary: 'Expert added; the test run needs your approval.', details: 'The errand expert validates {instruction, source, requestedAt} and runs through the act-then-ack path. Next: pytest on tests/test_errands.py, which is a shell command.' },
     { id: 'l-7', agentId: 's-mira-1', at: iso(-1), kind: 'bash', label: 'Bash', text: 'cd services/agent-svc && ../../.venv/bin/python -m pytest -q tests/test_errands.py' },
   ],
   's-asha-1': [
@@ -467,11 +476,11 @@ export const release = {
 };
 
 export const roomThreads = [
-  { id: 'rt-socket', title: 'Mac socket contract for errands', charterIds: ['experts', 'server'], createdBy: 'kabir', createdAt: iso(-120), state: 'open', lastAt: iso(-8), messageCount: 4, participants: ['kabir', 'mira', 'asha'], escalations: ['ib-5'] },
-  { id: 'rt-release', title: 'Release readiness 0.2.16', charterIds: ['qa-release', 'desktop-mac'], createdBy: 'nikhil', createdAt: iso(-200), state: 'open', lastAt: iso(-14), messageCount: 3, participants: ['nikhil', 'rohan'], escalations: ['ib-1'] },
-  { id: 'rt-voice', title: 'iPad voice default: push-to-talk or wake word', charterIds: ['conversation', 'mobile'], createdBy: 'dev', createdAt: iso(-300), state: 'open', lastAt: iso(-35), messageCount: 5, participants: ['dev', 'tara', 'asha'], escalations: ['ib-2'] },
-  { id: 'rt-split', title: 'Split mobile into iOS and Android', charterIds: ['mobile', 'chief-of-staff'], createdBy: 'asha', createdAt: iso(-400), state: 'open', lastAt: iso(-70), messageCount: 2, participants: ['asha', 'tara'], escalations: ['ib-4'] },
-  { id: 'rt-lipsync', title: 'Lip-sync timing on the desktop character', charterIds: ['character'], createdBy: 'dev', createdAt: iso(-3000), state: 'resolved', summary: 'Viseme timing follows the TTS word marks; the 40 ms lead stays. Written into the character charter.', lastAt: iso(-1500), messageCount: 7, participants: ['dev', 'rohan', 'nikhil'], escalations: [] },
+  { id: 'rt-socket', title: 'Mac socket contract for errands', charterIds: ['experts', 'server'], createdBy: 'kabir', createdAt: iso(-120), state: 'open', lastAt: iso(-8), messageCount: 4, participants: ['kabir', 'mira', 'asha'], escalations: ['ib-5'] , headline: 'Blocked on the socket shape; escalated to you as ib-5.' },
+  { id: 'rt-release', title: 'Release readiness 0.2.16', charterIds: ['qa-release', 'desktop-mac'], createdBy: 'nikhil', createdAt: iso(-200), state: 'open', lastAt: iso(-14), messageCount: 3, participants: ['nikhil', 'rohan'], escalations: ['ib-1'] , headline: 'Release 0.2.16 waits for your approval (ib-1).' },
+  { id: 'rt-voice', title: 'iPad voice default: push-to-talk or wake word', charterIds: ['conversation', 'mobile'], createdBy: 'dev', createdAt: iso(-300), state: 'open', lastAt: iso(-35), messageCount: 5, participants: ['dev', 'tara', 'asha'], escalations: ['ib-2'] , headline: 'Default is your call (ib-2); mis-fire numbers attached.' },
+  { id: 'rt-split', title: 'Split mobile into iOS and Android', charterIds: ['mobile', 'chief-of-staff'], createdBy: 'asha', createdAt: iso(-400), state: 'open', lastAt: iso(-70), messageCount: 2, participants: ['asha', 'tara'], escalations: ['ib-4'] , headline: 'Tara agrees; the split waits for you (ib-4).' },
+  { id: 'rt-lipsync', title: 'Lip-sync timing on the desktop character', charterIds: ['character'], createdBy: 'dev', createdAt: iso(-3000), state: 'resolved', summary: 'Viseme timing follows the TTS word marks; the 40 ms lead stays. Written into the character charter.', lastAt: iso(-1500), messageCount: 7, participants: ['dev', 'rohan', 'nikhil'], escalations: [] , headline: 'Resolved: word marks plus a 40 ms lead.' },
 ];
 
 const rm = (id, threadId, minutesAgo, by, text, mentions = []) => ({ id, threadId, at: iso(-minutesAgo), by, owner: by === 'owner', text, mentions });
@@ -522,7 +531,7 @@ export const sampleEvents = [
   { type: 'release.log', id: 'rel-1', line: 'notarizing Iris.app…' },
   { type: 'spend.updated', summary: spend },
   { type: 'signals.updated', signals },
-  { type: 'alert', level: 'needs-you', title: 'Mira needs an approval', body: 'Run pytest on the errand tests?', inboxId: 'ib-5' },
+  { type: 'alert', level: 'needs-you', title: 'Mira needs an approval', body: 'Kabir is blocked: reuse ask_mac for Mac errands now, or wait for the experts contract?', inboxId: 'ib-5' },
   { type: 'room.thread', thread: roomThreads[0] },
   { type: 'room.message', message: roomMessages['rt-socket'][3], thread: roomThreads[0] },
   { type: 'future.event', anything: 1 },

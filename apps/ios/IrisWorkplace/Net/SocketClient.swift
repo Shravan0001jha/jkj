@@ -21,6 +21,8 @@ enum SocketState: Equatable {
 @MainActor
 final class SocketClient {
     private(set) var state: SocketState = .idle { didSet { onState?(state) } }
+    /// The server's close code from the last drop, when it sent one.
+    private(set) var lastCloseCode: Int?
     var onEvent: ((ServerEvent) -> Void)?
     var onState: ((SocketState) -> Void)?
 
@@ -131,6 +133,7 @@ final class SocketClient {
 
     private func closed(_ t: SocketTransport, error: Error?) {
         guard t === transport else { return }
+        lastCloseCode = (error as? SocketClosed)?.code
         pingTask?.cancel(); pingTask = nil
         transport?.close(); transport = nil
         guard wantOpen else { state = .closed(retryAt: nil); return }
@@ -144,6 +147,15 @@ final class SocketClient {
             self?.open()
         }
     }
+}
+
+/// The server closed the socket with a code: 4401 = no or invalid session (or access off),
+/// 1013 = the Mac is offline (relay LLD).
+struct SocketClosed: Error, Equatable {
+    let code: Int
+    let reason: String?
+    static let unauthorized = 4401
+    static let macOffline = 1013
 }
 
 /// The real transport.
@@ -160,6 +172,7 @@ final class URLSessionSocketTransport: NSObject, SocketTransport, URLSessionWebS
         let cfg = URLSessionConfiguration.default
         cfg.waitsForConnectivity = false
         cfg.timeoutIntervalForRequest = 15
+        cfg.httpAdditionalHeaders = ["User-Agent": RestClient.userAgent]
         let session = URLSession(configuration: cfg, delegate: self, delegateQueue: nil)
         self.session = session
         let task = session.webSocketTask(with: url)
@@ -220,7 +233,7 @@ final class URLSessionSocketTransport: NSObject, SocketTransport, URLSessionWebS
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        finish(nil)
+        finish(SocketClosed(code: closeCode.rawValue, reason: reason.map { String(decoding: $0, as: UTF8.self) }))
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {

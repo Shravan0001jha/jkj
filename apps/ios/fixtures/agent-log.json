@@ -45,7 +45,9 @@
     "at": "2026-09-27T08:54:00.000Z",
     "kind": "assistant",
     "label": "",
-    "text": "The expert is in. Running the errand tests now; this needs your approval because it is a shell command."
+    "text": "The expert is in. Running the errand tests now; this needs your approval because it is a shell command.",
+    "summary": "Expert added; the test run needs your approval.",
+    "details": "The errand expert validates {instruction, source, requestedAt} and runs through the act-then-ack path. Next: pytest on tests/test_errands.py, which is a shell command."
   },
   {
     "id": "l-7",

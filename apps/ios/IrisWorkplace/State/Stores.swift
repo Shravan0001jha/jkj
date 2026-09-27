@@ -306,6 +306,8 @@ final class AlertsStore {
     private let notifier: Notifier?
     /// Is the app on screen? When not, an alert also becomes a local notification.
     var isActive: () -> Bool = { true }
+    /// True once pushes are registered: the relay's push covers it, so no local notification.
+    var suppressLocal: () -> Bool = { false }
     private var dismissTask: Task<Void, Never>?
 
     init(notifier: Notifier? = nil) {
@@ -324,7 +326,15 @@ final class AlertsStore {
             guard !Task.isCancelled else { return }
             if self?.banner?.id == r.id { self?.banner = nil }
         }
-        if !isActive() { notifier?.notify(a) }
+        if !isActive(), !suppressLocal() { notifier?.notify(a) }
+    }
+
+    /// Did the socket show this item or thread in the last minute? A push for it is then a duplicate.
+    func recentlyShown(inboxId: String?, threadId: String?, within: TimeInterval = 60, now: Date = Date()) -> Bool {
+        guard inboxId != nil || threadId != nil else { return false }
+        return alerts.contains { r in
+            now.timeIntervalSince(r.at) <= within && inboxId != nil && r.event.inboxId == inboxId
+        }
     }
 
     func dismissBanner() { banner = nil }

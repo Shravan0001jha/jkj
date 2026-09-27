@@ -67,10 +67,8 @@ struct ThreadRow: View {
                     Text(thread.title).font(.subheadline.weight(model.room.unread.contains(thread.id) ? .bold : .semibold)).lineLimit(2)
                     if model.room.unread.contains(thread.id) { Circle().fill(Color.accentColor).frame(width: 8, height: 8).accessibilityLabel("unread") }
                 }
-                Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                if thread.state == .resolved, let s = thread.summary, !s.isEmpty {
-                    Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                }
+                if !thread.headline.isEmpty { Text(thread.headline).font(.caption).lineLimit(2) }
+                Text(status).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .padding(.vertical, 2)
@@ -116,7 +114,7 @@ struct ThreadView: View {
                             }
                         }
                     }
-                    if t.state == .resolved, let s = t.summary, !s.isEmpty { Text(s).font(.caption).foregroundStyle(.secondary) }
+                    if !t.headline.isEmpty { Text(t.headline).font(.caption).foregroundStyle(.secondary) }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -111,6 +111,7 @@
       "kind": "question",
       "title": "Kabir: which socket contract for Mac errands?",
       "body": "The experts charter has not published the Mac socket message shape yet. Kabir is blocked until it exists, or until you say to reuse the existing ask_mac shape.",
+      "summary": "Kabir is blocked: reuse ask_mac for Mac errands now, or wait for the experts contract?",
       "context": {
         "assignment": "a-2",
         "blockedOn": "experts"

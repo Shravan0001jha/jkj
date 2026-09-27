@@ -212,7 +212,7 @@ const server = createServer(async (req, res) => {
     const body = await readJson(req);
     if (!body || !body.title || !body.text) return json(res, 400, { error: 'title and text required' });
     const now = new Date().toISOString();
-    const thread = { id: `rt-${Date.now().toString(36)}`, title: body.title, charterIds: body.charterIds ?? [], createdBy: 'owner', createdAt: now, state: 'open', lastAt: now, messageCount: 1, participants: ['owner', ...(body.mentions ?? [])], escalations: [] };
+    const thread = { id: `rt-${Date.now().toString(36)}`, title: body.title, charterIds: body.charterIds ?? [], createdBy: 'owner', createdAt: now, state: 'open', lastAt: now, messageCount: 1, participants: ['owner', ...(body.mentions ?? [])], escalations: [], headline: `You opened it; waiting for ${(body.mentions ?? ['the team']).join(', ')}.` };
     const message = { id: `m-${msgSeq++}`, threadId: thread.id, at: now, by: 'owner', owner: true, text: body.text, mentions: body.mentions ?? [] };
     state.threads.push(thread); state.messages[thread.id] = [message];
     broadcast({ type: 'room.thread', thread }); broadcast({ type: 'room.message', message, thread });
@@ -237,7 +237,7 @@ const server = createServer(async (req, res) => {
     const who = (body.mentions ?? [])[0] ?? thread.participants.find(x => x !== 'owner' && x !== 'workplace');
     if (who) setTimeout(() => {
       const reply = { id: `m-${msgSeq++}`, threadId: id, at: new Date().toISOString(), by: who, owner: false, text: `Noted. I will answer in the thread with evidence.\n\nDetails: reading the latest messages and my charter first; back within the hour.`, mentions: ['owner'] };
-      state.messages[id].push(reply); thread.lastAt = reply.at; thread.messageCount += 1;
+      state.messages[id].push(reply); thread.lastAt = reply.at; thread.messageCount += 1; thread.headline = `${who} replied; will answer with evidence within the hour.`;
       broadcast({ type: 'room.message', message: reply, thread }); broadcast({ type: 'room.thread', thread });
     }, 1500);
     return json(res, 200, message);
@@ -246,7 +246,7 @@ const server = createServer(async (req, res) => {
     const thread = state.threads.find(t => t.id === id);
     if (!thread) return json(res, 404, { error: 'no such thread' });
     const body = await readJson(req);
-    thread.state = 'resolved'; thread.summary = body?.summary ?? ''; thread.lastAt = new Date().toISOString();
+    thread.state = 'resolved'; thread.summary = body?.summary ?? ''; thread.headline = `Resolved: ${thread.summary}`; thread.lastAt = new Date().toISOString();
     broadcast({ type: 'room.thread', thread });
     return json(res, 200, thread);
   }

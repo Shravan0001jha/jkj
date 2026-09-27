@@ -4,6 +4,8 @@
     "kind": "approval",
     "title": "Approve the Mac release 0.2.16",
     "body": "Nikhil prepared desktop-mac 0.2.16: the errand handler, the no-false-Done guard and the tab switch fix. Notarisation is ready; the script kills the running Iris and does not relaunch it.",
+    "summary": "Nikhil asks you to release Mac 0.2.16 (errand handler, no-false-Done guard).",
+    "details": "Notarisation ready. The script **kills the running Iris** and does not relaunch it.\n\n- 8034a09 Phone actions on the Mac\n- ce943c7 Core round 9\n- 46e43c1 Merge core round 9",
     "context": {
       "action": "release",
       "subject": "desktop-mac 0.2.16",
@@ -52,6 +54,8 @@
     "kind": "decision",
     "title": "Push-to-talk or wake word as the iPad default?",
     "body": "The definition leaves it open. Dev recommends push-to-talk by default with the wake word opt-in, because the wake word mis-fires in shared rooms.",
+    "summary": "Dev asks: push-to-talk or wake word as the iPad default? He recommends push-to-talk.",
+    "details": "The wake word mis-fired in 3 of 20 shared-room sessions; the definition (REQ-VOICE-03) leaves the default open.",
     "context": {
       "requirement": "REQ-VOICE-03",
       "recommendation": "push-to-talk"
@@ -92,6 +96,7 @@
     "kind": "cap",
     "title": "Tara is at her daily cap (₹150)",
     "body": "The mobile errand sender is half built. Raise her cap for today, or keep it and she resumes tomorrow.",
+    "summary": "Tara hit her ₹150 cap with the mobile errand sender half built. Raise it for today, or keep it.",
     "context": {
       "scope": "employee:tara",
       "spentInr": 150,
@@ -123,6 +128,8 @@
     "kind": "org-change",
     "title": "Split \"mobile\" into iOS and Android, hire an Android lead",
     "body": "The mobile queue is at 7 and Android work keeps waiting on iOS. Asha proposes two charters and one hire from the lead template.",
+    "summary": "Asha proposes splitting mobile into iOS and Android and hiring an Android lead.",
+    "details": "Queue at 7; Android waits on iOS every time. Two charters replace mobile; 6 map entries move; Arjun hired at ₹150/day.",
     "context": {
       "proposalId": "op-1",
       "kind": "split",
@@ -160,6 +167,7 @@
     "kind": "question",
     "title": "Kabir: which socket contract for Mac errands?",
     "body": "The experts charter has not published the Mac socket message shape yet. Kabir is blocked until it exists, or until you say to reuse the existing ask_mac shape.",
+    "summary": "Kabir is blocked: reuse ask_mac for Mac errands now, or wait for the experts contract?",
     "context": {
       "assignment": "a-2",
       "blockedOn": "experts"
@@ -195,6 +203,7 @@
     "kind": "release",
     "title": "Deploy iris-api with the errand endpoint",
     "body": "Done and verified; waiting on the Mac contract first.",
+    "summary": "Nikhil asked to deploy iris-api with the errand endpoint. Rejected via Telegram.",
     "context": {
       "action": "deploy",
       "subject": "server-api"
@@ -232,6 +241,7 @@
     "kind": "approval",
     "title": "Access to the App Store Connect key for TestFlight",
     "body": "Tara needs the ASC key to upload a TestFlight build.",
+    "summary": "Tara asked for the App Store Connect key for TestFlight. Expired.",
     "context": {
       "action": "new-secret",
       "subject": "asc-key"
@@ -258,6 +268,7 @@
     "kind": "question",
     "title": "Superseded: old socket question",
     "body": "Replaced by ib-5.",
+    "summary": "Old socket question, superseded by ib-5.",
     "context": {},
     "options": [
       {

@@ -1209,6 +1209,8 @@
       "kind": "approval",
       "title": "Approve the Mac release 0.2.16",
       "body": "Nikhil prepared desktop-mac 0.2.16: the errand handler, the no-false-Done guard and the tab switch fix. Notarisation is ready; the script kills the running Iris and does not relaunch it.",
+      "summary": "Nikhil asks you to release Mac 0.2.16 (errand handler, no-false-Done guard).",
+      "details": "Notarisation ready. The script **kills the running Iris** and does not relaunch it.\n\n- 8034a09 Phone actions on the Mac\n- ce943c7 Core round 9\n- 46e43c1 Merge core round 9",
       "context": {
         "action": "release",
         "subject": "desktop-mac 0.2.16",
@@ -2291,7 +2293,7 @@
     "type": "alert",
     "level": "needs-you",
     "title": "Mira needs an approval",
-    "body": "Run pytest on the errand tests?",
+    "body": "Kabir is blocked: reuse ask_mac for Mac errands now, or wait for the experts contract?",
     "inboxId": "ib-5"
   },
   {
@@ -2315,7 +2317,8 @@
       ],
       "escalations": [
         "ib-5"
-      ]
+      ],
+      "headline": "Blocked on the socket shape; escalated to you as ib-5."
     }
   },
   {
@@ -2348,7 +2351,8 @@
       ],
       "escalations": [
         "ib-5"
-      ]
+      ],
+      "headline": "Blocked on the socket shape; escalated to you as ib-5."
     }
   },
   {

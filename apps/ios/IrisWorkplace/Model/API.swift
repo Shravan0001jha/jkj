@@ -55,6 +55,12 @@ enum API {
     static let pairExchange = "/api/pair/exchange"
     static let socket = "/ws"
 
+    // Relay-only (LLD-workplace-push §2, relay LLD): answered by the relay, never proxied.
+    static let relayHealth = "/relay/health"
+    static let pushRegister = "/api/push/register"
+    static let pushUnregister = "/api/push/unregister"
+    static let pushDevices = "/api/push/devices"
+
     /// `encodeURIComponent`: everything but A–Z a–z 0–9 - _ . ! ~ * ' ( ) is percent-encoded.
     static func enc(_ s: String) -> String {
         var allowed = CharacterSet.alphanumerics

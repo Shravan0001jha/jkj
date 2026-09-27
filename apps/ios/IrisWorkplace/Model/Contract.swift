@@ -37,6 +37,8 @@ struct LogEntry: Codable, Equatable, Hashable, Identifiable {
     var text: String
     var subagentId: String?
     var image: LogImage?
+    var summary: String?
+    var details: String?
 }
 
 struct PendingApproval: Codable, Equatable, Hashable {
@@ -435,6 +437,14 @@ struct WorkItem: Codable, Equatable, Hashable, Identifiable {
 
 // MARK: - workplace.ts · inbox
 
+/// One line to the owner (HLD D16): what he reads first, ≤ `ownerLineMax` chars; the rest on demand.
+struct OwnerLine: Codable, Equatable, Hashable {
+    var summary: String
+    var details: String?
+
+    static let ownerLineMax = 120
+}
+
 enum InboxKind: String, Codable, CaseIterable {
     case approval, decision, question, cap
     case orgChange = "org-change"
@@ -478,6 +488,8 @@ struct InboxItem: Codable, Equatable, Hashable, Identifiable {
     var onApprove: String?
     var onDeny: String?
     var links: [InboxLink]?
+    var summary: String
+    var details: String?
 }
 
 struct InboxLink: Codable, Equatable, Hashable {
@@ -698,6 +710,7 @@ struct RoomThread: Codable, Equatable, Hashable, Identifiable {
     var messageCount: Int
     var participants: [String]
     var escalations: [String]
+    var headline: String
 }
 
 struct RoomMessage: Codable, Equatable, Hashable, Identifiable {

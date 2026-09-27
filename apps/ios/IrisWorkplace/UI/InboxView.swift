@@ -64,7 +64,7 @@ struct InboxRow: View {
             Image(systemName: g.symbol).foregroundStyle(g.tint).font(.title3).frame(width: 26)
                 .accessibilityLabel(g.label)
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.title).font(.subheadline.weight(item.state == .open ? .semibold : .regular)).lineLimit(2)
+                Text(item.summary.isEmpty ? item.title : item.summary).font(.subheadline.weight(item.state == .open ? .semibold : .regular)).lineLimit(2)
                 HStack(spacing: 6) {
                     Text(g.label)
                     Text("·")
@@ -104,7 +104,8 @@ struct InboxItemView: View {
                                 Text(Format.ago(item.createdAt)).font(.caption).foregroundStyle(.secondary)
                             }
                             Text(item.title).font(.title3.weight(.semibold))
-                            Prose(text: item.body)
+                            OwnerLineView(summary: item.summary.isEmpty ? item.body : item.summary,
+                                          details: item.details ?? (item.body == item.summary ? nil : item.body))
                         }
                         .padding(.vertical, 4)
                     }
@@ -143,14 +144,56 @@ struct InboxItemView: View {
                     Section {
                         AnswerOptions(item: item)
                     } header: { SectionHeader(text: item.state == .open ? "Your answer" : "Answered") }
+                    .id("answer")
                 }
                 .listStyle(.insetGrouped)
+                .scrollToAnswerWhenDeciding(item.id)
             } else {
                 EmptyState(symbol: "tray", title: "Not in the inbox", text: "This item is not loaded. Pull to refresh the Inbox.")
             }
         }
         .navigationTitle(item?.kind.glyph.label ?? "Inbox item")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// The one line the owner reads first, with the details behind an expand control.
+struct OwnerLineView: View {
+    let summary: String
+    let details: String?
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(summary).font(.body)
+            if let details, !details.isEmpty {
+                Button { withAnimation(.snappy) { expanded.toggle() } } label: {
+                    Label(expanded ? "Hide details" : "Details", systemImage: expanded ? "chevron.up" : "chevron.down").font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                if expanded { Prose(text: details).font(.subheadline) }
+            }
+        }
+    }
+}
+
+private extension View {
+    /// A push's DECIDE action lands with the options in view.
+    func scrollToAnswerWhenDeciding(_ id: String) -> some View { modifier(DecideScroll(id: id)) }
+}
+
+private struct DecideScroll: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let id: String
+    func body(content: Content) -> some View {
+        ScrollViewReader { proxy in
+            content.onAppear {
+                if model.router.decideItemId == id {
+                    model.router.decideItemId = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { withAnimation { proxy.scrollTo("answer", anchor: .bottom) } }
+                }
+            }
+        }
     }
 }
 
@@ -235,9 +278,8 @@ struct AnswerOptions: View {
     }
 
     private func answer(_ opt: InboxOption, note: String?) async {
-        guard let rest = model.rest else { return }
         do {
-            try await model.inbox.answer(rest, id: item.id, optionId: opt.id, note: note)
+            try await model.answer(item: item, option: opt, note: note)
         } catch {
             self.error = error.localizedDescription
         }

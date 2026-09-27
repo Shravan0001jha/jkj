@@ -43,7 +43,7 @@ final class AppModelTests: XCTestCase {
                  makeTransport: { [unowned self] in
                      let t = FakeSocketTransport(); self.transports.append(t); return t
                  },
-                 webAuth: web, env: env, offlineProbeInterval: probe)
+                 webAuth: web, env: env, offlineProbeInterval: probe, pathMonitor: nil, deviceAuth: FakeDeviceAuth())
     }
 
     private func serveFixtures() {
@@ -370,4 +370,202 @@ func XCTAssertThrowsErrorAsync<T>(_ expression: @autoclosure () async throws -> 
         _ = try await expression()
         XCTFail("expected an error", file: file, line: line)
     } catch {}
+}
+
+final class FakePathMonitor: PathMonitoring {
+    var onChange: ((Bool) -> Void)?
+    private(set) var started = false
+    func start() { started = true }
+    func stop() { started = false }
+}
+
+final class FakeDeviceAuth: DeviceAuth {
+    var answer = true
+    private(set) var asked: [String] = []
+    func verify(reason: String) async -> Bool { asked.append(reason); return answer }
+}
+
+@MainActor
+final class ReliabilityAndPushTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var transports: [FakeSocketTransport] = []
+    private var relay = MemoryTokenStore(token: "s")
+    private var path = FakePathMonitor()
+    private var auth = FakeDeviceAuth()
+
+    override func setUp() {
+        StubURLProtocol.reset()
+        defaults = UserDefaults(suiteName: "ReliabilityTests")!
+        defaults.removePersistentDomain(forName: "ReliabilityTests")
+        transports = []
+        relay = MemoryTokenStore(token: "s")
+        path = FakePathMonitor()
+        auth = FakeDeviceAuth()
+    }
+
+    private func model() -> AppModel {
+        AppModel(relayTokens: relay, lanTokens: MemoryTokenStore(), defaults: defaults, notifier: FakeNotifier(),
+                 urlSession: StubURLProtocol.session(),
+                 makeTransport: { [unowned self] in let t = FakeSocketTransport(); self.transports.append(t); return t },
+                 webAuth: FakeWebAuth(), env: [:], offlineProbeInterval: 0.05, pathMonitor: path, deviceAuth: auth)
+    }
+
+    private func serve(relayMac: String = "online") {
+        StubURLProtocol.handler = { req in
+            switch req.url!.path {
+            case "/api/health": return (200, try! Fixtures.data("health"))
+            case "/api/office": return (200, try! Fixtures.data("office"))
+            case "/api/inbox": return (200, try! Fixtures.data("inbox"))
+            case "/relay/health": return (200, Data(#"{"ok":true,"name":"workplace-relay","version":"0.1.0","mac":"\#(relayMac)"}"#.utf8))
+            case "/api/push/register": return (200, Data(#"{"ok":true,"devices":1}"#.utf8))
+            case "/api/push/unregister": return (200, Data(#"{"ok":true}"#.utf8))
+            default: return (404, Data(#"{"error":"no route \#(req.url!.path)"}"#.utf8))
+            }
+        }
+    }
+
+    func testNetworkChangeReconnectsAtOnce() async {
+        serve()
+        let m = model()
+        m.start()
+        XCTAssertTrue(path.started)
+        await expectEventually { self.transports.count == 1 }
+        transports[0].open()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        path.onChange?(false)
+        XCTAssertEqual(m.connection, .offline(reason: "No internet connection", retryAt: nil))
+        path.onChange?(true)
+        await expectEventually { self.transports.count == 2 }
+    }
+
+    func testCloseCode4401IsSessionGoneAnd1013IsMacOffline() async {
+        serve()
+        let m = model()
+        m.start()
+        await expectEventually { self.transports.count == 1 }
+        transports[0].open()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        transports[0].drop(SocketClosed(code: 1013, reason: "mac offline"))
+        await expectEventually { m.connection == .macOffline }
+        XCTAssertTrue(transports[0].closed)
+        // The relay's cheap probe says the Mac is back → reconnect.
+        await expectEventually { self.transports.count == 2 }
+        transports[1].open()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        transports[1].drop(SocketClosed(code: 4401, reason: "session"))
+        await expectEventually { m.connection == .unauthorized }
+        XCTAssertTrue(transports[1].closed)
+    }
+
+    func testRelayProbeGatesTheApiProbeWhileTheMacIsDown() async {
+        var mac = "offline"
+        StubURLProtocol.handler = { req in
+            switch req.url!.path {
+            case "/relay/health": return (200, Data(#"{"ok":true,"mac":"\#(mac)"}"#.utf8))
+            case "/api/health": return mac == "online" ? (200, try! Fixtures.data("health")) : (503, Data(#"{"error":"The Mac is offline."}"#.utf8))
+            case "/api/office": return (200, try! Fixtures.data("office"))
+            case "/api/inbox": return (200, try! Fixtures.data("inbox"))
+            default: return (404, Data(#"{"error":"no"}"#.utf8))
+            }
+        }
+        let m = model()
+        m.start()
+        await expectEventually { m.connection == .macOffline }
+        try? await Task.sleep(for: .milliseconds(200))
+        let apiProbes = StubURLProtocol.recorded.filter { $0.request.url?.path == "/api/health" }.count
+        let relayProbes = StubURLProtocol.recorded.filter { $0.request.url?.path == "/relay/health" }.count
+        XCTAssertEqual(apiProbes, 1, "while the relay says offline, only /relay/health is polled")
+        XCTAssertGreaterThanOrEqual(relayProbes, 2)
+        mac = "online"
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+    }
+
+    func testSwitchedOffIsItsOwnState() async {
+        StubURLProtocol.handler = { _ in (503, Data(#"{"error":"Published access is switched off."}"#.utf8)) }
+        let m = model()
+        m.start()
+        await expectEventually { m.connection == .accessOff }
+        XCTAssertTrue(transports.isEmpty)
+    }
+
+    func testDNSFailureIsWordedAsUnreachableHost() {
+        let e = URLError(.cannotFindHost)
+        XCTAssertEqual(RestClient.describeTransport(e, host: "work.irisforu.com"), "Can't reach work.irisforu.com — check your connection")
+        XCTAssertEqual(RestClient.describeTransport(URLError(.notConnectedToInternet), host: "x"), "No internet connection")
+    }
+
+    func testPushRegistersAfterTokenAndSignInAndUnregistersOnSignOut() async throws {
+        serve()
+        let m = model()
+        m.start()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        XCTAssertEqual(m.pushStatusLine, "No — no device token yet")
+        m.pushTokenReceived(String(repeating: "ab", count: 32))
+        await expectEventually { m.pushRegistered }
+        XCTAssertEqual(m.pushStatusLine, "Yes")
+        let reg = StubURLProtocol.recorded.first { $0.request.url?.path == "/api/push/register" }!
+        XCTAssertEqual(reg.request.value(forHTTPHeaderField: "Authorization"), "Bearer s")
+        let body = try JSONSerialization.jsonObject(with: reg.body!) as! [String: Any]
+        XCTAssertEqual(body["token"] as? String, String(repeating: "ab", count: 32))
+        XCTAssertEqual(body["env"] as? String, "sandbox")
+        XCTAssertEqual(reg.request.value(forHTTPHeaderField: "User-Agent")?.hasPrefix("IrisWorkplace/"), true)
+        m.foreground()
+        await expectEventually { StubURLProtocol.recorded.filter { $0.request.url?.path == "/api/push/register" }.count >= 2 }
+        m.signOut()
+        await expectEventually { StubURLProtocol.recorded.contains { $0.request.url?.path == "/api/push/unregister" } }
+        XCTAssertFalse(m.pushRegistered)
+    }
+
+    func testPushRegistrationFailureIsExplained() async {
+        StubURLProtocol.handler = { req in
+            if req.url!.path == "/api/push/register" { return (500, Data(#"{"error":"relay unconfigured"}"#.utf8)) }
+            return (200, try! Fixtures.data(req.url!.path == "/api/health" ? "health" : req.url!.path == "/api/office" ? "office" : "inbox"))
+        }
+        let m = model()
+        m.start()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        m.pushTokenReceived(String(repeating: "cd", count: 32))
+        await expectEventually { m.pushProblem != nil }
+        XCTAssertEqual(m.pushStatusLine, "No — relay unconfigured")
+    }
+
+    func testAnsweringAnApprovalAsksTheDeviceOwnerFirst() async throws {
+        serve()
+        let m = model()
+        m.start()
+        await expectEventually { m.inbox.loaded }
+        var cleared: [String] = []
+        m.clearNotification = { cleared.append($0) }
+        let release = m.inbox.item("ib-1")!
+        var confirmed = release; confirmed.state = .answered
+        confirmed.answer = InboxAnswer(optionId: "approve", note: nil, at: "2026-09-28T00:00:00.000Z", via: .phone)
+        let payload = try JSONEncoder().encode(confirmed)
+        StubURLProtocol.handler = { req in req.url!.path == "/api/inbox/ib-1/answer" ? (200, payload) : (404, Data()) }
+        auth.answer = false
+        await XCTAssertThrowsErrorAsync(try await m.answer(item: release, option: release.options[0], note: nil))
+        XCTAssertEqual(auth.asked.count, 1)
+        XCTAssertEqual(m.inbox.item("ib-1")?.state, .open, "not confirmed → not sent")
+        auth.answer = true
+        try await m.answer(item: release, option: release.options[0], note: nil)
+        XCTAssertEqual(m.inbox.item("ib-1")?.state, .answered)
+        XCTAssertEqual(cleared, ["ib-1"], "the item's notification is cleared once answered")
+        let decision = m.inbox.item("ib-2")!
+        var d2 = decision; d2.state = .answered; d2.answer = InboxAnswer(optionId: "ptt", note: nil, at: "2026-09-28T00:00:00.000Z", via: .phone)
+        let p2 = try JSONEncoder().encode(d2)
+        StubURLProtocol.handler = { _ in (200, p2) }
+        try await m.answer(item: decision, option: decision.options[0], note: nil)
+        XCTAssertEqual(auth.asked.count, 2, "a plain decision does not ask")
+    }
+
+    func testDeepLinksRoute() {
+        let m = model()
+        m.open(.inbox("in_x", decide: true))
+        XCTAssertEqual(m.router.tab, .inbox); XCTAssertEqual(m.router.inboxItemId, "in_x"); XCTAssertEqual(m.router.decideItemId, "in_x")
+        m.open(.room("th_y"))
+        XCTAssertEqual(m.router.tab, .room); XCTAssertEqual(m.router.roomThreadId, "th_y")
+        m.open(.employee("dev"))
+        XCTAssertEqual(m.router.tab, .talk); XCTAssertEqual(m.router.talkEmployeeId, "dev")
+        XCTAssertTrue(m.handleOpenURL(URL(string: "irisworkplace://office")!))
+        XCTAssertEqual(m.router.tab, .office)
+    }
 }

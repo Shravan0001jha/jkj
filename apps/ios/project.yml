@@ -41,7 +41,8 @@ targets:
             CFBundleURLSchemes: [irisworkplace]
     entitlements:
       path: IrisWorkplace/IrisWorkplace.entitlements
-      properties: {}
+      properties:
+        aps-environment: development
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.irisforu.workplace

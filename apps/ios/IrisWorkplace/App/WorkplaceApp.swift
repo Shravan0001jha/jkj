@@ -3,6 +3,7 @@ import UserNotifications
 
 @main
 struct WorkplaceApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
 
@@ -21,8 +22,21 @@ struct WorkplaceApp: App {
                     model.start()
                 }
                 .onChange(of: model.hasCredential, initial: true) { _, has in
-                    // Ask for notifications once there is something to be notified about.
-                    if has { LocalNotifier.requestPermission() }
+                    // Ask for notifications once there is something to be notified about, then register for pushes.
+                    guard has else { return }
+                    let push = AppDelegate.push
+                    push.onToken = { [weak model] hex in model?.pushTokenReceived(hex) }
+                    push.onTokenFailure = { [weak model] reason in model?.pushTokenFailed(reason) }
+                    push.onOpen = { [weak model] link in model?.open(link) }
+                    push.recentlyShownBySocket = { [weak model] inboxId, threadId in model?.alerts.recentlyShown(inboxId: inboxId, threadId: threadId) ?? false }
+                    model.clearNotification = { PushManager.clear(inboxId: $0) }
+                    model.housekeeping = { PushManager.housekeeping(openInboxIds: $0) }
+                    LocalNotifier.requestPermission { granted in
+                        Task { @MainActor in
+                            model.pushPermissionDenied = !granted
+                            if granted { push.register() }
+                        }
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
@@ -39,11 +53,11 @@ struct WorkplaceApp: App {
 /// the app is closed needs APNs, which is a follow-up; this covers the minutes iOS keeps the socket
 /// alive after backgrounding.
 final class LocalNotifier: Notifier {
-    static func requestPermission() {
+    static func requestPermission(_ done: @escaping (Bool) -> Void = { _ in }) {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["WORKPLACE_NO_NOTIF_PROMPT"] == "1" { return }
+        if ProcessInfo.processInfo.environment["WORKPLACE_NO_NOTIF_PROMPT"] == "1" { done(false); return }
         #endif
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in done(granted) }
     }
 
     func notify(_ alert: AlertEvent) {

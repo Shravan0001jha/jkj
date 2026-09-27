@@ -43,6 +43,15 @@ final class RestClient {
         self.session = session
     }
 
+    /// `IrisWorkplace/<version> CFNetwork Darwin/<kernel>`: the relay records answers from it as `via: 'phone'`.
+    static let userAgent: String = {
+        let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        var u = utsname(); uname(&u)
+        let release = withUnsafePointer(to: &u.release) { $0.withMemoryRebound(to: CChar.self, capacity: 256) { String(cString: $0) } }
+        let major = release.split(separator: ".").first.map(String.init) ?? "24"
+        return "IrisWorkplace/\(v) CFNetwork Darwin/\(major)"
+    }()
+
     // MARK: endpoints
 
     func health() async throws -> WorkplaceHealthResponse { try await get(API.health) }
@@ -76,6 +85,14 @@ final class RestClient {
         try await post(API.roomResolve(id), ResolveThreadRequest(summary: summary))
     }
 
+    // Relay-only routes (never proxied to the Mac).
+    func relayHealth() async throws -> RelayHealth { try await get(API.relayHealth) }
+    func registerPush(token: String, env: PushEnvironment, device: String?) async throws -> PushRegisterResponse {
+        try await post(API.pushRegister, PushRegisterRequest(token: token, env: env, device: device))
+    }
+    func unregisterPush(token: String) async throws { let _: OkResponse = try await post(API.pushUnregister, PushUnregisterRequest(token: token)) }
+    func pushDevices() async throws -> PushDevicesResponse { try await get(API.pushDevices) }
+
     /// Pairing has no token yet; the exchange is the one unauthenticated call.
     static func exchange(config: ServerConfig, code: String, session: URLSession = .shared) async throws -> String {
         let client = RestClient(config: config, tokens: MemoryTokenStore(), session: session)
@@ -101,6 +118,7 @@ final class RestClient {
         req.httpMethod = method
         req.timeoutInterval = 20
         req.setValue("application/json", forHTTPHeaderField: "accept")
+        req.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         if authenticated, let token = tokens.token {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -161,6 +179,26 @@ extension RestClient {
 }
 
 struct Empty: Encodable {}
+
+/// `GET /relay/health`: the relay's own cheap probe, no session needed.
+struct RelayHealth: Codable, Equatable {
+    var ok: Bool
+    var mac: String?
+    var isMacOnline: Bool { mac == "online" }
+}
+
+enum PushEnvironment: String, Codable { case sandbox, production }
+struct PushRegisterRequest: Codable, Equatable { var token: String; var env: PushEnvironment; var device: String? }
+struct PushRegisterResponse: Codable, Equatable { var ok: Bool; var devices: Int? }
+struct PushUnregisterRequest: Codable, Equatable { var token: String }
+struct PushDevice: Codable, Equatable, Hashable {
+    var env: String
+    var device: String?
+    var created: String?
+    var lastSeen: String?
+    var thisDevice: Bool?
+}
+struct PushDevicesResponse: Codable, Equatable { var devices: [PushDevice] }
 struct OkResponse: Decodable { var ok: Bool? }
 
 func describe(_ error: Error) -> String {

@@ -6,6 +6,8 @@ struct SettingsView: View {
     @State private var confirmRepair = false
     @State private var confirmSignOut = false
     @State private var showDeveloper = false
+    @State private var devices: [PushDevice] = []
+    @State private var devicesError: String?
 
     var body: some View {
         NavigationStack {
@@ -45,6 +47,24 @@ struct SettingsView: View {
                          ? "Signing out forgets the session on this phone. Sign in again with your passkey or a Telegram code."
                          : "Re-pairing forgets the LAN token and address and returns to the relay. You will need a new one-time code from the Mac to pair again.")
                 }
+                if model.mode == .relay {
+                    Section {
+                        LabeledContent("This phone gets pushes", value: model.pushStatusLine).lineLimit(3)
+                        if devices.isEmpty {
+                            Text(devicesError ?? "No devices registered yet.").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        ForEach(Array(devices.enumerated()), id: \.offset) { _, d in
+                            HStack {
+                                Label(d.device ?? "Device", systemImage: d.thisDevice == true ? "iphone.gen3" : "iphone")
+                                if d.thisDevice == true { Pill(text: "this phone", tint: .accentColor) }
+                                Spacer()
+                                Text(d.env).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    } header: { SectionHeader(text: "Notifications") } footer: {
+                        Text("Pushes come from the relay for Inbox items that need you. They stop when you sign out.")
+                    }
+                }
                 Section {
                     Button("Developer options") { showDeveloper = true }
                 } footer: {
@@ -68,6 +88,10 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) {}
             }
             .sheet(isPresented: $showDeveloper) { DeveloperOptionsView() }
+            .task {
+                guard model.mode == .relay, let rest = model.rest else { return }
+                do { devices = try await rest.pushDevices().devices } catch { devicesError = error.localizedDescription }
+            }
         }
     }
 

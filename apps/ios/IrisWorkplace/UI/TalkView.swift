@@ -226,7 +226,7 @@ struct LogRow: View {
             }
             .padding(.horizontal, 12)
         case .assistant:
-            CompactRow(text: entry.text).padding(.horizontal, 16)
+            CompactRow(text: entry.text, summary: entry.summary, details: entry.details).padding(.horizontal, 16)
         case .error:
             Label(entry.text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline).padding(.horizontal, 16)
         case .system:
@@ -262,14 +262,16 @@ struct LogRow: View {
 /// An assistant message: one line by default, the whole text on tap.
 struct CompactRow: View {
     let text: String
+    var summary: String? = nil
+    var details: String? = nil
     @State private var expanded = false
 
     var body: some View {
-        let c = CompactText(text: text)
+        let c = CompactText(text: text, summary: summary, details: details)
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 6) {
                 if expanded {
-                    Prose(text: text)
+                    Prose(text: c.details ?? text)
                 } else {
                     Text(c.line).font(.body).lineLimit(1)
                 }
