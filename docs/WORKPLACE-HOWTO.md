@@ -18,6 +18,12 @@ First boot copies the seed organisation into `~/iris-workplace` (its own git rep
 at `~/iris-ops/workplace/api-token` (mode 600). Agents use `~/iris-ops/workplace/claude-oauth.env`;
 `ANTHROPIC_API_KEY` never reaches them.
 
+## Who talks to the owner
+
+The Workplace sends only its own automatic pings: Inbox items, enrolment and sign-in codes, new-device and
+security alerts, cap notices, and the daily digest. Status updates and answers to the owner's questions go
+through the lead, so he never hears the same thing twice.
+
 ## The screens
 
 - **Office** — who is working on what, what needs you, coverage of the product definition, spend
