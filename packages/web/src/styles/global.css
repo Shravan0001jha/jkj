@@ -1003,3 +1003,9 @@ details.plan { margin-top: 6px; }
   .moresheet a:hover { background: var(--surface-2); }
   .moresheet .glyph { color: var(--ink-3); }
 }
+
+/* ---------- published indicator ---------- */
+.published { font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--ink-3); white-space: nowrap; }
+.published.connected { color: var(--done); border-color: var(--done); }
+.published.offline, .published.connecting { color: var(--wait); border-color: var(--wait); }
+.published.off { color: var(--err); border-color: var(--err); }
