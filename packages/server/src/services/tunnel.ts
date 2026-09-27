@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
+import { Resolver, lookup as osLookup } from 'node:dns';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import { log } from '../util/logger.js';
@@ -103,7 +104,7 @@ export class Tunnel {
   private connect(): void {
     if (this.stopped) return;
     this.setStatus('connecting');
-    const ws = new WebSocket(this.options.url, { headers: { authorization: `Bearer ${this.options.secret}` } });
+    const ws = new WebSocket(this.options.url, { headers: { authorization: `Bearer ${this.options.secret}` }, lookup: freshLookup });
     this.ws = ws;
 
     ws.on('open', () => {
@@ -211,6 +212,24 @@ export class Tunnel {
     local.on('close', code => { if (this.locals.delete(id)) this.send({ type: 'ws-close', id, code }); });
     local.on('error', () => local.close());
   }
+}
+
+/**
+ * Resolve the relay's name with a direct query to the configured nameservers, falling back to the
+ * OS resolver. macOS caches a negative answer for a name that did not exist a minute ago (a fresh
+ * DNS record, 27 Sep) and the tunnel would sit on ENOTFOUND for the negative TTL.
+ */
+const resolver = new Resolver();
+type LookupCb = (err: NodeJS.ErrnoException | null, address: string | { address: string; family: number }[], family?: number) => void;
+function freshLookup(hostname: string, options: unknown, callback: LookupCb): void {
+  // net.connect may ask for every address (`all: true`, Node 20+) or for one.
+  const all = !!(options && typeof options === 'object' && (options as { all?: boolean }).all);
+  resolver.resolve4(hostname, (err, addresses) => {
+    if (!err && addresses.length) {
+      return all ? callback(null, addresses.map(address => ({ address, family: 4 }))) : callback(null, addresses[0]!, 4);
+    }
+    (osLookup as unknown as (h: string, o: unknown, cb: LookupCb) => void)(hostname, options, callback);
+  });
 }
 
 /** A path the relay may ask for: absolute, on our own origin, never a userinfo trick (review L5). */
