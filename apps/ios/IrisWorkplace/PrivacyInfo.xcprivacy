@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	Privacy manifest for Iris Workplace (apps/ios). Kept honest to what the sources use:
+	URLSession + URLSessionWebSocketTask (network to the owner's own Workplace / relay),
+	the Keychain for the session token (SecItem: no declared reason required), UserDefaults for
+	the server address and mode (required-reason API, CA92.1), UserNotifications for local
+	alerts. No remote push (no aps-environment entitlement), no third-party SDKs, no tracking,
+	no tracking domains. Re-check this file whenever a new framework is imported.
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
