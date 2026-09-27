@@ -49,11 +49,27 @@ function serveStatic(rawUrl: string, res: import('node:http').ServerResponse): v
   createReadStream(file).pipe(res);
 }
 
+/**
+ * Loopback is always bound: the page on this Mac and the pairing route need
+ * it. `--host <ip>` adds ONE more listener on that address (never 0.0.0.0),
+ * which is how the phone reaches the Workplace over the LAN or the tailnet;
+ * every request there must carry the bearer token.
+ */
 export function listen(server: Server, config: Config): Promise<void> {
-  return new Promise(resolve => {
-    server.listen(config.port, config.host, () => {
-      log.info('http', `listening on http://${config.host}:${config.port}`);
-      resolve();
+  const hosts = ['127.0.0.1', ...(config.host && !['127.0.0.1', 'localhost', '::1'].includes(config.host) ? [config.host] : [])];
+  return new Promise((resolve, reject) => {
+    server.listen(config.port, hosts[0], () => {
+      log.info('http', `listening on http://${hosts[0]}:${config.port}`);
+      if (hosts.length === 1) return resolve();
+      const port = (server.address() as { port: number }).port;
+      const extra = createServer((req, res) => server.emit('request', req, res));
+      extra.on('upgrade', (req, socket, head) => server.emit('upgrade', req, socket, head));
+      extra.on('error', reject);
+      extra.listen(port, hosts[1], () => {
+        log.info('http', `listening on http://${hosts[1]}:${port} (bearer token required)`);
+        server.once('close', () => extra.close());
+        resolve();
+      });
     });
   });
 }

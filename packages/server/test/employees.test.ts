@@ -39,6 +39,7 @@ test('a session gets the layered context, the subscription token, and no API key
     assert.equal('ANTHROPIC_API_KEY' in s.options.env!, false, 'the key is absent, not blank');
     assert.ok(s.options.maxBudgetUsd! > 0);
     assert.ok(s.options.mcpServers && 'workplace' in s.options.mcpServers);
+    assert.ok(s.options.allowedTools!.includes('mcp__workplace__write_handoff'), 'Workplace tools never prompt');
     assert.ok((agent.contextTokens ?? 0) > 500);
 
     // Talking again continues the same session.

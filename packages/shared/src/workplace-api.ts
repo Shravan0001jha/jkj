@@ -182,6 +182,8 @@ export interface SaveEmployeeContextRequest { id: string; body: string }
 /* ---------- socket events (added to ServerEvent) ---------- */
 
 export type WorkplaceServerEvent =
+  /** Sent once on socket connect: the whole Office, so a client can render before its first GET. */
+  | { type: 'office.snapshot'; office: OfficeResponse }
   | { type: 'office.updated'; card: EmployeeCard }
   | { type: 'inbox.updated'; item: InboxItem }
   | { type: 'work.updated'; item: WorkItem }

@@ -1,6 +1,6 @@
 import type { Server } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { ClientCommand, ServerEvent, WorkplaceClientCommand } from '@jkj/shared';
+import type { ClientCommand, ServerEvent, WorkplaceClientCommand, WorkplaceServerEvent } from '@jkj/shared';
 import { API } from '@jkj/shared';
 import type { Workplace } from '../services/workplace.js';
 import type { Auth } from '../http/auth.js';
@@ -50,7 +50,7 @@ export function attachSocket(server: Server, wp: Workplace, auth: Auth): void {
     send(ws, { type: 'hello', version: wp.config.version, startedAt: new Date().toISOString() });
     try {
       send(ws, { type: 'snapshot', projects: [], agents: await agents.listAgents(), mcp: [] });
-      ws.send(JSON.stringify({ type: 'office.snapshot', office: views.office(wp) }));
+      broadcastTo(ws, { type: 'office.snapshot', office: views.office(wp) });
     } catch (err) {
       send(ws, { type: 'error', message: err instanceof Error ? err.message : 'Could not read the workplace' });
     }
@@ -101,5 +101,9 @@ function handleCommand(wp: Workplace, ws: WebSocket, command: Command): void {
 }
 
 function send(ws: WebSocket, event: ServerEvent): void {
+  ws.send(JSON.stringify(event));
+}
+
+function broadcastTo(ws: WebSocket, event: WorkplaceServerEvent): void {
   ws.send(JSON.stringify(event));
 }

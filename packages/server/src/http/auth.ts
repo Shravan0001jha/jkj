@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import type { IncomingMessage } from 'node:http';
 import { log } from '../util/logger.js';
+import { BadRequest } from '../util/errors.js';
 
 /**
  * Reaching the Workplace from anywhere but this Mac (HLD D11).
@@ -36,7 +37,7 @@ export class Auth {
 
   /** Only from loopback. Six digits, five minutes, one use. */
   pair(req: IncomingMessage): { code: string; expiresAt: string } {
-    if (!isLoopback(req.socket.remoteAddress)) throw new Error('Pairing codes are minted from this Mac only.');
+    if (!isLoopback(req.socket.remoteAddress)) throw new BadRequest('Pairing codes are minted from this Mac only.');
     const code = String(randomBytes(4).readUInt32BE(0) % 1_000_000).padStart(6, '0');
     const expiresAt = this.now() + 5 * 60 * 1000;
     this.codes.set(code, expiresAt);

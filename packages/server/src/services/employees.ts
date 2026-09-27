@@ -36,6 +36,8 @@ interface Session {
 }
 
 const sessions = new Map<string, Session>();   // by agent id
+
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change'] as const;
 const stateOverride = new Map<string, EmployeeState>();
 const lastReport = new Map<string, string>();
 
@@ -97,7 +99,8 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
       env: childEnv(wp),
       systemPromptAppend: context.append,
       settingSources: ['user', 'project'],
-      ...(role?.tools.allowed?.length ? { allowedTools: role.tools.allowed } : {}),
+      // The Workplace's own tools are the reporting channel; they never prompt.
+      allowedTools: [...WORKPLACE_TOOLS.map(t => `mcp__workplace__${t}`), ...(role?.tools.allowed ?? [])],
       ...(role?.tools.disallowed?.length ? { disallowedTools: role.tools.disallowed.map(t => t.startsWith('mcp__') || /^[A-Z]/.test(t) ? t : `mcp__workplace__${t}`) } : {}),
       maxBudgetUsd: Math.max(0.05, remaining),
       mcpServers: { workplace: workplaceTools(wp, employeeId, () => session) },
@@ -292,7 +295,7 @@ function recordUsage(wp: Workplace, session: Session, result: RunResult): void {
 
 /* ---------- the Workplace's own tools, served in-process ---------- */
 
-function workplaceTools(wp: Workplace, employeeId: string, session: () => Session) {
+export function workplaceTools(wp: Workplace, employeeId: string, session: () => Session) {
   const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] });
   return createSdkMcpServer({
     name: 'workplace',
@@ -343,11 +346,14 @@ function workplaceTools(wp: Workplace, employeeId: string, session: () => Sessio
           inbox.raise(wp, { kind: 'question', title: `Review requested: ${item.title}`, body: note ?? 'Please verify.', raisedBy: employeeId, context: { assignmentId }, dedupeKey: `review:${assignmentId}` });
           return ok('Review requested.');
         }),
-      tool('propose_org_change', 'Propose a hire, split, merge, reassign or restructure with a reason. The owner approves it in the Inbox.',
-        { kind: z.enum(['hire', 'retire', 'split', 'merge', 'reassign', 'restructure']), reason: z.string(), params: z.record(z.string(), z.unknown()) },
-        async ({ kind, reason, params }) => {
+      tool('propose_org_change', 'Propose a hire, split, merge, reassign or restructure with a reason. The owner approves it in the Inbox. `paramsJson` is a JSON object as a string (see the handbook for the shape of each kind).',
+        // A z.record() here makes the MCP SDK fail to list ANY tool of this server; a JSON string does not.
+        { kind: z.enum(['hire', 'retire', 'split', 'merge', 'reassign', 'restructure']), reason: z.string(), paramsJson: z.string() },
+        async ({ kind, reason, paramsJson }) => {
           const emp = employee(wp, employeeId);
           if (emp.level === 2) return ok('Contractors cannot propose org changes; ask your lead.');
+          let params: Record<string, unknown>;
+          try { params = JSON.parse(paramsJson) as Record<string, unknown>; } catch { return ok('paramsJson is not valid JSON.'); }
           const proposals = await import('./proposals.js');
           try {
             const p = proposals.propose(wp, { kind, reason, params, proposedBy: employeeId });

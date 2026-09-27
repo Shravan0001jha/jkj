@@ -42,6 +42,10 @@ export interface RunEvents {
    */
   onPermission(request: PermissionRequest): Promise<'allow' | 'always' | 'deny'>;
   onUsage(inputTokens: number, outputTokens: number): void;
+  /** The SDK's init message: which MCP servers connected and how many tools exist. */
+  onInit?(init: { mcpServers: string[]; workplaceTools: number; tools: number }): void;
+  /** Lines the CLI process writes to stderr; the only place MCP start-up errors appear. */
+  onStderr?(line: string): void;
   /**
    * The end of a turn, with the SDK's cumulative accounting for the whole
    * query: per-model tokens and estimated cost. Cumulative, so callers diff.
@@ -115,8 +119,10 @@ export interface RunOptions {
 export function startRun(options: RunOptions, events: RunEvents): RunHandle {
   const input = createInputQueue();
   input.push(options.prompt, options.images);
+  const abort = new AbortController();
 
   const sdkOptions: Options = {
+    abortController: abort,
     cwd: options.cwd,
     model: options.model,
     permissionMode: SDK_MODES[options.permissionMode ?? 'ask'],
@@ -135,6 +141,7 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
     ...(options.maxBudgetUsd !== undefined ? { maxBudgetUsd: options.maxBudgetUsd } : {}),
     ...(options.maxTurns !== undefined ? { maxTurns: options.maxTurns } : {}),
     ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
+    stderr: (data: string) => { for (const line of data.split('\n')) if (line.trim()) events.onStderr?.(line); },
 
     // Every tool call routes through the browser unless the mode auto-allows.
     canUseTool: async (toolName, toolInput, meta): Promise<PermissionResult> => {
@@ -177,7 +184,9 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
     // it was launched, and a refusal the caller cannot see becomes a UI that
     // claims a mode it does not have.
     setMode: mode => stream.setPermissionMode(SDK_MODES[mode]),
-    close: () => input.end(),
+    // Ending the input is not enough: a turn in flight would keep running
+    // tools with nobody watching. Abort the query so the process stops.
+    close: () => { input.end(); abort.abort(); },
   };
 }
 
@@ -188,6 +197,14 @@ async function consume(stream: Query, events: RunEvents): Promise<void> {
       switch (message.type) {
         case 'system':
           if ('session_id' in message && message.session_id) events.onSessionId(message.session_id);
+          if ('subtype' in message && message.subtype === 'init') {
+            const init = message as unknown as { mcp_servers?: { name: string; status: string }[]; tools?: string[] };
+            events.onInit?.({
+              mcpServers: (init.mcp_servers ?? []).map(s => `${s.name}:${s.status}`),
+              workplaceTools: (init.tools ?? []).filter(t => t.startsWith('mcp__workplace__')).length,
+              tools: (init.tools ?? []).length,
+            });
+          }
           break;
 
         case 'assistant': {

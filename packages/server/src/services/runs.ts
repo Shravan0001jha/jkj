@@ -229,6 +229,9 @@ function spawn(options: SpawnOptions): Agent {
         options.onSessionId?.(sessionId);
       },
 
+      onInit: init => log.info('runs', `${id} init: mcp ${init.mcpServers.join(', ') || 'none'}; ${init.workplaceTools} workplace tools of ${init.tools}`),
+      onStderr: line => { if (/error|fail|mcp/i.test(line)) log.warn('runs', `${id} stderr: ${line.slice(0, 300)}`); },
+
       onText: text => append(run, 'assistant', '', text),
 
       onToolUse: (tool, input) => append(run, kindForTool(tool), tool, describeInput(tool, input)),
