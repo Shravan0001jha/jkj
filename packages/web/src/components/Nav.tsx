@@ -4,6 +4,7 @@ import { hrefFor, useStore, type RouteName } from '../state/store.js';
 const PRIMARY: { name: RouteName; label: string; glyph: string }[] = [
   { name: 'office', label: 'Office', glyph: '◉' },
   { name: 'inbox', label: 'Inbox', glyph: '✉' },
+  { name: 'room', label: 'Room', glyph: '◫' },
   { name: 'features', label: 'Features', glyph: '▦' },
   { name: 'org', label: 'Org', glyph: '⌥' },
 ];
@@ -17,7 +18,7 @@ const MORE: { name: RouteName; label: string; glyph: string }[] = [
 /**
  * One list of destinations, two shapes: a rail beside the content on a wide
  * screen, a bar under it on a phone. The phone bar folds the three rarer
- * screens behind "More" so the four the owner opens daily stay one tap away.
+ * screens behind "More" so the five the owner opens daily stay one tap away.
  */
 export function Nav({ needsYou }: { needsYou: number }) {
   const route = useStore(s => s.route);

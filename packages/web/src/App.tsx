@@ -3,6 +3,7 @@ import { AppShell } from './components/AppShell.js';
 import { OfficeView } from './features/office/OfficeView.js';
 import { OrgView } from './features/org/OrgView.js';
 import { InboxView } from './features/inbox/InboxView.js';
+import { RoomView } from './features/room/RoomView.js';
 import { FeaturesView } from './features/features/FeaturesView.js';
 import { EmployeeView } from './features/employee/EmployeeView.js';
 import { AssignView } from './features/assign/AssignView.js';
@@ -36,6 +37,7 @@ export function App() {
           {route.name === 'office' && <OfficeView />}
           {route.name === 'org' && <OrgView />}
           {route.name === 'inbox' && <InboxView />}
+          {route.name === 'room' && <RoomView id={route.id} />}
           {route.name === 'features' && <FeaturesView />}
           {route.name === 'employee' && route.id && <EmployeeView id={route.id} />}
           {route.name === 'assign' && <AssignView />}

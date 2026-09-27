@@ -1,6 +1,6 @@
 import type { EmployeeCard as Card } from '@jkj/shared';
 import { hrefFor, useStore } from '../../state/store.js';
-import { firstLines, inr, pct, stateLabel, stateTone, workTone } from '../../lib/format.js';
+import { ago, firstLines, inr, pct, stateLabel, stateTone, workTone } from '../../lib/format.js';
 import { Pill } from '../../components/Pill.js';
 import { CoverageBar } from '../../components/CoverageBar.js';
 
@@ -13,9 +13,7 @@ export function OfficeView() {
 
   if (!office) return <div className="pane"><p className="lede">Reading the office…</p></div>;
 
-  const { coverage, spend } = office;
-  const people = office.units.reduce((n, u) => n + u.employees.length, 0);
-  const working = office.units.flatMap(u => u.employees).filter(e => e.employee.state === 'working').length;
+  const { coverage, spend, counts } = office;
 
   return (
     <div className="pane">
@@ -24,10 +22,16 @@ export function OfficeView() {
           <b>{office.needsYou}</b><span>need{office.needsYou === 1 ? 's' : ''} you</span>
         </a>
         <div className="stat">
-          <b>{working}<small>/{people}</small></b><span>working</span>
+          <b>{counts.working}<small>/{counts.total}</small></b><span>working</span>
+        </div>
+        <div className={`stat${counts.blocked > 0 ? ' warn' : ''}`}>
+          <b>{counts.blocked}</b><span>blocked</span>
+        </div>
+        <div className={`stat${counts.stalled > 0 ? ' hot' : ''}`} title="Assignments in progress with no session activity past the stall threshold. The Chief of Staff resumes them or says why they wait.">
+          <b>{counts.stalled}</b><span>stalled</span>
         </div>
         <a className="stat" href={hrefFor('spend')}>
-          <b>{inr(spend.companyInr)}<small> / {inr(spend.capInr)}</small></b><span>spend today{spend.paused.length ? ` · ${spend.paused.length} paused` : ''}</span>
+          <b>{inr(spend.companyInr)}<small> / {inr(spend.capInr)}</small></b><span>real money today{spend.paused.length ? ` · ${spend.paused.length} paused` : ''}</span>
         </a>
         <a className={`stat${office.lintErrors > 0 ? ' warn' : ''}`} href={hrefFor('org')}>
           <b>{office.lintErrors}</b><span>lint error{office.lintErrors === 1 ? '' : 's'}</span>
@@ -65,12 +69,14 @@ function EmployeeCard({ card }: { card: Card }) {
         </div>
         <Pill tone={tone}>{stateLabel(employee.state)}</Pill>
       </div>
+      {employee.stateReason && <div className="reason">{employee.stateReason}</div>}
       <div className="chips">
         {card.charters.map(c => <span key={c.id} className="chip" title={c.mission}>{c.title}</span>)}
       </div>
       {card.currentWork ? (
         <div className="now" title={card.currentWork.title}>
           <Pill tone={workTone(card.currentWork.state)}>{card.currentWork.state}</Pill>
+          {card.currentWork.stalledSince && <Pill tone="waiting">stalled {ago(card.currentWork.stalledSince)}</Pill>}
           <span className="nowtitle">{card.currentWork.title}</span>
         </div>
       ) : (

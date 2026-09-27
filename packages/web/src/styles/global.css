@@ -1009,3 +1009,42 @@ details.plan { margin-top: 6px; }
 .published.connected { color: var(--done); border-color: var(--done); }
 .published.offline, .published.connecting { color: var(--wait); border-color: var(--wait); }
 .published.off { color: var(--err); border-color: var(--err); }
+
+/* ---------- owner's first-day batch: reasons, stalls, approvals everywhere, real money, the Team Room ---------- */
+.card .reason, .dhead .reason { font-size: 12px; color: var(--err); }
+.card .reason { padding: 4px 14px 0; }
+.dhead .reason { max-width: 60ch; }
+.needsyou { margin: 12px 0 4px; padding: 10px 12px; border: 1px solid var(--wait); border-radius: var(--radius); background: var(--wait-soft); }
+.needsyou h3.group { margin-top: 0; color: var(--wait); }
+.inboxcard .affects { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.inboxcard .affects a.chip { text-decoration: none; }
+.chip.link { background: var(--accent-soft); color: var(--accent-ink); }
+.chip.faint { opacity: 0.7; }
+.inboxcard .effects { display: grid; gap: 4px; margin: 8px 0 0; font-size: 12px; }
+.inboxcard .effects div { display: flex; gap: 8px; min-width: 0; }
+.inboxcard .effects dt { flex: none; min-width: 64px; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.08em; padding-top: 2px; }
+.inboxcard .effects dd { margin: 0; color: var(--ink-2); }
+.subusage { padding: 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius); }
+.subusage .stats { margin-bottom: 8px; }
+.subusage h4.group { margin: 12px 0 8px; font-family: var(--mono); font-size: 9.5px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.window { padding: 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.window .wh { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; }
+.window .track { position: relative; height: 6px; margin-top: 6px; overflow: hidden; border-radius: 99px; background: var(--surface-3); }
+.window .track span { display: block; height: 100%; background: var(--run); }
+.window .track span.over { background: var(--err); }
+.threadrow { display: block; padding: 9px 11px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); color: inherit; text-decoration: none; }
+.threadrow:hover { border-color: var(--line-strong); }
+.threadrow .ar1 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.threadmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 5px; font-size: 11.5px; color: var(--ink-3); }
+.messages { display: grid; gap: 10px; padding: 12px 0; }
+.msg { padding: 9px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.msg.owner { border-color: var(--accent); background: var(--accent-soft); }
+.msg.system { border-style: dashed; }
+.msg .mh { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.msg .mh a { color: var(--accent-ink); font-weight: 600; text-decoration: none; }
+.msg .mb { margin-top: 5px; font-size: 13px; }
+.thread .composer { margin-top: 6px; }
+.thread .row input.wide { flex: 1 1 260px; padding: 6px 9px; font: inherit; font-size: 12.5px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius); }
+.newthread { display: grid; gap: 10px; margin: 0 0 14px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.newthread .chips button.chip { cursor: pointer; border: 1px solid transparent; font: inherit; font-family: var(--mono); font-size: 10.5px; }
+.thread .dhead .task b { font-weight: 600; color: var(--ink); }

@@ -5,7 +5,8 @@ import type {
   FeatureDetail, Pivot, PivotRows, Requirement, Coverage, RouteResult, OrgProposal, Release,
   SpendSummary, HealthSignals, WorkplaceHealthResponse, DecomposeResponse, WorkQuery,
   CreateWorkRequest, CreateFeatureRequest, CreateProposalRequest, CreateReleaseRequest,
-  TransitionRequest,
+  TransitionRequest, RoomResponse, RoomThreadDetail, RoomThread, RoomMessage, CreateThreadRequest, PostMessageRequest,
+  ResolveThreadRequest,
 } from '@jkj/shared';
 
 /**
@@ -89,6 +90,14 @@ export const createProposal = (body: CreateProposalRequest) => post<OrgProposal>
 export const getReleases = () => request<Release[]>(W.releases);
 export const createRelease = (body: CreateReleaseRequest) => post<Release>(W.releases, body);
 export const runRelease = (id: string) => post<Release>(W.releaseRun(id));
+
+/* ---------- the Team Room ---------- */
+
+export const getRoom = () => request<RoomResponse>(W.room);
+export const getThread = (id: string) => request<RoomThreadDetail>(W.roomThread(id));
+export const createThread = (body: CreateThreadRequest) => post<RoomThreadDetail>(W.room, body);
+export const postRoomMessage = (id: string, body: PostMessageRequest) => post<RoomMessage>(W.roomMessages(id), body);
+export const resolveThread = (id: string, body: ResolveThreadRequest) => post<RoomThread>(W.roomResolve(id), body);
 
 export const getSpend = (day?: string) => request<SpendSummary>(W.spend(day));
 export const getSignals = () => request<HealthSignals>(W.signals);
