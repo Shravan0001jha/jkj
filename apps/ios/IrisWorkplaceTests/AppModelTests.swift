@@ -86,6 +86,24 @@ final class AppModelTests: XCTestCase {
         await expectEventually { m.office.data != nil && m.inbox.loaded }
     }
 
+    func testHasCredentialIsObservable() async throws {
+        // RootView switches on hasCredential; if it were computed from the Keychain, SwiftUI would never re-render.
+        serveFixtures()
+        let m = model()
+        m.start()
+        XCTAssertFalse(m.hasCredential)
+        var fired = false
+        withObservationTracking { _ = m.hasCredential } onChange: { fired = true }
+        try await m.signIn()
+        XCTAssertTrue(m.hasCredential)
+        XCTAssertTrue(fired, "signing in must notify observers of hasCredential")
+        fired = false
+        withObservationTracking { _ = m.hasCredential } onChange: { fired = true }
+        m.signOut()
+        XCTAssertFalse(m.hasCredential)
+        XCTAssertTrue(fired, "signing out must notify observers of hasCredential")
+    }
+
     func testEnrolUsesTheEnrolPage() async throws {
         serveFixtures()
         let m = model()

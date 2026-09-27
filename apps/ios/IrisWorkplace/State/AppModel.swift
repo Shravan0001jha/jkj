@@ -82,7 +82,9 @@ final class AppModel {
 
     /// The credential store for the current mode.
     private var tokens: TokenStore { config.mode == .relay ? relayTokens : lanTokens }
-    var hasCredential: Bool { tokens.token != nil }
+    /// Stored, not computed from the Keychain, so SwiftUI re-renders when it changes.
+    private(set) var hasCredential = false
+    private func syncCredential() { hasCredential = tokens.token != nil }
     var mode: ServerMode { config.mode }
     /// The LAN address a developer paired with earlier, if any.
     var savedLANURL: URL? { ServerConfig.savedLAN(defaults: defaults) }
@@ -97,6 +99,7 @@ final class AppModel {
         if env["WORKPLACE_FORGET"] == "1" { relayTokens.clear(); lanTokens.clear() }
         if let t = env["WORKPLACE_TOKEN"], !t.isEmpty { tokens.save(token: t) }
         #endif
+        syncCredential()
         guard hasCredential else { connection = .signedOut; return }
         connect()
         #if DEBUG
@@ -120,6 +123,7 @@ final class AppModel {
             throw WorkplaceError.transport("The sign-in page did not return a session to the app.")
         }
         relayTokens.save(token: token)
+        syncCredential()
         connect()
     }
 
@@ -129,6 +133,7 @@ final class AppModel {
         guard let token = AuthCallback.parse(url) else { return false }
         if config.mode != .relay { useRelay(connect: false) }
         relayTokens.save(token: token)
+        syncCredential()
         connect()
         return true
     }
@@ -137,6 +142,7 @@ final class AppModel {
     func signOut() {
         stopConnections()
         relayTokens.clear()
+        syncCredential()
         health = nil
         rest = nil
         connection = .signedOut
@@ -152,6 +158,7 @@ final class AppModel {
         #endif
         config = cfg
         config.save(defaults: defaults)
+        syncCredential()
         health = nil
         rest = nil
         if shouldConnect { if hasCredential { connect() } else { connection = .signedOut } }
@@ -172,6 +179,7 @@ final class AppModel {
         lanTokens.save(token: token)
         cfg.save(defaults: defaults)
         config = cfg
+        syncCredential()
         health = nil
         connect()
     }
@@ -181,7 +189,7 @@ final class AppModel {
         stopConnections()
         lanTokens.clear()
         ServerConfig.forgetLAN(defaults: defaults)
-        useRelay()
+        useRelay()   // syncs the credential for relay mode
     }
 
     /// Switch to a LAN Workplace paired earlier (developer toggle).
@@ -190,6 +198,7 @@ final class AppModel {
         stopConnections()
         config = ServerConfig(mode: .lan, baseURL: url)
         config.save(defaults: defaults)
+        syncCredential()
         health = nil
         rest = nil
         if hasCredential { connect() } else { connection = .signedOut }

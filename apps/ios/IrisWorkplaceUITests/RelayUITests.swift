@@ -50,6 +50,7 @@ final class RelayUITests: XCTestCase {
         let pageButtonLoose = app.buttons["Sign in with passkey (mock)"].firstMatch
         let ok = pageButton.waitForExistence(timeout: 15) || pageButtonLoose.waitForExistence(timeout: 5)
         XCTAssertTrue(ok, "the relay's sign-in page is shown in the auth session")
+        sleep(1)
         shot("relay-web-page")
         (pageButton.exists ? pageButton : pageButtonLoose).tap()
 
