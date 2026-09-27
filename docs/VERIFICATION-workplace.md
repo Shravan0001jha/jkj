@@ -68,7 +68,9 @@ there (the two that pass are confirmations of things that were already right), s
    ran a second event loop. All fixed with tests.
 7. The first test run after adding worktrees cut `emp/*` branches in the real checkouts (no file changes); removed,
    and tests now build temp repos.
-8. The Mac's resolver had cached NXDOMAIN for `work.irisforu.com` from before the record existed; the tunnel now
+8. Negative DNS caching: this Mac's resolver (and the owner's phone, reported as "not working" at 23:2x) had
+   cached NXDOMAIN for `work.irisforu.com` from lookups made before the record existed; public resolvers
+   answered. Recovery is airplane-mode toggle / cache flush / waiting out the TTL (HOWTO). The Mac's resolver had cached NXDOMAIN for `work.irisforu.com` from before the record existed; the tunnel now
    resolves the relay with a direct DNS query (and Node's `all: true` lookup shape was wrong at first).
 10. The tunnel reconnected every 45 s after publishing: the Mac's watchdog waited for pongs, but the Mac never
    pings (the relay does); any relay frame now counts as liveness. Held connected for 4+ minutes afterwards.

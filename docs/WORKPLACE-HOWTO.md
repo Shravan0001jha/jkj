@@ -90,6 +90,13 @@ Files: `~/iris-ops/workplace/relay.env` (this Mac: `RELAY_URL`, `TUNNEL_SECRET`)
 `relay-server.env` (copied to the box by `~/claude-dev-deploy/scripts/deploy-workplace-relay.sh`).
 The iOS app signs in through the same page and keeps a bearer session in the Keychain.
 
+**If the name does not resolve on a device** ("not working" while the relay is up): a resolver that
+looked the name up before the record existed caches the negative answer, up to the zone's SOA minimum
+(irisforu.com: 86400 s; Route 53 caps it at 900 s, some resolvers hold longer). To recover: toggle
+airplane mode on the phone, or flush the Mac's cache (`sudo dscacheutil -flushcache; sudo killall -HUP
+mDNSResponder`), or wait. New hostnames: create the DNS record before anything looks the name up. The
+Mac-side tunnel is immune: it resolves the relay with a direct DNS query and falls back to the OS.
+
 ## The phone on the LAN (development only)
 
 `--host <lan or tailnet ip>` adds a token-protected listener; pair the app with `POST /api/pair`
