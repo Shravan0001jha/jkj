@@ -39,6 +39,9 @@ mission: "Own the one account memory Iris shares across devices, so she knows th
 - Consolidation budget per plan: free 1, p5 3, p10 7, p20 15, p100/p200 42 runs a week, bounded at 5,000 tokens a run and 2% of a plan's price; an explicit remember bills to the conversation half, not context (free's context half is 240 tokens/day).
 - Low-confidence beliefs are hedged or left out and never drive a consequential action without confirmation; connectors still confirm every time (`HLD-iris-memory.md` §4).
 - Changing the contract means changing `docs/LLD-iris-memory.md` first; server and client build against it.
+- Scheduling: a consolidation is due at session end (last line ≥10 quiet minutes ago, plans with ≥7 runs a week) or nightly at 03:00 IST, never within 10 minutes of the last attempt; an outage costs nothing and drops no lines; three paid unusable answers in a row drop the batch.
+- Migration of the legacy `user_memory` rows is idempotent (flag row plus `INSERT OR IGNORE` inside `BEGIN IMMEDIATE`, because the API and the worker both run it at boot); same ids where free so a phone holding the old list deletes the right one.
+- Before this client existed, "forget my address" routed to `pocket.clear` and wiped the pocket, and "remember I like short answers" became a Reminders to-do; the memory expert must stay registered and `speaks` so those routes never return (`memory-client.md` §0).
 
 ## Definition of done
 - `cd services/agent-svc && ../../.venv/bin/python -m pytest -q tests` (state the count) including the loopback-server tests; `cd services/iris-api && ../../.venv/bin/python -m pytest -q test_memory.py test_api_memory.py` (283 passed for the whole API suite on 27 Sep); `cd desktop && npm test` for the view.

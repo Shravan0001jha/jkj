@@ -2,7 +2,7 @@ import type {
   Agent, ApprovalDecision, Attachment, CreateAgentRequest,
   LogEntry, LogKind, PermissionMode,
 } from '@jkj/shared';
-import { startRun, type RunHandle, type RunImage } from '../runtime/claude-agent.js';
+import { startRun, type RunEvents, type RunHandle, type RunImage, type RunOptions, type RunResult } from '../runtime/claude-agent.js';
 import { getSnapshot } from './workspace.js';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
@@ -34,6 +34,13 @@ interface Run {
 
 const runs = new Map<string, Run>();
 
+/** The runtime is injectable so tests drive scripted sessions with no model. */
+export type Runtime = (options: RunOptions, events: RunEvents) => RunHandle;
+let runtime: Runtime = startRun;
+export function useRuntime(fn: Runtime | null): void {
+  runtime = fn ?? startRun;
+}
+
 type Listener = (event: { agent?: Agent; entry?: LogEntry }) => void;
 const listeners = new Set<Listener>();
 
@@ -52,6 +59,32 @@ export const listRunAgents = (): Agent[] => [...runs.values()].map(r => r.agent)
 
 export const getRunTranscript = (agentId: string): LogEntry[] | null =>
   runs.get(agentId)?.entries ?? null;
+
+export const getRunAgent = (agentId: string): Agent | undefined => runs.get(agentId)?.agent;
+
+/** The SDK session id behind a run, once known. */
+export const sessionIdOf = (agentId: string): string | undefined => runs.get(agentId)?.sessionId;
+
+/** Append a line the Workplace itself wants in the transcript. */
+export function note(agentId: string, label: string, text: string): void {
+  const run = runs.get(agentId);
+  if (run) append(run, 'system', label, text);
+}
+
+/** How long since the run last did anything, for stall detection. */
+export function idleMs(agentId: string, now = Date.now()): number | null {
+  const run = runs.get(agentId);
+  if (!run) return null;
+  const last = run.entries.at(-1)?.at ?? run.agent.startedAt;
+  return now - new Date(last).getTime();
+}
+
+/** The last N tool entries, for loop detection. */
+export function lastTools(agentId: string, n: number): { label: string; text: string }[] {
+  const run = runs.get(agentId);
+  if (!run) return [];
+  return run.entries.filter(e => ['read', 'edit', 'bash', 'search', 'task', 'tool'].includes(e.kind)).slice(-n).map(e => ({ label: e.label, text: e.text }));
+}
 
 /**
  * Session files JKJ is writing right now. The disk reader would otherwise
@@ -125,7 +158,19 @@ interface SpawnOptions {
   resume?: string;
   /** Transcript to carry over, so a resumed session reads continuously. */
   history?: LogEntry[];
+  /** The employee this session belongs to, when it is a Workplace session. */
+  employeeId?: string;
+  assignmentId?: string;
+  contextTokens?: number;
+  /** Runtime options the Workplace sets: env, appended context, tools, budget. */
+  extra?: Partial<RunOptions>;
+  /** Called with the SDK's cumulative accounting at the end of every turn. */
+  onResult?: (result: RunResult) => void;
+  /** Called when the run's SDK session id is known. */
+  onSessionId?: (sessionId: string) => void;
 }
+
+export const createRunDirect = (options: SpawnOptions): Agent => spawn(options);
 
 function spawn(options: SpawnOptions): Agent {
   // Until the SDK reports one, the run needs an id of its own.
@@ -146,6 +191,9 @@ function spawn(options: SpawnOptions): Agent {
     permissionMode: options.permissionMode,
     alwaysAllowed: [],
     usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+    ...(options.employeeId ? { employeeId: options.employeeId } : {}),
+    ...(options.assignmentId ? { assignmentId: options.assignmentId } : {}),
+    ...(options.contextTokens !== undefined ? { contextTokens: options.contextTokens } : {}),
   };
 
   const run: Run = {
@@ -160,8 +208,9 @@ function spawn(options: SpawnOptions): Agent {
   append(run, 'user', '', options.prompt);
   const prompt = withFiles(options.prompt, text);
 
-  run.handle = startRun(
+  run.handle = runtime(
     {
+      ...(options.extra ?? {}),
       cwd: options.cwd,
       model: options.model,
       prompt,
@@ -177,6 +226,7 @@ function spawn(options: SpawnOptions): Agent {
         // reader can skip the file this run is writing.
         run.sessionId = sessionId;
         log.info('runs', `${id} is session ${sessionId}`);
+        options.onSessionId?.(sessionId);
       },
 
       onText: text => append(run, 'assistant', '', text),
@@ -218,6 +268,11 @@ function spawn(options: SpawnOptions): Agent {
           costUsd: 0,
         },
       }),
+
+      onResult: result => {
+        update(run, { usage: { ...run.agent.usage, costUsd: result.totalCostUsd } });
+        options.onResult?.(result);
+      },
 
       onDone: () => update(run, { status: 'waiting' }),
 

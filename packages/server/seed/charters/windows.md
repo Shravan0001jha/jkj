@@ -46,6 +46,7 @@ mission: "Bring Iris on Windows from \"it builds\" to \"a Windows user completes
 - On real Windows hardware (the teammate's machine or a VM with a GPU): the installer runs, the character window renders transparent, the agent serves `/healthz`, one voice turn round-trips, and the daily errand catalogue result is stated against the Mac's (`tests/eval_*` rows that apply).
 - `cd services/agent-svc && ../../.venv/bin/python -m pytest -q tests` on the Mac still green for any seam change (the Null and Darwin seams must not regress).
 - "Not verified" must say "not run on Windows hardware" whenever that is true, and keep the UNVERIFIED markers.
+- The Windows LLD is done when it lists every Mac-only mechanism with its Windows counterpart or an honest "no equivalent", and the owner has read it before code starts.
 
 ## How to build, test and ship
 - CI probe: push to `desktop/**`, `services/agent-svc/**` or the workflow, or `workflow_dispatch`; runner `windows-latest`, Python 3.12, Node 22.
@@ -59,6 +60,7 @@ mission: "Bring Iris on Windows from \"it builds\" to \"a Windows user completes
 - conversation: renderer-only audio on Windows, AEC verification.
 - product-and-business: Phase 2 timing and the India beta shape.
 - qa-release: real-hardware verification and release readiness.
+- beta-ops: the first Windows testers' logs (the shipper and `/admin/logs` are platform-neutral; the Electron crash reporter is not yet built anywhere).
 
 ## Needs owner approval
 - Publishing a Windows build (manifest merge, upload); any Authenticode signing certificate.

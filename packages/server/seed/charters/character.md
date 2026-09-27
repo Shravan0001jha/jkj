@@ -32,7 +32,8 @@ mission: "Own Iris as a visible, alive, quiet-by-default character on screen, wi
 - Character never costs a model call; timers, reminders and alarms run as local code (Road doc, extract §D). Proactive lines are the one gated exception (`POST /v1/pet/proactive`, rate-limited, not while speaking, engaged or busy).
 - The body is the only layer that can be relied on for the whole pending turn: micro-motion every U(0.24, 0.44) s (0.44 s plus one 60 fps frame stays under 0.5 s), no blink within 1.6 s of the last, eye flicks alternate side so travel is at least 0.14 (`docs/HLD-responsiveness.md` §0 and addendum).
 - Idle picker, halo and wandering eyes must not run while a turn is pending (RCA A); the thought bubble goes up on `heard` and stays until the answer, and comes down after speech that was not for her.
-- Never guilt; invisible when it matters (hides in meetings and screen shares, still while you type); late-night doze is visual only and any input wakes her at once; drag out starts only from the pocket badge, never from her body; the crown becomes the default hat (extract §C collisions).
+- Never guilt: she is never upset because you were away; companion apps use guilt or FOMO in 37% of goodbyes and it raises churn, anger and legal risk (deck `rules`).
+- Invisible when it matters (hides in meetings and screen shares, still while you type); late-night doze is visual only and any input wakes her at once; drag out starts only from the pocket badge, never from her body; the crown becomes the default hat (extract §C collisions).
 - Auto-hide on screen share is the one non-negotiable: hide from capture by default with a developer switch for tests and an "appear in recordings" setting; verify on Zoom, Meet and Teams; if a capture path ignores it, detect the share and hide the window (extract §C Wave 1, risks).
 - Behaviour lock B1: one "stay still" flag that walker, props, reactions and proactive lines all respect (typing, focus sessions, meetings, share).
 - Quiet by default (D1) and content sensors (D3) are owner decisions; proactive lines ground on app and dwell only once D3 lands; raw screen text is never stored.
@@ -62,5 +63,6 @@ mission: "Own Iris as a visible, alive, quiet-by-default character on screen, wi
 
 ## Needs owner approval
 - Changing the default character (3D vs 2D) or the default hide/quiet behaviour.
+- Art direction for the expressions (the deck still says "Placeholder faces — art direction still open"); new hats or colour variants beyond the crown.
 - Any proactive-line trigger that reads content rather than metadata.
 - Releases carrying character changes.

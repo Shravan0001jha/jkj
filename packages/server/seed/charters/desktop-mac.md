@@ -22,6 +22,7 @@ mission: "Own the Mac app as a shippable: packaging, signing, notarisation, the 
 
 ## Interfaces
 - Publishes: `latest.json` (the manifest, one key per platform) and `Iris.dmg` / update zips in the S3 bucket behind CloudFront; the packaged env for the agent (`VOICE_IO=renderer`, the latency flags in `desktop/auth.js`); IPC bridges (`pet:nudge`, `pet:tuck`, `tts:level`); the `iris-dev.log` the harness reads.
+- Publishes: the launch-check result and `iris-dev.log` location for qa-release; the arm64 and x64 dmg names and sha256s in the release report.
 - Consumes: `/v1/update/{filename}` with the user's token and short-lived signed URLs (`updater.js`); the agent's `/healthz` on port 9110; `character/stage.bundle.js` from character.
 
 ## Rules and traps
@@ -63,3 +64,4 @@ mission: "Own the Mac app as a shippable: packaging, signing, notarisation, the 
 ## Needs owner approval
 - Running `scripts/release-iris.sh` or `release-iris-x64.sh` (they publish to testers and kill his running Iris).
 - Rollback; changing the publish URL, signing identity or entitlements; bumping Electron major.
+- Adding a usage description or entitlement (each is a new permission prompt for every tester).

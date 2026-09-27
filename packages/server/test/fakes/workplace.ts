@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 /** A full Workplace (config, org, in-memory store, requirements) in a temp dir. */
 export function testWorkplace(overrides: Partial<Record<string, string>> = {}): { wp: Workplace; tmp: TmpWorkplace } {
   const tmp = tmpWorkplace();
-  const config = loadConfig(['--no-open', '--no-telegram', '--no-seed'], {
+  const argv = ['--no-open', '--no-seed', ...(overrides['WORKPLACE_TELEGRAM'] === '1' ? [] : ['--no-telegram'])];
+  const config = loadConfig(argv, {
     IRIS_WORKPLACE_DIR: tmp.dir,
     IRIS_OPS_DIR: `${tmp.dir}/ops`,
     WORKPLACE_CAP_INR: '1000',

@@ -38,6 +38,8 @@ mission: "Own iris-api, the cloud agent and the website so every paid call origi
 - `POST /v1/llm/stream` is written and tested but not deployed; the Mac falls back to whole replies. A Mac question is answered standalone with no chat history (the IPL mix-up, `docs/experts/info.md` §6) and that fix needs a deploy.
 - `scripts/deploy-web.sh` uploads assets before `index.html` and never touches `latest.json`, the DMGs or update zips (those belong to `scripts/release-iris.sh`).
 - One person deploying iris-api is a named risk; an agreed deploy branch and a regular deploy slot are the mitigation (Road doc risks).
+- TestFlight invites (`asc.py`): a signed-in user asks for the beta via `POST /v1/ios-beta`; the server adds the email to the external group named by `ASC_BETA_GROUP` (default "Public beta") with a short-lived ES256 JWT; nobody gets access to the developer account.
+- The website's 3D bundle is content-hashed and cached for a year; only `index.html`, fonts and the OG image are invalidated (`deploy-web.sh`).
 
 ## Definition of done
 - `cd services/iris-api && ../../.venv/bin/python -m pytest -q` (283 passed on 27 Sep); `cd services/cloud-agent && ../../.venv/bin/python -m pytest -q test_agent.py` (30 passed); `cd services/llm-gateway && ../../.venv/bin/python -m pytest -q` (17) when the gateway is touched.

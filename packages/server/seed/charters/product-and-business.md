@@ -23,6 +23,8 @@ mission: "Hold the Iris product definition, surface every open decision to the o
 - Platform roadmap: Mac + iPhone first (Phase 1), Windows + Android in Phase 2, watches and beyond later; four stages each with one gate, stage 1 = paying users keep her open daily and errands work reliably on Mac, iPhone and iPad.
 - Legal, privacy, trust: DPDP Act 2023 for Indian user data; 18+ confirmation at sign-up; AI disclosure at first run and in settings; auto-hide on screen share as the one non-negotiable; memory view and delete item by item; transcript retention (verbatim transcripts shipped to the server and CloudWatch, redaction mode exists and is off); friend-network safety (rate limits, block, report; SB 243 exposure).
 - Security design docs: data egress (only the question text leaves the Mac for info; never screen text, clipboard or files), hijacking, permission modes, OAuth broker with narrow scopes and revocable credentials.
+- The wave order (extract §C): decisions first; Wave 1 quick wins and non-negotiables (1–2 weeks: hide on share, 18+, AI disclosure, behaviour lock, typing stillness, doze, battery and weather looks, pocket badge, Wi-Fi, Bluetooth helper, Do Not Disturb via a Shortcut, Intel release); Wave 2 voice and privacy rules (after D1–D3); Wave 3 one account, one memory; Wave 4 what the lead segments open her for (focus timer, calendar, daily brief, deadlines via Canvas feed, email and message drafts, find files, hats); Wave 5 every screen (iPhone app, presence, portable character, Android bubble); Wave 6 friends (after D6); plans and payments alongside Waves 2–4.
+- The Road doc's phases (extract §D): Phase 0 trustworthy on the Mac (2–3 weeks, every §3.5 rule passes an automated test and real serving cost is measured); Phase 1 the agent loop (3–4); Phase 2 one brain (5–6); Phase 3 iPhone and Android parity (6–8); Phase 4 the definition's Phase 2 (4–6).
 - Metrics: the five product numbers (daily opens per paying user; verified errand completion rate; declined-request rate; serving cost per active user by tier; hide and mute usage).
 
 ## Interfaces
@@ -37,6 +39,7 @@ mission: "Hold the Iris product definition, surface every open decision to the o
 - iOS subscriptions must go through the App Store; Android through Play billing; web checkout elsewhere.
 - Storing Indian users' data: DPDP applies; check with someone qualified before real user data goes live (owner's global rule, `~/.claude/CLAUDE.md`).
 - The listening budget was sized against the wrong quantity (turns × 8 s); real `stt_seconds` is closer to how long the room is noisy (`docs/ISSUE-LOG.md`, 21 Sep). Any plan that meters STT must be re-derived from a measured day.
+- A feature leads for a segment when it is why they open Iris daily; it is held back when it would embarrass them at their desk (deck `matrix`).
 - Numbers quoted from the deck's images (tier cards, the ten expressions, stage names) are image-only; cite sources C and D for prices.
 
 ## Definition of done

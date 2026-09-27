@@ -92,6 +92,11 @@ export interface Agent {
    */
   driven?: boolean;
   approval?: PendingApproval;
+  /** Set when this is a Workplace employee session. */
+  employeeId?: string;
+  assignmentId?: string;
+  /** Tokens of layered context appended at spawn. */
+  contextTokens?: number;
 }
 
 /**
