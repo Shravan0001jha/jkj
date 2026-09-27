@@ -70,6 +70,8 @@ there (the two that pass are confirmations of things that were already right), s
    and tests now build temp repos.
 8. The Mac's resolver had cached NXDOMAIN for `work.irisforu.com` from before the record existed; the tunnel now
    resolves the relay with a direct DNS query (and Node's `all: true` lookup shape was wrong at first).
+10. The tunnel reconnected every 45 s after publishing: the Mac's watchdog waited for pongs, but the Mac never
+   pings (the relay does); any relay frame now counts as liveness. Held connected for 4+ minutes afterwards.
 9. Relay: the lead's review (spoofable XFF, brute-forceable enrolment, `!=` on the secret) and the independent review
    (bearer rotation, half-dead tunnel, token in the access log, pairing via the relay, sockets outliving logout, unit
    hardening, and ten smaller items) — every point fixed with a test that failed first.
