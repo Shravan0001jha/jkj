@@ -13,10 +13,21 @@ import type {
  * change that breaks the UI breaks the build instead of the page.
  */
 
+/**
+ * Behind the published relay (https://work.irisforu.com) every mutating request must carry the
+ * CSRF token the relay set in the readable `wp_csrf` cookie. On the Mac (loopback) there is no
+ * cookie and the header is simply absent.
+ */
+function csrfHeader(): Record<string, string> {
+  const m = /(?:^|;\s*)wp_csrf=([^;]+)/.exec(document.cookie);
+  return m ? { 'x-csrf-token': decodeURIComponent(m[1]!) } : {};
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? 'GET').toUpperCase();
   const res = await fetch(path, {
     ...init,
-    headers: { 'content-type': 'application/json', ...init?.headers },
+    headers: { 'content-type': 'application/json', ...(method !== 'GET' ? csrfHeader() : {}), ...init?.headers },
   });
   if (!res.ok) {
     let detail = '';

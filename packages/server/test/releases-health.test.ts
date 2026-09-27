@@ -4,6 +4,7 @@ import * as releases from '../src/services/releases.js';
 import * as inbox from '../src/services/inbox.js';
 import * as work from '../src/services/work.js';
 import * as employees from '../src/services/employees.js';
+import * as runs from '../src/services/runs.js';
 import * as health from '../src/services/health.js';
 import type { WorkplaceEvent } from '../src/services/workplace.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
@@ -85,6 +86,33 @@ test('a session idle for ten minutes is stalled once: interrupted, blocked, one 
     await health.handleStalls(wp, started + 12 * 60 * 1000);
     assert.equal(inbox.list(wp).filter(i => i.kind === 'question').length, 1);
     assert.equal(fake.last().interrupted, 1);
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});
+
+test('a tool call parked for two minutes raises one needs-you alert', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    const agent = employees.talk(wp, 'asha', 'go');
+    await tick();
+    const alerts: string[] = [];
+    wp.on(e => { if (e.type === 'alert') alerts.push(e.title); });
+    const decided: string[] = [];
+    void fake.last().events.onPermission({ tool: 'Bash', input: { command: 'rm -rf build' }, title: 'Run a command', suggestions: [] }).then(d => decided.push(d));
+    await tick();
+    const now = Date.now();
+    assert.deepEqual(health.handleParkedApprovals(wp, now + 60_000), []);
+    const first = health.handleParkedApprovals(wp, now + 3 * 60_000);
+    assert.equal(first.length, 1);
+    assert.deepEqual(health.handleParkedApprovals(wp, now + 4 * 60_000), [], 'once per prompt');
+    assert.ok(alerts.some(t => t.startsWith('Asha is waiting for a tool approval')));
+    assert.equal(employees.stateOf(wp, 'asha'), 'needs-owner');
+    runs.resolveApproval(agent.id, 'deny');
+    await tick();
+    assert.deepEqual(decided, ['deny']);
   } finally {
     fake.restore();
     tmp.cleanup();

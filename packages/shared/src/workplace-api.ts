@@ -82,7 +82,7 @@ function withQuery(path: string, q?: Record<string, string | undefined>): string
 /* ---------- responses ---------- */
 
 export interface WorkplaceHealthResponse extends HealthResponse {
-  workplace: { dataDir: string; capInr: number; day: string; telegram: boolean };
+  workplace: { dataDir: string; capInr: number; day: string; telegram: boolean; published: 'not-configured' | 'connecting' | 'connected' | 'offline' | 'off' };
 }
 
 export interface OfficeResponse {

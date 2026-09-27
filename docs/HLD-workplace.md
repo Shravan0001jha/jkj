@@ -171,6 +171,39 @@ read from `inbox.jsonl` and applied, so one-tap approvals work from the phone on
 was considered and rejected: any relay that needs no setup on his side is a public endpoint, and the
 page drives sessions that edit code and run commands.
 
+### D11b. Publishing it: an outbound tunnel to a relay, a passkey login, no inbound port (27 Sep, owner)
+
+The owner asked for the Workplace to be reachable from anywhere, behind a login only he can pass.
+Anyone who passes that login drives agents that edit code and run commands on his Mac, so it is
+treated as remote code execution. The lead's decisions, and why:
+
+- **No inbound port on the Mac.** The Workplace server opens an outbound, authenticated WSS
+  connection to a small **relay** on the existing Iris API box and reconnects with backoff. The LAN
+  listener (D11) is turned off once the iOS device test is done. Why: a listening port on a laptop
+  behind a hotspot is neither reachable nor safe; an outbound tunnel is both, and the box already
+  has a public address, TLS and a deploy procedure.
+- **Public URL `https://work.irisforu.com`**, an A record in the irisforu.com Route 53 zone to the
+  box; TLS the way the box already does it (Caddy). The relay proxies HTTP and WebSocket to the
+  tunnel **only for an authenticated session**; with the tunnel down it serves a clean "Mac
+  offline" page.
+- **One user, the owner**, by the email in the Iris credentials on this Mac. Primary factor: a
+  **passkey** (WebAuthn, Face ID on his iPhone). Enrolment needs a one-time code sent to him on
+  Telegram. Fallback: an email code **plus** a Telegram code. Never a password alone. Why: a
+  passkey is phishing-resistant and needs the phone in hand; the Telegram code reuses the channel
+  only he holds; there is no password to leak.
+- **Sessions** are short and rotating (12 h idle, 7 d max), httpOnly/secure/SameSite=strict
+  cookies, CSRF-protected for cookie sessions, rate-limited with lockout, with an audit log of
+  logins and every mutating request, "sign out everywhere", and an **emergency off switch** that
+  drops the tunnel (from the Mac, from Telegram, or from the relay). Every login from a new device
+  pings Telegram.
+- **Telegram codes travel through the tunnel**: the relay asks the Mac to run `notify.sh`, so the
+  bot token never leaves the Mac. With the Mac offline there is nothing to reach anyway.
+- **The iOS app** uses the same URL: sign-in through `ASWebAuthenticationSession` with the passkey,
+  then a session bearer token in the Keychain (bearer sessions are exempt from CSRF: browsers never
+  send them on their own).
+- **Defence in depth:** the Workplace's own gates stay. Releases, deploys, org changes, spend and
+  secrets still need the owner's Inbox approval whatever the login.
+
 ### D12. GitHub Apps: one per lead, credentials held by the Workplace, created by the lead
 
 `~/iris-ops/workplace/apps/<charter>.json` (App id, installation id, key path) and

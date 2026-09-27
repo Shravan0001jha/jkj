@@ -222,7 +222,6 @@ entries:
   - { kind: requirement-group, key: "Cross-device", primary: mobile, consulted: [experts, server] }
 
   # ---------- function: qa-release ----------
-  - { kind: keyword, key: "verify", primary: qa-release }
   - { kind: keyword, key: "regression", primary: qa-release }
   - { kind: path, key: "iris:scripts/tester-logs.sh", primary: beta-ops }
   - { kind: path, key: "iris:scripts/ticket.sh", primary: beta-ops }
@@ -272,4 +271,3 @@ entries:
   - { kind: path, key: "iris:VM_is_working.md", primary: chief-of-staff }
   - { kind: keyword, key: "repo split", primary: chief-of-staff }
   - { kind: keyword, key: "org change", primary: chief-of-staff }
-  - { kind: keyword, key: "spec", primary: chief-of-staff }

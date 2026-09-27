@@ -2,13 +2,17 @@
 # budget class. An employee is an instance of one of these plus its charters.
 # "sonnet" everywhere by default: the company cap is ₹1000/day for all agents
 # combined, and the equivalent API cost of Opus would spend it before lunch.
+# Permission mode "auto" for working roles: a classifier lets ordinary work
+# through and parks only the risky calls for the owner. "acceptEdits" parked
+# a read-only code-graph query for five minutes on 27 Sep; §0 of the brief
+# says branch work, reads and tests are the agent's freedom.
 
 roles:
   - id: chief-of-staff
     title: Chief of Staff
     level: 0
     model: sonnet
-    permissionMode: acceptEdits
+    permissionMode: auto
     budgetClass: high
     tools:
       disallowed: []
@@ -24,7 +28,7 @@ roles:
     title: Lead
     level: 1
     model: sonnet
-    permissionMode: acceptEdits
+    permissionMode: auto
     budgetClass: medium
     tools:
       disallowed: []
@@ -38,7 +42,7 @@ roles:
     title: QA and release
     level: 1
     model: sonnet
-    permissionMode: acceptEdits
+    permissionMode: auto
     budgetClass: medium
     tools:
       disallowed: []
@@ -53,7 +57,7 @@ roles:
     title: Engineer (contractor)
     level: 2
     model: sonnet
-    permissionMode: acceptEdits
+    permissionMode: auto
     budgetClass: low
     tools:
       disallowed: [propose_org_change]

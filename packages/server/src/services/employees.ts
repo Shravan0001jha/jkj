@@ -38,6 +38,19 @@ interface Session {
 const sessions = new Map<string, Session>();   // by agent id
 
 export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature'] as const;
+
+/**
+ * What never asks, whatever the mode: reading, searching, the code graph,
+ * and the commands the charters name for building and testing. Everything
+ * outward still goes through the Workplace's gates, not through a prompt.
+ */
+export const FREE_TOOLS = [
+  'Read', 'Grep', 'Glob', 'LS', 'WebFetch', 'WebSearch', 'ToolSearch', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
+  'mcp__travsr__*', 'mcp__prior__prior_recall',
+  'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git branch:*)', 'Bash(git show:*)', 'Bash(git worktree list:*)',
+  'Bash(ls:*)', 'Bash(cat:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(wc:*)', 'Bash(find:*)', 'Bash(grep:*)', 'Bash(rg:*)', 'Bash(pwd)',
+  'Bash(npm test:*)', 'Bash(npm run test:*)', 'Bash(node --test:*)', 'Bash(../../.venv/bin/python -m pytest:*)', 'Bash(.venv/bin/python -m pytest:*)', 'Bash(python3 -m pytest:*)', 'Bash(pytest:*)',
+];
 const stateOverride = new Map<string, EmployeeState>();
 const lastReport = new Map<string, string>();
 
@@ -100,7 +113,7 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
       systemPromptAppend: context.append,
       settingSources: ['user', 'project'],
       // The Workplace's own tools are the reporting channel; they never prompt.
-      allowedTools: [...WORKPLACE_TOOLS.map(t => `mcp__workplace__${t}`), ...(role?.tools.allowed ?? [])],
+      allowedTools: [...WORKPLACE_TOOLS.map(t => `mcp__workplace__${t}`), ...FREE_TOOLS, ...(role?.tools.allowed ?? [])],
       ...(role?.tools.disallowed?.length ? { disallowedTools: role.tools.disallowed.map(t => t.startsWith('mcp__') || /^[A-Z]/.test(t) ? t : `mcp__workplace__${t}`) } : {}),
       maxBudgetUsd: Math.max(0.05, remaining),
       mcpServers: { workplace: workplaceTools(wp, employeeId, () => session) },

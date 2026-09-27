@@ -30,7 +30,8 @@ test('a session gets the layered context, the subscription token, and no API key
     assert.equal(agent.employeeId, 'mira');
     assert.equal(s.options.cwd, '/Users/shravan0001jha/claude-dev');
     assert.equal(s.options.model, 'sonnet');
-    assert.equal(s.options.permissionMode, 'acceptEdits');
+    assert.equal(s.options.permissionMode, 'auto');
+    assert.ok(s.options.allowedTools!.includes('mcp__travsr__*') && s.options.allowedTools!.includes('Bash(npm test:*)'), 'reads and tests never prompt');
     assert.ok(s.options.systemPromptAppend!.startsWith('You are Mira'));
     assert.ok(s.options.systemPromptAppend!.includes('## Charter: Experts'));
     assert.ok(s.options.systemPromptAppend!.includes('Next: the info expert card.'));

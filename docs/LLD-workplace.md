@@ -276,3 +276,49 @@ composer, approvals, permission mode) plus a Context panel using `ContextView`.
 `IRIS_WORKPLACE_DIR`, `IRIS_OPS_DIR` (default `~/iris-ops`), `WORKPLACE_CAP_INR` (1000),
 `WORKPLACE_USD_INR` (88), `WORKPLACE_CONTEXT_TOKENS` (24000), `WORKPLACE_DIGEST_HOUR` (9),
 `--port` (4317), `--host` (127.0.0.1), `--no-open`, `--no-telegram` (tests), `--no-seed`.
+
+## 17. Publishing: the relay and the login (HLD D11b)
+
+**Relay service** `services/workplace-relay/` in the deploy worktree (`~/claude-dev-deploy`): Python
+3.12, FastAPI + `websockets`, its own SQLite (`/opt/workplace-relay/relay.db`), systemd unit
+`workplace-relay` on `127.0.0.1:9200`, Caddy site `work.irisforu.com { reverse_proxy 127.0.0.1:9200 }`
+(Caddy issues the certificate). Deploy script `scripts/deploy-workplace-relay.sh` follows
+`deploy-agent.sh`: tests locally, `ssh-window.sh open`, scp, venv, unit, Caddy reload, health check,
+`ssh-window.sh close`. It never touches `/opt/iris-api`.
+
+**Tunnel protocol** (one WSS `/tunnel` from the Mac, `Authorization: Bearer <tunnel secret>`; the
+secret is in `~/iris-ops/workplace/relay.env` on the Mac and `/opt/workplace-relay/.env` on the box,
+mode 600, generated once):
+
+| Frame | Direction | Fields |
+|---|---|---|
+| `http` | relay → Mac | `id, method, path, headers, body` (base64); Mac answers `response { id, status, headers, body }` |
+| `ws-open` / `ws-frame` / `ws-close` | both | `id, path` / `id, data` / `id` — one relay client socket ↔ one local socket to `127.0.0.1:<port>/ws` |
+| `telegram` | relay → Mac | `text` — the Mac runs `notify.sh` (codes, new-device pings) |
+| `off` | Mac → relay | drops every session and refuses until `on` |
+| `ping`/`pong` | both | liveness; the relay marks the Mac offline after 20 s |
+
+The Mac side is `services/tunnel.ts`: reconnect with backoff (1 s → 30 s), forwards to its own
+loopback port (trusted, D11), reports `published: connected | offline` on `/api/health` and the Office.
+
+**Login** (`/login`, `/login/*` on the relay; single allowed email from config):
+- Passkey: `webauthn` (py_webauthn), RP id `work.irisforu.com`, user handle = the email; enrolment
+  at `/login/enrol` needs a Telegram code first (6 digits, 10 min, 5 attempts).
+- Fallback: `/login/code` sends an email code (SES, as iris-api's email sign-in does) **and** a
+  Telegram code; both must match.
+- Session: 32-byte random id, server-side row `{ id, created, last_seen, device, ua, ip }`; cookie
+  `wp_session` httpOnly/Secure/SameSite=Strict; idle 12 h, max 7 d; the id rotates every hour of use.
+  Bearer form for the app: the same id in `Authorization: Bearer`. CSRF: cookie sessions must send
+  `X-CSRF-Token` equal to the `wp_csrf` cookie on every non-GET; bearer sessions are exempt.
+- Rate limits: 5 failed factors per IP or per email in 15 min → 15 min lockout; audit table
+  `{ at, session, ip, kind, path, ok }` for every login step and every non-GET.
+- `/logout`, `/logout-all`; `POST /off` (from the tunnel) and `/on`; a new device (new session
+  without a `wp_device` cookie) → Telegram ping through the tunnel.
+- iOS: `ASWebAuthenticationSession` opens `/login?app=1`; on success the relay redirects to
+  `irisworkplace://auth#token=<session id>`; the app stores it in the Keychain and sends it as a
+  bearer. Contract change announced to "main".
+
+**Verification (live, from outside the LAN):** no session → login page; wrong or absent factor →
+refused; passkey → in; WebSocket without a session → rejected; tunnel down → "Mac offline";
+new-device Telegram ping arrives.
+

@@ -12,6 +12,8 @@ test('commands parse: approve, reject, answer, talk, status, anything else is no
   assert.deepEqual(parseCommand('answer in_1 raise-today 1500'), { kind: 'answer', id: 'in_1', optionId: 'raise-today', text: '1500' });
   assert.deepEqual(parseCommand('talk Tara how is the composer going?'), { kind: 'talk', employeeId: 'tara', text: 'how is the composer going?' });
   assert.deepEqual(parseCommand('status'), { kind: 'status' });
+  assert.deepEqual(parseCommand('OFF'), { kind: 'off' });
+  assert.deepEqual(parseCommand('emergency off'), { kind: 'off' });
   assert.equal(parseCommand('Why can\'t we release all?').kind, 'unknown');
 });
 

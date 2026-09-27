@@ -9,6 +9,7 @@ import { createWorkplace, type Workplace } from './services/workplace.js';
 import { Telegram } from './services/telegram.js';
 import * as digestService from './services/digest.js';
 import * as features from './services/features.js';
+import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
 import * as employees from './services/employees.js';
 import * as spend from './services/spend.js';
 import * as health from './services/health.js';
@@ -44,20 +45,26 @@ export async function start(config: Config): Promise<Running> {
   const telegram = new Telegram(wp, {
     talk: async (id, text) => { const agent = employees.talk(wp, id, text); return `${agent.name}: message delivered (session ${agent.id}). Reply arrives in the Office.`; },
     status: () => statusLine(wp),
+    off: () => { tunnel?.off(); return tunnel ? 'Published access is OFF: the tunnel to the relay is dropped and every remote session is gone. Restart the Workplace to publish again.' : 'Nothing is published; no tunnel is configured.'; },
   });
 
   // The first real feature, with Iris's real statuses, once.
   try { features.seedFeature(wp); } catch (err) { log.warn('boot', `feature seed failed: ${err instanceof Error ? err.message : err}`); }
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
-  const server = createHttpServer({ config, wp, auth, telegram });
+  const tunnel = createTunnel(config, telegram);
+  const server = createHttpServer({ config, wp, auth, telegram, tunnel });
   const hub = attachSocket(server, wp, auth);
   await listen(server, config);
 
   telegram.attach();
   if (config.telegram) telegram.start();
+  tunnel?.start();
 
-  const stallTimer = setInterval(() => void health.handleStalls(wp).catch(err => log.warn('health', String(err))), 30_000);
+  const stallTimer = setInterval(() => {
+    health.handleParkedApprovals(wp);
+    void health.handleStalls(wp).catch(err => log.warn('health', String(err)));
+  }, 30_000);
   const digestTimer = setInterval(() => void digestService.maybeSend(wp, telegram, config.digestHour), 60_000);
 
   if (config.host !== '127.0.0.1' && config.host !== 'localhost') {
@@ -67,6 +74,7 @@ export async function start(config: Config): Promise<Running> {
   return {
     server, wp, telegram,
     stop: async () => {
+      tunnel?.stop();
       clearInterval(stallTimer);
       clearInterval(digestTimer);
       telegram.stop();
@@ -94,3 +102,20 @@ function statusLine(wp: Workplace): string {
   const states = wp.org.employees.map(e => `${e.name}: ${employees.stateOf(wp, e.id)}`).join(', ');
   return `Needs you: ${inbox.openCount(wp)} · Spend ₹${s.companyInr.toFixed(0)} of ₹${s.capInr}\n${states}`;
 }
+
+/**
+ * The outbound tunnel to the relay, when ~/iris-ops/workplace/relay.env
+ * names one (RELAY_URL and TUNNEL_SECRET). Without it nothing is published.
+ */
+function createTunnel(config: Config, telegram: Telegram): Tunnel | null {
+  const url = readRelayUrl(config.opsDir);
+  const secret = readTunnelSecret(config.opsDir);
+  if (!url || !secret) { log.info('tunnel', 'not published: no relay.env'); return null; }
+  return new Tunnel({
+    url, secret,
+    local: `http://127.0.0.1:${config.port}`,
+    notify: text => telegram.notify(text),
+    onStatus: status => log.info('tunnel', `published: ${status}`),
+  });
+}
+

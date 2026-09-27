@@ -23,10 +23,12 @@ export interface TelegramDeps {
   /** How `talk` reaches an employee; wired by employees.ts. */
   talk?: (employeeId: string, text: string) => Promise<string>;
   status?: () => string;
+  /** The emergency off switch for published access. */
+  off?: () => string;
 }
 
 export interface Command {
-  kind: 'approve' | 'reject' | 'talk' | 'status' | 'answer' | 'unknown';
+  kind: 'approve' | 'reject' | 'talk' | 'status' | 'answer' | 'off' | 'unknown';
   id?: string;
   employeeId?: string;
   text?: string;
@@ -42,6 +44,7 @@ export function parseCommand(text: string): Command {
   m = /^talk\s+(\S+)\s+([\s\S]+)$/i.exec(t);
   if (m) return { kind: 'talk', employeeId: m[1]!.toLowerCase(), text: m[2]! };
   if (/^status$/i.test(t)) return { kind: 'status' };
+  if (/^(off|workplace off|emergency off)$/i.test(t)) return { kind: 'off' };
   return { kind: 'unknown', text: t };
 }
 
@@ -126,6 +129,9 @@ export class Telegram {
         }
         case 'status':
           await this.notify(this.deps.status?.() ?? 'Workplace is up.');
+          break;
+        case 'off':
+          await this.notify(this.deps.off?.() ?? 'Nothing is published.');
           break;
         default:
           break;   // ordinary conversation with the older ops loop; not ours

@@ -17,6 +17,8 @@ import * as views from '../services/views.js';
 import * as features from '../services/features.js';
 import * as digest from '../services/digest.js';
 import type { Telegram } from '../services/telegram.js';
+import type { Tunnel } from '../services/tunnel.js';
+import { isLoopback } from './auth.js';
 import { route as routeThings } from '../services/ownership.js';
 import { coverage } from '../services/requirements.js';
 import { commitOrg, parseCharter, renderCharter, writeCharter } from '../services/org.js';
@@ -43,9 +45,10 @@ export interface RouterDeps {
   wp: Workplace;
   auth: Auth;
   telegram?: Telegram;
+  tunnel?: Tunnel | null;
 }
 
-export function createRouter({ config, wp, auth, telegram }: RouterDeps) {
+export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps) {
   const startedAt = Date.now();
   const r = (method: string, pattern: string, handler: Handler): Route => ({
     method,
@@ -60,7 +63,7 @@ export function createRouter({ config, wp, auth, telegram }: RouterDeps) {
         ok: true, name: 'jkj', version: config.version,
         uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
         claudeHome: home.present ? home.configDir : null,
-        workplace: { dataDir: config.workplaceDir, capInr: spend.capFor(wp), day: spend.dayOf(), telegram: config.telegram },
+        workplace: { dataDir: config.workplaceDir, capInr: spend.capFor(wp), day: spend.dayOf(), telegram: config.telegram, published: tunnel ? tunnel.status : 'not-configured' },
       });
     }),
 
@@ -272,6 +275,14 @@ export function createRouter({ config, wp, auth, telegram }: RouterDeps) {
       json(res, 201, releases.propose(wp, shippable, str(body['version']), typeof body['by'] === 'string' ? body['by'] : 'owner'));
     }),
     r('POST', '/api/releases/:id/run', async (_req, res, _url, [id]) => json(res, 200, await releases.run(wp, dec(id)))),
+
+    /* ---------- published access: the emergency off switch ---------- */
+    r('POST', '/api/relay/off', (req, res) => {
+      if (!isLoopback(req.socket.remoteAddress)) throw new BadRequest('The off switch is pressed from this Mac (or Telegram: "off").');
+      if (!tunnel) return json(res, 200, { published: 'not-configured' });
+      tunnel.off();
+      json(res, 200, { published: tunnel.status });
+    }),
 
     /* ---------- digest ---------- */
     r('POST', '/api/digest', async (_req, res) => {
