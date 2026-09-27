@@ -110,6 +110,7 @@ entries:
   - { kind: requirement-group, key: "Memory", primary: memory, consulted: [server, product-and-business] }
 
   # ---------- platform: server ----------
+  - { kind: path, key: "iris:services", primary: server, consulted: [experts, memory, conversation] }
   - { kind: path, key: "iris:services/iris-api", primary: server }
   - { kind: path, key: "iris:services/cloud-agent", primary: server, consulted: [experts] }
   - { kind: path, key: "iris:services/llm-gateway", primary: server }

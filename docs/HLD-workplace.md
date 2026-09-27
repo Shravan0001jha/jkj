@@ -206,7 +206,7 @@ existing `read_inbox.sh` cursor.
 
 ## 3. The first organisation (seed) and why it is shaped this way
 
-Seven employees, eleven charters, four units. The mix is deliberate: capability charters (how Iris
+Seven employees, twelve charters, four units. The mix is deliberate: capability charters (how Iris
 behaves), platform charters (where she runs), function charters (how work is checked and shipped),
 and one non-code charter, so the model is proven to hold more than one axis from day one.
 

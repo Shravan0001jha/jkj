@@ -1,7 +1,11 @@
-import { API } from '@jkj/shared';
+import { WORKPLACE_API as W } from '@jkj/shared';
 import type {
-  ActivityEvent, Agent, Attachment, ContextLayer, ContextResponse,
-  CreateAgentRequest, HealthResponse, LogEntry, McpListResponse, Project,
+  Agent, Attachment, ContextLayer, ContextResponse, LogEntry,
+  OfficeResponse, OrgResponse, Charter, InboxItem, Employee, EmployeeDetail, WorkItem, FeatureBoard,
+  FeatureDetail, Pivot, PivotRows, Requirement, Coverage, RouteResult, OrgProposal, Release,
+  SpendSummary, HealthSignals, WorkplaceHealthResponse, DecomposeResponse, WorkQuery,
+  CreateWorkRequest, CreateFeatureRequest, CreateProposalRequest, CreateReleaseRequest,
+  TransitionRequest,
 } from '@jkj/shared';
 
 /**
@@ -15,46 +19,71 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'content-type': 'application/json', ...init?.headers },
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new Error(detail ? `${res.status} — ${detail}` : `${res.status} ${res.statusText}`);
+    let detail = '';
+    try {
+      const body = await res.json() as { error?: string };
+      detail = body.error ?? '';
+    } catch {
+      detail = '';
+    }
+    throw new Error(detail || `${res.status} ${res.statusText}`);
   }
   return (await res.json()) as T;
 }
 
-export const getHealth = () => request<HealthResponse>(API.health);
-export const getProjects = () => request<Project[]>(API.projects);
-export const getAgents = () => request<Agent[]>(API.agents);
-export const getTranscript = (agentId: string) => request<LogEntry[]>(API.agentLog(encodeURIComponent(agentId)));
-export const getContext = (projectId: string) => request<ContextResponse>(API.context(projectId));
-export const getMcp = () => request<McpListResponse>(API.mcp);
-export const getActivity = () => request<ActivityEvent[]>(API.activity);
+const post = <T>(path: string, body?: unknown) =>
+  request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
+const put = <T>(path: string, body: unknown) =>
+  request<T>(path, { method: 'PUT', body: JSON.stringify(body) });
 
-export const addProject = (path: string) =>
-  request<Project>(API.projects, { method: 'POST', body: JSON.stringify({ path }) });
+/* ---------- workplace ---------- */
 
-export const removeProject = (id: string) =>
-  request<{ ok: true }>(API.project(encodeURIComponent(id)), { method: 'DELETE' });
+export const getHealth = () => request<WorkplaceHealthResponse>(W.health);
+export const getOffice = () => request<OfficeResponse>(W.office);
+export const getOrg = () => request<OrgResponse>(W.org);
+export const getCharter = (id: string) => request<Charter>(W.charter(id));
+export const putCharter = (id: string, body: string) => put<Charter>(W.charter(id), { body });
 
-export const createAgent = (body: CreateAgentRequest) =>
-  request<Agent>(API.agents, { method: 'POST', body: JSON.stringify(body) });
+export const getInbox = () => request<InboxItem[]>(W.inbox);
+export const answerInbox = (id: string, optionId: string, note?: string) =>
+  post<InboxItem>(W.inboxAnswer(id), { optionId, ...(note ? { note } : {}) });
 
-export const resumeAgent = (agentId: string, text: string, attachments: Attachment[] = []) =>
-  request<Agent>(API.agentResume(encodeURIComponent(agentId)), {
-    method: 'POST',
-    body: JSON.stringify({ text, attachments }),
-  });
+export const getEmployees = () => request<Employee[]>(W.employees);
+export const getEmployee = (id: string) => request<EmployeeDetail>(W.employee(id));
+export const talkTo = (id: string, text: string, attachments: Attachment[] = []) =>
+  post<Agent>(W.employeeTalk(id), { text, attachments });
+export const endSession = (id: string) => post<{ ok: true }>(W.employeeEndSession(id));
+export const getEmployeeContext = (id: string) => request<ContextResponse>(W.employeeContext(id));
+export const putEmployeeContext = (employeeId: string, id: string, body: string) =>
+  put<ContextLayer>(W.employeeContext(employeeId), { id, body });
 
+export const getWork = (q?: WorkQuery) => request<WorkItem[]>(W.work(q));
+export const createWork = (body: CreateWorkRequest) => post<WorkItem>(W.work(), body);
+export const transitionWork = (id: string, body: TransitionRequest) => post<WorkItem>(W.workTransition(id), body);
+
+export const getFeatures = () => request<FeatureBoard>(W.features);
+export const createFeature = (body: CreateFeatureRequest) => post<WorkItem>(W.features, body);
+export const getFeature = (id: string) => request<FeatureDetail>(W.feature(id));
+export const decomposeFeature = (id: string) => post<DecomposeResponse>(W.featureDecompose(id));
+export const getPivot = (rows: PivotRows) => request<Pivot>(W.featurePivot(rows));
+
+export const getRequirements = (group?: string) => request<Requirement[]>(W.requirements(group));
+export const getCoverage = () => request<Coverage>(W.coverage);
+export const previewRoute = (q: { text?: string; paths?: string[]; platforms?: string[]; requirementIds?: string[] }) =>
+  request<RouteResult>(W.route(q));
+
+export const getProposals = () => request<OrgProposal[]>(W.proposals);
+export const createProposal = (body: CreateProposalRequest) => post<OrgProposal>(W.proposals, body);
+
+export const getReleases = () => request<Release[]>(W.releases);
+export const createRelease = (body: CreateReleaseRequest) => post<Release>(W.releases, body);
+export const runRelease = (id: string) => post<Release>(W.releaseRun(id));
+
+export const getSpend = (day?: string) => request<SpendSummary>(W.spend(day));
+export const getSignals = () => request<HealthSignals>(W.signals);
+
+/* ---------- sessions (kept from JKJ) ---------- */
+
+export const getTranscript = (agentId: string) => request<LogEntry[]>(W.agentLog(agentId));
 export const postMessage = (agentId: string, text: string, attachments: Attachment[] = []) =>
-  request<{ ok: true }>(API.agentMessage(encodeURIComponent(agentId)), {
-    method: 'POST',
-    body: JSON.stringify({ text, attachments }),
-  });
-
-export const archiveAgent = (agentId: string) =>
-  request<{ ok: true }>(API.agent(encodeURIComponent(agentId)), { method: 'DELETE' });
-
-export const putContext = (projectId: string, id: string, body: string) =>
-  request<ContextLayer>(`/api/context?projectId=${encodeURIComponent(projectId)}`, {
-    method: 'PUT',
-    body: JSON.stringify({ id, body }),
-  });
+  post<{ ok: true }>(W.agentMessage(agentId), { text, attachments });

@@ -32,6 +32,11 @@ test('paths resolve by longest prefix', () => {
   assert.equal(resolve(map, { kind: 'path', key: 'iris:services/iris-api' })?.primary, 'server');
   // A prefix must end at a path boundary: agent-svc-old is not agent-svc.
   assert.equal(resolve(map, { kind: 'path', key: 'iris:services/agent-svc-old/x.py' }), null);
+  // A bare "<repo>:" key is the repo root and covers every path in it.
+  const withRoot = [...map, entry('path', 'iris-deploy:', 'server')];
+  assert.equal(resolve(withRoot, { kind: 'path', key: 'iris-deploy:scripts/deploy-api.sh' })?.primary, 'server');
+  assert.equal(resolve(withRoot, { kind: 'path', key: 'iris-deploy:' })?.primary, 'server');
+  assert.equal(resolve(withRoot, { kind: 'path', key: 'iris-deployment:x' }), null);
 });
 
 test('requirements resolve by id first, then by group', () => {

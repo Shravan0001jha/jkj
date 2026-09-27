@@ -31,6 +31,6 @@ export function tmpWorkplace(): TmpWorkplace {
     get org() { return state.org; },
     db,
     reload: () => { state.org = loadOrg(dir); return state.org; },
-    cleanup: () => { db.close(); rmSync(dir, { recursive: true, force: true }); },
+    cleanup: () => { try { db.close(); } catch { /* already closed by the server */ } rmSync(dir, { recursive: true, force: true }); },
   };
 }

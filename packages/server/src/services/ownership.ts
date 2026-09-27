@@ -34,7 +34,9 @@ export function resolve(
     for (const entry of map) {
       if (entry.kind !== 'path') continue;
       const key = normalisePath(entry.key);
-      if (path === key || path.startsWith(`${key}/`)) {
+      // "<repo>:" alone is the repo root and covers everything in it.
+      const root = key.endsWith(':');
+      if (path === key || path.startsWith(root ? key : `${key}/`)) {
         if (!best || key.length > normalisePath(best.key).length) best = entry;
       }
     }

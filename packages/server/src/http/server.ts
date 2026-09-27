@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Config } from '../config.js';
-import { createRouter } from './routes.js';
+import { createRouter, type RouterDeps } from './routes.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -22,8 +22,8 @@ const MIME: Record<string, string> = {
   '.woff2': 'font/woff2',
 };
 
-export function createHttpServer(config: Config): Server {
-  const api = createRouter(config);
+export function createHttpServer(deps: RouterDeps): Server {
+  const api = createRouter(deps);
 
   return createServer(async (req, res) => {
     if (await api(req, res)) return;
@@ -34,7 +34,7 @@ export function createHttpServer(config: Config): Server {
 function serveStatic(rawUrl: string, res: import('node:http').ServerResponse): void {
   if (!existsSync(WEB_DIST)) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end('<h1>JKJ</h1><p>The web UI is not built yet. Run <code>npm run dev</code> and open the Vite URL.</p>');
+    res.end('<h1>Iris Workplace</h1><p>The web UI is not built yet. Run <code>npm run build</code>, or <code>npm run dev</code> and open the Vite URL.</p>');
     return;
   }
 

@@ -5,7 +5,7 @@ import { start } from './index.js';
 import { log } from './util/logger.js';
 
 /**
- * `jkj` — start the control plane and open it in a browser.
+ * `jkj` — start the Iris Workplace and open it in a browser.
  *
  * Flags:
  *   --port <n>        default 4317
@@ -15,10 +15,13 @@ import { log } from './util/logger.js';
  */
 async function main(): Promise<void> {
   const config = loadConfig();
-  await start(config);
+  const running = await start(config);
 
   const url = `http://${config.host}:${config.port}`;
-  log.info('jkj', `ready at ${url}`);
+  log.info('workplace', `ready at ${url}`);
+  const shutdown = () => { void running.stop().finally(() => process.exit(0)); };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 
   if (config.openBrowser) openBrowser(url);
 }
@@ -31,6 +34,6 @@ function openBrowser(url: string): void {
 }
 
 main().catch(err => {
-  log.error('jkj', err instanceof Error ? err.message : String(err));
+  log.error('workplace', err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

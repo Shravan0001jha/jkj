@@ -5,6 +5,7 @@ import type { ContextKind, ContextLayer, ContextResponse } from '@jkj/shared';
 import { findClaudeHome, readTextFile } from '../runtime/claude-home.js';
 import { getSnapshot } from './workspace.js';
 import { BadRequest } from '../util/errors.js';
+import type { Workplace } from './workplace.js';
 
 /**
  * Reads and writes every file that reaches a session in a project.
@@ -38,6 +39,51 @@ export async function saveContext(projectId: string, id: string, body: string): 
   writeFileSync(layer.path, body, 'utf8');
 
   return { ...layer, body, exists: true, tokens: estimateTokens(body) };
+}
+
+/* ---------- employees: Workplace layers above the repo chain ---------- */
+
+/**
+ * An employee's context: the Workplace's own layers (handbook, unit,
+ * charters, status, handoff) followed by the CLAUDE.md chain of the repo it
+ * works in. Every layer is editable; Workplace layers write back to the
+ * workplace directory, repo layers to the repo.
+ */
+export async function readEmployeeContext(wp: Workplace, employeeId: string): Promise<ContextResponse> {
+  const layers = await employeeLayers(wp, employeeId);
+  return { projectId: `employee:${employeeId}`, layers, totalTokens: layers.reduce((n, l) => n + (l.counted ? l.tokens : 0), 0) };
+}
+
+export async function saveEmployeeContext(wp: Workplace, employeeId: string, id: string, body: string): Promise<ContextLayer> {
+  const layer = (await employeeLayers(wp, employeeId)).find(l => l.id === id);
+  if (!layer) throw new BadRequest('That context layer is no longer listed. Reload and try again.');
+  if (!layer.path) throw new BadRequest('That layer is assembled, not a file.');
+  mkdirSync(dirname(layer.path), { recursive: true });
+  writeFileSync(layer.path, body, 'utf8');
+  if (layer.path.startsWith(wp.org.dir)) {
+    const { commitOrg } = await import('./org.js');
+    commitOrg(wp.org.dir, `Edit ${layer.label} for ${employeeId}`);
+    wp.reloadOrg();
+  }
+  return { ...layer, body, exists: true, tokens: estimateTokens(body) };
+}
+
+async function employeeLayers(wp: Workplace, employeeId: string): Promise<ContextLayer[]> {
+  const { assembleContext } = await import('./context-layers.js');
+  const employee = wp.org.employees.find(e => e.id === employeeId);
+  if (!employee) throw new BadRequest(`No employee ${employeeId}`);
+  const assembled = assembleContext(wp.org, employee, { maxTokens: wp.config.contextTokens });
+  const home = findClaudeHome();
+  const repo = employee.workspace.worktree ?? employee.workspace.repo;
+  const chain: ContextLayer[] = [];
+  chain.push(layer({ id: 'user', kind: 'user', label: 'How I like things', summary: 'Yours, applied to every session on this machine.', path: join(home.configDir, 'CLAUDE.md') }));
+  for (const dir of ancestry(repo)) {
+    const path = join(dir, 'CLAUDE.md');
+    const inherited = dir !== repo;
+    if (inherited && !existsSync(path)) continue;
+    chain.push(layer({ id: `project:${dir}`, kind: 'project', label: inherited ? `${labelFor(dir)} (inherited)` : 'The repo', summary: inherited ? 'From a directory above the repo, so it applies here too.' : 'Committed with the code.', path, inherited }));
+  }
+  return [...assembled.layers.map(l => ({ ...l, summary: `${l.summary}${l.path.startsWith(wp.org.dir) ? ' (Workplace file)' : ''}` })), ...chain];
 }
 
 /* ---------- assembly ---------- */
