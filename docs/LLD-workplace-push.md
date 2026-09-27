@@ -1,7 +1,38 @@
 # LLD: push notifications for the Iris Workplace phone app
 
-Status: spec, 28 Sep 2026. Server side (`~/jkj`, branch `iris-workplace-push`) and relay side
+Spec written 28 Sep 2026. Server side (`~/jkj`, branch `iris-workplace-push`) and relay side
 (`services/workplace-relay/`) are built against this document; the iOS app implements §2 and §6.
+
+## Status (parked 28 Sep, end of day; nothing deployed)
+
+**Built and tested, not deployed, not merged:**
+- Mac: `packages/server/src/services/push.ts` (intents, derived bodies, secret scrub, collapse and
+  10-minute dedupe, 6/minute burst cap with a summary push, quiet hours, offline = dropped), wired in
+  `index.ts` beside Telegram; `tunnel.ts` gained the `push` / `push-result` frames and `Tunnel.push()`;
+  `config.ts` gained `push`, `ownerHandles`, `pushQuiet`; `/api/health` shows `workplace.push`.
+  Tests: `test/push.test.ts` (12) plus tunnel/telegram/api suites green.
+- Relay (`~/claude-dev-deploy`, branch `deploy/api-2026-09-22`, committed, **not deployed**):
+  `push.py` (ES256 JWT from the .p8, HTTP/2 per env, 410/BadDeviceToken → row dropped,
+  ExpiredProviderToken → one re-sign), `store.py` `push_devices` rows that leave with their session,
+  `tunnel.py` `push` frame → `push_requested` → `push-result`, `app.py` `/api/push/register|unregister|devices`
+  (bearer sessions only, never proxied), `/relay/health` `push` + `devices`. `requirements.txt` adds `h2`.
+  Tests: `test_relay_push.py` (12); the full relay suite is 40 green.
+- `scripts/deploy-workplace-relay.sh` now ships `push.py`, copies `~/iris-ops/mobile/AuthKey_<id>.p8`
+  to `/opt/workplace-relay/apns-key.p8` (640, group `workplace-relay`) and appends the four `APNS_*`
+  lines to the box's `.env` from `~/iris-ops/mobile/apns.env`. Syntax-checked, **not run**.
+
+**Next steps, in order:**
+1. Lead reviews the relay diff summary (sent) and approves; then deploy: `ssh-window.sh open`,
+   `scripts/deploy-workplace-relay.sh` (runs both test suites and the DB backup itself),
+   `ssh-window.sh close`; confirm `/relay/health` says `"push": "ready"`.
+2. Merge `iris-workplace-push` into `iris-workplace` (touches `config.ts`, `index.ts`, `tunnel.ts`,
+   `routes.ts` lightly; new files otherwise) and restart the owner's Workplace when the lead says so.
+3. iOS agent: §6. Until it registers a token, nothing pushes (zero devices is a no-op).
+4. Live check with a development build (`env: sandbox`): raise an Inbox item, see the push arrive
+   with the app closed, tap it, land on the item; then `logout-all` and confirm pushes stop.
+5. Known gaps: no delivery receipts beyond `push-result` counts; no retry queue by design; the Mac's
+   `alert` for a parked tool approval still carries tool input on the socket (only the push body is
+   sanitised, this document §4); quiet hours drop rather than hold.
 
 ## 0. Why and what
 

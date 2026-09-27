@@ -4,6 +4,7 @@ import { Resolver, lookup as osLookup } from 'node:dns';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import { log } from '../util/logger.js';
+import type { PushIntent, PushResult } from './push.js';
 
 /**
  * The Mac's outbound tunnel to the relay (HLD D11b, LLD §17).
@@ -22,6 +23,8 @@ export type Frame =
   | { type: 'ws-frame'; id: string; data: string }
   | { type: 'ws-close'; id: string; code?: number }
   | { type: 'telegram'; text: string }
+  | ({ type: 'push' } & PushIntent)
+  | ({ type: 'push-result' } & PushResult)
   | { type: 'off' }
   | { type: 'on' }
   | { type: 'enrol-on' }
@@ -41,6 +44,8 @@ export interface TunnelOptions {
   minBackoffMs?: number;
   maxBackoffMs?: number;
   onStatus?: (status: TunnelStatus) => void;
+  /** The relay's answer to a push frame. */
+  onPushResult?: (result: PushResult) => void;
 }
 
 export type TunnelStatus = 'connecting' | 'connected' | 'offline' | 'off';
@@ -75,6 +80,16 @@ export class Tunnel {
     this.ws?.close();
     this.ws = null;
     this.setStatus('offline');
+  }
+
+  /**
+   * Ask the relay to push to the owner's phones (LLD-workplace-push §8). False when nothing is
+   * connected: the intent is dropped, never queued, so a reconnect cannot replay stale "needs you".
+   */
+  push(intent: PushIntent): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.send({ type: 'push', ...intent });
+    return true;
   }
 
   /** Re-enable passkey enrolment on the relay after it disabled itself. */
@@ -173,6 +188,7 @@ export class Tunnel {
       case 'ws-frame': this.locals.get(frame.id)?.send(frame.data); break;
       case 'ws-close': { const l = this.locals.get(frame.id); this.locals.delete(frame.id); l?.close(); break; }
       case 'telegram': await (this.options.notify ?? notifyViaScript)(frame.text); break;
+      case 'push-result': this.options.onPushResult?.({ id: String(frame.id), sent: Number(frame.sent) || 0, dropped: Number(frame.dropped) || 0, failed: Number(frame.failed) || 0 }); break;
       default: break;
     }
   }
