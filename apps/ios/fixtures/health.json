@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "name": "jkj",
+  "version": "0.3.0-mock",
+  "uptimeSeconds": 4210,
+  "claudeHome": "/Users/shravan0001jha/.claude",
+  "workplace": {
+    "dataDir": "/Users/shravan0001jha/iris-workplace",
+    "capInr": 1000,
+    "day": "2026-09-27",
+    "telegram": true
+  }
+}

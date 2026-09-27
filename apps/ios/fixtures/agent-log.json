@@ -1,0 +1,58 @@
+[
+  {
+    "id": "l-1",
+    "agentId": "s-mira-1",
+    "at": "2026-09-27T08:35:00.000Z",
+    "kind": "user",
+    "label": "",
+    "text": "Assignment a-1: Errand receiver on the Mac. Reply with ## Plan first."
+  },
+  {
+    "id": "l-2",
+    "agentId": "s-mira-1",
+    "at": "2026-09-27T08:36:00.000Z",
+    "kind": "assistant",
+    "label": "",
+    "text": "## Plan\n1. Add an `errand` expert that validates the instruction.\n2. Run it through the existing act-then-ack path.\n3. Tests for a busy Mac."
+  },
+  {
+    "id": "l-3",
+    "agentId": "s-mira-1",
+    "at": "2026-09-27T08:40:00.000Z",
+    "kind": "read",
+    "label": "Read",
+    "text": "services/agent-svc/experts/whatsapp.py"
+  },
+  {
+    "id": "l-4",
+    "agentId": "s-mira-1",
+    "at": "2026-09-27T08:42:00.000Z",
+    "kind": "edit",
+    "label": "Edit",
+    "text": "services/agent-svc/experts/errand.py"
+  },
+  {
+    "id": "l-5",
+    "agentId": "s-mira-1",
+    "at": "2026-09-27T08:50:00.000Z",
+    "kind": "search",
+    "label": "Grep",
+    "text": "ask_mac"
+  },
+  {
+    "id": "l-6",
+    "agentId": "s-mira-1",
+    "at": "2026-09-27T08:54:00.000Z",
+    "kind": "assistant",
+    "label": "",
+    "text": "The expert is in. Running the errand tests now; this needs your approval because it is a shell command."
+  },
+  {
+    "id": "l-7",
+    "agentId": "s-mira-1",
+    "at": "2026-09-27T08:59:00.000Z",
+    "kind": "bash",
+    "label": "Bash",
+    "text": "cd services/agent-svc && ../../.venv/bin/python -m pytest -q tests/test_errands.py"
+  }
+]

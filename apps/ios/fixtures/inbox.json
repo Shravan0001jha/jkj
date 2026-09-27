@@ -1,0 +1,188 @@
+[
+  {
+    "id": "ib-1",
+    "kind": "approval",
+    "title": "Approve the Mac release 0.2.16",
+    "body": "Nikhil prepared desktop-mac 0.2.16: the errand handler, the no-false-Done guard and the tab switch fix. Notarisation is ready; the script kills the running Iris and does not relaunch it.",
+    "context": {
+      "action": "release",
+      "subject": "desktop-mac 0.2.16",
+      "unreleased": [
+        "8034a09 Phone actions on the Mac",
+        "ce943c7 Core round 9",
+        "46e43c1 Merge core round 9"
+      ],
+      "link": "https://github.com/Shravan0001jha/hivemind-prototype/compare/v0.2.15...feat/iris-character"
+    },
+    "options": [
+      {
+        "id": "approve",
+        "label": "Release 0.2.16",
+        "danger": true
+      },
+      {
+        "id": "reject",
+        "label": "Not yet",
+        "needsNote": true
+      }
+    ],
+    "state": "open",
+    "raisedBy": "nikhil",
+    "createdAt": "2026-09-27T08:48:00.000Z"
+  },
+  {
+    "id": "ib-2",
+    "kind": "decision",
+    "title": "Push-to-talk or wake word as the iPad default?",
+    "body": "The definition leaves it open. Dev recommends push-to-talk by default with the wake word opt-in, because the wake word mis-fires in shared rooms.",
+    "context": {
+      "requirement": "REQ-VOICE-03",
+      "recommendation": "push-to-talk"
+    },
+    "options": [
+      {
+        "id": "ptt",
+        "label": "Push-to-talk default"
+      },
+      {
+        "id": "wake",
+        "label": "Wake word default"
+      },
+      {
+        "id": "later",
+        "label": "Decide later",
+        "needsNote": true
+      }
+    ],
+    "state": "open",
+    "raisedBy": "dev",
+    "createdAt": "2026-09-27T08:27:00.000Z"
+  },
+  {
+    "id": "ib-3",
+    "kind": "cap",
+    "title": "Tara is at her daily cap (₹150)",
+    "body": "The mobile errand sender is half built. Raise her cap for today, or keep it and she resumes tomorrow.",
+    "context": {
+      "scope": "employee:tara",
+      "spentInr": 150,
+      "capInr": 150
+    },
+    "options": [
+      {
+        "id": "raise-today",
+        "label": "Raise for today",
+        "needsNote": true
+      },
+      {
+        "id": "keep",
+        "label": "Keep the cap"
+      }
+    ],
+    "state": "open",
+    "raisedBy": "workplace",
+    "createdAt": "2026-09-27T08:12:00.000Z"
+  },
+  {
+    "id": "ib-4",
+    "kind": "org-change",
+    "title": "Split \"mobile\" into iOS and Android, hire an Android lead",
+    "body": "The mobile queue is at 7 and Android work keeps waiting on iOS. Asha proposes two charters and one hire from the lead template.",
+    "context": {
+      "proposalId": "op-1",
+      "kind": "split",
+      "diff": "--- charters/mobile.md\n+++ charters/mobile-ios.md\n+++ charters/mobile-android.md\n map.yaml: 6 entries move to mobile-android"
+    },
+    "options": [
+      {
+        "id": "approve",
+        "label": "Approve the split and hire"
+      },
+      {
+        "id": "reject",
+        "label": "Reject",
+        "needsNote": true
+      }
+    ],
+    "state": "open",
+    "raisedBy": "asha",
+    "createdAt": "2026-09-27T07:50:00.000Z"
+  },
+  {
+    "id": "ib-5",
+    "kind": "question",
+    "title": "Kabir: which socket contract for Mac errands?",
+    "body": "The experts charter has not published the Mac socket message shape yet. Kabir is blocked until it exists, or until you say to reuse the existing ask_mac shape.",
+    "context": {
+      "assignment": "a-2",
+      "blockedOn": "experts"
+    },
+    "options": [
+      {
+        "id": "reuse",
+        "label": "Reuse ask_mac"
+      },
+      {
+        "id": "wait",
+        "label": "Wait for experts"
+      }
+    ],
+    "state": "open",
+    "raisedBy": "kabir",
+    "createdAt": "2026-09-27T08:31:00.000Z"
+  },
+  {
+    "id": "ib-6",
+    "kind": "release",
+    "title": "Deploy iris-api with the errand endpoint",
+    "body": "Done and verified; waiting on the Mac contract first.",
+    "context": {
+      "action": "deploy",
+      "subject": "server-api"
+    },
+    "options": [
+      {
+        "id": "approve",
+        "label": "Deploy",
+        "danger": true
+      },
+      {
+        "id": "reject",
+        "label": "Reject",
+        "needsNote": true
+      }
+    ],
+    "state": "answered",
+    "answer": {
+      "optionId": "reject",
+      "note": "After the Mac contract lands.",
+      "at": "2026-09-27T08:40:00.000Z",
+      "via": "telegram"
+    },
+    "raisedBy": "nikhil",
+    "createdAt": "2026-09-27T05:40:00.000Z"
+  },
+  {
+    "id": "ib-7",
+    "kind": "approval",
+    "title": "Access to the App Store Connect key for TestFlight",
+    "body": "Tara needs the ASC key to upload a TestFlight build.",
+    "context": {
+      "action": "new-secret",
+      "subject": "asc-key"
+    },
+    "options": [
+      {
+        "id": "approve",
+        "label": "Grant"
+      },
+      {
+        "id": "reject",
+        "label": "Deny"
+      }
+    ],
+    "state": "expired",
+    "raisedBy": "tara",
+    "createdAt": "2026-09-26T08:00:00.000Z"
+  }
+]

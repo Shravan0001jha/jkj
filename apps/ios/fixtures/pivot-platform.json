@@ -1,0 +1,70 @@
+{
+  "rows": [
+    "mac",
+    "windows",
+    "ios",
+    "android",
+    "server"
+  ],
+  "cols": [
+    "f-errands",
+    "f-share",
+    "f-lipsync"
+  ],
+  "cells": {
+    "mac": {
+      "f-errands": {
+        "total": 3,
+        "byState": {
+          "building": 1,
+          "review": 1,
+          "done": 1
+        }
+      },
+      "f-share": {
+        "total": 1,
+        "byState": {
+          "planned": 1
+        }
+      },
+      "f-lipsync": {
+        "total": 2,
+        "byState": {
+          "done": 2
+        }
+      }
+    },
+    "windows": {
+      "f-share": {
+        "total": 1,
+        "byState": {
+          "proposed": 1
+        }
+      }
+    },
+    "ios": {
+      "f-errands": {
+        "total": 1,
+        "byState": {
+          "planned": 1
+        }
+      }
+    },
+    "android": {
+      "f-errands": {
+        "total": 1,
+        "byState": {
+          "planned": 1
+        }
+      }
+    },
+    "server": {
+      "f-errands": {
+        "total": 1,
+        "byState": {
+          "blocked": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "id": "experts",
+  "title": "Experts",
+  "axis": "capability",
+  "version": 2,
+  "mission": "Device actions with the no-lie guard: act first, then acknowledge.",
+  "holderIds": [
+    "mira"
+  ],
+  "tokens": 1380,
+  "scope": [
+    "Timer and alarm",
+    "Reminders",
+    "WhatsApp (staged send, confirm)",
+    "Music",
+    "Screen-aware lines",
+    "Phone→Mac errands (Mac side)"
+  ],
+  "owns": [
+    {
+      "kind": "path",
+      "key": "services/agent-svc/experts/"
+    },
+    {
+      "kind": "path",
+      "key": "docs/experts/"
+    },
+    {
+      "kind": "keyword",
+      "key": "errand"
+    },
+    {
+      "kind": "requirement-group",
+      "key": "System actions"
+    }
+  ],
+  "interfaces": {
+    "publishes": [
+      "Fn.speaks flag",
+      "expert result envelope"
+    ],
+    "consumes": [
+      "STT transcript",
+      "cloud agent errand"
+    ]
+  },
+  "rules": [
+    "Never fire-and-forget a send.",
+    "Deterministic actions run, then ack.",
+    "Optimistic \"Done\" only for slow work."
+  ],
+  "definitionOfDone": [
+    "pytest green",
+    "a live voice run through the shipped binary",
+    "notVerified listed"
+  ],
+  "buildTestShip": [
+    "services/agent-svc: ../../.venv/bin/python -m pytest -q tests",
+    "harness/live_turn.py for speech"
+  ],
+  "coordinateWith": [
+    "conversation",
+    "mobile",
+    "server"
+  ],
+  "needsOwnerApproval": [
+    "any message to a person",
+    "deleting user data"
+  ],
+  "body": "# Experts\n\n## Mission\nDevice actions with the no-lie guard.\n\n## Rules\n- Never fire-and-forget a send.\n- Deterministic actions run, then ack.\n\n## Traps\n- AppleScript needs the app running.\n",
+  "path": "/Users/shravan0001jha/iris-workplace/charters/experts.md"
+}

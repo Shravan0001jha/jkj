@@ -1,0 +1,177 @@
+[
+  {
+    "id": "asha",
+    "name": "Asha",
+    "roleId": "chief-of-staff",
+    "level": 0,
+    "permanent": true,
+    "charterIds": [
+      "chief-of-staff",
+      "product-and-business"
+    ],
+    "unitId": "product",
+    "chapterIds": [],
+    "reportsTo": null,
+    "workspace": {
+      "repo": "/Users/shravan0001jha/claude-dev",
+      "worktree": "/Users/shravan0001jha/claude-dev-asha",
+      "branch": "wp/asha"
+    },
+    "budget": {
+      "inrPerDay": 150,
+      "concurrentSessions": 2
+    },
+    "githubApp": "iris-chief-of-staff",
+    "state": "working"
+  },
+  {
+    "id": "dev",
+    "name": "Dev",
+    "roleId": "lead",
+    "level": 1,
+    "permanent": true,
+    "charterIds": [
+      "conversation",
+      "character"
+    ],
+    "unitId": "capabilities",
+    "chapterIds": [],
+    "reportsTo": "asha",
+    "workspace": {
+      "repo": "/Users/shravan0001jha/claude-dev",
+      "worktree": "/Users/shravan0001jha/claude-dev-dev",
+      "branch": "wp/dev"
+    },
+    "budget": {
+      "inrPerDay": 150,
+      "concurrentSessions": 2
+    },
+    "githubApp": "iris-conversation-lead",
+    "state": "idle"
+  },
+  {
+    "id": "mira",
+    "name": "Mira",
+    "roleId": "lead",
+    "level": 1,
+    "permanent": true,
+    "charterIds": [
+      "experts"
+    ],
+    "unitId": "capabilities",
+    "chapterIds": [],
+    "reportsTo": "asha",
+    "workspace": {
+      "repo": "/Users/shravan0001jha/claude-dev",
+      "worktree": "/Users/shravan0001jha/claude-dev-mira",
+      "branch": "wp/mira"
+    },
+    "budget": {
+      "inrPerDay": 150,
+      "concurrentSessions": 2
+    },
+    "githubApp": "iris-experts-lead",
+    "state": "needs-owner"
+  },
+  {
+    "id": "kabir",
+    "name": "Kabir",
+    "roleId": "lead",
+    "level": 1,
+    "permanent": true,
+    "charterIds": [
+      "memory",
+      "server"
+    ],
+    "unitId": "capabilities",
+    "chapterIds": [
+      "platforms-chapter"
+    ],
+    "reportsTo": "asha",
+    "workspace": {
+      "repo": "/Users/shravan0001jha/claude-dev",
+      "worktree": "/Users/shravan0001jha/claude-dev-kabir",
+      "branch": "wp/kabir"
+    },
+    "budget": {
+      "inrPerDay": 150,
+      "concurrentSessions": 2
+    },
+    "githubApp": "iris-memory-lead",
+    "state": "blocked"
+  },
+  {
+    "id": "rohan",
+    "name": "Rohan",
+    "roleId": "lead",
+    "level": 1,
+    "permanent": true,
+    "charterIds": [
+      "desktop-mac",
+      "windows"
+    ],
+    "unitId": "platforms",
+    "chapterIds": [],
+    "reportsTo": "asha",
+    "workspace": {
+      "repo": "/Users/shravan0001jha/claude-dev",
+      "worktree": "/Users/shravan0001jha/claude-dev-rohan",
+      "branch": "wp/rohan"
+    },
+    "budget": {
+      "inrPerDay": 150,
+      "concurrentSessions": 2
+    },
+    "githubApp": "iris-desktop-mac-lead",
+    "state": "working"
+  },
+  {
+    "id": "tara",
+    "name": "Tara",
+    "roleId": "lead",
+    "level": 1,
+    "permanent": true,
+    "charterIds": [
+      "mobile"
+    ],
+    "unitId": "platforms",
+    "chapterIds": [],
+    "reportsTo": "asha",
+    "workspace": {
+      "repo": "/Users/shravan0001jha/claude-dev",
+      "worktree": "/Users/shravan0001jha/claude-dev-tara",
+      "branch": "wp/tara"
+    },
+    "budget": {
+      "inrPerDay": 150,
+      "concurrentSessions": 2
+    },
+    "githubApp": "iris-mobile-lead",
+    "state": "paused"
+  },
+  {
+    "id": "nikhil",
+    "name": "Nikhil",
+    "roleId": "qa",
+    "level": 1,
+    "permanent": true,
+    "charterIds": [
+      "qa-release",
+      "beta-ops"
+    ],
+    "unitId": "quality",
+    "chapterIds": [],
+    "reportsTo": "asha",
+    "workspace": {
+      "repo": "/Users/shravan0001jha/claude-dev",
+      "worktree": "/Users/shravan0001jha/claude-dev-nikhil",
+      "branch": "wp/nikhil"
+    },
+    "budget": {
+      "inrPerDay": 150,
+      "concurrentSessions": 2
+    },
+    "githubApp": "iris-qa",
+    "state": "idle"
+  }
+]

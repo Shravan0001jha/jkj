@@ -1,0 +1,116 @@
+{
+  "total": 118,
+  "owned": 118,
+  "planned": 61,
+  "built": 52,
+  "verified": 9,
+  "released": 0,
+  "byGroup": {
+    "Expressions": {
+      "total": 9,
+      "owned": 9,
+      "planned": 6,
+      "built": 5,
+      "verified": 1,
+      "released": 0
+    },
+    "Voice": {
+      "total": 11,
+      "owned": 11,
+      "planned": 8,
+      "built": 7,
+      "verified": 2,
+      "released": 0
+    },
+    "System actions": {
+      "total": 14,
+      "owned": 14,
+      "planned": 9,
+      "built": 8,
+      "verified": 3,
+      "released": 0
+    },
+    "Memory": {
+      "total": 8,
+      "owned": 8,
+      "planned": 5,
+      "built": 4,
+      "verified": 1,
+      "released": 0
+    },
+    "Cross-device": {
+      "total": 7,
+      "owned": 7,
+      "planned": 4,
+      "built": 2,
+      "verified": 0,
+      "released": 0
+    },
+    "Privacy and safety": {
+      "total": 9,
+      "owned": 9,
+      "planned": 2,
+      "built": 3,
+      "verified": 1,
+      "released": 0
+    },
+    "Pricing": {
+      "total": 6,
+      "owned": 6,
+      "planned": 1,
+      "built": 0,
+      "verified": 0,
+      "released": 0
+    }
+  },
+  "byCharter": {
+    "character": {
+      "total": 22,
+      "owned": 22,
+      "planned": 12,
+      "built": 11,
+      "verified": 2,
+      "released": 0
+    },
+    "conversation": {
+      "total": 18,
+      "owned": 18,
+      "planned": 11,
+      "built": 9,
+      "verified": 2,
+      "released": 0
+    },
+    "experts": {
+      "total": 24,
+      "owned": 24,
+      "planned": 14,
+      "built": 13,
+      "verified": 3,
+      "released": 0
+    },
+    "memory": {
+      "total": 8,
+      "owned": 8,
+      "planned": 5,
+      "built": 4,
+      "verified": 1,
+      "released": 0
+    },
+    "mobile": {
+      "total": 7,
+      "owned": 7,
+      "planned": 4,
+      "built": 2,
+      "verified": 0,
+      "released": 0
+    },
+    "product-and-business": {
+      "total": 39,
+      "owned": 39,
+      "planned": 15,
+      "built": 13,
+      "verified": 1,
+      "released": 0
+    }
+  }
+}

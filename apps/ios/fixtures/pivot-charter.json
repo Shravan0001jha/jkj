@@ -1,0 +1,71 @@
+{
+  "rows": [
+    "experts",
+    "server",
+    "desktop-mac",
+    "mobile",
+    "conversation",
+    "character"
+  ],
+  "cols": [
+    "f-errands",
+    "f-share",
+    "f-lipsync"
+  ],
+  "cells": {
+    "experts": {
+      "f-errands": {
+        "total": 1,
+        "byState": {
+          "building": 1
+        }
+      }
+    },
+    "server": {
+      "f-errands": {
+        "total": 1,
+        "byState": {
+          "blocked": 1
+        }
+      }
+    },
+    "desktop-mac": {
+      "f-errands": {
+        "total": 1,
+        "byState": {
+          "review": 1
+        }
+      },
+      "f-share": {
+        "total": 1,
+        "byState": {
+          "planned": 1
+        }
+      }
+    },
+    "mobile": {
+      "f-errands": {
+        "total": 1,
+        "byState": {
+          "planned": 1
+        }
+      }
+    },
+    "conversation": {
+      "f-errands": {
+        "total": 1,
+        "byState": {
+          "done": 1
+        }
+      }
+    },
+    "character": {
+      "f-lipsync": {
+        "total": 2,
+        "byState": {
+          "done": 2
+        }
+      }
+    }
+  }
+}

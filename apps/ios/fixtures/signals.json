@@ -1,0 +1,77 @@
+{
+  "employees": {
+    "asha": {
+      "throughput7d": 3,
+      "rework7d": 1,
+      "falseDoneRate7d": 0.1,
+      "costPerDoneInr": 62.5
+    },
+    "dev": {
+      "throughput7d": 3,
+      "rework7d": 1,
+      "falseDoneRate7d": 0.1,
+      "costPerDoneInr": 62.5
+    },
+    "mira": {
+      "throughput7d": 3,
+      "rework7d": 1,
+      "falseDoneRate7d": 0.1,
+      "costPerDoneInr": 62.5
+    },
+    "kabir": {
+      "throughput7d": 3,
+      "rework7d": 1,
+      "falseDoneRate7d": 0.1,
+      "costPerDoneInr": 62.5
+    },
+    "rohan": {
+      "throughput7d": 3,
+      "rework7d": 1,
+      "falseDoneRate7d": 0.1,
+      "costPerDoneInr": 62.5
+    },
+    "tara": {
+      "throughput7d": 3,
+      "rework7d": 1,
+      "falseDoneRate7d": 0.1,
+      "costPerDoneInr": 62.5
+    },
+    "nikhil": {
+      "throughput7d": 3,
+      "rework7d": 1,
+      "falseDoneRate7d": 0.1,
+      "costPerDoneInr": 62.5
+    }
+  },
+  "charters": {
+    "experts": {
+      "queue": 2,
+      "contextLimitHits7d": 1
+    },
+    "mobile": {
+      "queue": 7,
+      "contextLimitHits7d": 3
+    }
+  },
+  "blockingPairs": [
+    [
+      "server",
+      "experts"
+    ]
+  ],
+  "proposalTriggers": [
+    {
+      "code": "queue",
+      "subject": "mobile",
+      "message": "Queue length 7 > 5"
+    }
+  ],
+  "stalled": [
+    {
+      "sessionId": "s-kabir-1",
+      "employeeId": "kabir",
+      "reason": "idle",
+      "since": "2026-09-27T08:30:00.000Z"
+    }
+  ]
+}

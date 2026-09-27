@@ -1,0 +1,13 @@
+{
+  "id": "rel-1",
+  "shippable": "desktop-mac",
+  "version": "0.2.16",
+  "state": "proposed",
+  "unreleased": [
+    "8034a09",
+    "ce943c7",
+    "46e43c1"
+  ],
+  "inboxId": "ib-1",
+  "createdAt": "2026-09-27T08:48:00.000Z"
+}

@@ -1,0 +1,130 @@
+import XCTest
+@testable import IrisWorkplace
+
+/// Every response type decodes from a fixture shaped by the contract and re-encodes to the same
+/// JSON. A field the Swift model lacks, misnames or mistypes fails here.
+final class ContractTests: XCTestCase {
+    private func roundTrip<T: Codable & Equatable>(_ name: String, _ type: T.Type) throws {
+        let decoded = try Fixtures.decode(name, as: T.self)
+        let reencoded = try jsonObject(decoded)
+        // `x: T | null` in TypeScript is `T?` in Swift, which encodes as an absent key: strip nulls before comparing.
+        let original = stripNulls(try Fixtures.json(name))
+        XCTAssertTrue((reencoded as AnyObject).isEqual(original), "\(name): re-encoded JSON differs from the fixture (a field is missing, renamed or mistyped in \(T.self)):\n\(diff(original, reencoded))")
+        let again = try JSONDecoder().decode(T.self, from: try JSONEncoder().encode(decoded))
+        XCTAssertEqual(again, decoded)
+    }
+
+    func testHealth() throws { try roundTrip("health", WorkplaceHealthResponse.self) }
+    func testOffice() throws { try roundTrip("office", OfficeResponse.self) }
+    func testOrg() throws { try roundTrip("org", OrgResponse.self) }
+    func testCharter() throws { try roundTrip("charter", Charter.self) }
+    func testInbox() throws { try roundTrip("inbox", [InboxItem].self) }
+    func testEmployees() throws { try roundTrip("employees", [Employee].self) }
+    func testEmployeeDetail() throws { try roundTrip("employee-detail", EmployeeDetail.self) }
+    func testAgent() throws { try roundTrip("agent", Agent.self) }
+    func testAgentLog() throws { try roundTrip("agent-log", [LogEntry].self) }
+    func testFeatures() throws { try roundTrip("features", FeatureBoard.self) }
+    func testFeatureDetail() throws { try roundTrip("feature-detail", FeatureDetail.self) }
+    func testPivots() throws {
+        try roundTrip("pivot-charter", Pivot.self)
+        try roundTrip("pivot-platform", Pivot.self)
+        try roundTrip("pivot-team", Pivot.self)
+    }
+    func testRequirements() throws { try roundTrip("requirements", [Requirement].self) }
+    func testCoverage() throws { try roundTrip("coverage", Coverage.self) }
+    func testSpend() throws { try roundTrip("spend", SpendSummary.self) }
+    func testSignals() throws { try roundTrip("signals", HealthSignals.self) }
+    func testRelease() throws { try roundTrip("release", Release.self) }
+    func testProposal() throws { try roundTrip("proposal", OrgProposal.self) }
+    func testRoute() throws { try roundTrip("route", RouteResult.self) }
+    func testPair() throws {
+        try roundTrip("pair", PairResponse.self)
+        try roundTrip("pair-exchange", PairExchangeResponse.self)
+    }
+
+    func testOfficeFixtureHasEveryEmployeeState() throws {
+        let office = try Fixtures.decode("office", as: OfficeResponse.self)
+        let states = Set(office.units.flatMap(\.employees).map(\.employee.state))
+        XCTAssertEqual(states, Set(EmployeeState.allCases), "the office fixture must exercise every employee state")
+        XCTAssertEqual(office.units.flatMap(\.employees).count, 7)
+    }
+
+    func testInboxFixtureHasEveryKindAndState() throws {
+        let items = try Fixtures.decode("inbox", as: [InboxItem].self)
+        XCTAssertEqual(Set(items.map(\.kind)), Set(InboxKind.allCases))
+        XCTAssertEqual(Set(items.map(\.state)), Set(InboxState.allCases))
+        XCTAssertTrue(items.contains { $0.options.contains { $0.danger == true } })
+        XCTAssertTrue(items.contains { $0.options.contains { $0.needsNote == true } })
+        XCTAssertEqual(items.first { $0.id == "ib-6" }?.answer?.via, .telegram)
+    }
+
+    func testInboxContextIsArbitraryJSON() throws {
+        let items = try Fixtures.decode("inbox", as: [InboxItem].self)
+        let release = items.first { $0.id == "ib-1" }!
+        XCTAssertEqual(release.context["action"], .string("release"))
+        guard case .array(let unreleased)? = release.context["unreleased"] else { return XCTFail("unreleased should be an array") }
+        XCTAssertEqual(unreleased.count, 3)
+        XCTAssertEqual(JSONValue.number(150).display, "150")
+        XCTAssertEqual(JSONValue.number(1.5).display, "1.5")
+        XCTAssertEqual(JSONValue.bool(true).display, "yes")
+        XCTAssertEqual(JSONValue.null.display, "—")
+    }
+
+    func testWorkStateIsTheUnionOfFeatureAndAssignmentStates() {
+        XCTAssertEqual(Set(WorkState.featureStates + WorkState.assignmentStates), Set(WorkState.allCases))
+        XCTAssertEqual(WorkState.inProgress.rawValue, "in-progress")
+    }
+
+    func testEveryKnownServerEventDecodes() throws {
+        let raw = try Fixtures.json("events") as! [[String: Any]]
+        let data = try Fixtures.data("events")
+        let events = try JSONDecoder().decode([ServerEvent].self, from: data)
+        XCTAssertEqual(events.count, raw.count)
+        var seen: Set<String> = []
+        for (i, e) in events.enumerated() {
+            let type = raw[i]["type"] as! String
+            if case .unknown(let t) = e {
+                XCTAssertEqual(t, "future.event", "known event type \(type) decoded as unknown")
+            } else {
+                seen.insert(type)
+            }
+        }
+        XCTAssertEqual(seen, Set(ServerEvent.knownTypes), "the events fixture must cover every known event type")
+    }
+
+    func testEventPayloadsAreDecodedNotJustRecognised() throws {
+        let events = try Fixtures.decode("events", as: [ServerEvent].self)
+        guard case .alert(let a) = events.first(where: { if case .alert = $0 { return true } else { return false } })! else { return XCTFail() }
+        XCTAssertEqual(a.level, .needsYou)
+        XCTAssertEqual(a.inboxId, "ib-5")
+        guard case .snapshot(let agents) = events[1] else { return XCTFail("second event is the snapshot") }
+        XCTAssertEqual(agents.count, 4)
+        guard case .agentUpdated(let agent) = events[2] else { return XCTFail() }
+        XCTAssertEqual(agent.approval?.tool, "Bash")
+        XCTAssertEqual(agent.status, .waiting)
+    }
+
+    func testClientCommandsEncodeToTheContract() throws {
+        let cases: [(ClientCommand, [String: Any])] = [
+            (.subscribe(projectId: "p"), ["type": "subscribe", "projectId": "p"]),
+            (.agentMessage(agentId: "a", text: "hi"), ["type": "agent.message", "agentId": "a", "text": "hi"]),
+            (.agentInterrupt(agentId: "a"), ["type": "agent.interrupt", "agentId": "a"]),
+            (.agentApprove(agentId: "a", approvalId: "ap", decision: .always), ["type": "agent.approve", "agentId": "a", "approvalId": "ap", "decision": "always"]),
+            (.agentMode(agentId: "a", mode: .acceptEdits), ["type": "agent.mode", "agentId": "a", "mode": "acceptEdits"]),
+            (.inboxAnswer(id: "i", optionId: "approve", note: nil), ["type": "inbox.answer", "id": "i", "optionId": "approve"]),
+            (.inboxAnswer(id: "i", optionId: "reject", note: "why"), ["type": "inbox.answer", "id": "i", "optionId": "reject", "note": "why"]),
+        ]
+        var types: Set<String> = []
+        for (cmd, expected) in cases {
+            let obj = try jsonObject(cmd) as! [String: Any]
+            XCTAssertTrue((obj as NSDictionary).isEqual(to: expected), "\(cmd) encoded as \(obj)")
+            types.insert(expected["type"] as! String)
+        }
+        XCTAssertEqual(types, Set(ClientCommand.knownTypes))
+    }
+
+    func testUnknownEnumValueIsADecodingError() {
+        let bad = Data(#"{"id":"x","kind":"bribe","title":"","body":"","context":{},"options":[],"state":"open","raisedBy":"","createdAt":""}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(InboxItem.self, from: bad))
+    }
+}

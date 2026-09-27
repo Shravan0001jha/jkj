@@ -1,0 +1,350 @@
+{
+  "feature": {
+    "id": "f-errands",
+    "kind": "feature",
+    "title": "Phone→Mac errands: say it on the phone, it happens on the Mac",
+    "body": "The owner says \"open the deck on my Mac\" on the phone. The cloud agent turns it into an errand, the Mac runs it through the experts, and the phone shows an honest result: never \"Done\" before it happened.",
+    "state": "in-progress",
+    "requirementIds": [
+      "REQ-CROSS-01",
+      "REQ-CROSS-03",
+      "REQ-SYS-07"
+    ],
+    "platformIds": [
+      "ios",
+      "android",
+      "mac",
+      "server"
+    ],
+    "createdAt": "2026-09-27T07:00:00.000Z",
+    "updatedAt": "2026-09-27T08:55:00.000Z",
+    "history": [
+      {
+        "at": "2026-09-27T07:00:00.000Z",
+        "from": null,
+        "to": "stated",
+        "by": "owner"
+      },
+      {
+        "at": "2026-09-27T07:20:00.000Z",
+        "from": "stated",
+        "to": "specced",
+        "by": "asha"
+      },
+      {
+        "at": "2026-09-27T07:25:00.000Z",
+        "from": "specced",
+        "to": "decomposed",
+        "by": "workplace"
+      },
+      {
+        "at": "2026-09-27T08:00:00.000Z",
+        "from": "decomposed",
+        "to": "in-progress",
+        "by": "workplace"
+      }
+    ],
+    "spec": "## Spec\n1. Phone sends the instruction whole.\n2. Cloud agent asks the Mac (ask_mac); a busy Mac is online.\n3. No \"Done\" without a Mac result.\n\n## Acceptance\n- Round trip under 3 s on LAN.\n- False-done rate 0 over 20 errands."
+  },
+  "assignments": [
+    {
+      "id": "a-1",
+      "kind": "assignment",
+      "title": "Errand receiver on the Mac (experts)",
+      "body": "Errand receiver on the Mac (experts)",
+      "state": "building",
+      "requirementIds": [],
+      "platformIds": [
+        "mac"
+      ],
+      "createdAt": "2026-09-27T07:00:00.000Z",
+      "updatedAt": "2026-09-27T08:55:00.000Z",
+      "history": [
+        {
+          "at": "2026-09-27T07:00:00.000Z",
+          "from": null,
+          "to": "proposed",
+          "by": "owner"
+        }
+      ],
+      "featureId": "f-errands",
+      "charterId": "experts",
+      "employeeId": "mira",
+      "sessionId": "s-mira-1",
+      "plan": "## Plan\n1. Add an `errand` expert that validates the instruction.\n2. Run it through the existing act-then-ack path.\n3. Tests for a busy Mac."
+    },
+    {
+      "id": "a-2",
+      "kind": "assignment",
+      "title": "Errand endpoint on iris-api",
+      "body": "Errand endpoint on iris-api",
+      "state": "blocked",
+      "requirementIds": [],
+      "platformIds": [
+        "server"
+      ],
+      "createdAt": "2026-09-27T07:00:00.000Z",
+      "updatedAt": "2026-09-27T08:55:00.000Z",
+      "history": [
+        {
+          "at": "2026-09-27T08:00:00.000Z",
+          "from": "planned",
+          "to": "building",
+          "by": "kabir"
+        },
+        {
+          "at": "2026-09-27T08:30:00.000Z",
+          "from": "building",
+          "to": "blocked",
+          "by": "kabir",
+          "note": "Needs the contract for the Mac socket from experts."
+        }
+      ],
+      "featureId": "f-errands",
+      "charterId": "server",
+      "employeeId": "kabir",
+      "sessionId": "s-kabir-1",
+      "plan": "## Plan\n1. POST /v1/errands.\n2. Persist and relay to the Mac socket."
+    },
+    {
+      "id": "a-3",
+      "kind": "assignment",
+      "title": "Desktop errand handler",
+      "body": "Desktop errand handler",
+      "state": "review",
+      "requirementIds": [],
+      "platformIds": [
+        "mac"
+      ],
+      "createdAt": "2026-09-27T07:00:00.000Z",
+      "updatedAt": "2026-09-27T08:55:00.000Z",
+      "history": [
+        {
+          "at": "2026-09-27T07:00:00.000Z",
+          "from": null,
+          "to": "proposed",
+          "by": "owner"
+        }
+      ],
+      "featureId": "f-errands",
+      "charterId": "desktop-mac",
+      "employeeId": "rohan",
+      "sessionId": "s-rohan-1",
+      "plan": "## Plan\n1. Wire the socket message to the expert runner.\n2. Show the result in the pet bubble.",
+      "evidence": {
+        "tests": {
+          "passed": 212,
+          "failed": 0,
+          "command": "npm test"
+        },
+        "commits": [
+          "8034a09 Phone actions on the Mac: no false Done",
+          "ce943c7 Core round 9: errand lifecycle"
+        ],
+        "liveVerified": [
+          "20 errands from the iPhone on LAN, 0 false done",
+          "busy Mac reported online"
+        ],
+        "notVerified": [
+          "Android sender",
+          "Tailscale path"
+        ],
+        "notes": "https://github.com/Shravan0001jha/hivemind-prototype/pull/41"
+      }
+    },
+    {
+      "id": "a-4",
+      "kind": "assignment",
+      "title": "Errand sender in the iOS and Android apps",
+      "body": "Errand sender in the iOS and Android apps",
+      "state": "planned",
+      "requirementIds": [],
+      "platformIds": [
+        "ios",
+        "android"
+      ],
+      "createdAt": "2026-09-27T07:00:00.000Z",
+      "updatedAt": "2026-09-27T08:55:00.000Z",
+      "history": [
+        {
+          "at": "2026-09-27T07:00:00.000Z",
+          "from": null,
+          "to": "proposed",
+          "by": "owner"
+        }
+      ],
+      "featureId": "f-errands",
+      "charterId": "mobile",
+      "employeeId": "tara",
+      "plan": "## Plan\n1. iOS: send the whole instruction, show the ask_mac state.\n2. Android: same."
+    },
+    {
+      "id": "a-5",
+      "kind": "assignment",
+      "title": "Errand spoken confirmations",
+      "body": "Errand spoken confirmations",
+      "state": "done",
+      "requirementIds": [],
+      "platformIds": [
+        "mac"
+      ],
+      "createdAt": "2026-09-27T07:00:00.000Z",
+      "updatedAt": "2026-09-27T08:55:00.000Z",
+      "history": [
+        {
+          "at": "2026-09-27T07:00:00.000Z",
+          "from": null,
+          "to": "proposed",
+          "by": "owner"
+        }
+      ],
+      "featureId": "f-errands",
+      "charterId": "conversation",
+      "employeeId": "dev",
+      "verifiedBy": "nikhil",
+      "evidence": {
+        "tests": {
+          "passed": 48,
+          "failed": 0,
+          "command": "pytest -q tests/test_speaker.py"
+        },
+        "commits": [
+          "46e43c1 Merge core round 9"
+        ],
+        "liveVerified": [
+          "3 spoken confirmations through the shipped binary"
+        ],
+        "notVerified": []
+      }
+    }
+  ],
+  "requirements": [
+    {
+      "id": "REQ-CROSS-01",
+      "group": "Cross-device",
+      "section": "§3 Features",
+      "title": "Say it on the phone, it happens on the Mac",
+      "segments": [
+        "tech workers",
+        "students"
+      ],
+      "status": "partial",
+      "evidence": [
+        "20 errands live on LAN"
+      ],
+      "charterId": "mobile",
+      "featureIds": [
+        "f-errands"
+      ]
+    },
+    {
+      "id": "REQ-CROSS-03",
+      "group": "Cross-device",
+      "section": "§3 Features",
+      "title": "A busy Mac still counts as online",
+      "segments": [
+        "tech workers"
+      ],
+      "status": "built",
+      "evidence": [
+        "8034a09"
+      ],
+      "charterId": "server",
+      "featureIds": [
+        "f-errands"
+      ]
+    },
+    {
+      "id": "REQ-SYS-07",
+      "group": "System actions",
+      "section": "§3 Features",
+      "title": "Never claim an action before it happened",
+      "note": "The no-lie guard.",
+      "segments": [
+        "all"
+      ],
+      "status": "verified",
+      "evidence": [
+        "harness/live_turn.py run 27 Sep"
+      ],
+      "charterId": "experts",
+      "featureIds": [
+        "f-errands"
+      ]
+    }
+  ],
+  "route": {
+    "primaries": [
+      {
+        "charterId": "experts",
+        "because": [
+          {
+            "kind": "keyword",
+            "key": "errand"
+          },
+          {
+            "kind": "requirement",
+            "key": "REQ-SYS-07"
+          }
+        ]
+      },
+      {
+        "charterId": "server",
+        "because": [
+          {
+            "kind": "platform",
+            "key": "server"
+          },
+          {
+            "kind": "requirement",
+            "key": "REQ-CROSS-03"
+          }
+        ]
+      },
+      {
+        "charterId": "desktop-mac",
+        "because": [
+          {
+            "kind": "platform",
+            "key": "mac"
+          }
+        ]
+      },
+      {
+        "charterId": "mobile",
+        "because": [
+          {
+            "kind": "platform",
+            "key": "ios"
+          },
+          {
+            "kind": "platform",
+            "key": "android"
+          },
+          {
+            "kind": "requirement",
+            "key": "REQ-CROSS-01"
+          }
+        ]
+      },
+      {
+        "charterId": "conversation",
+        "because": [
+          {
+            "kind": "keyword",
+            "key": "spoken"
+          }
+        ]
+      }
+    ],
+    "consulted": [
+      "memory"
+    ],
+    "unresolved": [
+      {
+        "kind": "path",
+        "key": "mobile/watch/"
+      }
+    ]
+  }
+}

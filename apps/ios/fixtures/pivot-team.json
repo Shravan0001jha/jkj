@@ -1,0 +1,49 @@
+{
+  "rows": [
+    "capabilities",
+    "platforms",
+    "product",
+    "quality"
+  ],
+  "cols": [
+    "f-errands",
+    "f-share",
+    "f-lipsync"
+  ],
+  "cells": {
+    "capabilities": {
+      "f-errands": {
+        "total": 3,
+        "byState": {
+          "building": 1,
+          "blocked": 1,
+          "done": 1
+        }
+      },
+      "f-lipsync": {
+        "total": 2,
+        "byState": {
+          "done": 2
+        }
+      }
+    },
+    "platforms": {
+      "f-errands": {
+        "total": 2,
+        "byState": {
+          "review": 1,
+          "planned": 1
+        }
+      },
+      "f-share": {
+        "total": 2,
+        "byState": {
+          "planned": 1,
+          "proposed": 1
+        }
+      }
+    },
+    "product": {},
+    "quality": {}
+  }
+}

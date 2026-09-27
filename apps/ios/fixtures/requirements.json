@@ -1,0 +1,55 @@
+[
+  {
+    "id": "REQ-CROSS-01",
+    "group": "Cross-device",
+    "section": "§3 Features",
+    "title": "Say it on the phone, it happens on the Mac",
+    "segments": [
+      "tech workers",
+      "students"
+    ],
+    "status": "partial",
+    "evidence": [
+      "20 errands live on LAN"
+    ],
+    "charterId": "mobile",
+    "featureIds": [
+      "f-errands"
+    ]
+  },
+  {
+    "id": "REQ-CROSS-03",
+    "group": "Cross-device",
+    "section": "§3 Features",
+    "title": "A busy Mac still counts as online",
+    "segments": [
+      "tech workers"
+    ],
+    "status": "built",
+    "evidence": [
+      "8034a09"
+    ],
+    "charterId": "server",
+    "featureIds": [
+      "f-errands"
+    ]
+  },
+  {
+    "id": "REQ-SYS-07",
+    "group": "System actions",
+    "section": "§3 Features",
+    "title": "Never claim an action before it happened",
+    "note": "The no-lie guard.",
+    "segments": [
+      "all"
+    ],
+    "status": "verified",
+    "evidence": [
+      "harness/live_turn.py run 27 Sep"
+    ],
+    "charterId": "experts",
+    "featureIds": [
+      "f-errands"
+    ]
+  }
+]

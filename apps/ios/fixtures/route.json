@@ -1,0 +1,74 @@
+{
+  "primaries": [
+    {
+      "charterId": "experts",
+      "because": [
+        {
+          "kind": "keyword",
+          "key": "errand"
+        },
+        {
+          "kind": "requirement",
+          "key": "REQ-SYS-07"
+        }
+      ]
+    },
+    {
+      "charterId": "server",
+      "because": [
+        {
+          "kind": "platform",
+          "key": "server"
+        },
+        {
+          "kind": "requirement",
+          "key": "REQ-CROSS-03"
+        }
+      ]
+    },
+    {
+      "charterId": "desktop-mac",
+      "because": [
+        {
+          "kind": "platform",
+          "key": "mac"
+        }
+      ]
+    },
+    {
+      "charterId": "mobile",
+      "because": [
+        {
+          "kind": "platform",
+          "key": "ios"
+        },
+        {
+          "kind": "platform",
+          "key": "android"
+        },
+        {
+          "kind": "requirement",
+          "key": "REQ-CROSS-01"
+        }
+      ]
+    },
+    {
+      "charterId": "conversation",
+      "because": [
+        {
+          "kind": "keyword",
+          "key": "spoken"
+        }
+      ]
+    }
+  ],
+  "consulted": [
+    "memory"
+  ],
+  "unresolved": [
+    {
+      "kind": "path",
+      "key": "mobile/watch/"
+    }
+  ]
+}

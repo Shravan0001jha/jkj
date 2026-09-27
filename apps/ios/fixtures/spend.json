@@ -1,0 +1,23 @@
+{
+  "day": "2026-09-27",
+  "companyInr": 412.5,
+  "capInr": 1000,
+  "byEmployee": {
+    "asha": 96.2,
+    "mira": 131.8,
+    "rohan": 88.4,
+    "kabir": 74.6,
+    "dev": 21.5,
+    "tara": 0,
+    "nikhil": 0
+  },
+  "byUnit": {
+    "product": 96.2,
+    "capabilities": 227.9,
+    "platforms": 88.4,
+    "quality": 0
+  },
+  "paused": [
+    "employee:tara"
+  ]
+}

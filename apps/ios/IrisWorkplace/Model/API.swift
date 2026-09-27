@@ -1,0 +1,76 @@
+import Foundation
+
+/// `WORKPLACE_API` from workplace-api.ts, one function per entry, so the app never guesses a path.
+enum API {
+    static let health = "/api/health"
+    static let office = "/api/office"
+    static let org = "/api/org"
+    static func charter(_ id: String) -> String { "/api/charters/\(enc(id))" }
+    static let inbox = "/api/inbox"
+    static func inboxAnswer(_ id: String) -> String { "/api/inbox/\(enc(id))/answer" }
+    static let employees = "/api/employees"
+    static func employee(_ id: String) -> String { "/api/employees/\(enc(id))" }
+    static func employeeTalk(_ id: String) -> String { "/api/employees/\(enc(id))/talk" }
+    static func employeeEndSession(_ id: String) -> String { "/api/employees/\(enc(id))/end-session" }
+    static func employeeContext(_ id: String) -> String { "/api/employees/\(enc(id))/context" }
+    static func agentLog(_ id: String) -> String { "/api/agents/\(enc(id))/log" }
+    static func agentMessage(_ id: String) -> String { "/api/agents/\(enc(id))/message" }
+    static func agentInterrupt(_ id: String) -> String { "/api/agents/\(enc(id))/interrupt" }
+    static func agentApprove(_ id: String) -> String { "/api/agents/\(enc(id))/approve" }
+    static func agentMode(_ id: String) -> String { "/api/agents/\(enc(id))/mode" }
+    static func agentImage(_ id: String, ref: String) -> String { "/api/agents/\(enc(id))/image?ref=\(enc(ref))" }
+    static func work(kind: WorkKind? = nil, state: WorkState? = nil, charterId: String? = nil,
+                     employeeId: String? = nil, featureId: String? = nil) -> String {
+        withQuery("/api/work", [
+            ("kind", kind?.rawValue), ("state", state?.rawValue), ("charterId", charterId),
+            ("employeeId", employeeId), ("featureId", featureId),
+        ])
+    }
+    static func workItem(_ id: String) -> String { "/api/work/\(enc(id))" }
+    static func workTransition(_ id: String) -> String { "/api/work/\(enc(id))/transition" }
+    static let features = "/api/features"
+    static func feature(_ id: String) -> String { "/api/features/\(enc(id))" }
+    static func featureDecompose(_ id: String) -> String { "/api/features/\(enc(id))/decompose" }
+    static func featurePivot(_ rows: PivotRows) -> String { "/api/features/pivot?rows=\(rows.rawValue)" }
+    static func requirements(group: String? = nil) -> String { withQuery("/api/requirements", [("group", group)]) }
+    static let coverage = "/api/requirements/coverage"
+    static func route(text: String? = nil, paths: [String]? = nil, platforms: [String]? = nil,
+                      requirementIds: [String]? = nil) -> String {
+        withQuery("/api/route", [
+            ("text", text), ("paths", paths?.joined(separator: ",")),
+            ("platforms", platforms?.joined(separator: ",")), ("requirementIds", requirementIds?.joined(separator: ",")),
+        ])
+    }
+    static let proposals = "/api/proposals"
+    static func proposalApply(_ id: String) -> String { "/api/proposals/\(enc(id))/apply" }
+    static let releases = "/api/releases"
+    static func releaseRun(_ id: String) -> String { "/api/releases/\(enc(id))/run" }
+    static func spend(day: String? = nil) -> String { withQuery("/api/spend", [("day", day)]) }
+    static let signals = "/api/health/signals"
+    static let pair = "/api/pair"
+    static let pairExchange = "/api/pair/exchange"
+    static let socket = "/ws"
+
+    /// `encodeURIComponent`: everything but A–Z a–z 0–9 - _ . ! ~ * ' ( ) is percent-encoded.
+    static func enc(_ s: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-_.!~*'()")
+        return s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
+    }
+
+    /// `URLSearchParams` semantics: empty values are skipped, spaces become `+`.
+    private static func withQuery(_ path: String, _ q: [(String, String?)]) -> String {
+        let parts = q.compactMap { (k, v) -> String? in
+            guard let v, !v.isEmpty else { return nil }
+            return "\(formEnc(k))=\(formEnc(v))"
+        }
+        return parts.isEmpty ? path : "\(path)?\(parts.joined(separator: "&"))"
+    }
+
+    private static func formEnc(_ s: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "*-._")
+        let e = s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
+        return e.replacingOccurrences(of: "%20", with: "+")
+    }
+}

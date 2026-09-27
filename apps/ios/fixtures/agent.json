@@ -1,0 +1,29 @@
+{
+  "id": "s-mira-1",
+  "projectId": "claude-dev",
+  "name": "mira",
+  "task": "Errand receiver on the Mac",
+  "model": "sonnet",
+  "status": "waiting",
+  "workspace": "worktree",
+  "cwd": "/Users/shravan0001jha/claude-dev-mira",
+  "startedAt": "2026-09-27T08:35:00.000Z",
+  "usage": {
+    "inputTokens": 18400,
+    "outputTokens": 6200,
+    "costUsd": 0.41
+  },
+  "messageCount": 14,
+  "permissionMode": "acceptEdits",
+  "alwaysAllowed": [
+    "Read"
+  ],
+  "driven": true,
+  "approval": {
+    "id": "ap-1",
+    "tool": "Bash",
+    "input": "cd services/agent-svc && ../../.venv/bin/python -m pytest -q tests/test_errands.py",
+    "reason": "Runs a command",
+    "requestedAt": "2026-09-27T08:59:00.000Z"
+  }
+}

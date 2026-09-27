@@ -1,0 +1,217 @@
+import SwiftUI
+
+struct OfficeView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let error = model.office.error, model.office.data == nil {
+                    ErrorRow(message: error) { Task { await reload() } }
+                }
+                if let d = model.office.data {
+                    Section { OfficeHeader(data: d) }
+                    ForEach(d.units) { u in
+                        Section {
+                            ForEach(u.employees) { card in
+                                Button { model.router.talk(to: card.employee.id) } label: {
+                                    EmployeeCardView(card: card)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("Opens Talk with \(card.employee.name)")
+                            }
+                        } header: {
+                            HStack {
+                                SectionHeader(text: u.unit.title)
+                                Spacer()
+                                if let b = d.spend.byUnit[u.unit.id], b > 0 {
+                                    Text(Format.inr(b)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    if let error = model.office.error {
+                        Section { ErrorRow(message: error) { Task { await reload() } } }
+                    }
+                } else if model.office.loading {
+                    Section { HStack { Spacer(); ProgressView("Loading the office…"); Spacer() } }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .refreshable { await reload() }
+            .navigationTitle("Office")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { model.router.showSettings = true } label: { Image(systemName: "gearshape") }
+                        .accessibilityLabel("Settings")
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
+            .task { if model.office.data == nil { await reload() } }
+        }
+    }
+
+    private func reload() async {
+        guard let rest = model.rest else { return }
+        await model.office.load(rest)
+        if !model.inbox.loaded { await model.inbox.load(rest) }
+    }
+}
+
+/// Needs you, spend against the cap, coverage, lint.
+struct OfficeHeader: View {
+    let data: OfficeResponse
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Stat(value: "\(data.needsYou)", label: data.needsYou == 1 ? "needs you" : "need you",
+                     glyph: data.needsYou > 0 ? EmployeeState.needsOwner.glyph : Glyph(symbol: "checkmark.circle", tint: .green, label: "nothing waiting"))
+                Divider().frame(height: 36)
+                Stat(value: "\(data.units.flatMap(\.employees).filter { $0.employee.state == .working }.count)", label: "working", glyph: EmployeeState.working.glyph)
+                Divider().frame(height: 36)
+                let blocked = data.units.flatMap(\.employees).filter { $0.employee.state == .blocked }.count
+                Stat(value: "\(blocked)", label: "blocked", glyph: blocked > 0 ? EmployeeState.blocked.glyph : Glyph(symbol: "circle", tint: .secondary, label: "none blocked"))
+            }
+            SpendMeter(spend: data.spend)
+            CoverageRow(coverage: data.coverage)
+            if data.lintErrors > 0 {
+                Label("\(data.lintErrors) ownership-map error\(data.lintErrors == 1 ? "" : "s") block routing", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.red)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct Stat: View {
+    let value: String
+    let label: String
+    let glyph: Glyph
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: glyph.symbol).foregroundStyle(glyph.tint)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(value).font(.title2.weight(.semibold).monospacedDigit())
+                Text(label).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Spend today against the daily cap. Shape: a bar; colour: green → orange (≥ 80 %) → red (at cap).
+struct SpendMeter: View {
+    let spend: SpendSummary
+
+    private var fraction: Double { spend.capInr > 0 ? min(1, spend.companyInr / spend.capInr) : 0 }
+    private var tint: Color { fraction >= 1 ? .red : fraction >= 0.8 ? .orange : .green }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Spend today").font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(Format.inr(spend.companyInr)) of \(Format.inr(spend.capInr))")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(fraction >= 0.8 ? tint : .primary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.2))
+                    Capsule().fill(tint).frame(width: max(4, geo.size.width * fraction))
+                    if fraction < 1 {
+                        Rectangle().fill(Color.secondary.opacity(0.5)).frame(width: 1).offset(x: geo.size.width * 0.8)
+                    }
+                }
+            }
+            .frame(height: 8)
+            if !spend.paused.isEmpty {
+                Label(spend.paused.map(pausedName).joined(separator: ", ") + " paused at cap", systemImage: "pause.circle.fill")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Spend today \(Format.inr(spend.companyInr)) of \(Format.inr(spend.capInr)), \(Format.percent(Int(spend.companyInr), of: Int(spend.capInr)))")
+    }
+
+    private func pausedName(_ scope: String) -> String {
+        if scope == "company" { return "Company" }
+        let parts = scope.split(separator: ":", maxSplits: 1).map(String.init)
+        return parts.count == 2 ? parts[1].capitalized : scope
+    }
+}
+
+/// Requirement coverage: owned / planned / built / verified / released as fractions of the definition.
+struct CoverageRow: View {
+    let coverage: Coverage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Definition coverage").font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(coverage.total) requirements").font(.caption).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 0) {
+                seg("owned", coverage.owned, .blue)
+                seg("planned", coverage.planned, .indigo)
+                seg("built", coverage.built, .mint)
+                seg("verified", coverage.verified, .green)
+                seg("released", coverage.released, .green)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func seg(_ label: String, _ n: Int, _ tint: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(Format.percent(n, of: coverage.total)).font(.subheadline.weight(.semibold).monospacedDigit())
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Capsule().fill(tint).frame(height: 3).opacity(n > 0 ? 1 : 0.2)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel("\(label) \(n) of \(coverage.total)")
+    }
+}
+
+struct EmployeeCardView: View {
+    let card: EmployeeCard
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(card.employee.name).font(.headline)
+                Text(card.charters.map(\.title).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Spacer()
+                StateLabel(glyph: card.employee.state.glyph, compact: true)
+            }
+            if let w = card.currentWork {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: w.state.glyph.symbol).foregroundStyle(w.state.glyph.tint).font(.caption)
+                    Text(w.title).font(.subheadline).lineLimit(2)
+                }
+            } else {
+                Text("Nothing assigned").font(.subheadline).foregroundStyle(.secondary)
+            }
+            if let r = card.lastReport, !r.isEmpty {
+                Text(r).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            HStack(spacing: 8) {
+                Pill(text: Format.inr(card.spendTodayInr) + " today", symbol: "indianrupeesign", tint: .secondary)
+                if card.needsYou > 0 {
+                    Pill(text: "\(card.needsYou) for you", symbol: "exclamationmark.circle.fill", tint: .orange)
+                }
+                if let s = card.session {
+                    Pill(text: s.status.glyph.label, symbol: s.status.glyph.symbol, tint: s.status.glyph.tint)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}

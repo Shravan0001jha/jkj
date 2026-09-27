@@ -1,0 +1,805 @@
+{
+  "id": "op-1",
+  "kind": "split",
+  "reason": "Mobile queue at 7; Android waits on iOS.",
+  "proposedBy": "asha",
+  "state": "pending",
+  "params": {
+    "charterId": "mobile",
+    "into": [
+      "mobile-ios",
+      "mobile-android"
+    ],
+    "hire": {
+      "roleId": "lead",
+      "charterId": "mobile-android",
+      "name": "Arjun"
+    }
+  },
+  "before": {
+    "units": [
+      {
+        "id": "product",
+        "title": "Product",
+        "parentId": null,
+        "kind": "unit"
+      },
+      {
+        "id": "capabilities",
+        "title": "Capabilities",
+        "parentId": null,
+        "kind": "unit",
+        "budget": {
+          "inrPerDay": 500
+        }
+      },
+      {
+        "id": "platforms",
+        "title": "Platforms",
+        "parentId": null,
+        "kind": "unit",
+        "budget": {
+          "inrPerDay": 300
+        }
+      },
+      {
+        "id": "quality",
+        "title": "Quality",
+        "parentId": null,
+        "kind": "unit"
+      }
+    ],
+    "employees": [
+      {
+        "id": "asha",
+        "name": "Asha",
+        "roleId": "chief-of-staff",
+        "level": 0,
+        "permanent": true,
+        "charterIds": [
+          "chief-of-staff",
+          "product-and-business"
+        ],
+        "unitId": "product",
+        "chapterIds": [],
+        "reportsTo": null,
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-asha",
+          "branch": "wp/asha"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-chief-of-staff",
+        "state": "working"
+      },
+      {
+        "id": "dev",
+        "name": "Dev",
+        "roleId": "lead",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "conversation",
+          "character"
+        ],
+        "unitId": "capabilities",
+        "chapterIds": [],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-dev",
+          "branch": "wp/dev"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-conversation-lead",
+        "state": "idle"
+      },
+      {
+        "id": "mira",
+        "name": "Mira",
+        "roleId": "lead",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "experts"
+        ],
+        "unitId": "capabilities",
+        "chapterIds": [],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-mira",
+          "branch": "wp/mira"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-experts-lead",
+        "state": "needs-owner"
+      },
+      {
+        "id": "kabir",
+        "name": "Kabir",
+        "roleId": "lead",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "memory",
+          "server"
+        ],
+        "unitId": "capabilities",
+        "chapterIds": [
+          "platforms-chapter"
+        ],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-kabir",
+          "branch": "wp/kabir"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-memory-lead",
+        "state": "blocked"
+      },
+      {
+        "id": "rohan",
+        "name": "Rohan",
+        "roleId": "lead",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "desktop-mac",
+          "windows"
+        ],
+        "unitId": "platforms",
+        "chapterIds": [],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-rohan",
+          "branch": "wp/rohan"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-desktop-mac-lead",
+        "state": "working"
+      },
+      {
+        "id": "tara",
+        "name": "Tara",
+        "roleId": "lead",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "mobile"
+        ],
+        "unitId": "platforms",
+        "chapterIds": [],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-tara",
+          "branch": "wp/tara"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-mobile-lead",
+        "state": "paused"
+      },
+      {
+        "id": "nikhil",
+        "name": "Nikhil",
+        "roleId": "qa",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "qa-release",
+          "beta-ops"
+        ],
+        "unitId": "quality",
+        "chapterIds": [],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-nikhil",
+          "branch": "wp/nikhil"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-qa",
+        "state": "idle"
+      }
+    ],
+    "charters": [
+      {
+        "id": "chief-of-staff",
+        "title": "Chief of Staff",
+        "axis": "function",
+        "version": 1,
+        "mission": "Keep the organisation coherent: specs, routing, org proposals, the owner's decisions.",
+        "holderIds": [
+          "asha"
+        ],
+        "tokens": 900
+      },
+      {
+        "id": "product-and-business",
+        "title": "Product and business",
+        "axis": "segment",
+        "version": 2,
+        "mission": "Pricing, legal and privacy, growth segments and the platform roadmap; decisions go to the owner.",
+        "holderIds": [
+          "asha"
+        ],
+        "tokens": 1020
+      },
+      {
+        "id": "conversation",
+        "title": "Conversation",
+        "axis": "capability",
+        "version": 3,
+        "mission": "Voice, STT/TTS, personality and the responsiveness ladder: something visible within 500 ms.",
+        "holderIds": [
+          "dev"
+        ],
+        "tokens": 1140
+      },
+      {
+        "id": "character",
+        "title": "Character",
+        "axis": "capability",
+        "version": 1,
+        "mission": "The on-screen character: expressions, movement, moods, lip-sync, quiet by default.",
+        "holderIds": [
+          "dev"
+        ],
+        "tokens": 1260
+      },
+      {
+        "id": "experts",
+        "title": "Experts",
+        "axis": "capability",
+        "version": 2,
+        "mission": "Device actions with the no-lie guard: act first, then acknowledge.",
+        "holderIds": [
+          "mira"
+        ],
+        "tokens": 1380
+      },
+      {
+        "id": "memory",
+        "title": "Memory",
+        "axis": "capability",
+        "version": 3,
+        "mission": "Account beliefs across devices; L1/L2/L3 memory layers.",
+        "holderIds": [
+          "kabir"
+        ],
+        "tokens": 1500
+      },
+      {
+        "id": "server",
+        "title": "Server",
+        "axis": "platform",
+        "version": 1,
+        "mission": "iris-api and the cloud agent; deploy only from the deploy worktree, back up iris.db first.",
+        "holderIds": [
+          "kabir"
+        ],
+        "tokens": 1620
+      },
+      {
+        "id": "desktop-mac",
+        "title": "Desktop (Mac)",
+        "axis": "platform",
+        "version": 2,
+        "mission": "The Electron app on Apple Silicon and Intel; release via the notarised script.",
+        "holderIds": [
+          "rohan"
+        ],
+        "tokens": 1740
+      },
+      {
+        "id": "windows",
+        "title": "Windows",
+        "axis": "platform",
+        "version": 3,
+        "mission": "The Windows build. A human teammate also develops here: coordinate, never overwrite.",
+        "holderIds": [
+          "rohan"
+        ],
+        "tokens": 1860
+      },
+      {
+        "id": "mobile",
+        "title": "Mobile",
+        "axis": "platform",
+        "version": 1,
+        "mission": "iPhone, iPad and Android apps; TestFlight via App Store Connect.",
+        "holderIds": [
+          "tara"
+        ],
+        "tokens": 1980
+      },
+      {
+        "id": "qa-release",
+        "title": "QA and release",
+        "axis": "function",
+        "version": 2,
+        "mission": "The different identity on every lead's PR; prepares releases the owner approves.",
+        "holderIds": [
+          "nikhil"
+        ],
+        "tokens": 2100
+      },
+      {
+        "id": "beta-ops",
+        "title": "Beta ops",
+        "axis": "function",
+        "version": 3,
+        "mission": "Tester digests, alerts and crash reporting.",
+        "holderIds": [
+          "nikhil"
+        ],
+        "tokens": 2220
+      }
+    ],
+    "map": [
+      {
+        "kind": "path",
+        "key": "services/agent-svc/experts/",
+        "primary": "experts",
+        "contributors": [],
+        "consulted": [
+          "conversation"
+        ]
+      },
+      {
+        "kind": "path",
+        "key": "services/iris-api/",
+        "primary": "server",
+        "contributors": [
+          "memory"
+        ],
+        "consulted": []
+      },
+      {
+        "kind": "platform",
+        "key": "ios",
+        "primary": "mobile",
+        "contributors": [],
+        "consulted": [
+          "experts"
+        ]
+      },
+      {
+        "kind": "requirement-group",
+        "key": "Cross-device",
+        "primary": "mobile",
+        "contributors": [],
+        "consulted": [
+          "experts",
+          "server"
+        ]
+      },
+      {
+        "kind": "keyword",
+        "key": "errand",
+        "primary": "experts",
+        "contributors": [],
+        "consulted": []
+      }
+    ]
+  },
+  "after": {
+    "units": [
+      {
+        "id": "product",
+        "title": "Product",
+        "parentId": null,
+        "kind": "unit"
+      },
+      {
+        "id": "capabilities",
+        "title": "Capabilities",
+        "parentId": null,
+        "kind": "unit",
+        "budget": {
+          "inrPerDay": 500
+        }
+      },
+      {
+        "id": "platforms",
+        "title": "Platforms",
+        "parentId": null,
+        "kind": "unit",
+        "budget": {
+          "inrPerDay": 300
+        }
+      },
+      {
+        "id": "quality",
+        "title": "Quality",
+        "parentId": null,
+        "kind": "unit"
+      }
+    ],
+    "employees": [
+      {
+        "id": "asha",
+        "name": "Asha",
+        "roleId": "chief-of-staff",
+        "level": 0,
+        "permanent": true,
+        "charterIds": [
+          "chief-of-staff",
+          "product-and-business"
+        ],
+        "unitId": "product",
+        "chapterIds": [],
+        "reportsTo": null,
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-asha",
+          "branch": "wp/asha"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-chief-of-staff",
+        "state": "working"
+      },
+      {
+        "id": "dev",
+        "name": "Dev",
+        "roleId": "lead",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "conversation",
+          "character"
+        ],
+        "unitId": "capabilities",
+        "chapterIds": [],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-dev",
+          "branch": "wp/dev"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-conversation-lead",
+        "state": "idle"
+      },
+      {
+        "id": "mira",
+        "name": "Mira",
+        "roleId": "lead",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "experts"
+        ],
+        "unitId": "capabilities",
+        "chapterIds": [],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-mira",
+          "branch": "wp/mira"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-experts-lead",
+        "state": "needs-owner"
+      },
+      {
+        "id": "kabir",
+        "name": "Kabir",
+        "roleId": "lead",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "memory",
+          "server"
+        ],
+        "unitId": "capabilities",
+        "chapterIds": [
+          "platforms-chapter"
+        ],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-kabir",
+          "branch": "wp/kabir"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-memory-lead",
+        "state": "blocked"
+      },
+      {
+        "id": "rohan",
+        "name": "Rohan",
+        "roleId": "lead",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "desktop-mac",
+          "windows"
+        ],
+        "unitId": "platforms",
+        "chapterIds": [],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-rohan",
+          "branch": "wp/rohan"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-desktop-mac-lead",
+        "state": "working"
+      },
+      {
+        "id": "tara",
+        "name": "Tara",
+        "roleId": "lead",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "mobile"
+        ],
+        "unitId": "platforms",
+        "chapterIds": [],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-tara",
+          "branch": "wp/tara"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-mobile-lead",
+        "state": "paused"
+      },
+      {
+        "id": "nikhil",
+        "name": "Nikhil",
+        "roleId": "qa",
+        "level": 1,
+        "permanent": true,
+        "charterIds": [
+          "qa-release",
+          "beta-ops"
+        ],
+        "unitId": "quality",
+        "chapterIds": [],
+        "reportsTo": "asha",
+        "workspace": {
+          "repo": "/Users/shravan0001jha/claude-dev",
+          "worktree": "/Users/shravan0001jha/claude-dev-nikhil",
+          "branch": "wp/nikhil"
+        },
+        "budget": {
+          "inrPerDay": 150,
+          "concurrentSessions": 2
+        },
+        "githubApp": "iris-qa",
+        "state": "idle"
+      }
+    ],
+    "charters": [
+      {
+        "id": "chief-of-staff",
+        "title": "Chief of Staff",
+        "axis": "function",
+        "version": 1,
+        "mission": "Keep the organisation coherent: specs, routing, org proposals, the owner's decisions.",
+        "holderIds": [
+          "asha"
+        ],
+        "tokens": 900
+      },
+      {
+        "id": "product-and-business",
+        "title": "Product and business",
+        "axis": "segment",
+        "version": 2,
+        "mission": "Pricing, legal and privacy, growth segments and the platform roadmap; decisions go to the owner.",
+        "holderIds": [
+          "asha"
+        ],
+        "tokens": 1020
+      },
+      {
+        "id": "conversation",
+        "title": "Conversation",
+        "axis": "capability",
+        "version": 3,
+        "mission": "Voice, STT/TTS, personality and the responsiveness ladder: something visible within 500 ms.",
+        "holderIds": [
+          "dev"
+        ],
+        "tokens": 1140
+      },
+      {
+        "id": "character",
+        "title": "Character",
+        "axis": "capability",
+        "version": 1,
+        "mission": "The on-screen character: expressions, movement, moods, lip-sync, quiet by default.",
+        "holderIds": [
+          "dev"
+        ],
+        "tokens": 1260
+      },
+      {
+        "id": "experts",
+        "title": "Experts",
+        "axis": "capability",
+        "version": 2,
+        "mission": "Device actions with the no-lie guard: act first, then acknowledge.",
+        "holderIds": [
+          "mira"
+        ],
+        "tokens": 1380
+      },
+      {
+        "id": "memory",
+        "title": "Memory",
+        "axis": "capability",
+        "version": 3,
+        "mission": "Account beliefs across devices; L1/L2/L3 memory layers.",
+        "holderIds": [
+          "kabir"
+        ],
+        "tokens": 1500
+      },
+      {
+        "id": "server",
+        "title": "Server",
+        "axis": "platform",
+        "version": 1,
+        "mission": "iris-api and the cloud agent; deploy only from the deploy worktree, back up iris.db first.",
+        "holderIds": [
+          "kabir"
+        ],
+        "tokens": 1620
+      },
+      {
+        "id": "desktop-mac",
+        "title": "Desktop (Mac)",
+        "axis": "platform",
+        "version": 2,
+        "mission": "The Electron app on Apple Silicon and Intel; release via the notarised script.",
+        "holderIds": [
+          "rohan"
+        ],
+        "tokens": 1740
+      },
+      {
+        "id": "windows",
+        "title": "Windows",
+        "axis": "platform",
+        "version": 3,
+        "mission": "The Windows build. A human teammate also develops here: coordinate, never overwrite.",
+        "holderIds": [
+          "rohan"
+        ],
+        "tokens": 1860
+      },
+      {
+        "id": "mobile",
+        "title": "Mobile",
+        "axis": "platform",
+        "version": 1,
+        "mission": "iPhone, iPad and Android apps; TestFlight via App Store Connect.",
+        "holderIds": [
+          "tara"
+        ],
+        "tokens": 1980
+      },
+      {
+        "id": "qa-release",
+        "title": "QA and release",
+        "axis": "function",
+        "version": 2,
+        "mission": "The different identity on every lead's PR; prepares releases the owner approves.",
+        "holderIds": [
+          "nikhil"
+        ],
+        "tokens": 2100
+      },
+      {
+        "id": "beta-ops",
+        "title": "Beta ops",
+        "axis": "function",
+        "version": 3,
+        "mission": "Tester digests, alerts and crash reporting.",
+        "holderIds": [
+          "nikhil"
+        ],
+        "tokens": 2220
+      }
+    ],
+    "map": [
+      {
+        "kind": "path",
+        "key": "services/agent-svc/experts/",
+        "primary": "experts",
+        "contributors": [],
+        "consulted": [
+          "conversation"
+        ]
+      },
+      {
+        "kind": "path",
+        "key": "services/iris-api/",
+        "primary": "server",
+        "contributors": [
+          "memory"
+        ],
+        "consulted": []
+      },
+      {
+        "kind": "platform",
+        "key": "ios",
+        "primary": "mobile",
+        "contributors": [],
+        "consulted": [
+          "experts"
+        ]
+      },
+      {
+        "kind": "requirement-group",
+        "key": "Cross-device",
+        "primary": "mobile",
+        "contributors": [],
+        "consulted": [
+          "experts",
+          "server"
+        ]
+      },
+      {
+        "kind": "keyword",
+        "key": "errand",
+        "primary": "experts",
+        "contributors": [],
+        "consulted": []
+      }
+    ]
+  },
+  "diff": "--- charters/mobile.md\n+++ charters/mobile-ios.md\n+++ charters/mobile-android.md\n",
+  "inboxId": "ib-4",
+  "createdAt": "2026-09-27T07:50:00.000Z",
+  "lint": []
+}
