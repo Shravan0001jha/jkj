@@ -78,11 +78,22 @@ release/deploy scripts are the real ones (`scripts/release-iris.sh`, `scripts/de
 `~/claude-dev-deploy`, ...) and refuse to run otherwise. At a cap (employee, unit, company) sessions
 pause and a `cap` item asks whether to raise today's cap.
 
-## The phone
+## From anywhere: https://work.irisforu.com
 
-Install Tailscale on the Mac and the phone (needs you). Start with `--host <tailnet ip>`. Pair the
-app: from this Mac `POST /api/pair` gives a six-digit code; the app exchanges it within five
-minutes for the bearer token. Until then, Telegram carries the Inbox.
+The Workplace on this Mac keeps an outbound tunnel to a small relay on the Iris API box; nothing
+listens on the Mac. The relay proxies only an authenticated session. Sign in with your **passkey**
+(Face ID on the iPhone); enrol it once at `/login/enrol` with a Telegram code. Fallback: an email
+code **and** a Telegram code. Sessions expire after 12 h idle / 7 days; every new device pings
+Telegram. **Emergency off:** reply `off` on Telegram, or `curl -X POST http://127.0.0.1:4317/api/relay/off`
+on this Mac: the tunnel drops and every remote session is gone until the Workplace is restarted.
+Files: `~/iris-ops/workplace/relay.env` (this Mac: `RELAY_URL`, `TUNNEL_SECRET`) and
+`relay-server.env` (copied to the box by `~/claude-dev-deploy/scripts/deploy-workplace-relay.sh`).
+The iOS app signs in through the same page and keeps a bearer session in the Keychain.
+
+## The phone on the LAN (development only)
+
+`--host <lan or tailnet ip>` adds a token-protected listener; pair the app with `POST /api/pair`
+from this Mac (a six-digit code the app exchanges within five minutes). Off by default.
 
 ## GitHub Apps (the lead creates them)
 
