@@ -289,6 +289,28 @@ Milestone notes and Inbox pings go through `~/iris-ops/notify.sh` (3–5 lines).
 replies to `inbox.jsonl`; the Workplace tails it from its own cursor file so it never steals the
 existing `read_inbox.sh` cursor.
 
+### D16. One line to the owner (owner rule, 28 Sep)
+
+Every message that reaches the owner is one line by default: the outcome, not the process. That
+covers Talk replies, Inbox items, reports, Team Room headlines, Telegram pings and the digest.
+Details only on request ("details?", "why?", "show me") or behind an expand control. Three layers
+make it hold: the **handbook** tells every employee to write one sentence and put the rest in
+details; the **contract** carries `summary` (≤ 120 chars, required) and optional `details`
+(markdown) on Inbox items, assistant transcript entries and Team Room threads (`headline`); and a
+**server-side guard** (`services/one-line.ts`) trims what still exceeds one line, deterministically
+(first plain sentence, cut at a word), moving the whole text into `details`. Employee-to-employee
+Team Room threads stay as detailed as the work needs; the owner sees each as its headline. Telegram
+pings are one line per item and the digest is one line of numbers plus at most three items. The rule
+applies to the Workplace app and Telegram, not to the lead's own terminal conversation.
+
+### D17. One Workplace per organisation (28 Sep)
+
+A restart on 27 Sep left a second process alive for three hours: its listener had closed but
+`server.close()` waited on an open WebSocket, so the shutdown never reached `process.exit`. The
+Workplace now takes a pid lock next to the database (`workplace.lock`) before opening anything; a
+live holder refuses the start, a dead one is taken over; a port it cannot bind fails the start; and
+the CLI exits 20 s after a stop begins whether or not the close finished.
+
 ## 3. The first organisation (seed) and why it is shaped this way
 
 Seven employees, twelve charters, four units. The mix is deliberate: capability charters (how Iris

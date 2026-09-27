@@ -337,6 +337,22 @@ strings. The contract is `packages/shared/src/workplace-api.ts` (`WORKPLACE_API`
 | GET `/api/spend?day=` → `SpendSummary`; GET `/api/health/signals` → `HealthSignals` | Spend |
 | POST `/api/pair` (loopback) → `{ code, expiresAt }`; POST `/api/pair/exchange` `{ code }` → `{ token }` | phone setup |
 
+### One line to the owner (D16) — contract additions of 28 Sep
+
+| Type | Field | Meaning |
+|---|---|---|
+| `OwnerLine` (new) | `summary: string`, `details?: string` | `OWNER_LINE_MAX = 120`. The summary is what the owner reads; details sit behind an expand control. |
+| `InboxItem` | `summary: string` (required), `details?: string` | Derived from `body` when the raiser gave none; `body` stays as the full text. Old rows get a summary on read. |
+| `RoomThread` | `headline: string` (required) | The thread's one-line status for the owner. Set at creation (title, or the poster's `headline`), by any post carrying `headline`, and by the resolution summary. Old rows read as their title. `summary` is still the resolution summary. |
+| `LogEntry` (transcript) | `summary?: string`, `details?: string` | On `kind: 'assistant'` entries only: the reply's one line and, when the reply was longer, the whole text. |
+| `ServerEvent 'alert'` | `body` | Now the item's `summary` (was the first 200 chars of the body). |
+| `room_post` tool | `headline?` | Employees set the owner's line for a thread. |
+| `RaiseOptions` (server) | `summary?`, `details?` | `ask_owner`, `request_review` and the rest pass the body; the guard derives the line. |
+
+Telegram: a ping is `Iris Workplace · <summary> — reply: approve <id> / reject <id>` (one line); the
+digest is `Iris Workplace · needs you N · done yesterday N · blocked N · real money ₹X of ₹Y` plus at
+most three `· <summary>` lines.
+
 ### WebSocket `/ws` (`ServerEvent` additions)
 
 `office.snapshot { office: OfficeResponse }` (once, on connect), `office.updated { card: EmployeeCard }`, `inbox.updated { item }`, `work.updated { item }`,
@@ -344,6 +360,26 @@ strings. The contract is `packages/shared/src/workplace-api.ts` (`WORKPLACE_API`
 `alert { level: 'info'|'needs-you'|'blocked'|'cap'; title; body; inboxId? }`. The existing
 `agent.updated` / `agent.log` stay. `ClientCommand` additions: `inbox.answer { id, optionId, note? }`.
 Alerts are the phone's push-style feed; the phone shows them as notifications while open.
+
+## 14b. One line to the owner (`services/one-line.ts`) — HLD D16
+
+`oneLine(text)`: strip code blocks; take the first non-empty line without its markdown furniture
+(heading marks, bullets, numbering, emphasis, inline code); take its first sentence when that is at
+least 16 characters; trim to 120 at a word with an ellipsis. `details` is the whole original text
+whenever the original had more than one line or the summary is shorter than the line. `withOwnerLine`
+applies it to assistant transcript entries in `runs.append`. `inbox.raise` stores `summary`/`details`
+on the item (the raiser's own `summary` wins) and the `alert` event carries the summary; `list`/`get`
+backfill old rows. `room.createThread/post/resolve` maintain `headline`. `telegram.ping` and
+`telegram.digest` render the one-liners. The handbook (layer 1 of every context) carries the rule.
+
+## 14c. One Workplace per organisation (`services/lock.ts`) — HLD D17
+
+`acquire(dir, pid, alive)`: `workplace.lock` next to the database holds `pid\nISO`. A different live
+pid throws `AlreadyRunning` (the CLI exits 1 with the pid and time); a dead or garbage holder is
+taken over; the same pid re-acquiring gets a no-op handle so a nested boot cannot release the
+first. `start()` acquires before `createWorkplace` and releases on any boot failure and in `stop()`.
+`http/server.listen` rejects on the listener's `error` (EADDRINUSE names the address). `cli.ts`
+arms a 20 s deadline on SIGINT/SIGTERM and exits 1 if `stop()` has not finished.
 
 ## 15. Web screens (`packages/web`)
 

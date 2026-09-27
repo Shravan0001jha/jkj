@@ -1,5 +1,6 @@
 import type { InboxAnswer, InboxItem, InboxKind, InboxOption } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
+import { oneLine } from './one-line.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { BadRequest, Conflict } from '../util/errors.js';
 
@@ -24,6 +25,9 @@ export interface RaiseOptions {
   onApprove?: string;
   onDeny?: string;
   links?: { label: string; href: string }[];
+  /** One line for the owner (D16). Derived from the body when absent. */
+  summary?: string;
+  details?: string;
 }
 
 /**
@@ -86,6 +90,7 @@ export function raise(wp: Workplace, spec: RaiseOptions): InboxItem {
     kind: spec.kind,
     title: spec.title,
     body: spec.body,
+    ...ownerLine(spec),
     context: { ...(spec.context ?? {}), ...(spec.dedupeKey ? { dedupeKey: spec.dedupeKey } : {}) },
     options: spec.options ?? DEFAULT_OPTIONS[spec.kind],
     state: 'open',
@@ -99,7 +104,7 @@ export function raise(wp: Workplace, spec: RaiseOptions): InboxItem {
   wp.db.prepare('insert into inbox (id, kind, state, raised_by, created_at, json) values (?, ?, ?, ?, ?, ?)')
     .run(item.id, item.kind, item.state, item.raisedBy, item.createdAt, JSON.stringify(item));
   wp.emit({ type: 'inbox.updated', item });
-  wp.emit({ type: 'alert', level: 'needs-you', title: item.title, body: firstLine(item.body), inboxId: item.id });
+  wp.emit({ type: 'alert', level: 'needs-you', title: item.title, body: item.summary, inboxId: item.id });
   return item;
 }
 
@@ -108,7 +113,20 @@ export function list(wp: Workplace, state?: InboxItem['state']): InboxItem[] {
     ? wp.db.prepare('select json from inbox where state = ? order by created_at desc, rowid desc').all(state)
     : wp.db.prepare("select json from inbox order by case state when 'open' then 0 else 1 end, created_at desc, rowid desc").all();
   // Items raised before `affects` existed get it computed on read.
-  return rowsJson<InboxItem>(rows).map(i => i.affects ? i : { ...i, affects: affectsOf(wp, i), onApprove: i.onApprove ?? DEFAULT_EFFECT[i.kind].onApprove, onDeny: i.onDeny ?? DEFAULT_EFFECT[i.kind].onDeny });
+  return rowsJson<InboxItem>(rows).map(i => backfill(wp, i));
+}
+
+/** Items raised before `affects` (D7b) or `summary` (D16) existed get them computed on read. */
+function backfill(wp: Workplace, i: InboxItem): InboxItem {
+  const withAffects = i.affects ? i : { ...i, affects: affectsOf(wp, i), onApprove: i.onApprove ?? DEFAULT_EFFECT[i.kind].onApprove, onDeny: i.onDeny ?? DEFAULT_EFFECT[i.kind].onDeny };
+  return withAffects.summary ? withAffects : { ...withAffects, ...ownerLine(withAffects) };
+}
+
+/** The one line for the owner: given, or the body's first plain sentence; the rest is details. */
+function ownerLine(spec: { body: string; summary?: string; details?: string }): { summary: string; details?: string } {
+  if (spec.summary?.trim()) { const s = oneLine(spec.summary).summary; const details = spec.details ?? (spec.body.trim() && spec.body.trim() !== s ? spec.body.trim() : undefined); return details ? { summary: s, details } : { summary: s }; }
+  const line = oneLine(spec.body);
+  return line.details ? { summary: line.summary, details: spec.details ?? line.details } : { summary: line.summary, ...(spec.details ? { details: spec.details } : {}) };
 }
 
 /** Open items that concern an employee, for its page (HLD D7b). */
@@ -119,7 +137,8 @@ export function forEmployee(wp: Workplace, employeeId: string): InboxItem[] {
 
 
 export function get(wp: Workplace, id: string): InboxItem | undefined {
-  return rowJson<InboxItem>(wp.db.prepare('select json from inbox where id = ?').get(id));
+  const item = rowJson<InboxItem>(wp.db.prepare('select json from inbox where id = ?').get(id));
+  return item ? backfill(wp, item) : undefined;
 }
 
 export function answer(wp: Workplace, id: string, optionId: string, note: string | undefined, via: InboxAnswer['via']): InboxItem {
@@ -152,4 +171,3 @@ export function onAnswer(fn: AnswerListener): () => void {
 export const openCount = (wp: Workplace): number =>
   Number((wp.db.prepare("select count(*) as n from inbox where state = 'open'").get() as { n: number }).n);
 
-const firstLine = (s: string): string => s.split('\n').find(l => l.trim())?.slice(0, 200) ?? '';

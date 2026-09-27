@@ -4,6 +4,7 @@ import type {
 } from '@jkj/shared';
 import { startRun, type RunEvents, type RunHandle, type RunImage, type RunOptions, type RunResult } from '../runtime/claude-agent.js';
 import { getSnapshot } from './workspace.js';
+import { withOwnerLine } from './one-line.js';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
 
@@ -442,7 +443,7 @@ function append(
   text: string,
   extra?: Partial<LogEntry>,
 ): LogEntry {
-  const entry: LogEntry = {
+  const entry: LogEntry = withOwnerLine({
     id: `ln_${Math.random().toString(36).slice(2, 9)}`,
     agentId: run.agent.id,
     at: new Date().toISOString(),
@@ -450,7 +451,7 @@ function append(
     label,
     text,
     ...extra,
-  };
+  });
   run.entries.push(entry);
   emit({ entry });
   return entry;

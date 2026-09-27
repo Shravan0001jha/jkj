@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Workplace } from './workplace.js';
 import * as inbox from './inbox.js';
 import { log } from '../util/logger.js';
+import { oneLine } from './one-line.js';
 
 /**
  * Telegram is the channel today and the alert channel always (HLD D15).
@@ -79,12 +80,11 @@ export class Telegram {
     });
   }
 
-  /** Pings for what needs the owner. Called from the event bus. */
+  /** Pings for what needs the owner: one line per item (D16), the reply command after it. */
   attach(): void {
     this.wp.on(event => {
       if (event.type === 'alert' && (event.level === 'needs-you' || event.level === 'cap' || event.level === 'blocked')) {
-        const id = event.inboxId ? `\nReply: approve ${event.inboxId} / reject ${event.inboxId}` : '';
-        void this.notify(`Iris Workplace · ${event.title}\n${event.body}${id}`);
+        void this.notify(ping(event.title, event.body, event.inboxId));
       }
     });
   }
@@ -175,13 +175,16 @@ export class Telegram {
   }
 }
 
-/** The daily digest: needs you, done yesterday, blocked, spend. */
+/** One line to the owner (D16): the item's summary, then the reply command. */
+export function ping(title: string, body: string, inboxId?: string): string {
+  const line = oneLine(body || title).summary;
+  return `Iris Workplace · ${line}${inboxId ? ` — reply: approve ${inboxId} / reject ${inboxId}` : ''}`;
+}
+
+/** The daily digest: one line of numbers, then at most three one-line items (D16). */
 export function digest(parts: { needsYou: number; doneYesterday: number; blocked: number; spendInr: number; capInr: number; open: string[] }): string {
-  const top = parts.open.slice(0, 2).map(t => ` · ${t}`).join('\n');
   return [
-    `Iris Workplace digest`,
-    `Needs you: ${parts.needsYou} · Done yesterday: ${parts.doneYesterday} · Blocked: ${parts.blocked}`,
-    `Spend today: ₹${parts.spendInr.toFixed(0)} of ₹${parts.capInr}`,
-    ...(top ? [top] : []),
+    `Iris Workplace · needs you ${parts.needsYou} · done yesterday ${parts.doneYesterday} · blocked ${parts.blocked} · real money ₹${parts.spendInr.toFixed(0)} of ₹${parts.capInr}`,
+    ...parts.open.slice(0, 3).map(t => `· ${oneLine(t).summary}`),
   ].join('\n');
 }

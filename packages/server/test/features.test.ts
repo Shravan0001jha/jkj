@@ -89,9 +89,9 @@ test('the digest counts what needs the owner, what is blocked, and spend', () =>
   try {
     seedFeature(wp);
     const text = buildDigest(wp);
-    assert.match(text, /^Iris Workplace digest/);
-    assert.match(text, /Needs you: 0/);
-    assert.match(text, /Spend today: ₹0 of ₹1000/);
+    assert.match(text, /^Iris Workplace · needs you \d+ · done yesterday/);
+    assert.match(text, /needs you 0/);
+    assert.match(text, /real money ₹0 of ₹1000/);
     assert.ok(text.split('\n').length <= 5);
   } finally {
     tmp.cleanup();

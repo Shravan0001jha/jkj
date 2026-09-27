@@ -19,7 +19,7 @@ export function build(wp: Workplace): string {
     doneYesterday: work.list(wp, { kind: 'assignment', state: 'done' }).filter(a => a.updatedAt >= yesterday).length,
     blocked: work.list(wp, { kind: 'assignment', state: 'blocked' }).length + wp.org.employees.filter(e => employees.stateOf(wp, e.id) === 'blocked').length,
     spendInr: s.companyInr, capInr: s.capInr,
-    open: open.map(i => i.title),
+    open: open.map(i => i.summary || i.title),
   });
 }
 

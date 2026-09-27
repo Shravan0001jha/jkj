@@ -10,6 +10,7 @@ import { Telegram } from './services/telegram.js';
 import * as digestService from './services/digest.js';
 import * as features from './services/features.js';
 import * as cos from './services/cos.js';
+import * as lock from './services/lock.js';
 import * as room from './services/room.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
@@ -32,6 +33,17 @@ export interface Running {
 }
 
 export async function start(config: Config): Promise<Running> {
+  // One Workplace per organisation: a live pid in the lock refuses the start (lock.ts).
+  const held = lock.acquire(config.workplaceDir);
+  try {
+    return await boot(config, held);
+  } catch (err) {
+    held.release();
+    throw err;
+  }
+}
+
+async function boot(config: Config, held: lock.Lock): Promise<Running> {
   const home = findClaudeHome();
   if (!home.present) log.warn('boot', `no Claude Code state found at ${home.configDir}; sessions will still run`);
 
@@ -99,6 +111,7 @@ export async function start(config: Config): Promise<Running> {
       server.closeAllConnections();
       await new Promise<void>(resolve => server.close(() => resolve()));
       wp.db.close();
+      held.release();
     },
   };
 }

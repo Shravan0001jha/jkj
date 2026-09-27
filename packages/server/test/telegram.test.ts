@@ -72,9 +72,10 @@ test('replies are tailed from the Workplace cursor and applied with via=telegram
   }
 });
 
-test('the digest is four lines at most', () => {
-  const d = digest({ needsYou: 2, doneYesterday: 3, blocked: 1, spendInr: 412.4, capInr: 1000, open: ['Release 0.2.16', 'Split mobile', 'third'] });
-  assert.equal(d.split('\n').length, 5);
-  assert.match(d, /Needs you: 2/);
+test('the digest is a few one-liners: one line of numbers, at most three items (D16)', () => {
+  const d = digest({ needsYou: 2, doneYesterday: 3, blocked: 1, spendInr: 412.4, capInr: 1000, open: ['Release 0.2.16', 'Split mobile', 'third', 'fourth'] });
+  assert.equal(d.split('\n').length, 4);
+  assert.match(d, /needs you 2 · done yesterday 3 · blocked 1/);
   assert.match(d, /₹412 of ₹1000/);
+  assert.ok(!d.includes('fourth'));
 });

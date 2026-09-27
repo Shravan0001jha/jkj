@@ -130,6 +130,18 @@ employees see their open threads in context; Asha's `room_resolve` writes the su
 follow-ups; `escalate` files an Inbox item linked to the thread; non-Asha cannot resolve; the seed
 threads from the 27 Sep plans exist and mention the right people.
 
+**`one-line.test.ts`** — a short sentence is its own summary; narration becomes one line with the
+whole text as details; a long line is trimmed at a word to 120 with an ellipsis; a tiny first
+sentence keeps the line; assistant entries carry summary/details, tool entries do not; Inbox items
+carry them, the Telegram ping is one line, a raiser's own summary wins, old rows read with one; Team
+Room headlines follow creation, posts and resolution and old rows read as their title; the digest is
+at most four one-liners.
+
+**`lock.test.ts`** — the lock holds the pid; a live holder refuses; the same pid re-acquires without
+stealing; a dead holder is taken over; release removes only one's own lock; garbage is no holder; a
+second `start()` on a taken port rejects with EADDRINUSE and leaves the lock; another live pid in the
+lock refuses `start()` before anything opens; a squatted port fails the start and releases the lock.
+
 **Kept from JKJ, now under test:** `session-reader` (parse a fixture transcript: entries, subagents,
 images, cleaned user text), `context.ts` (ancestry chain, memory notes not counted),
 `projects.encodeProjectKey`, `routes` validation (`validateCreate`, `validateMessage`).

@@ -257,11 +257,26 @@ export interface InboxAnswer {
   via: 'web' | 'phone' | 'telegram' | 'workplace';
 }
 
+/**
+ * One line to the owner (HLD D16): what he reads first, ≤ OWNER_LINE_MAX chars, the outcome not
+ * the process. The rest, when there is more, is `details` (markdown) behind an expand control.
+ */
+export interface OwnerLine {
+  summary: string;
+  details?: string;
+}
+export const OWNER_LINE_MAX = 120;
+
 export interface InboxItem {
   id: string;
   kind: InboxKind;
   title: string;
+  /** The full text, as raised. Clients show `summary` and put this behind expand. */
   body: string;
+  /** One line for the owner (D16), derived from the body when the raiser gave none. */
+  summary: string;
+  /** The rest of the body, when the body was more than one line. */
+  details?: string;
   /** Structured context a client may render: action, subject, diff, links. */
   context: Record<string, unknown>;
   options: InboxOption[];
@@ -436,6 +451,8 @@ export interface RoomThread {
   state: 'open' | 'resolved';
   /** Asha's summary when resolved; written into the relevant charter or contract. */
   summary?: string;
+  /** One line for the owner (D16): where this thread stands. Set by the poster or the Chief of Staff; the resolution summary when resolved. */
+  headline: string;
   lastAt: string;
   messageCount: number;
   /** Employees mentioned or posting in the thread. */
