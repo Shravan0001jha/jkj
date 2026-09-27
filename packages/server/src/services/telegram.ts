@@ -25,10 +25,12 @@ export interface TelegramDeps {
   status?: () => string;
   /** The emergency off switch for published access. */
   off?: () => string;
+  /** Re-enable passkey enrolment on the relay. */
+  enrolOn?: () => string;
 }
 
 export interface Command {
-  kind: 'approve' | 'reject' | 'talk' | 'status' | 'answer' | 'off' | 'unknown';
+  kind: 'approve' | 'reject' | 'talk' | 'status' | 'answer' | 'off' | 'enrol-on' | 'unknown';
   id?: string;
   employeeId?: string;
   text?: string;
@@ -45,6 +47,7 @@ export function parseCommand(text: string): Command {
   if (m) return { kind: 'talk', employeeId: m[1]!.toLowerCase(), text: m[2]! };
   if (/^status$/i.test(t)) return { kind: 'status' };
   if (/^(off|workplace off|emergency off)$/i.test(t)) return { kind: 'off' };
+  if (/^enrol\s*on$/i.test(t)) return { kind: 'enrol-on' };
   return { kind: 'unknown', text: t };
 }
 
@@ -132,6 +135,9 @@ export class Telegram {
           break;
         case 'off':
           await this.notify(this.deps.off?.() ?? 'Nothing is published.');
+          break;
+        case 'enrol-on':
+          await this.notify(this.deps.enrolOn?.() ?? 'Nothing is published.');
           break;
         default:
           break;   // ordinary conversation with the older ops loop; not ours

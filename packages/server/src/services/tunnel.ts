@@ -23,6 +23,7 @@ export type Frame =
   | { type: 'telegram'; text: string }
   | { type: 'off' }
   | { type: 'on' }
+  | { type: 'enrol-on' }
   | { type: 'ping' }
   | { type: 'pong' }
   | { type: 'hello'; relay: string };
@@ -71,6 +72,13 @@ export class Tunnel {
     this.ws?.close();
     this.ws = null;
     this.setStatus('offline');
+  }
+
+  /** Re-enable passkey enrolment on the relay after it disabled itself. */
+  enrolOn(): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.send({ type: 'enrol-on' });
+    return true;
   }
 
   /** The emergency off switch: tell the relay to drop everything, then close. */
