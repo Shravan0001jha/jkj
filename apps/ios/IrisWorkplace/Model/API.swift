@@ -47,6 +47,10 @@ enum API {
     static func releaseRun(_ id: String) -> String { "/api/releases/\(enc(id))/run" }
     static func spend(day: String? = nil) -> String { withQuery("/api/spend", [("day", day)]) }
     static let signals = "/api/health/signals"
+    static let room = "/api/room"
+    static func roomThread(_ id: String) -> String { "/api/room/\(enc(id))" }
+    static func roomMessages(_ id: String) -> String { "/api/room/\(enc(id))/messages" }
+    static func roomResolve(_ id: String) -> String { "/api/room/\(enc(id))/resolve" }
     static let pair = "/api/pair"
     static let pairExchange = "/api/pair/exchange"
     static let socket = "/ws"

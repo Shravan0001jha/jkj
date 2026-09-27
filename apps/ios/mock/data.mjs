@@ -69,10 +69,10 @@ const emp = (id, name, roleId, level, charterIds, unitId, chapterIds, reportsTo,
 export const employees = [
   emp('asha', 'Asha', 'chief-of-staff', 0, ['chief-of-staff', 'product-and-business'], 'product', [], null, 'working'),
   emp('dev', 'Dev', 'lead', 1, ['conversation', 'character'], 'capabilities', [], 'asha', 'idle'),
-  emp('mira', 'Mira', 'lead', 1, ['experts'], 'capabilities', [], 'asha', 'needs-owner'),
-  emp('kabir', 'Kabir', 'lead', 1, ['memory', 'server'], 'capabilities', ['platforms-chapter'], 'asha', 'blocked'),
+  emp('mira', 'Mira', 'lead', 1, ['experts'], 'capabilities', [], 'asha', 'needs-owner', { stateReason: 'waiting for your approval to run the errand tests' }),
+  emp('kabir', 'Kabir', 'lead', 1, ['memory', 'server'], 'capabilities', ['platforms-chapter'], 'asha', 'blocked', { stateReason: 'no Mac socket contract from experts yet' }),
   emp('rohan', 'Rohan', 'lead', 1, ['desktop-mac', 'windows'], 'platforms', [], 'asha', 'working'),
-  emp('tara', 'Tara', 'lead', 1, ['mobile'], 'platforms', [], 'asha', 'paused'),
+  emp('tara', 'Tara', 'lead', 1, ['mobile'], 'platforms', [], 'asha', 'paused', { stateReason: 'Paused — daily budget reached (₹150). You can still talk to Tara.' }),
   emp('nikhil', 'Nikhil', 'qa', 1, ['qa-release', 'beta-ops'], 'quality', [], 'asha', 'idle', { githubApp: 'iris-qa' }),
 ];
 
@@ -128,6 +128,7 @@ export const assignments = [
     featureId: 'f-errands', charterId: 'server', employeeId: 'kabir', platformIds: ['server'], sessionId: 's-kabir-1',
     plan: '## Plan\n1. POST /v1/errands.\n2. Persist and relay to the Mac socket.',
     history: [{ at: iso(-60), from: 'planned', to: 'building', by: 'kabir' }, { at: iso(-30), from: 'building', to: 'blocked', by: 'kabir', note: 'Needs the contract for the Mac socket from experts.' }],
+    stalledSince: iso(-45),
   }),
   work('a-3', 'assignment', 'Desktop errand handler', 'review', {
     featureId: 'f-errands', charterId: 'desktop-mac', employeeId: 'rohan', platformIds: ['mac'], sessionId: 's-rohan-1',
@@ -179,10 +180,30 @@ export const coverage = {
 
 export const spend = {
   day: '2026-09-27', companyInr: 412.5, capInr: 1000,
+  bySource: { 'anthropic-api': 318.0, aws: 62.5, 'third-party': 32.0 },
+  byBasis: { metered: 318.0, estimated: 62.5, reported: 32.0 },
   byEmployee: { asha: 96.2, mira: 131.8, rohan: 88.4, kabir: 74.6, dev: 21.5, tara: 0, nikhil: 0 },
   byUnit: { product: 96.2, capabilities: 227.9, platforms: 88.4, quality: 0 },
   paused: ['employee:tara'],
+  subscription: {
+    turns: 63, inputTokens: 412_000, outputTokens: 88_400, cacheReadTokens: 2_910_000, cacheWriteTokens: 310_000,
+    equivalentInr: 1_842.6,
+    byEmployee: { asha: { turns: 14, equivalentInr: 412.1 }, mira: { turns: 22, equivalentInr: 611.9 }, rohan: { turns: 15, equivalentInr: 488.3 }, kabir: { turns: 9, equivalentInr: 240.8 }, dev: { turns: 3, equivalentInr: 89.5 } },
+    windows: [
+      { window: 'five_hour', status: 'allowed', utilization: 0.42, resetsAt: iso(180), seenAt: iso(-2) },
+      { window: 'seven_day', status: 'allowed_warning', utilization: 0.81, resetsAt: iso(60 * 24 * 3), seenAt: iso(-2) },
+      { window: 'seven_day_opus', status: 'allowed', utilization: 0.35, resetsAt: iso(60 * 24 * 3), seenAt: iso(-2) },
+    ],
+  },
+  ownerTalkInr: 18.4,
 };
+
+export const spendEntries = [
+  { at: iso(-90), employeeId: 'rohan', sessionId: 's-rohan-1', source: 'anthropic-api', basis: 'metered', what: 'llm-gateway test run', inr: 318.0, detail: { usd: 3.61, tokens: 240_000 } },
+  { at: iso(-60), employeeId: 'kabir', sessionId: 's-kabir-1', source: 'aws', basis: 'estimated', what: 'AWS actual (unattributed)', inr: 62.5 },
+  { at: iso(-30), employeeId: 'nikhil', sessionId: '', source: 'third-party', basis: 'reported', what: 'release-iris.sh 0.2.16 notarisation', inr: 32.0 },
+  { at: iso(-10), employeeId: 'dev', sessionId: 's-dev-owner', source: 'subscription', basis: 'estimated', what: 'owner talk', inr: 18.4, tag: 'owner-talk' },
+];
 
 export const inbox = [
   {
@@ -190,42 +211,71 @@ export const inbox = [
     context: { action: 'release', subject: 'desktop-mac 0.2.16', unreleased: ['8034a09 Phone actions on the Mac', 'ce943c7 Core round 9', '46e43c1 Merge core round 9'], link: 'https://github.com/Shravan0001jha/hivemind-prototype/compare/v0.2.15...feat/iris-character' },
     options: [{ id: 'approve', label: 'Release 0.2.16', danger: true }, { id: 'reject', label: 'Not yet', needsNote: true }],
     state: 'open', raisedBy: 'nikhil', createdAt: iso(-12),
+    affects: ['nikhil', 'rohan', 'asha'],
+    onApprove: 'Runs scripts/release-iris.sh 0.2.16: notarises, uploads to S3/CloudFront, kills the running Iris.',
+    onDeny: 'Nothing ships; Nikhil keeps the build and waits for your note.',
+    links: [{ label: 'Compare v0.2.15…feat/iris-character', href: 'https://github.com/Shravan0001jha/hivemind-prototype/compare/v0.2.15...feat/iris-character' }, { label: 'Team Room: release readiness', href: '#/room/rt-release' }],
   },
   {
     id: 'ib-2', kind: 'decision', title: 'Push-to-talk or wake word as the iPad default?', body: 'The definition leaves it open. Dev recommends push-to-talk by default with the wake word opt-in, because the wake word mis-fires in shared rooms.',
     context: { requirement: 'REQ-VOICE-03', recommendation: 'push-to-talk' },
     options: [{ id: 'ptt', label: 'Push-to-talk default' }, { id: 'wake', label: 'Wake word default' }, { id: 'later', label: 'Decide later', needsNote: true }],
     state: 'open', raisedBy: 'dev', createdAt: iso(-33),
+    affects: ['dev', 'asha'],
+    onApprove: 'Push-to-talk becomes the default in the conversation charter; the wake word stays opt-in.',
+    onDeny: 'The wake word stays the default; Dev files the mis-fire fixes as a feature.',
+    links: [{ label: 'Team Room: iPad voice default', href: '#/room/rt-voice' }],
   },
   {
     id: 'ib-3', kind: 'cap', title: 'Tara is at her daily cap (₹150)', body: 'The mobile errand sender is half built. Raise her cap for today, or keep it and she resumes tomorrow.',
     context: { scope: 'employee:tara', spentInr: 150, capInr: 150 },
     options: [{ id: 'raise-today', label: 'Raise for today', needsNote: true }, { id: 'keep', label: 'Keep the cap' }],
     state: 'open', raisedBy: 'workplace', createdAt: iso(-48),
+    affects: ['tara', 'asha'],
+    onApprove: 'Tara resumes today up to the number you give.',
+    onDeny: 'Tara stays paused until tomorrow 00:00 IST.',
   },
   {
     id: 'ib-4', kind: 'org-change', title: 'Split "mobile" into iOS and Android, hire an Android lead', body: 'The mobile queue is at 7 and Android work keeps waiting on iOS. Asha proposes two charters and one hire from the lead template.',
     context: { proposalId: 'op-1', kind: 'split', diff: '--- charters/mobile.md\n+++ charters/mobile-ios.md\n+++ charters/mobile-android.md\n map.yaml: 6 entries move to mobile-android' },
     options: [{ id: 'approve', label: 'Approve the split and hire' }, { id: 'reject', label: 'Reject', needsNote: true }],
     state: 'open', raisedBy: 'asha', createdAt: iso(-70),
+    affects: ['asha', 'tara'],
+    onApprove: 'Two charters replace mobile; Arjun is hired as Android lead with a ₹150/day budget; the map moves 6 entries.',
+    onDeny: 'The org stays as it is; Asha records your reason in the proposal.',
+    links: [{ label: 'Proposal diff', href: '#/room/rt-split' }],
   },
   {
     id: 'ib-5', kind: 'question', title: 'Kabir: which socket contract for Mac errands?', body: 'The experts charter has not published the Mac socket message shape yet. Kabir is blocked until it exists, or until you say to reuse the existing ask_mac shape.',
     context: { assignment: 'a-2', blockedOn: 'experts' },
     options: [{ id: 'reuse', label: 'Reuse ask_mac' }, { id: 'wait', label: 'Wait for experts' }],
     state: 'open', raisedBy: 'kabir', createdAt: iso(-29),
+    affects: ['kabir', 'mira'],
+    onApprove: 'Kabir builds on the ask_mac shape today.',
+    onDeny: 'Kabir stays blocked until Mira publishes the socket contract.',
+    links: [{ label: 'Team Room: Mac socket contract', href: '#/room/rt-socket' }],
   },
   {
     id: 'ib-6', kind: 'release', title: 'Deploy iris-api with the errand endpoint', body: 'Done and verified; waiting on the Mac contract first.',
     context: { action: 'deploy', subject: 'server-api' },
     options: [{ id: 'approve', label: 'Deploy', danger: true }, { id: 'reject', label: 'Reject', needsNote: true }],
     state: 'answered', answer: { optionId: 'reject', note: 'After the Mac contract lands.', at: iso(-20), via: 'telegram' }, raisedBy: 'nikhil', createdAt: iso(-200),
+    affects: ['nikhil', 'kabir'],
+    onApprove: 'Deploys iris-api from the deploy worktree after a db backup.',
+    onDeny: 'Nothing deploys.',
   },
   {
     id: 'ib-7', kind: 'approval', title: 'Access to the App Store Connect key for TestFlight', body: 'Tara needs the ASC key to upload a TestFlight build.',
     context: { action: 'new-secret', subject: 'asc-key' },
     options: [{ id: 'approve', label: 'Grant' }, { id: 'reject', label: 'Deny' }],
     state: 'expired', raisedBy: 'tara', createdAt: iso(-1500),
+    affects: ['tara'],
+  },
+  {
+    id: 'ib-8', kind: 'question', title: 'Superseded: old socket question', body: 'Replaced by ib-5.',
+    context: {}, options: [{ id: 'ok', label: 'OK' }],
+    state: 'answered', answer: { optionId: 'ok', note: 'Superseded by ib-5.', at: iso(-25), via: 'workplace' }, raisedBy: 'kabir', createdAt: iso(-100),
+    affects: ['kabir'],
   },
 ];
 
@@ -248,17 +298,26 @@ export const cards = [
   card(byId('nikhil'), null, 'Release 0.2.16 prepared and waiting for your approval.', null),
 ];
 
+export const counts = (cardList = cards, items = inbox) => ({
+  working: cardList.filter(c => c.employee.state === 'working').length,
+  blocked: cardList.filter(c => c.employee.state === 'blocked').length,
+  stalled: assignments.filter(a => a.stalledSince).length,
+  needsYou: items.filter(i => i.state === 'open').length,
+  total: cardList.length,
+});
+
 export const office = () => ({
   units: units.filter(u => u.kind === 'unit').map(unit => ({ unit, employees: cards.filter(c => c.employee.unitId === unit.id) })),
   coverage,
   needsYou: inbox.filter(i => i.state === 'open').length,
   spend,
   lintErrors: 0,
+  counts: counts(),
 });
 
 export const health = {
   ok: true, name: 'jkj', version: '0.3.0-mock', uptimeSeconds: 4210, claudeHome: '/Users/shravan0001jha/.claude',
-  workplace: { dataDir: '/Users/shravan0001jha/iris-workplace', capInr: 1000, day: '2026-09-27', telegram: true },
+  workplace: { dataDir: '/Users/shravan0001jha/iris-workplace', capInr: 1000, day: '2026-09-27', telegram: true, published: 'connected' },
 };
 
 export const signals = {
@@ -282,6 +341,7 @@ export const employeeDetail = (id) => {
     assignments: assignments.filter(a => a.employeeId === id),
     spendTodayInr: c.spendTodayInr,
     signals: signals.employees[id],
+    needsYou: inbox.filter(i => i.state === 'open' && (i.raisedBy === id || i.affects.includes(id))),
   };
 };
 
@@ -406,6 +466,44 @@ export const release = {
   unreleased: ['8034a09', 'ce943c7', '46e43c1'], inboxId: 'ib-1', createdAt: iso(-12),
 };
 
+export const roomThreads = [
+  { id: 'rt-socket', title: 'Mac socket contract for errands', charterIds: ['experts', 'server'], createdBy: 'kabir', createdAt: iso(-120), state: 'open', lastAt: iso(-8), messageCount: 4, participants: ['kabir', 'mira', 'asha'], escalations: ['ib-5'] },
+  { id: 'rt-release', title: 'Release readiness 0.2.16', charterIds: ['qa-release', 'desktop-mac'], createdBy: 'nikhil', createdAt: iso(-200), state: 'open', lastAt: iso(-14), messageCount: 3, participants: ['nikhil', 'rohan'], escalations: ['ib-1'] },
+  { id: 'rt-voice', title: 'iPad voice default: push-to-talk or wake word', charterIds: ['conversation', 'mobile'], createdBy: 'dev', createdAt: iso(-300), state: 'open', lastAt: iso(-35), messageCount: 5, participants: ['dev', 'tara', 'asha'], escalations: ['ib-2'] },
+  { id: 'rt-split', title: 'Split mobile into iOS and Android', charterIds: ['mobile', 'chief-of-staff'], createdBy: 'asha', createdAt: iso(-400), state: 'open', lastAt: iso(-70), messageCount: 2, participants: ['asha', 'tara'], escalations: ['ib-4'] },
+  { id: 'rt-lipsync', title: 'Lip-sync timing on the desktop character', charterIds: ['character'], createdBy: 'dev', createdAt: iso(-3000), state: 'resolved', summary: 'Viseme timing follows the TTS word marks; the 40 ms lead stays. Written into the character charter.', lastAt: iso(-1500), messageCount: 7, participants: ['dev', 'rohan', 'nikhil'], escalations: [] },
+];
+
+const rm = (id, threadId, minutesAgo, by, text, mentions = []) => ({ id, threadId, at: iso(-minutesAgo), by, owner: by === 'owner', text, mentions });
+export const roomMessages = {
+  'rt-socket': [
+    rm('m-1', 'rt-socket', 120, 'kabir', 'Starting the errand endpoint on iris-api. @mira what shape does the Mac socket message take? I need the field names before I persist anything.', ['mira']),
+    rm('m-2', 'rt-socket', 95, 'mira', 'Not published yet. The errand expert validates {instruction, source, requestedAt}; I can publish that as the socket shape today unless the server needs more.\n\nDetails: source is "phone" or "cloud"; requestedAt ISO; instruction whole, never split.', ['kabir']),
+    rm('m-3', 'rt-socket', 40, 'asha', 'Escalated to the owner as ib-5: reuse ask_mac now, or wait for the published shape.', []),
+    rm('m-4', 'rt-socket', 8, 'workplace', 'Inbox item ib-5 is open and waiting for the owner.', []),
+  ],
+  'rt-release': [
+    rm('m-5', 'rt-release', 200, 'nikhil', 'Preparing desktop-mac 0.2.16. @rohan is the errand handler merged?', ['rohan']),
+    rm('m-6', 'rt-release', 150, 'rohan', 'Merged as 8034a09 and ce943c7. 212 tests green; 20 live errands with 0 false done.', []),
+    rm('m-7', 'rt-release', 14, 'nikhil', 'Release proposed as ib-1. The script kills the running Iris and does not relaunch it; the owner should know.', []),
+  ],
+  'rt-voice': [
+    rm('m-8', 'rt-voice', 300, 'dev', 'The wake word mis-fires in shared rooms (3 of 20 sessions). Proposing push-to-talk as the iPad default with the wake word opt-in. @tara @asha', ['tara', 'asha']),
+    rm('m-9', 'rt-voice', 250, 'tara', 'Fine from the iPad side; the talk button already exists. It changes the first-run copy.', []),
+    rm('m-10', 'rt-voice', 120, 'owner', 'What does the definition say about the default?', []),
+    rm('m-11', 'rt-voice', 100, 'asha', 'It leaves it open (REQ-VOICE-03). That is why it is your decision: ib-2.', []),
+    rm('m-12', 'rt-voice', 35, 'dev', 'Adding the mis-fire numbers to ib-2 so the choice is informed.', []),
+  ],
+  'rt-split': [
+    rm('m-13', 'rt-split', 400, 'asha', 'The mobile queue is at 7 and Android waits on iOS every time. Proposing the split and an Android hire. @tara', ['tara']),
+    rm('m-14', 'rt-split', 70, 'tara', 'Agreed. I keep iOS; the Android charter takes the Gradle build, signing and the Play upload.', []),
+  ],
+  'rt-lipsync': [
+    rm('m-15', 'rt-lipsync', 3000, 'dev', 'Lip-sync lags the audio by ~120 ms on the Mac. Options: lead the visemes by 40 ms, or drive them from the TTS word marks.', []),
+    rm('m-16', 'rt-lipsync', 1500, 'asha', 'Resolved: word marks plus a 40 ms lead. Written into the character charter (v3).', []),
+  ],
+};
+
 export const sampleEvents = [
   { type: 'hello', version: '0.3.0-mock', startedAt: T0 },
   { type: 'snapshot', projects: [{ id: 'claude-dev', name: 'claude-dev', path: '/Users/shravan0001jha/claude-dev', branch: 'feat/iris-character', enabledMcpServers: [] }], agents: Object.values(agents), mcp: [{ id: 'travsr', name: 'Travsr', source: 'travsr', transport: 'stdio', health: 'healthy', toolCount: 24 }] },
@@ -425,6 +523,8 @@ export const sampleEvents = [
   { type: 'spend.updated', summary: spend },
   { type: 'signals.updated', signals },
   { type: 'alert', level: 'needs-you', title: 'Mira needs an approval', body: 'Run pytest on the errand tests?', inboxId: 'ib-5' },
+  { type: 'room.thread', thread: roomThreads[0] },
+  { type: 'room.message', message: roomMessages['rt-socket'][3], thread: roomThreads[0] },
   { type: 'future.event', anything: 1 },
 ];
 
@@ -446,6 +546,9 @@ export const fixtures = () => ({
   'requirements.json': requirements,
   'coverage.json': coverage,
   'spend.json': spend,
+  'spend-entries.json': spendEntries,
+  'room.json': { threads: roomThreads },
+  'room-thread.json': { thread: roomThreads[0], messages: roomMessages['rt-socket'] },
   'signals.json': signals,
   'release.json': release,
   'proposal.json': proposal,

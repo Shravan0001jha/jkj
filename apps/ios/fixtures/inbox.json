@@ -28,7 +28,24 @@
     ],
     "state": "open",
     "raisedBy": "nikhil",
-    "createdAt": "2026-09-27T08:48:00.000Z"
+    "createdAt": "2026-09-27T08:48:00.000Z",
+    "affects": [
+      "nikhil",
+      "rohan",
+      "asha"
+    ],
+    "onApprove": "Runs scripts/release-iris.sh 0.2.16: notarises, uploads to S3/CloudFront, kills the running Iris.",
+    "onDeny": "Nothing ships; Nikhil keeps the build and waits for your note.",
+    "links": [
+      {
+        "label": "Compare v0.2.15…feat/iris-character",
+        "href": "https://github.com/Shravan0001jha/hivemind-prototype/compare/v0.2.15...feat/iris-character"
+      },
+      {
+        "label": "Team Room: release readiness",
+        "href": "#/room/rt-release"
+      }
+    ]
   },
   {
     "id": "ib-2",
@@ -56,7 +73,19 @@
     ],
     "state": "open",
     "raisedBy": "dev",
-    "createdAt": "2026-09-27T08:27:00.000Z"
+    "createdAt": "2026-09-27T08:27:00.000Z",
+    "affects": [
+      "dev",
+      "asha"
+    ],
+    "onApprove": "Push-to-talk becomes the default in the conversation charter; the wake word stays opt-in.",
+    "onDeny": "The wake word stays the default; Dev files the mis-fire fixes as a feature.",
+    "links": [
+      {
+        "label": "Team Room: iPad voice default",
+        "href": "#/room/rt-voice"
+      }
+    ]
   },
   {
     "id": "ib-3",
@@ -81,7 +110,13 @@
     ],
     "state": "open",
     "raisedBy": "workplace",
-    "createdAt": "2026-09-27T08:12:00.000Z"
+    "createdAt": "2026-09-27T08:12:00.000Z",
+    "affects": [
+      "tara",
+      "asha"
+    ],
+    "onApprove": "Tara resumes today up to the number you give.",
+    "onDeny": "Tara stays paused until tomorrow 00:00 IST."
   },
   {
     "id": "ib-4",
@@ -106,7 +141,19 @@
     ],
     "state": "open",
     "raisedBy": "asha",
-    "createdAt": "2026-09-27T07:50:00.000Z"
+    "createdAt": "2026-09-27T07:50:00.000Z",
+    "affects": [
+      "asha",
+      "tara"
+    ],
+    "onApprove": "Two charters replace mobile; Arjun is hired as Android lead with a ₹150/day budget; the map moves 6 entries.",
+    "onDeny": "The org stays as it is; Asha records your reason in the proposal.",
+    "links": [
+      {
+        "label": "Proposal diff",
+        "href": "#/room/rt-split"
+      }
+    ]
   },
   {
     "id": "ib-5",
@@ -129,7 +176,19 @@
     ],
     "state": "open",
     "raisedBy": "kabir",
-    "createdAt": "2026-09-27T08:31:00.000Z"
+    "createdAt": "2026-09-27T08:31:00.000Z",
+    "affects": [
+      "kabir",
+      "mira"
+    ],
+    "onApprove": "Kabir builds on the ask_mac shape today.",
+    "onDeny": "Kabir stays blocked until Mira publishes the socket contract.",
+    "links": [
+      {
+        "label": "Team Room: Mac socket contract",
+        "href": "#/room/rt-socket"
+      }
+    ]
   },
   {
     "id": "ib-6",
@@ -160,7 +219,13 @@
       "via": "telegram"
     },
     "raisedBy": "nikhil",
-    "createdAt": "2026-09-27T05:40:00.000Z"
+    "createdAt": "2026-09-27T05:40:00.000Z",
+    "affects": [
+      "nikhil",
+      "kabir"
+    ],
+    "onApprove": "Deploys iris-api from the deploy worktree after a db backup.",
+    "onDeny": "Nothing deploys."
   },
   {
     "id": "ib-7",
@@ -183,6 +248,34 @@
     ],
     "state": "expired",
     "raisedBy": "tara",
-    "createdAt": "2026-09-26T08:00:00.000Z"
+    "createdAt": "2026-09-26T08:00:00.000Z",
+    "affects": [
+      "tara"
+    ]
+  },
+  {
+    "id": "ib-8",
+    "kind": "question",
+    "title": "Superseded: old socket question",
+    "body": "Replaced by ib-5.",
+    "context": {},
+    "options": [
+      {
+        "id": "ok",
+        "label": "OK"
+      }
+    ],
+    "state": "answered",
+    "answer": {
+      "optionId": "ok",
+      "note": "Superseded by ib-5.",
+      "at": "2026-09-27T08:35:00.000Z",
+      "via": "workplace"
+    },
+    "raisedBy": "kabir",
+    "createdAt": "2026-09-27T07:20:00.000Z",
+    "affects": [
+      "kabir"
+    ]
   }
 ]

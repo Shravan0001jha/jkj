@@ -81,7 +81,7 @@ final class StoreTests: XCTestCase {
         let s = InboxStore()
         await s.load(rest)
         XCTAssertEqual(s.open.map(\.id), ["ib-1", "ib-5", "ib-2", "ib-3", "ib-4"])
-        XCTAssertEqual(s.closed.map(\.id), ["ib-6", "ib-7"])
+        XCTAssertEqual(s.closed.map(\.id), ["ib-8", "ib-6", "ib-7"])
     }
 
     func testInboxAnswerFlipsOnlyAfterTheServerConfirms() async throws {
@@ -127,7 +127,7 @@ final class StoreTests: XCTestCase {
         fresh.id = "ib-9"; fresh.state = .open; fresh.createdAt = "2026-09-27T12:00:00.000Z"
         s.handle(.inboxUpdated(fresh))
         XCTAssertEqual(s.open.first?.id, "ib-9")
-        XCTAssertEqual(s.items.count, 8)
+        XCTAssertEqual(s.items.count, 9)
     }
 
     // MARK: Talk
@@ -248,5 +248,140 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(s.unread, 0)
         s.handle(.spendUpdated(try! Fixtures.decode("spend", as: SpendSummary.self)))
         XCTAssertEqual(s.alerts.count, 2, "other events are ignored")
+    }
+}
+
+@MainActor
+final class RoomStoreTests: XCTestCase {
+    private var rest: RestClient!
+
+    override func setUp() {
+        StubURLProtocol.reset()
+        StubURLProtocol.handler = { req in
+            switch (req.httpMethod ?? "GET", req.url!.path) {
+            case ("GET", "/api/room"): return (200, try! Fixtures.data("room"))
+            case ("GET", "/api/room/rt-socket"): return (200, try! Fixtures.data("room-thread"))
+            default: return (404, Data(#"{"error":"no route \#(req.url!.path)"}"#.utf8))
+            }
+        }
+        rest = RestClient(config: ServerConfig(mode: .lan, baseURL: ServerConfig.parse("127.0.0.1:4317")!),
+                          tokens: MemoryTokenStore(token: "t"), session: StubURLProtocol.session())
+    }
+
+    func testThreadsSortOpenFirstThenNewest() async {
+        let s = RoomStore()
+        await s.load(rest)
+        XCTAssertNil(s.error)
+        XCTAssertEqual(s.open.map(\.id), ["rt-socket", "rt-release", "rt-voice", "rt-split"])
+        XCTAssertEqual(s.resolved.map(\.id), ["rt-lipsync"])
+        XCTAssertEqual(s.thread("rt-lipsync")?.summary?.isEmpty, false)
+    }
+
+    func testThreadMessagesLoadAndLiveUpdatesAppendOnce() async {
+        let s = RoomStore()
+        await s.load(rest)
+        await s.loadThread(rest, id: "rt-socket")
+        XCTAssertEqual(s.messages["rt-socket"]?.count, 4)
+        let thread = s.thread("rt-socket")!
+        let m = RoomMessage(id: "m-new", threadId: "rt-socket", at: "2026-09-27T12:00:00.000Z", by: "mira", owner: false, text: "Published the shape.", mentions: ["kabir"])
+        var t2 = thread; t2.lastAt = m.at; t2.messageCount = 5
+        s.handle(.roomMessage(m, thread: t2))
+        s.handle(.roomMessage(m, thread: t2))
+        XCTAssertEqual(s.messages["rt-socket"]?.count, 5)
+        XCTAssertEqual(s.thread("rt-socket")?.messageCount, 5)
+        XCTAssertTrue(s.unread.contains("rt-socket"), "an employee's message marks the thread unread")
+        s.markRead("rt-socket")
+        XCTAssertFalse(s.unread.contains("rt-socket"))
+        let mine = RoomMessage(id: "m-own", threadId: "rt-socket", at: "2026-09-27T12:01:00.000Z", by: "owner", owner: true, text: "Thanks.", mentions: [])
+        s.handle(.roomMessage(mine, thread: t2))
+        XCTAssertFalse(s.unread.contains("rt-socket"), "the owner's own message is not unread")
+        var resolved = t2; resolved.state = .resolved; resolved.summary = "Reuse ask_mac."
+        s.handle(.roomThread(resolved))
+        XCTAssertEqual(s.resolved.map(\.id).sorted(), ["rt-lipsync", "rt-socket"])
+    }
+
+    func testPostShowsTheMessageOnlyAfterTheServerReturnedIt() async throws {
+        let s = RoomStore()
+        await s.load(rest)
+        await s.loadThread(rest, id: "rt-socket")
+        StubURLProtocol.handler = { req in
+            XCTAssertEqual(req.url?.path, "/api/room/rt-socket/messages")
+            let m = RoomMessage(id: "m-99", threadId: "rt-socket", at: "2026-09-27T13:00:00.000Z", by: "owner", owner: true, text: "Reuse ask_mac. @kabir go ahead.", mentions: ["kabir"])
+            return (200, try! JSONEncoder().encode(m))
+        }
+        try await s.post(rest, threadId: "rt-socket", text: "Reuse ask_mac. @kabir go ahead.", mentions: ["kabir"])
+        XCTAssertEqual(s.messages["rt-socket"]?.last?.id, "m-99")
+        XCTAssertEqual(s.messages["rt-socket"]?.last?.owner, true)
+        StubURLProtocol.handler = { _ in (500, Data(#"{"error":"boom"}"#.utf8)) }
+        await XCTAssertThrowsErrorAsync(try await s.post(rest, threadId: "rt-socket", text: "again", mentions: []))
+        XCTAssertEqual(s.messages["rt-socket"]?.count, 5, "a failed post adds nothing")
+    }
+
+    func testMentionsAreParsedAgainstKnownEmployees() {
+        let known = ["asha", "dev", "mira", "kabir"]
+        XCTAssertEqual(RoomStore.mentions(in: "@mira and @Kabir, see @asha. @nobody @mira", known: known), ["mira", "kabir", "asha"])
+        XCTAssertEqual(RoomStore.mentions(in: "no mentions here", known: known), [])
+    }
+}
+
+final class CompactTextTests: XCTestCase {
+    func testFirstLineIsTheSummaryWhenTheServerSendsNone() {
+        let c = CompactText(text: "Not published yet. The errand expert validates the shape.\n\nDetails: source is phone or cloud.")
+        XCTAssertEqual(c.line, "Not published yet. The errand expert validates the shape.")
+        XCTAssertEqual(c.details, "Details: source is phone or cloud.")
+        XCTAssertTrue(c.hasDetails)
+    }
+
+    func testSingleLineHasNoDetails() {
+        let c = CompactText(text: "Merged as 8034a09.")
+        XCTAssertEqual(c.line, "Merged as 8034a09.")
+        XCTAssertFalse(c.hasDetails)
+    }
+
+    func testLeadingBlankLinesAreSkippedAndLongLinesTruncated() {
+        let c = CompactText(text: "\n\nA first line after blanks\nmore")
+        XCTAssertEqual(c.line, "A first line after blanks")
+        XCTAssertEqual(c.details, "more")
+        let long = CompactText(text: String(repeating: "word ", count: 60))
+        XCTAssertLessThanOrEqual(long.line.count, 160)
+        XCTAssertTrue(long.line.hasSuffix("…"))
+        XCTAssertTrue(long.hasDetails)
+    }
+
+    func testServerSummaryWinsWhenPresent() {
+        let c = CompactText(text: "Long body\nwith lines", summary: "Short summary", details: "Long body\nwith lines")
+        XCTAssertEqual(c.line, "Short summary")
+        XCTAssertEqual(c.details, "Long body\nwith lines")
+        let same = CompactText(text: "Just this", summary: "Just this")
+        XCTAssertFalse(same.hasDetails, "summary equal to the text means nothing to expand")
+    }
+}
+
+@MainActor
+final class EmployeeNeedsYouTests: XCTestCase {
+    func testNeedsYouFollowsInboxUpdates() async throws {
+        StubURLProtocol.reset()
+        StubURLProtocol.handler = { req in
+            switch req.url!.path {
+            case "/api/employees/mira": return (200, try! Fixtures.data("employee-detail"))
+            case "/api/agents/s-mira-1/log": return (200, try! Fixtures.data("agent-log"))
+            default: return (404, Data(#"{"error":"no"}"#.utf8))
+            }
+        }
+        let rest = RestClient(config: ServerConfig(mode: .lan, baseURL: ServerConfig.parse("127.0.0.1:4317")!), tokens: MemoryTokenStore(token: "t"), session: StubURLProtocol.session())
+        let s = TalkStore()
+        await s.select(rest, employeeId: "mira")
+        XCTAssertEqual(s.detail?.needsYou.map(\.id), ["ib-5"])
+        var answered = s.detail!.needsYou[0]
+        answered.state = .answered
+        s.handle(.inboxUpdated(answered))
+        XCTAssertEqual(s.detail?.needsYou.count, 0, "answered anywhere → gone from the employee page")
+        var fresh = try Fixtures.decode("inbox", as: [InboxItem].self).first { $0.id == "ib-1" }!
+        fresh.affects = ["mira"]
+        s.handle(.inboxUpdated(fresh))
+        XCTAssertEqual(s.detail?.needsYou.map(\.id), ["ib-1"], "a new open item that affects her appears")
+        var other = fresh; other.id = "ib-x"; other.affects = ["dev"]; other.raisedBy = "dev"
+        s.handle(.inboxUpdated(other))
+        XCTAssertEqual(s.detail?.needsYou.count, 1, "items about someone else stay away")
     }
 }

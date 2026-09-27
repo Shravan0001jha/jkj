@@ -41,6 +41,12 @@ struct OfficeView: View {
             .refreshable { await reload() }
             .navigationTitle("Office")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { model.router.showAlerts = true } label: {
+                        Image(systemName: model.alerts.unread > 0 ? "bell.badge" : "bell")
+                    }
+                    .accessibilityLabel(model.alerts.unread > 0 ? "\(model.alerts.unread) new alerts" : "Alerts")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { model.router.showSettings = true } label: { Image(systemName: "gearshape") }
                         .accessibilityLabel("Settings")
@@ -58,22 +64,30 @@ struct OfficeView: View {
     }
 }
 
-/// Needs you, spend against the cap, coverage, lint.
+/// Needs you, working, blocked, stalled; spend against the cap; coverage; lint.
 struct OfficeHeader: View {
+    @Environment(AppModel.self) private var model
     let data: OfficeResponse
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 16) {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Stat(value: "\(data.needsYou)", label: data.needsYou == 1 ? "needs you" : "need you",
                      glyph: data.needsYou > 0 ? EmployeeState.needsOwner.glyph : Glyph(symbol: "checkmark.circle", tint: .green, label: "nothing waiting"))
-                Divider().frame(height: 36)
-                Stat(value: "\(data.units.flatMap(\.employees).filter { $0.employee.state == .working }.count)", label: "working", glyph: EmployeeState.working.glyph)
-                Divider().frame(height: 36)
-                let blocked = data.units.flatMap(\.employees).filter { $0.employee.state == .blocked }.count
-                Stat(value: "\(blocked)", label: "blocked", glyph: blocked > 0 ? EmployeeState.blocked.glyph : Glyph(symbol: "circle", tint: .secondary, label: "none blocked"))
+                Divider().frame(height: 36).padding(.horizontal, 6)
+                Stat(value: "\(data.counts.working)", label: "working", glyph: EmployeeState.working.glyph)
+                Divider().frame(height: 36).padding(.horizontal, 6)
+                Stat(value: "\(data.counts.blocked)", label: "blocked",
+                     glyph: data.counts.blocked > 0 ? EmployeeState.blocked.glyph : Glyph(symbol: "circle", tint: .secondary, label: "none blocked"))
+                Divider().frame(height: 36).padding(.horizontal, 6)
+                Stat(value: "\(data.counts.stalled)", label: "stalled",
+                     glyph: data.counts.stalled > 0 ? Glyph(symbol: "clock.badge.exclamationmark", tint: .orange, label: "stalled") : Glyph(symbol: "clock", tint: .secondary, label: "none stalled"))
             }
-            SpendMeter(spend: data.spend)
+            Button { model.router.showSpend = true } label: {
+                SpendMeter(spend: data.spend)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens spend and subscription usage")
             CoverageRow(coverage: data.coverage)
             if data.lintErrors > 0 {
                 Label("\(data.lintErrors) ownership-map error\(data.lintErrors == 1 ? "" : "s") block routing", systemImage: "exclamationmark.triangle.fill")
@@ -90,18 +104,19 @@ private struct Stat: View {
     let glyph: Glyph
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: glyph.symbol).foregroundStyle(glyph.tint)
+        HStack(spacing: 5) {
+            Image(systemName: glyph.symbol).foregroundStyle(glyph.tint).font(.subheadline)
             VStack(alignment: .leading, spacing: 0) {
-                Text(value).font(.title2.weight(.semibold).monospacedDigit())
-                Text(label).font(.caption).foregroundStyle(.secondary)
+                Text(value).font(.title3.weight(.semibold).monospacedDigit())
+                Text(label).font(.caption2).foregroundStyle(.secondary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 }
 
-/// Spend today against the daily cap. Shape: a bar; colour: green → orange (≥ 80 %) → red (at cap).
+/// Real money today against the daily cap. Shape: a bar; colour: green → orange (≥ 80 %) → red (at cap).
 struct SpendMeter: View {
     let spend: SpendSummary
 
@@ -112,10 +127,12 @@ struct SpendMeter: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Spend today").font(.subheadline.weight(.semibold))
+                Text("real money").font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 Text("\(Format.inr(spend.companyInr)) of \(Format.inr(spend.capInr))")
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(fraction >= 0.8 ? tint : .primary)
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -127,11 +144,16 @@ struct SpendMeter: View {
                 }
             }
             .frame(height: 8)
-            if !spend.paused.isEmpty {
-                Label(spend.paused.map(pausedName).joined(separator: ", ") + " paused at cap", systemImage: "pause.circle.fill")
-                    .font(.caption).foregroundStyle(.orange)
+            HStack(spacing: 10) {
+                if !spend.paused.isEmpty {
+                    Label(spend.paused.map(pausedName).joined(separator: ", ") + " paused at cap", systemImage: "pause.circle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                Spacer()
+                Text("Subscription: \(spend.subscription.turns) turns, free").font(.caption).foregroundStyle(.secondary)
             }
         }
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Spend today \(Format.inr(spend.companyInr)) of \(Format.inr(spend.capInr)), \(Format.percent(Int(spend.companyInr), of: Int(spend.capInr)))")
     }
@@ -187,10 +209,17 @@ struct EmployeeCardView: View {
                 Spacer()
                 StateLabel(glyph: card.employee.state.glyph, compact: true)
             }
+            if let reason = card.employee.stateReason, !reason.isEmpty {
+                Text(reason).font(.caption).foregroundStyle(card.employee.state.glyph.tint).lineLimit(3)
+            }
             if let w = card.currentWork {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: w.state.glyph.symbol).foregroundStyle(w.state.glyph.tint).font(.caption)
                     Text(w.title).font(.subheadline).lineLimit(2)
+                }
+                if let since = w.stalledSince {
+                    Label("Stalled since \(Format.ago(since)) — the Chief of Staff resumes it or asks you", systemImage: "clock.badge.exclamationmark")
+                        .font(.caption).foregroundStyle(.orange)
                 }
             } else {
                 Text("Nothing assigned").font(.subheadline).foregroundStyle(.secondary)

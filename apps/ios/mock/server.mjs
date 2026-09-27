@@ -35,8 +35,11 @@ const fresh = () => ({
   features: structuredClone(D.features),
   assignments: structuredClone(D.assignments),
   spend: structuredClone(D.spend),
+  threads: structuredClone(D.roomThreads),
+  messages: structuredClone(D.roomMessages),
   usedCodes: new Set(),
 });
+let msgSeq = 100;
 let state = fresh();
 let logSeq = 100;
 
@@ -77,6 +80,7 @@ const office = () => ({
   needsYou: state.inbox.filter(i => i.state === 'open').length,
   spend: state.spend,
   lintErrors: 0,
+  counts: D.counts(state.cards, state.inbox),
 });
 
 const broadcast = (event) => {
@@ -134,8 +138,10 @@ const server = createServer(async (req, res) => {
     item.state = 'answered';
     item.answer = { optionId: opt.id, note: body.note, at: new Date().toISOString(), via: isLoopback(req) ? 'web' : 'phone' };
     broadcast({ type: 'inbox.updated', item });
-    const card = state.cards.find(c => c.employee.id === item.raisedBy);
-    if (card) { card.needsYou = state.inbox.filter(i => i.state === 'open' && i.raisedBy === card.employee.id).length; broadcast({ type: 'office.updated', card }); }
+    for (const card of state.cards.filter(c => c.employee.id === item.raisedBy || item.affects.includes(c.employee.id))) {
+      card.needsYou = state.inbox.filter(i => i.state === 'open' && i.raisedBy === card.employee.id).length;
+      broadcast({ type: 'office.updated', card });
+    }
     broadcast({ type: 'alert', level: 'info', title: `Answered: ${item.title}`, body: `${opt.label}${body.note ? ' · ' + body.note : ''}`, inboxId: item.id });
     return json(res, 200, item);
   }
@@ -144,6 +150,7 @@ const server = createServer(async (req, res) => {
     const d = D.employeeDetail(id);
     if (!d) return json(res, 404, { error: 'no such employee' });
     d.sessions = Object.values(state.agents).filter(a => a.name === id);
+    d.needsYou = state.inbox.filter(i => i.state === 'open' && (i.raisedBy === id || i.affects.includes(id)));
     return json(res, 200, d);
   }
   if (m === 'POST' && seg[1] === 'employees' && seg[3] === 'talk') {
@@ -200,6 +207,50 @@ const server = createServer(async (req, res) => {
   if (m === 'GET' && p === '/api/spend') return json(res, 200, state.spend);
   if (m === 'GET' && p === '/api/health/signals') return json(res, 200, D.signals);
   if (m === 'GET' && p === '/api/work') return json(res, 200, state.assignments);
+  if (m === 'GET' && p === '/api/room') return json(res, 200, { threads: [...state.threads].sort((a, b) => b.lastAt.localeCompare(a.lastAt)) });
+  if (m === 'POST' && p === '/api/room') {
+    const body = await readJson(req);
+    if (!body || !body.title || !body.text) return json(res, 400, { error: 'title and text required' });
+    const now = new Date().toISOString();
+    const thread = { id: `rt-${Date.now().toString(36)}`, title: body.title, charterIds: body.charterIds ?? [], createdBy: 'owner', createdAt: now, state: 'open', lastAt: now, messageCount: 1, participants: ['owner', ...(body.mentions ?? [])], escalations: [] };
+    const message = { id: `m-${msgSeq++}`, threadId: thread.id, at: now, by: 'owner', owner: true, text: body.text, mentions: body.mentions ?? [] };
+    state.threads.push(thread); state.messages[thread.id] = [message];
+    broadcast({ type: 'room.thread', thread }); broadcast({ type: 'room.message', message, thread });
+    return json(res, 200, { thread, messages: [message] });
+  }
+  if (m === 'GET' && seg[1] === 'room' && id && !seg[3]) {
+    const thread = state.threads.find(t => t.id === id);
+    if (!thread) return json(res, 404, { error: 'no such thread' });
+    return json(res, 200, { thread, messages: state.messages[id] ?? [] });
+  }
+  if (m === 'POST' && seg[1] === 'room' && seg[3] === 'messages') {
+    const thread = state.threads.find(t => t.id === id);
+    if (!thread) return json(res, 404, { error: 'no such thread' });
+    const body = await readJson(req);
+    if (!body || typeof body.text !== 'string' || !body.text.trim()) return json(res, 400, { error: 'text required' });
+    const now = new Date().toISOString();
+    const message = { id: `m-${msgSeq++}`, threadId: id, at: now, by: 'owner', owner: true, text: body.text, mentions: body.mentions ?? [] };
+    (state.messages[id] ??= []).push(message);
+    thread.lastAt = now; thread.messageCount += 1; if (!thread.participants.includes('owner')) thread.participants.push('owner');
+    broadcast({ type: 'room.message', message, thread }); broadcast({ type: 'room.thread', thread });
+    // A mentioned employee answers in a moment.
+    const who = (body.mentions ?? [])[0] ?? thread.participants.find(x => x !== 'owner' && x !== 'workplace');
+    if (who) setTimeout(() => {
+      const reply = { id: `m-${msgSeq++}`, threadId: id, at: new Date().toISOString(), by: who, owner: false, text: `Noted. I will answer in the thread with evidence.\n\nDetails: reading the latest messages and my charter first; back within the hour.`, mentions: ['owner'] };
+      state.messages[id].push(reply); thread.lastAt = reply.at; thread.messageCount += 1;
+      broadcast({ type: 'room.message', message: reply, thread }); broadcast({ type: 'room.thread', thread });
+    }, 1500);
+    return json(res, 200, message);
+  }
+  if (m === 'POST' && seg[1] === 'room' && seg[3] === 'resolve') {
+    const thread = state.threads.find(t => t.id === id);
+    if (!thread) return json(res, 404, { error: 'no such thread' });
+    const body = await readJson(req);
+    thread.state = 'resolved'; thread.summary = body?.summary ?? ''; thread.lastAt = new Date().toISOString();
+    broadcast({ type: 'room.thread', thread });
+    return json(res, 200, thread);
+  }
+  if (m === 'GET' && p === '/api/spend/entries') return json(res, 200, D.spendEntries);
   if (m === 'GET' && p === '/api/releases') return json(res, 200, [D.release]);
   if (m === 'GET' && p === '/api/proposals') return json(res, 200, [D.proposal]);
   return json(res, 404, { error: `no route ${m} ${p}` });

@@ -271,6 +271,7 @@ struct Employee: Codable, Equatable, Hashable, Identifiable {
     var budget: EmployeeBudget
     var githubApp: String?
     var state: EmployeeState
+    var stateReason: String?
 }
 
 enum UnitKind: String, Codable, CaseIterable {
@@ -429,6 +430,7 @@ struct WorkItem: Codable, Equatable, Hashable, Identifiable {
     var createdAt: String
     var updatedAt: String
     var history: [WorkHistoryEntry]
+    var stalledSince: String?
 }
 
 // MARK: - workplace.ts · inbox
@@ -447,7 +449,7 @@ struct InboxOption: Codable, Equatable, Hashable, Identifiable {
 }
 
 enum AnswerVia: String, Codable, CaseIterable {
-    case web, phone, telegram
+    case web, phone, telegram, workplace
 }
 
 struct InboxAnswer: Codable, Equatable, Hashable {
@@ -472,6 +474,27 @@ struct InboxItem: Codable, Equatable, Hashable, Identifiable {
     var answer: InboxAnswer?
     var raisedBy: String
     var createdAt: String
+    var affects: [String]
+    var onApprove: String?
+    var onDeny: String?
+    var links: [InboxLink]?
+}
+
+struct InboxLink: Codable, Equatable, Hashable {
+    var label: String
+    var href: String
+
+    /// `#/room/<threadId>` is a deep link into a Team Room thread.
+    var roomThreadId: String? {
+        guard href.hasPrefix("#/room/") else { return nil }
+        let id = String(href.dropFirst("#/room/".count))
+        return id.isEmpty ? nil : id
+    }
+
+    var url: URL? {
+        guard href.hasPrefix("http://") || href.hasPrefix("https://") else { return nil }
+        return URL(string: href)
+    }
 }
 
 // MARK: - workplace.ts · org changes
@@ -515,26 +538,83 @@ struct OrgHistoryEntry: Codable, Equatable, Hashable {
 
 // MARK: - workplace.ts · spend and health
 
+enum SpendSource: String, Codable, CaseIterable {
+    case anthropicApi = "anthropic-api"
+    case aws
+    case thirdParty = "third-party"
+    case subscription
+}
+
+enum SpendBasis: String, Codable, CaseIterable {
+    case metered, estimated, reported
+}
+
+enum SpendTag: String, Codable, CaseIterable {
+    case ownerTalk = "owner-talk"
+}
+
 struct SpendEntry: Codable, Equatable, Hashable {
     var at: String
     var employeeId: String
     var sessionId: String
-    var model: String
+    var source: SpendSource
+    var basis: SpendBasis
+    var what: String
+    var inr: Double
+    var detail: [String: JSONValue]?
+    var tag: SpendTag?
+}
+
+enum RateLimitWindowKind: String, Codable, CaseIterable {
+    case fiveHour = "five_hour"
+    case sevenDay = "seven_day"
+    case sevenDayOpus = "seven_day_opus"
+    case sevenDaySonnet = "seven_day_sonnet"
+    case sevenDayOverageIncluded = "seven_day_overage_included"
+    case overage, unknown
+}
+
+enum RateLimitStatus: String, Codable, CaseIterable {
+    case allowed
+    case allowedWarning = "allowed_warning"
+    case rejected
+}
+
+struct RateLimitWindow: Codable, Equatable, Hashable {
+    var window: RateLimitWindowKind
+    var status: RateLimitStatus
+    var utilization: Double?
+    var resetsAt: String?
+    var seenAt: String
+}
+
+struct SubscriptionEmployeeUsage: Codable, Equatable, Hashable {
+    var turns: Int
+    var equivalentInr: Double
+}
+
+struct SubscriptionUsage: Codable, Equatable, Hashable {
+    var turns: Int
     var inputTokens: Int
     var outputTokens: Int
     var cacheReadTokens: Int
     var cacheWriteTokens: Int
-    var usd: Double
-    var inr: Double
+    var equivalentInr: Double
+    var byEmployee: [String: SubscriptionEmployeeUsage]
+    var windows: [RateLimitWindow]
 }
 
 struct SpendSummary: Codable, Equatable, Hashable {
     var day: String
     var companyInr: Double
     var capInr: Double
+    var bySource: [String: Double]
+    var byBasis: [String: Double]
     var byEmployee: [String: Double]
     var byUnit: [String: Double]
     var paused: [String]
+    var subscription: SubscriptionUsage
+    var ownerTalkInr: Double
 }
 
 struct EmployeeSignals: Codable, Equatable, Hashable {
@@ -600,6 +680,36 @@ struct Release: Codable, Equatable, Hashable, Identifiable {
     var createdAt: String
 }
 
+// MARK: - workplace.ts · the Team Room
+
+enum RoomThreadState: String, Codable, CaseIterable {
+    case open, resolved
+}
+
+struct RoomThread: Codable, Equatable, Hashable, Identifiable {
+    var id: String
+    var title: String
+    var charterIds: [String]
+    var createdBy: String
+    var createdAt: String
+    var state: RoomThreadState
+    var summary: String?
+    var lastAt: String
+    var messageCount: Int
+    var participants: [String]
+    var escalations: [String]
+}
+
+struct RoomMessage: Codable, Equatable, Hashable, Identifiable {
+    var id: String
+    var threadId: String
+    var at: String
+    var by: String
+    var owner: Bool
+    var text: String
+    var mentions: [String]
+}
+
 // MARK: - workplace.ts · views
 
 struct EmployeeCard: Codable, Equatable, Hashable, Identifiable {
@@ -616,11 +726,17 @@ struct EmployeeCard: Codable, Equatable, Hashable, Identifiable {
 
 // MARK: - workplace-api.ts · responses
 
+enum PublishedState: String, Codable, CaseIterable {
+    case notConfigured = "not-configured"
+    case connecting, connected, offline, off
+}
+
 struct WorkplaceInfo: Codable, Equatable {
     var dataDir: String
     var capInr: Double
     var day: String
     var telegram: Bool
+    var published: PublishedState
 }
 
 struct WorkplaceHealthResponse: Codable, Equatable {
@@ -639,12 +755,21 @@ struct OfficeUnit: Codable, Equatable, Hashable, Identifiable {
     var id: String { unit.id }
 }
 
+struct OfficeCounts: Codable, Equatable, Hashable {
+    var working: Int
+    var blocked: Int
+    var stalled: Int
+    var needsYou: Int
+    var total: Int
+}
+
 struct OfficeResponse: Codable, Equatable {
     var units: [OfficeUnit]
     var coverage: Coverage
     var needsYou: Int
     var spend: SpendSummary
     var lintErrors: Int
+    var counts: OfficeCounts
 }
 
 struct OrgResponse: Codable, Equatable {
@@ -667,6 +792,16 @@ struct EmployeeDetail: Codable, Equatable {
     var assignments: [WorkItem]
     var spendTodayInr: Double
     var signals: EmployeeSignals
+    var needsYou: [InboxItem]
+}
+
+struct RoomResponse: Codable, Equatable {
+    var threads: [RoomThread]
+}
+
+struct RoomThreadDetail: Codable, Equatable {
+    var thread: RoomThread
+    var messages: [RoomMessage]
 }
 
 struct FeatureBoard: Codable, Equatable {
@@ -717,6 +852,23 @@ struct ErrorResponse: Codable, Equatable {
 struct TalkRequest: Codable, Equatable {
     var text: String
     var attachments: [Attachment]?
+    var probe: Bool?
+}
+
+struct CreateThreadRequest: Codable, Equatable {
+    var title: String
+    var text: String
+    var charterIds: [String]?
+    var mentions: [String]?
+}
+
+struct PostMessageRequest: Codable, Equatable {
+    var text: String
+    var mentions: [String]?
+}
+
+struct ResolveThreadRequest: Codable, Equatable {
+    var summary: String
 }
 
 struct AnswerInboxRequest: Codable, Equatable {

@@ -10,12 +10,14 @@ enum Connection: Equatable {
     case offline(reason: String, retryAt: Date?)
     /// The relay answers, but the Mac's tunnel to it is down. Probed every few seconds.
     case macOffline
+    /// The owner switched published access off. Probed every few seconds.
+    case accessOff
     /// The credential was refused: sign in again (relay) or re-pair (LAN).
     case unauthorized
 }
 
 enum Tab: String, CaseIterable {
-    case office, inbox, talk, features, alerts
+    case office, inbox, talk, room, features
 }
 
 /// Cross-tab navigation: an alert opens its Inbox item, an Office card opens Talk.
@@ -26,9 +28,13 @@ final class Router {
     var talkEmployeeId: String?
     var featureId: String?
     var pivot: PivotRows?
+    var roomThreadId: String?
     var showSettings = false
+    var showAlerts = false
+    var showSpend = false
 
     func openInbox(_ id: String) { inboxItemId = id; tab = .inbox }
+    func openThread(_ id: String) { roomThreadId = id; tab = .room }
     func talk(to employeeId: String) { talkEmployeeId = employeeId; tab = .talk }
 }
 
@@ -46,6 +52,7 @@ final class AppModel {
     let inbox = InboxStore()
     let talk = TalkStore()
     let features = FeaturesStore()
+    let room = RoomStore()
     let alerts: AlertsStore
     let router = Router()
 
@@ -108,6 +115,9 @@ final class AppModel {
         if let id = env["WORKPLACE_INBOX_ITEM"] { router.openInbox(id) }
         if let id = env["WORKPLACE_TALK"] { router.talk(to: id) }
         if let id = env["WORKPLACE_FEATURE"] { router.featureId = id; router.tab = .features }
+        if let id = env["WORKPLACE_ROOM"] { if id == "list" { router.tab = .room } else { router.openThread(id) } }
+        if env["WORKPLACE_SPEND"] == "1" { router.showSpend = true }
+        if env["WORKPLACE_ALERTS"] == "1" { router.showAlerts = true }
         if let p = env["WORKPLACE_PIVOT"], let rows = PivotRows(rawValue: p) { router.pivot = rows; router.tab = .features }
         if env["WORKPLACE_SETTINGS"] == "1" { router.showSettings = true }
         #endif
@@ -209,7 +219,7 @@ final class AppModel {
     func foreground() {
         guard hasCredential else { return }
         switch connection {
-        case .macOffline, .unauthorized: connect()
+        case .macOffline, .accessOff, .unauthorized: connect()
         default: if socket == nil { connect() } else { socket?.reconnectNow() }
         }
     }
@@ -241,7 +251,7 @@ final class AppModel {
                 // Offline here means the network, not the Mac: the socket's backoff will recover it.
                 socket.start()
                 await self.loadAll()
-            case .macOffline:
+            case .macOffline, .accessOff:
                 self.waitForMac(rest, socket: socket)
             case .unauthorized, .signedOut, .connecting:
                 break
@@ -259,6 +269,8 @@ final class AppModel {
             connection = .unauthorized
         } catch WorkplaceError.macOffline {
             connection = .macOffline
+        } catch WorkplaceError.accessOff {
+            connection = .accessOff
         } catch {
             connection = .offline(reason: error.localizedDescription, retryAt: nil)
         }
@@ -297,7 +309,7 @@ final class AppModel {
             connection = .online(version: health?.version ?? "")
         case .closed(let retryAt):
             switch connection {
-            case .unauthorized, .macOffline, .signedOut: return
+            case .unauthorized, .macOffline, .accessOff, .signedOut: return
             default: break
             }
             guard let retryAt, let rest, let socket else { return }
@@ -306,7 +318,7 @@ final class AppModel {
             Task { [weak self] in
                 guard let self else { return }
                 switch await self.probe(rest) {
-                case .macOffline:
+                case .macOffline, .accessOff:
                     socket.stop()
                     self.waitForMac(rest, socket: socket)
                 case .unauthorized:
@@ -328,6 +340,7 @@ final class AppModel {
         inbox.handle(event)
         talk.handle(event)
         features.handle(event)
+        room.handle(event)
         alerts.handle(event)
         switch event {
         case .hello(let version, _):

@@ -33,6 +33,35 @@ final class ContractTests: XCTestCase {
     func testRequirements() throws { try roundTrip("requirements", [Requirement].self) }
     func testCoverage() throws { try roundTrip("coverage", Coverage.self) }
     func testSpend() throws { try roundTrip("spend", SpendSummary.self) }
+    func testSpendEntries() throws { try roundTrip("spend-entries", [SpendEntry].self) }
+    func testRoom() throws {
+        try roundTrip("room", RoomResponse.self)
+        try roundTrip("room-thread", RoomThreadDetail.self)
+    }
+
+    func testNewContractFieldsAreCarried() throws {
+        let office = try Fixtures.decode("office", as: OfficeResponse.self)
+        XCTAssertEqual(office.counts, OfficeCounts(working: 2, blocked: 1, stalled: 1, needsYou: 5, total: 7))
+        XCTAssertEqual(office.cards().first { $0.employee.id == "tara" }?.employee.stateReason, "Paused — daily budget reached (₹150). You can still talk to Tara.")
+        XCTAssertEqual(office.spend.bySource["anthropic-api"], 318.0)
+        XCTAssertEqual(office.spend.subscription.windows.map(\.window), [.fiveHour, .sevenDay, .sevenDayOpus])
+        XCTAssertEqual(office.spend.subscription.windows[1].status, .allowedWarning)
+        let detail = try Fixtures.decode("employee-detail", as: EmployeeDetail.self)
+        XCTAssertEqual(detail.needsYou.map(\.id), ["ib-5"])
+        let inbox = try Fixtures.decode("inbox", as: [InboxItem].self)
+        let release = inbox.first { $0.id == "ib-1" }!
+        XCTAssertEqual(release.affects, ["nikhil", "rohan", "asha"])
+        XCTAssertNotNil(release.onApprove); XCTAssertNotNil(release.onDeny)
+        XCTAssertEqual(release.links?.count, 2)
+        XCTAssertEqual(release.links?[1].roomThreadId, "rt-release")
+        XCTAssertNil(release.links?[0].roomThreadId)
+        XCTAssertEqual(release.links?[0].url?.host, "github.com")
+        XCTAssertEqual(inbox.first { $0.id == "ib-8" }?.answer?.via, .workplace)
+        let feature = try Fixtures.decode("feature-detail", as: FeatureDetail.self)
+        XCTAssertEqual(feature.assignments.first { $0.id == "a-2" }?.stalledSince?.isEmpty, false)
+        let health = try Fixtures.decode("health", as: WorkplaceHealthResponse.self)
+        XCTAssertEqual(health.workplace.published, .connected)
+    }
     func testSignals() throws { try roundTrip("signals", HealthSignals.self) }
     func testRelease() throws { try roundTrip("release", Release.self) }
     func testProposal() throws { try roundTrip("proposal", OrgProposal.self) }
@@ -102,6 +131,9 @@ final class ContractTests: XCTestCase {
         guard case .agentUpdated(let agent) = events[2] else { return XCTFail() }
         XCTAssertEqual(agent.approval?.tool, "Bash")
         XCTAssertEqual(agent.status, .waiting)
+        guard case .roomMessage(let message, let thread) = events.first(where: { if case .roomMessage = $0 { return true } else { return false } })! else { return XCTFail() }
+        XCTAssertEqual(message.threadId, thread.id)
+        XCTAssertEqual(message.by, "workplace")
     }
 
     func testClientCommandsEncodeToTheContract() throws {

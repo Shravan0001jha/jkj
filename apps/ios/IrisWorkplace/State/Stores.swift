@@ -204,6 +204,13 @@ final class TalkStore {
             if let i = log.firstIndex(where: { $0.id == entry.id }) { log[i] = entry } else { log.append(entry) }
         case .agentRemoved(let id):
             if id == session?.id { session = nil; log = [] }
+        case .inboxUpdated(let item):
+            // The employee page's Needs you: answered anywhere → gone here; new and relevant → shown.
+            guard var d = detail else { return }
+            let relevant = item.raisedBy == d.employee.id || item.affects.contains(d.employee.id)
+            d.needsYou.removeAll { $0.id == item.id }
+            if item.state == .open, relevant { d.needsYou.insert(item, at: 0) }
+            detail = d
         default:
             break
         }

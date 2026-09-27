@@ -78,6 +78,7 @@ struct SettingsView: View {
             case .connecting: return ("Connecting…", "antenna.radiowaves.left.and.right", .secondary)
             case .offline(let reason, _): return (reason, "wifi.exclamationmark", .orange)
             case .macOffline: return ("Mac offline", "desktopcomputer.trianglebadge.exclamationmark", .red)
+            case .accessOff: return ("Access switched off", "lock.slash", .red)
             case .unauthorized: return (model.mode == .relay ? "Session ended" : "Token refused", "key.slash", .red)
             case .signedOut: return (model.mode == .relay ? "Signed out" : "Not paired", "circle.dotted", .secondary)
             }

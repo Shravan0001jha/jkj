@@ -1,0 +1,65 @@
+{
+  "thread": {
+    "id": "rt-socket",
+    "title": "Mac socket contract for errands",
+    "charterIds": [
+      "experts",
+      "server"
+    ],
+    "createdBy": "kabir",
+    "createdAt": "2026-09-27T07:00:00.000Z",
+    "state": "open",
+    "lastAt": "2026-09-27T08:52:00.000Z",
+    "messageCount": 4,
+    "participants": [
+      "kabir",
+      "mira",
+      "asha"
+    ],
+    "escalations": [
+      "ib-5"
+    ]
+  },
+  "messages": [
+    {
+      "id": "m-1",
+      "threadId": "rt-socket",
+      "at": "2026-09-27T07:00:00.000Z",
+      "by": "kabir",
+      "owner": false,
+      "text": "Starting the errand endpoint on iris-api. @mira what shape does the Mac socket message take? I need the field names before I persist anything.",
+      "mentions": [
+        "mira"
+      ]
+    },
+    {
+      "id": "m-2",
+      "threadId": "rt-socket",
+      "at": "2026-09-27T07:25:00.000Z",
+      "by": "mira",
+      "owner": false,
+      "text": "Not published yet. The errand expert validates {instruction, source, requestedAt}; I can publish that as the socket shape today unless the server needs more.\n\nDetails: source is \"phone\" or \"cloud\"; requestedAt ISO; instruction whole, never split.",
+      "mentions": [
+        "kabir"
+      ]
+    },
+    {
+      "id": "m-3",
+      "threadId": "rt-socket",
+      "at": "2026-09-27T08:20:00.000Z",
+      "by": "asha",
+      "owner": false,
+      "text": "Escalated to the owner as ib-5: reuse ask_mac now, or wait for the published shape.",
+      "mentions": []
+    },
+    {
+      "id": "m-4",
+      "threadId": "rt-socket",
+      "at": "2026-09-27T08:52:00.000Z",
+      "by": "workplace",
+      "owner": false,
+      "text": "Inbox item ib-5 is open and waiting for the owner.",
+      "mentions": []
+    }
+  ]
+}

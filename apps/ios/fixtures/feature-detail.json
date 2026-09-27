@@ -104,7 +104,8 @@
       "charterId": "server",
       "employeeId": "kabir",
       "sessionId": "s-kabir-1",
-      "plan": "## Plan\n1. POST /v1/errands.\n2. Persist and relay to the Mac socket."
+      "plan": "## Plan\n1. POST /v1/errands.\n2. Persist and relay to the Mac socket.",
+      "stalledSince": "2026-09-27T08:15:00.000Z"
     },
     {
       "id": "a-3",

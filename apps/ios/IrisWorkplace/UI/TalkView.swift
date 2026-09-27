@@ -81,6 +81,9 @@ struct ConversationView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
+                        if let d = talk.detail, !d.needsYou.isEmpty {
+                            NeedsYouSection(items: d.needsYou, name: name)
+                        }
                         if talk.loading && talk.log.isEmpty {
                             HStack { Spacer(); ProgressView(); Spacer() }.padding()
                         } else if talk.session == nil && !talk.loading {
@@ -223,7 +226,7 @@ struct LogRow: View {
             }
             .padding(.horizontal, 12)
         case .assistant:
-            Prose(text: entry.text).padding(.horizontal, 16)
+            CompactRow(text: entry.text).padding(.horizontal, 16)
         case .error:
             Label(entry.text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline).padding(.horizontal, 16)
         case .system:
@@ -253,6 +256,73 @@ struct LogRow: View {
         case .task: return "person.2"
         default: return "wrench"
         }
+    }
+}
+
+/// An assistant message: one line by default, the whole text on tap.
+struct CompactRow: View {
+    let text: String
+    @State private var expanded = false
+
+    var body: some View {
+        let c = CompactText(text: text)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 6) {
+                if expanded {
+                    Prose(text: text)
+                } else {
+                    Text(c.line).font(.body).lineLimit(1)
+                }
+                if c.hasDetails {
+                    Spacer(minLength: 0)
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(.secondary).padding(.top, 4)
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { if c.hasDetails { withAnimation(.snappy) { expanded.toggle() } } }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(c.hasDetails ? (expanded ? "Collapses the message" : "Expands the message") : "")
+    }
+}
+
+/// What this employee is waiting on you for: each item with what approve and deny do, and its options.
+struct NeedsYouSection: View {
+    @Environment(AppModel.self) private var model
+    let items: [InboxItem]
+    let name: String
+    @State private var collapsed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { withAnimation(.snappy) { collapsed.toggle() } } label: {
+                HStack {
+                    Label("Needs you · \(items.count)", systemImage: "exclamationmark.circle.fill").font(.subheadline.weight(.semibold)).foregroundStyle(.orange)
+                    Spacer()
+                    Image(systemName: collapsed ? "chevron.down" : "chevron.up").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            if !collapsed {
+                ForEach(items) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            StateLabel(glyph: item.kind.glyph, compact: true)
+                            Spacer()
+                            Button("Open") { model.router.openInbox(item.id) }.font(.caption)
+                        }
+                        Text(item.title).font(.subheadline.weight(.semibold))
+                        if let a = item.onApprove, !a.isEmpty { Label(a, systemImage: "checkmark.circle").font(.caption).foregroundStyle(.secondary) }
+                        if let d = item.onDeny, !d.isEmpty { Label(d, systemImage: "xmark.circle").font(.caption).foregroundStyle(.secondary) }
+                        AnswerOptions(item: item, compact: true)
+                    }
+                    .padding(10)
+                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.orange.opacity(0.4)))
+                }
+            }
+        }
+        .padding(.horizontal, 12)
     }
 }
 

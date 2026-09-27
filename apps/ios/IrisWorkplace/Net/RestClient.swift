@@ -11,8 +11,10 @@ enum WorkplaceError: Error, Equatable, LocalizedError {
     case transport(String)
     /// The app has no credential for the Workplace yet.
     case notPaired
-    /// The relay is up but the Mac's tunnel to it is down (502/503/504, "Mac offline").
+    /// The relay is up but the Mac's tunnel to it is down (503 "The Mac is offline.").
     case macOffline
+    /// The owner switched published access off (503 "Published access is switched off.").
+    case accessOff
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +24,7 @@ enum WorkplaceError: Error, Equatable, LocalizedError {
         case .transport(let d): return d
         case .notPaired: return "Sign in to the Workplace first."
         case .macOffline: return "Your Mac is offline — Workplace unavailable."
+        case .accessOff: return "Access is switched off — turn it back on from your Mac or Telegram."
         }
     }
 }
@@ -61,6 +64,17 @@ final class RestClient {
     func feature(_ id: String) async throws -> FeatureDetail { try await get(API.feature(id)) }
     func pivot(_ rows: PivotRows) async throws -> Pivot { try await get(API.featurePivot(rows)) }
     func spend(day: String? = nil) async throws -> SpendSummary { try await get(API.spend(day: day)) }
+    func room() async throws -> RoomResponse { try await get(API.room) }
+    func roomThread(_ id: String) async throws -> RoomThreadDetail { try await get(API.roomThread(id)) }
+    func postMessage(_ id: String, text: String, mentions: [String]) async throws -> RoomMessage {
+        try await post(API.roomMessages(id), PostMessageRequest(text: text, mentions: mentions.isEmpty ? nil : mentions))
+    }
+    func createThread(title: String, text: String, mentions: [String], charterIds: [String]? = nil) async throws -> RoomThreadDetail {
+        try await post(API.room, CreateThreadRequest(title: title, text: text, charterIds: charterIds, mentions: mentions.isEmpty ? nil : mentions))
+    }
+    func resolveThread(_ id: String, summary: String) async throws -> RoomThread {
+        try await post(API.roomResolve(id), ResolveThreadRequest(summary: summary))
+    }
 
     /// Pairing has no token yet; the exchange is the one unauthenticated call.
     static func exchange(config: ServerConfig, code: String, session: URLSession = .shared) async throws -> String {
@@ -99,10 +113,11 @@ final class RestClient {
         do {
             (data, response) = try await session.data(for: req)
         } catch {
-            throw WorkplaceError.transport(error.localizedDescription)
+            throw WorkplaceError.transport(Self.describeTransport(error, host: req.url?.host ?? "the server"))
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 401 { throw WorkplaceError.unauthorized }
+        if Self.isAccessOff(status: status, body: data) { throw WorkplaceError.accessOff }
         if Self.isMacOffline(status: status, body: data) { throw WorkplaceError.macOffline }
         if !(200..<300).contains(status) {
             let message = (try? decoder.decode(ErrorResponse.self, from: data))?.error
@@ -117,6 +132,25 @@ final class RestClient {
 }
 
 extension RestClient {
+    /// "Published access is switched off." — the owner turned the relay off; not an outage.
+    static func isAccessOff(status: Int, body: Data) -> Bool {
+        guard status >= 400 else { return false }
+        return String(decoding: body.prefix(4096), as: UTF8.self).lowercased().contains("switched off")
+    }
+
+    /// A network failure in the owner's words: DNS, no connection, timeout.
+    static func describeTransport(_ error: Error, host: String) -> String {
+        guard let e = error as? URLError else { return error.localizedDescription }
+        switch e.code {
+        case .cannotFindHost, .dnsLookupFailed: return "Can't reach \(host) — check your connection"
+        case .notConnectedToInternet, .networkConnectionLost, .internationalRoamingOff, .dataNotAllowed: return "No internet connection"
+        case .timedOut: return "\(host) did not answer in time"
+        case .cannotConnectToHost: return "Can't connect to \(host)"
+        case .secureConnectionFailed, .serverCertificateUntrusted, .serverCertificateHasBadDate: return "Secure connection to \(host) failed"
+        default: return e.localizedDescription
+        }
+    }
+
     /// The relay's "Mac offline" answer: a gateway status, or any error body that says so.
     static func isMacOffline(status: Int, body: Data) -> Bool {
         if [502, 503, 504].contains(status) { return true }

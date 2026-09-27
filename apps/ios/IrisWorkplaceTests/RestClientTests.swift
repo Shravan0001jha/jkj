@@ -125,7 +125,7 @@ final class RestClientTests: XCTestCase {
         let spend = try await c.spend(day: "2026-09-27")
         XCTAssertEqual(spend.capInr, 1000)
         let inbox = try await c.inbox()
-        XCTAssertEqual(inbox.count, 7)
+        XCTAssertEqual(inbox.count, 8)
         let employees = try await c.employees()
         XCTAssertEqual(employees.count, 7)
     }

@@ -10,6 +10,9 @@ struct RootView: View {
                 if model.mode == .relay { SignInView() } else { PairingView() }
             } else if model.connection == .unauthorized {
                 ReauthView()
+            } else if model.connection == .accessOff && model.office.data == nil {
+                AccessOffView()
+                    .sheet(isPresented: $router.showSettings) { SettingsView() }
             } else if model.connection == .macOffline && model.office.data == nil {
                 MacOfflineView()
                     .sheet(isPresented: $router.showSettings) { SettingsView() }
@@ -25,16 +28,18 @@ struct RootView: View {
                     TalkView()
                         .tabItem { Label("Talk", systemImage: "bubble.left.and.bubble.right") }
                         .tag(Tab.talk)
+                    RoomView()
+                        .tabItem { Label("Room", systemImage: "person.3") }
+                        .badge(model.room.unread.count)
+                        .tag(Tab.room)
                     FeaturesView()
                         .tabItem { Label("Features", systemImage: "square.grid.2x2") }
                         .tag(Tab.features)
-                    AlertsView()
-                        .tabItem { Label("Alerts", systemImage: "bell") }
-                        .badge(model.alerts.unread)
-                        .tag(Tab.alerts)
                 }
                 .overlay(alignment: .top) { AlertBanner() }
                 .sheet(isPresented: $router.showSettings) { SettingsView() }
+                .sheet(isPresented: $router.showAlerts) { AlertsView() }
+                .sheet(isPresented: $router.showSpend) { SpendView() }
             }
         }
         .onOpenURL { url in model.handleOpenURL(url) }
@@ -53,6 +58,8 @@ struct ConnectionStrip: View {
             strip("Connecting…", symbol: "antenna.radiowaves.left.and.right", tint: .secondary)
         case .macOffline:
             strip("Your Mac is offline — Workplace unavailable", symbol: "desktopcomputer.trianglebadge.exclamationmark", tint: .red)
+        case .accessOff:
+            strip("Access is switched off — turn it on from your Mac or Telegram", symbol: "lock.slash", tint: .red)
         case .offline(let reason, let retryAt):
             let when = retryAt.map { " · retrying \($0.formatted(.relative(presentation: .numeric)))" } ?? ""
             strip("\(reason)\(when)", symbol: "wifi.exclamationmark", tint: .orange)
@@ -84,7 +91,7 @@ struct AlertBanner: View {
             let g = b.event.level.glyph
             Button {
                 model.alerts.dismissBanner()
-                if let id = b.event.inboxId { model.router.openInbox(id) } else { model.router.tab = .alerts }
+                if let id = b.event.inboxId { model.router.openInbox(id) } else { model.router.showAlerts = true }
             } label: {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: g.symbol).foregroundStyle(g.tint).font(.title3)
@@ -107,5 +114,23 @@ struct AlertBanner: View {
             .animation(.snappy, value: b.id)
             .accessibilityLabel("\(g.label): \(b.event.title). \(b.event.body)")
         }
+    }
+}
+
+/// The owner switched published access off: distinct from the Mac being offline.
+struct AccessOffView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "lock.slash").font(.system(size: 48)).foregroundStyle(.red)
+            Text("Access is switched off").font(.title2.weight(.semibold))
+            Text("Published access to the Workplace is off. Turn it back on from your Mac or Telegram; the app reconnects on its own.")
+                .multilineTextAlignment(.center).foregroundStyle(.secondary)
+            HStack(spacing: 8) { ProgressView(); Text("Checking every few seconds").font(.caption).foregroundStyle(.secondary) }
+            Button("Check now") { model.foreground() }.buttonStyle(.bordered)
+            Button("Settings") { model.router.showSettings = true }.font(.footnote)
+        }
+        .padding(24)
     }
 }

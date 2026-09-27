@@ -76,6 +76,8 @@ const inlineUnions = {
   'Unit.kind': 'UnitKind', 'InboxItem.state': 'InboxState', 'InboxAnswer.via': 'AnswerVia', 'OrgProposal.state': 'ProposalState',
   'Release.state': 'ReleaseState', 'LintFinding.severity': 'LintSeverity', 'Role.budgetClass': 'BudgetClass',
   'McpServer.transport': 'McpTransport', 'ActivityEvent.kind': 'ActivityKind',
+  'SpendEntry.tag': 'SpendTag', 'RateLimitWindow.window': 'RateLimitWindowKind', 'RateLimitWindow.status': 'RateLimitStatus',
+  'RoomThread.state': 'RoomThreadState',
 };
 for (const [key, swiftName] of Object.entries(inlineUnions)) {
   const [iface, field] = key.split('.');

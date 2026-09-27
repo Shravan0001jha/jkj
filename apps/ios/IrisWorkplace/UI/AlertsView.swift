@@ -3,6 +3,7 @@ import SwiftUI
 /// Socket `alert` events received this session. Tapping one with an Inbox id opens the item.
 struct AlertsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -14,7 +15,7 @@ struct AlertsView: View {
                 ForEach(model.alerts.alerts) { a in
                     let g = a.event.level.glyph
                     Button {
-                        if let id = a.event.inboxId { model.router.openInbox(id) }
+                        if let id = a.event.inboxId { dismiss(); model.router.openInbox(id) }
                     } label: {
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: g.symbol).foregroundStyle(g.tint).font(.title3).frame(width: 26)
@@ -40,15 +41,13 @@ struct AlertsView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("Alerts")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("Clear") { model.alerts.clear() }.disabled(model.alerts.alerts.isEmpty)
                 }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
-            .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
             .onAppear { model.alerts.markAllRead() }
-            .onChange(of: model.alerts.alerts.count) { _, _ in
-                if model.router.tab == .alerts { model.alerts.markAllRead() }
-            }
+            .onChange(of: model.alerts.alerts.count) { _, _ in model.alerts.markAllRead() }
         }
     }
 }

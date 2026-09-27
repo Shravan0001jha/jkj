@@ -2,6 +2,16 @@
   "day": "2026-09-27",
   "companyInr": 412.5,
   "capInr": 1000,
+  "bySource": {
+    "anthropic-api": 318,
+    "aws": 62.5,
+    "third-party": 32
+  },
+  "byBasis": {
+    "metered": 318,
+    "estimated": 62.5,
+    "reported": 32
+  },
   "byEmployee": {
     "asha": 96.2,
     "mira": 131.8,
@@ -19,5 +29,59 @@
   },
   "paused": [
     "employee:tara"
-  ]
+  ],
+  "subscription": {
+    "turns": 63,
+    "inputTokens": 412000,
+    "outputTokens": 88400,
+    "cacheReadTokens": 2910000,
+    "cacheWriteTokens": 310000,
+    "equivalentInr": 1842.6,
+    "byEmployee": {
+      "asha": {
+        "turns": 14,
+        "equivalentInr": 412.1
+      },
+      "mira": {
+        "turns": 22,
+        "equivalentInr": 611.9
+      },
+      "rohan": {
+        "turns": 15,
+        "equivalentInr": 488.3
+      },
+      "kabir": {
+        "turns": 9,
+        "equivalentInr": 240.8
+      },
+      "dev": {
+        "turns": 3,
+        "equivalentInr": 89.5
+      }
+    },
+    "windows": [
+      {
+        "window": "five_hour",
+        "status": "allowed",
+        "utilization": 0.42,
+        "resetsAt": "2026-09-27T12:00:00.000Z",
+        "seenAt": "2026-09-27T08:58:00.000Z"
+      },
+      {
+        "window": "seven_day",
+        "status": "allowed_warning",
+        "utilization": 0.81,
+        "resetsAt": "2026-09-30T09:00:00.000Z",
+        "seenAt": "2026-09-27T08:58:00.000Z"
+      },
+      {
+        "window": "seven_day_opus",
+        "status": "allowed",
+        "utilization": 0.35,
+        "resetsAt": "2026-09-30T09:00:00.000Z",
+        "seenAt": "2026-09-27T08:58:00.000Z"
+      }
+    ]
+  },
+  "ownerTalkInr": 18.4
 }

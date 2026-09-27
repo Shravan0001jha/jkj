@@ -424,7 +424,8 @@
                   "concurrentSessions": 2
                 },
                 "githubApp": "iris-experts-lead",
-                "state": "needs-owner"
+                "state": "needs-owner",
+                "stateReason": "waiting for your approval to run the errand tests"
               },
               "charters": [
                 {
@@ -524,7 +525,8 @@
                   "concurrentSessions": 2
                 },
                 "githubApp": "iris-memory-lead",
-                "state": "blocked"
+                "state": "blocked",
+                "stateReason": "no Mac socket contract from experts yet"
               },
               "charters": [
                 {
@@ -581,7 +583,8 @@
                 "charterId": "server",
                 "employeeId": "kabir",
                 "sessionId": "s-kabir-1",
-                "plan": "## Plan\n1. POST /v1/errands.\n2. Persist and relay to the Mac socket."
+                "plan": "## Plan\n1. POST /v1/errands.\n2. Persist and relay to the Mac socket.",
+                "stalledSince": "2026-09-27T08:15:00.000Z"
               },
               "lastReport": "Blocked: no Mac socket contract from experts yet.",
               "session": {
@@ -768,7 +771,8 @@
                   "concurrentSessions": 2
                 },
                 "githubApp": "iris-mobile-lead",
-                "state": "paused"
+                "state": "paused",
+                "stateReason": "Paused — daily budget reached (₹150). You can still talk to Tara."
               },
               "charters": [
                 {
@@ -1004,6 +1008,16 @@
         "day": "2026-09-27",
         "companyInr": 412.5,
         "capInr": 1000,
+        "bySource": {
+          "anthropic-api": 318,
+          "aws": 62.5,
+          "third-party": 32
+        },
+        "byBasis": {
+          "metered": 318,
+          "estimated": 62.5,
+          "reported": 32
+        },
         "byEmployee": {
           "asha": 96.2,
           "mira": 131.8,
@@ -1021,9 +1035,70 @@
         },
         "paused": [
           "employee:tara"
-        ]
+        ],
+        "subscription": {
+          "turns": 63,
+          "inputTokens": 412000,
+          "outputTokens": 88400,
+          "cacheReadTokens": 2910000,
+          "cacheWriteTokens": 310000,
+          "equivalentInr": 1842.6,
+          "byEmployee": {
+            "asha": {
+              "turns": 14,
+              "equivalentInr": 412.1
+            },
+            "mira": {
+              "turns": 22,
+              "equivalentInr": 611.9
+            },
+            "rohan": {
+              "turns": 15,
+              "equivalentInr": 488.3
+            },
+            "kabir": {
+              "turns": 9,
+              "equivalentInr": 240.8
+            },
+            "dev": {
+              "turns": 3,
+              "equivalentInr": 89.5
+            }
+          },
+          "windows": [
+            {
+              "window": "five_hour",
+              "status": "allowed",
+              "utilization": 0.42,
+              "resetsAt": "2026-09-27T12:00:00.000Z",
+              "seenAt": "2026-09-27T08:58:00.000Z"
+            },
+            {
+              "window": "seven_day",
+              "status": "allowed_warning",
+              "utilization": 0.81,
+              "resetsAt": "2026-09-30T09:00:00.000Z",
+              "seenAt": "2026-09-27T08:58:00.000Z"
+            },
+            {
+              "window": "seven_day_opus",
+              "status": "allowed",
+              "utilization": 0.35,
+              "resetsAt": "2026-09-30T09:00:00.000Z",
+              "seenAt": "2026-09-27T08:58:00.000Z"
+            }
+          ]
+        },
+        "ownerTalkInr": 18.4
       },
-      "lintErrors": 0
+      "lintErrors": 0,
+      "counts": {
+        "working": 2,
+        "blocked": 1,
+        "stalled": 1,
+        "needsYou": 5,
+        "total": 7
+      }
     }
   },
   {
@@ -1051,7 +1126,8 @@
           "concurrentSessions": 2
         },
         "githubApp": "iris-experts-lead",
-        "state": "needs-owner"
+        "state": "needs-owner",
+        "stateReason": "waiting for your approval to run the errand tests"
       },
       "charters": [
         {
@@ -1157,7 +1233,24 @@
       ],
       "state": "open",
       "raisedBy": "nikhil",
-      "createdAt": "2026-09-27T08:48:00.000Z"
+      "createdAt": "2026-09-27T08:48:00.000Z",
+      "affects": [
+        "nikhil",
+        "rohan",
+        "asha"
+      ],
+      "onApprove": "Runs scripts/release-iris.sh 0.2.16: notarises, uploads to S3/CloudFront, kills the running Iris.",
+      "onDeny": "Nothing ships; Nikhil keeps the build and waits for your note.",
+      "links": [
+        {
+          "label": "Compare v0.2.15…feat/iris-character",
+          "href": "https://github.com/Shravan0001jha/hivemind-prototype/compare/v0.2.15...feat/iris-character"
+        },
+        {
+          "label": "Team Room: release readiness",
+          "href": "#/room/rt-release"
+        }
+      ]
     }
   },
   {
@@ -1315,7 +1408,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-experts-lead",
-            "state": "needs-owner"
+            "state": "needs-owner",
+            "stateReason": "waiting for your approval to run the errand tests"
           },
           {
             "id": "kabir",
@@ -1342,7 +1436,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-memory-lead",
-            "state": "blocked"
+            "state": "blocked",
+            "stateReason": "no Mac socket contract from experts yet"
           },
           {
             "id": "rohan",
@@ -1391,7 +1486,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-mobile-lead",
-            "state": "paused"
+            "state": "paused",
+            "stateReason": "Paused — daily budget reached (₹150). You can still talk to Tara."
           },
           {
             "id": "nikhil",
@@ -1706,7 +1802,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-experts-lead",
-            "state": "needs-owner"
+            "state": "needs-owner",
+            "stateReason": "waiting for your approval to run the errand tests"
           },
           {
             "id": "kabir",
@@ -1733,7 +1830,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-memory-lead",
-            "state": "blocked"
+            "state": "blocked",
+            "stateReason": "no Mac socket contract from experts yet"
           },
           {
             "id": "rohan",
@@ -1782,7 +1880,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-mobile-lead",
-            "state": "paused"
+            "state": "paused",
+            "stateReason": "Paused — daily budget reached (₹150). You can still talk to Tara."
           },
           {
             "id": "nikhil",
@@ -2024,6 +2123,16 @@
       "day": "2026-09-27",
       "companyInr": 412.5,
       "capInr": 1000,
+      "bySource": {
+        "anthropic-api": 318,
+        "aws": 62.5,
+        "third-party": 32
+      },
+      "byBasis": {
+        "metered": 318,
+        "estimated": 62.5,
+        "reported": 32
+      },
       "byEmployee": {
         "asha": 96.2,
         "mira": 131.8,
@@ -2041,7 +2150,61 @@
       },
       "paused": [
         "employee:tara"
-      ]
+      ],
+      "subscription": {
+        "turns": 63,
+        "inputTokens": 412000,
+        "outputTokens": 88400,
+        "cacheReadTokens": 2910000,
+        "cacheWriteTokens": 310000,
+        "equivalentInr": 1842.6,
+        "byEmployee": {
+          "asha": {
+            "turns": 14,
+            "equivalentInr": 412.1
+          },
+          "mira": {
+            "turns": 22,
+            "equivalentInr": 611.9
+          },
+          "rohan": {
+            "turns": 15,
+            "equivalentInr": 488.3
+          },
+          "kabir": {
+            "turns": 9,
+            "equivalentInr": 240.8
+          },
+          "dev": {
+            "turns": 3,
+            "equivalentInr": 89.5
+          }
+        },
+        "windows": [
+          {
+            "window": "five_hour",
+            "status": "allowed",
+            "utilization": 0.42,
+            "resetsAt": "2026-09-27T12:00:00.000Z",
+            "seenAt": "2026-09-27T08:58:00.000Z"
+          },
+          {
+            "window": "seven_day",
+            "status": "allowed_warning",
+            "utilization": 0.81,
+            "resetsAt": "2026-09-30T09:00:00.000Z",
+            "seenAt": "2026-09-27T08:58:00.000Z"
+          },
+          {
+            "window": "seven_day_opus",
+            "status": "allowed",
+            "utilization": 0.35,
+            "resetsAt": "2026-09-30T09:00:00.000Z",
+            "seenAt": "2026-09-27T08:58:00.000Z"
+          }
+        ]
+      },
+      "ownerTalkInr": 18.4
     }
   },
   {
@@ -2130,6 +2293,63 @@
     "title": "Mira needs an approval",
     "body": "Run pytest on the errand tests?",
     "inboxId": "ib-5"
+  },
+  {
+    "type": "room.thread",
+    "thread": {
+      "id": "rt-socket",
+      "title": "Mac socket contract for errands",
+      "charterIds": [
+        "experts",
+        "server"
+      ],
+      "createdBy": "kabir",
+      "createdAt": "2026-09-27T07:00:00.000Z",
+      "state": "open",
+      "lastAt": "2026-09-27T08:52:00.000Z",
+      "messageCount": 4,
+      "participants": [
+        "kabir",
+        "mira",
+        "asha"
+      ],
+      "escalations": [
+        "ib-5"
+      ]
+    }
+  },
+  {
+    "type": "room.message",
+    "message": {
+      "id": "m-4",
+      "threadId": "rt-socket",
+      "at": "2026-09-27T08:52:00.000Z",
+      "by": "workplace",
+      "owner": false,
+      "text": "Inbox item ib-5 is open and waiting for the owner.",
+      "mentions": []
+    },
+    "thread": {
+      "id": "rt-socket",
+      "title": "Mac socket contract for errands",
+      "charterIds": [
+        "experts",
+        "server"
+      ],
+      "createdBy": "kabir",
+      "createdAt": "2026-09-27T07:00:00.000Z",
+      "state": "open",
+      "lastAt": "2026-09-27T08:52:00.000Z",
+      "messageCount": 4,
+      "participants": [
+        "kabir",
+        "mira",
+        "asha"
+      ],
+      "escalations": [
+        "ib-5"
+      ]
+    }
   },
   {
     "type": "future.event",

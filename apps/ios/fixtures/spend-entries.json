@@ -1,0 +1,43 @@
+[
+  {
+    "at": "2026-09-27T07:30:00.000Z",
+    "employeeId": "rohan",
+    "sessionId": "s-rohan-1",
+    "source": "anthropic-api",
+    "basis": "metered",
+    "what": "llm-gateway test run",
+    "inr": 318,
+    "detail": {
+      "usd": 3.61,
+      "tokens": 240000
+    }
+  },
+  {
+    "at": "2026-09-27T08:00:00.000Z",
+    "employeeId": "kabir",
+    "sessionId": "s-kabir-1",
+    "source": "aws",
+    "basis": "estimated",
+    "what": "AWS actual (unattributed)",
+    "inr": 62.5
+  },
+  {
+    "at": "2026-09-27T08:30:00.000Z",
+    "employeeId": "nikhil",
+    "sessionId": "",
+    "source": "third-party",
+    "basis": "reported",
+    "what": "release-iris.sh 0.2.16 notarisation",
+    "inr": 32
+  },
+  {
+    "at": "2026-09-27T08:50:00.000Z",
+    "employeeId": "dev",
+    "sessionId": "s-dev-owner",
+    "source": "subscription",
+    "basis": "estimated",
+    "what": "owner talk",
+    "inr": 18.4,
+    "tag": "owner-talk"
+  }
+]

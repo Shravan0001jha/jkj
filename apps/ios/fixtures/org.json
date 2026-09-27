@@ -165,7 +165,8 @@
         "concurrentSessions": 2
       },
       "githubApp": "iris-experts-lead",
-      "state": "needs-owner"
+      "state": "needs-owner",
+      "stateReason": "waiting for your approval to run the errand tests"
     },
     {
       "id": "kabir",
@@ -192,7 +193,8 @@
         "concurrentSessions": 2
       },
       "githubApp": "iris-memory-lead",
-      "state": "blocked"
+      "state": "blocked",
+      "stateReason": "no Mac socket contract from experts yet"
     },
     {
       "id": "rohan",
@@ -241,7 +243,8 @@
         "concurrentSessions": 2
       },
       "githubApp": "iris-mobile-lead",
-      "state": "paused"
+      "state": "paused",
+      "stateReason": "Paused — daily budget reached (₹150). You can still talk to Tara."
     },
     {
       "id": "nikhil",
@@ -588,7 +591,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-experts-lead",
-            "state": "needs-owner"
+            "state": "needs-owner",
+            "stateReason": "waiting for your approval to run the errand tests"
           },
           {
             "id": "kabir",
@@ -615,7 +619,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-memory-lead",
-            "state": "blocked"
+            "state": "blocked",
+            "stateReason": "no Mac socket contract from experts yet"
           },
           {
             "id": "rohan",
@@ -664,7 +669,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-mobile-lead",
-            "state": "paused"
+            "state": "paused",
+            "stateReason": "Paused — daily budget reached (₹150). You can still talk to Tara."
           },
           {
             "id": "nikhil",
@@ -979,7 +985,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-experts-lead",
-            "state": "needs-owner"
+            "state": "needs-owner",
+            "stateReason": "waiting for your approval to run the errand tests"
           },
           {
             "id": "kabir",
@@ -1006,7 +1013,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-memory-lead",
-            "state": "blocked"
+            "state": "blocked",
+            "stateReason": "no Mac socket contract from experts yet"
           },
           {
             "id": "rohan",
@@ -1055,7 +1063,8 @@
               "concurrentSessions": 2
             },
             "githubApp": "iris-mobile-lead",
-            "state": "paused"
+            "state": "paused",
+            "stateReason": "Paused — daily budget reached (₹150). You can still talk to Tara."
           },
           {
             "id": "nikhil",

@@ -8,6 +8,7 @@
     "dataDir": "/Users/shravan0001jha/iris-workplace",
     "capInr": 1000,
     "day": "2026-09-27",
-    "telegram": true
+    "telegram": true,
+    "published": "connected"
   }
 }

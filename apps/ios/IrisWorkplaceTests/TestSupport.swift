@@ -150,6 +150,10 @@ func diff(_ a: Any, _ b: Any, path: String = "$") -> String {
     return (a as AnyObject).isEqual(b) ? "" : "\(path): \(a) vs \(b)"
 }
 
+extension OfficeResponse {
+    func cards() -> [EmployeeCard] { units.flatMap(\.employees) }
+}
+
 func jsonObject<T: Encodable>(_ value: T) throws -> Any {
     try JSONSerialization.jsonObject(with: try JSONEncoder().encode(value))
 }

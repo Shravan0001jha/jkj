@@ -1,0 +1,105 @@
+{
+  "threads": [
+    {
+      "id": "rt-socket",
+      "title": "Mac socket contract for errands",
+      "charterIds": [
+        "experts",
+        "server"
+      ],
+      "createdBy": "kabir",
+      "createdAt": "2026-09-27T07:00:00.000Z",
+      "state": "open",
+      "lastAt": "2026-09-27T08:52:00.000Z",
+      "messageCount": 4,
+      "participants": [
+        "kabir",
+        "mira",
+        "asha"
+      ],
+      "escalations": [
+        "ib-5"
+      ]
+    },
+    {
+      "id": "rt-release",
+      "title": "Release readiness 0.2.16",
+      "charterIds": [
+        "qa-release",
+        "desktop-mac"
+      ],
+      "createdBy": "nikhil",
+      "createdAt": "2026-09-27T05:40:00.000Z",
+      "state": "open",
+      "lastAt": "2026-09-27T08:46:00.000Z",
+      "messageCount": 3,
+      "participants": [
+        "nikhil",
+        "rohan"
+      ],
+      "escalations": [
+        "ib-1"
+      ]
+    },
+    {
+      "id": "rt-voice",
+      "title": "iPad voice default: push-to-talk or wake word",
+      "charterIds": [
+        "conversation",
+        "mobile"
+      ],
+      "createdBy": "dev",
+      "createdAt": "2026-09-27T04:00:00.000Z",
+      "state": "open",
+      "lastAt": "2026-09-27T08:25:00.000Z",
+      "messageCount": 5,
+      "participants": [
+        "dev",
+        "tara",
+        "asha"
+      ],
+      "escalations": [
+        "ib-2"
+      ]
+    },
+    {
+      "id": "rt-split",
+      "title": "Split mobile into iOS and Android",
+      "charterIds": [
+        "mobile",
+        "chief-of-staff"
+      ],
+      "createdBy": "asha",
+      "createdAt": "2026-09-27T02:20:00.000Z",
+      "state": "open",
+      "lastAt": "2026-09-27T07:50:00.000Z",
+      "messageCount": 2,
+      "participants": [
+        "asha",
+        "tara"
+      ],
+      "escalations": [
+        "ib-4"
+      ]
+    },
+    {
+      "id": "rt-lipsync",
+      "title": "Lip-sync timing on the desktop character",
+      "charterIds": [
+        "character"
+      ],
+      "createdBy": "dev",
+      "createdAt": "2026-09-25T07:00:00.000Z",
+      "state": "resolved",
+      "summary": "Viseme timing follows the TTS word marks; the 40 ms lead stays. Written into the character charter.",
+      "lastAt": "2026-09-26T08:00:00.000Z",
+      "messageCount": 7,
+      "participants": [
+        "dev",
+        "rohan",
+        "nikhil"
+      ],
+      "escalations": []
+    }
+  ]
+}

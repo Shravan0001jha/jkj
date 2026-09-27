@@ -21,7 +21,8 @@
       "concurrentSessions": 2
     },
     "githubApp": "iris-experts-lead",
-    "state": "needs-owner"
+    "state": "needs-owner",
+    "stateReason": "waiting for your approval to run the errand tests"
   },
   "charters": [
     {
@@ -103,5 +104,42 @@
     "rework7d": 1,
     "falseDoneRate7d": 0.1,
     "costPerDoneInr": 62.5
-  }
+  },
+  "needsYou": [
+    {
+      "id": "ib-5",
+      "kind": "question",
+      "title": "Kabir: which socket contract for Mac errands?",
+      "body": "The experts charter has not published the Mac socket message shape yet. Kabir is blocked until it exists, or until you say to reuse the existing ask_mac shape.",
+      "context": {
+        "assignment": "a-2",
+        "blockedOn": "experts"
+      },
+      "options": [
+        {
+          "id": "reuse",
+          "label": "Reuse ask_mac"
+        },
+        {
+          "id": "wait",
+          "label": "Wait for experts"
+        }
+      ],
+      "state": "open",
+      "raisedBy": "kabir",
+      "createdAt": "2026-09-27T08:31:00.000Z",
+      "affects": [
+        "kabir",
+        "mira"
+      ],
+      "onApprove": "Kabir builds on the ask_mac shape today.",
+      "onDeny": "Kabir stays blocked until Mira publishes the socket contract.",
+      "links": [
+        {
+          "label": "Team Room: Mac socket contract",
+          "href": "#/room/rt-socket"
+        }
+      ]
+    }
+  ]
 }

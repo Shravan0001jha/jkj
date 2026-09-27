@@ -84,14 +84,11 @@ struct InboxRow: View {
     }
 }
 
-/// The item with its context and one button per option. `danger` confirms; `needsNote` asks for a note.
+/// The item with who raised it, who it concerns, what each answer does, its links, and one
+/// button per option. `danger` confirms; `needsNote` asks for a note.
 struct InboxItemView: View {
     @Environment(AppModel.self) private var model
     let id: String
-    @State private var confirming: InboxOption?
-    @State private var noting: InboxOption?
-    @State private var note = ""
-    @State private var error: String?
 
     private var item: InboxItem? { model.inbox.item(id) }
 
@@ -104,12 +101,37 @@ struct InboxItemView: View {
                             HStack {
                                 StateLabel(glyph: item.kind.glyph)
                                 Spacer()
-                                Text("\(model.employeeName(item.raisedBy)) · \(Format.ago(item.createdAt))").font(.caption).foregroundStyle(.secondary)
+                                Text(Format.ago(item.createdAt)).font(.caption).foregroundStyle(.secondary)
                             }
                             Text(item.title).font(.title3.weight(.semibold))
                             Prose(text: item.body)
                         }
                         .padding(.vertical, 4)
+                    }
+                    Section {
+                        LabeledContent("Raised by", value: model.employeeName(item.raisedBy))
+                        if !item.affects.isEmpty {
+                            LabeledContent("Affects", value: item.affects.map { model.employeeName($0) }.joined(separator: ", "))
+                        }
+                        if let a = item.onApprove, !a.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("If you approve", systemImage: "checkmark.circle").font(.caption.weight(.semibold)).foregroundStyle(.green)
+                                Text(a).font(.subheadline)
+                            }
+                        }
+                        if let d = item.onDeny, !d.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("If you refuse", systemImage: "xmark.circle").font(.caption.weight(.semibold)).foregroundStyle(.red)
+                                Text(d).font(.subheadline)
+                            }
+                        }
+                    } header: { SectionHeader(text: "Who and what") }
+                    if let links = item.links, !links.isEmpty {
+                        Section {
+                            ForEach(Array(links.enumerated()), id: \.offset) { _, link in
+                                InboxLinkRow(link: link)
+                            }
+                        } header: { SectionHeader(text: "Links") }
                     }
                     if !item.context.isEmpty {
                         Section {
@@ -119,26 +141,7 @@ struct InboxItemView: View {
                         } header: { SectionHeader(text: "Context") }
                     }
                     Section {
-                        if item.state == .open {
-                            ForEach(item.options) { opt in
-                                Button(role: opt.danger == true ? .destructive : nil) { tap(opt) } label: {
-                                    HStack {
-                                        Image(systemName: opt.danger == true ? "exclamationmark.triangle" : opt.needsNote == true ? "text.bubble" : "checkmark.circle")
-                                        Text(opt.label).fontWeight(.semibold)
-                                        Spacer()
-                                        if model.inbox.answering.contains(item.id) { ProgressView() }
-                                    }
-                                }
-                                .disabled(model.inbox.answering.contains(item.id))
-                            }
-                        } else if let a = item.answer {
-                            let label = item.options.first { $0.id == a.optionId }?.label ?? a.optionId
-                            Label("\(label) · \(Format.ago(a.at)) via \(a.via.rawValue)", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                            if let n = a.note, !n.isEmpty { Text(n).font(.subheadline).foregroundStyle(.secondary) }
-                        } else {
-                            Label("Expired without an answer", systemImage: "clock.badge.xmark").foregroundStyle(.secondary)
-                        }
-                        if let error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline) }
+                        AnswerOptions(item: item)
                     } header: { SectionHeader(text: item.state == .open ? "Your answer" : "Answered") }
                 }
                 .listStyle(.insetGrouped)
@@ -148,13 +151,69 @@ struct InboxItemView: View {
         }
         .navigationTitle(item?.kind.glyph.label ?? "Inbox item")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// A link on an Inbox item: a Team Room thread opens in the Room tab; a URL opens outside.
+struct InboxLinkRow: View {
+    @Environment(AppModel.self) private var model
+    let link: InboxLink
+
+    var body: some View {
+        if let threadId = link.roomThreadId {
+            Button { model.router.openThread(threadId) } label: {
+                Label(link.label, systemImage: "person.3")
+            }
+        } else if let url = link.url {
+            Link(destination: url) { Label(link.label, systemImage: "link") }
+        } else {
+            Label(link.label, systemImage: "link").foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// One button per option, with the confirm (danger) and note (needsNote) steps, and the recorded
+/// answer once there is one. Shared by the Inbox item and the employee page.
+struct AnswerOptions: View {
+    @Environment(AppModel.self) private var model
+    let item: InboxItem
+    var compact = false
+    @State private var confirming: InboxOption?
+    @State private var noting: InboxOption?
+    @State private var note = ""
+    @State private var error: String?
+
+    var body: some View {
+        Group {
+            if item.state == .open {
+                ForEach(item.options) { opt in
+                    Button(role: opt.danger == true ? .destructive : nil) { tap(opt) } label: {
+                        HStack {
+                            Image(systemName: opt.danger == true ? "exclamationmark.triangle" : opt.needsNote == true ? "text.bubble" : "checkmark.circle")
+                            Text(opt.label).fontWeight(.semibold)
+                            Spacer()
+                            if model.inbox.answering.contains(item.id) { ProgressView() }
+                        }
+                        .font(compact ? .subheadline : .body)
+                    }
+                    .disabled(model.inbox.answering.contains(item.id))
+                }
+            } else if let a = item.answer {
+                let label = item.options.first { $0.id == a.optionId }?.label ?? a.optionId
+                Label("\(label) · \(Format.ago(a.at)) via \(a.via.rawValue)", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                if let n = a.note, !n.isEmpty { Text(n).font(.subheadline).foregroundStyle(.secondary) }
+            } else {
+                Label("Expired without an answer", systemImage: "clock.badge.xmark").foregroundStyle(.secondary)
+            }
+            if let error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline) }
+        }
         .confirmationDialog(confirming.map { "\($0.label)?" } ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), titleVisibility: .visible) {
             if let opt = confirming {
                 Button(opt.label, role: .destructive) { confirming = nil; proceed(opt) }
                 Button("Cancel", role: .cancel) { confirming = nil }
             }
         } message: {
-            Text("This is an outward action. It runs as soon as you confirm.")
+            Text(item.onApprove ?? "This is an outward action. It runs as soon as you confirm.")
         }
         .alert(noting.map { $0.label } ?? "", isPresented: Binding(get: { noting != nil }, set: { if !$0 { noting = nil } })) {
             TextField(noting?.id == "raise-today" ? "New cap for today, in ₹" : "Note", text: $note)
@@ -178,7 +237,7 @@ struct InboxItemView: View {
     private func answer(_ opt: InboxOption, note: String?) async {
         guard let rest = model.rest else { return }
         do {
-            try await model.inbox.answer(rest, id: id, optionId: opt.id, note: note)
+            try await model.inbox.answer(rest, id: item.id, optionId: opt.id, note: note)
         } catch {
             self.error = error.localizedDescription
         }
