@@ -192,6 +192,14 @@ export function attachPlan(wp: Workplace, id: string, plan: string, by: string):
   return transition(wp, id, { to: 'planned', by, plan });
 }
 
+export function attachSpec(wp: Workplace, id: string, spec: string, ): WorkItem {
+  const item = require$(wp, id);
+  if (item.kind !== 'feature') throw new BadRequest(`${id} is not a feature`);
+  const updated = { ...item, spec, updatedAt: now() };
+  save(wp, updated);
+  return updated;
+}
+
 /** Sent back from review: counted as rework, and as a false "done". */
 export function sendBack(wp: Workplace, id: string, by: string, note: string): WorkItem {
   return transition(wp, id, { to: 'building', by, note: `sent back: ${note}` });

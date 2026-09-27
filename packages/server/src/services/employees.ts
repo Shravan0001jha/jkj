@@ -37,7 +37,7 @@ interface Session {
 
 const sessions = new Map<string, Session>();   // by agent id
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature'] as const;
 const stateOverride = new Map<string, EmployeeState>();
 const lastReport = new Map<string, string>();
 
@@ -359,6 +359,38 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           if (!item) return ok(`No assignment ${assignmentId}.`);
           inbox.raise(wp, { kind: 'question', title: `Review requested: ${item.title}`, body: note ?? 'Please verify.', raisedBy: employeeId, context: { assignmentId }, dedupeKey: `review:${assignmentId}` });
           return ok('Review requested.');
+        }),
+      tool('write_spec', 'Chief of Staff only: attach the spec (acceptance criteria) to a stated feature. It becomes "specced" and can be decomposed.',
+        { featureId: z.string(), spec: z.string() },
+        async ({ featureId, spec }) => {
+          const emp = employee(wp, employeeId);
+          if (!emp.charterIds.includes('chief-of-staff') && emp.level !== 0) return ok('Only the Chief of Staff writes specs.');
+          try {
+            const item = work.get(wp, featureId);
+            if (!item || item.kind !== 'feature') return ok(`No feature ${featureId}.`);
+            const next = item.state === 'stated' ? work.transition(wp, featureId, { to: 'specced', by: employeeId, spec }) : work.attachSpec(wp, featureId, spec);
+            return ok(`Spec attached; ${next.id} is ${next.state}. Call decompose_feature to route it through the ownership map, or leave that to the owner.`);
+          } catch (err) {
+            return ok(`Not attached: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }),
+      tool('decompose_feature', 'Chief of Staff only: route a specced feature through the ownership map into one assignment per charter and start their sessions.',
+        { featureId: z.string(), paths: z.array(z.string()).optional(), services: z.array(z.string()).optional() },
+        async ({ featureId, paths, services }) => {
+          const emp = employee(wp, employeeId);
+          if (!emp.charterIds.includes('chief-of-staff') && emp.level !== 0) return ok('Only the Chief of Staff decomposes features.');
+          try {
+            const result = work.decompose(wp, featureId, { ...(paths ? { paths } : {}), ...(services ? { services } : {}) }, employeeId);
+            const started: string[] = [];
+            for (const a of result.assignments) {
+              if (a.state !== 'proposed' || !a.employeeId || a.sessionId || a.employeeId === employeeId) continue;
+              try { assign(wp, a.id); started.push(a.charterId ?? a.id); } catch (err) { work.transition(wp, a.id, { to: 'blocked', by: 'workplace', note: err instanceof Error ? err.message : String(err) }); }
+            }
+            const r = result.route;
+            return ok(`Routed to ${r.primaries.map(h => h.charterId).join(', ')}${r.consulted.length ? ` (consult ${r.consulted.join(', ')})` : ''}; sessions started for ${started.join(', ') || 'nobody new'}.` + (r.unresolved.length ? ` Unresolved: ${r.unresolved.map(t => `${t.kind}:${t.key}`).join(', ')}.` : ''));
+          } catch (err) {
+            return ok(`Not decomposed: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }),
       tool('propose_org_change', 'Propose a hire, split, merge, reassign or restructure with a reason. The owner approves it in the Inbox. `paramsJson` is a JSON object as a string (see the handbook for the shape of each kind).',
         // A z.record() here makes the MCP SDK fail to list ANY tool of this server; a JSON string does not.

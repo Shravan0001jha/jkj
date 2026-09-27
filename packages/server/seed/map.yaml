@@ -32,6 +32,8 @@ entries:
   - { kind: keyword, key: "500 ms", primary: conversation }
   - { kind: keyword, key: "push-to-talk", primary: conversation, consulted: [product-and-business] }
   - { kind: keyword, key: "speaks", primary: conversation }
+  - { kind: keyword, key: "spoken", primary: conversation }
+  - { kind: keyword, key: "speaker", primary: conversation }
   - { kind: requirement-group, key: "Voice", primary: conversation, consulted: [product-and-business] }
   - { kind: requirement-group, key: "Personality", primary: conversation, consulted: [character] }
 

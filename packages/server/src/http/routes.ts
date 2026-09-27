@@ -14,6 +14,9 @@ import * as releases from '../services/releases.js';
 import * as spend from '../services/spend.js';
 import * as health from '../services/health.js';
 import * as views from '../services/views.js';
+import * as features from '../services/features.js';
+import * as digest from '../services/digest.js';
+import type { Telegram } from '../services/telegram.js';
 import { route as routeThings } from '../services/ownership.js';
 import { coverage } from '../services/requirements.js';
 import { commitOrg, parseCharter, renderCharter, writeCharter } from '../services/org.js';
@@ -39,9 +42,10 @@ export interface RouterDeps {
   config: Config;
   wp: Workplace;
   auth: Auth;
+  telegram?: Telegram;
 }
 
-export function createRouter({ config, wp, auth }: RouterDeps) {
+export function createRouter({ config, wp, auth, telegram }: RouterDeps) {
   const startedAt = Date.now();
   const r = (method: string, pattern: string, handler: Handler): Route => ({
     method,
@@ -212,6 +216,7 @@ export function createRouter({ config, wp, auth }: RouterDeps) {
         ...(typeof body['spec'] === 'string' && body['spec'].trim() ? { spec: body['spec'] } : {}),
       });
       if (item.spec) work.transition(wp, item.id, { to: 'specced', by: 'owner', spec: item.spec });
+      else if (body['askSpec'] !== false) features.requestSpec(wp, item);
       json(res, 201, work.get(wp, item.id));
     }),
     r('GET', '/api/features/:id', (_req, res, _url, [id]) => json(res, 200, views.featureDetail(wp, dec(id)))),
@@ -267,6 +272,13 @@ export function createRouter({ config, wp, auth }: RouterDeps) {
       json(res, 201, releases.propose(wp, shippable, str(body['version']), typeof body['by'] === 'string' ? body['by'] : 'owner'));
     }),
     r('POST', '/api/releases/:id/run', async (_req, res, _url, [id]) => json(res, 200, await releases.run(wp, dec(id)))),
+
+    /* ---------- digest ---------- */
+    r('POST', '/api/digest', async (_req, res) => {
+      if (!telegram) throw new BadRequest('No Telegram channel is attached.');
+      json(res, 200, await digest.send(wp, telegram));
+    }),
+    r('GET', '/api/digest', (_req, res) => json(res, 200, { text: digest.build(wp) })),
 
     /* ---------- spend and health ---------- */
     r('GET', '/api/spend', (_req, res, url) => json(res, 200, spend.summary(wp, url.searchParams.get('day') ?? undefined))),

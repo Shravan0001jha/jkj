@@ -49,6 +49,7 @@ test('the Office answers with the seed organisation, coverage, the open decision
     assert.equal(body.coverage.total, 206);
     assert.equal(body.coverage.owned, 206);
     assert.equal(body.needsYou, 8, 'the eight open product decisions are in the Inbox on first boot');
+    assert.equal(body.coverage.planned, 4, 'the seeded feature plans four cross-device requirements');
     assert.equal(body.spend.capInr, 1000);
     assert.equal(body.lintErrors, 0);
     const health = await call<{ workplace: { capInr: number } }>(b.base, 'GET', '/api/health');
@@ -104,8 +105,10 @@ test('a stated feature is specced, decomposed by the map, and every assignee get
     assert.ok(events.includes('work.updated') && events.includes('office.updated') && events.includes('agent.log'));
 
     const pivot = await call<{ rows: string[]; cells: Record<string, Record<string, { total: number }>> }>(b.base, 'GET', '/api/features/pivot?rows=platform');
-    assert.deepEqual(pivot.body.rows, ['android', 'ios', 'mac']);
+    // The seeded phone→Mac feature adds its own rows; ours is the second column.
+    assert.deepEqual(pivot.body.rows, ['android', 'ios', 'mac', 'server']);
     assert.equal(pivot.body.cells['ios']![feature.body.id]!.total, 5);
+    assert.equal(Object.keys(pivot.body.cells['ios']!).length, 2, 'the seeded feature and ours');
     ws.close();
   } finally {
     delete process.env['ANTHROPIC_API_KEY'];
