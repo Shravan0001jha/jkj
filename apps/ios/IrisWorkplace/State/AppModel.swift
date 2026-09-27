@@ -19,6 +19,8 @@ final class Router {
     var tab: Tab = .office
     var inboxItemId: String?
     var talkEmployeeId: String?
+    var featureId: String?
+    var pivot: PivotRows?
     var showSettings = false
 
     func openInbox(_ id: String) { inboxItemId = id; tab = .inbox }
@@ -74,6 +76,15 @@ final class AppModel {
         config = ServerConfig.load(defaults: defaults, env: env)
         guard isPaired else { connection = .unpaired; return }
         connect()
+        #if DEBUG
+        // Scripted runs (screenshots) open a screen directly.
+        if let t = env["WORKPLACE_TAB"], let tab = Tab(rawValue: t) { router.tab = tab }
+        if let id = env["WORKPLACE_INBOX_ITEM"] { router.openInbox(id) }
+        if let id = env["WORKPLACE_TALK"] { router.talk(to: id) }
+        if let id = env["WORKPLACE_FEATURE"] { router.featureId = id; router.tab = .features }
+        if let p = env["WORKPLACE_PIVOT"], let rows = PivotRows(rawValue: p) { router.pivot = rows; router.tab = .features }
+        if env["WORKPLACE_SETTINGS"] == "1" { router.showSettings = true }
+        #endif
     }
 
     /// Pairing: exchange the one-time code, keep the token, connect.

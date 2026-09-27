@@ -19,7 +19,10 @@ struct WorkplaceApp: App {
                 .onAppear {
                     model.alerts.isActive = { UIApplication.shared.applicationState == .active }
                     model.start()
-                    LocalNotifier.requestPermission()
+                }
+                .onChange(of: model.isPaired, initial: true) { _, paired in
+                    // Ask for notifications once there is something to be notified about.
+                    if paired { LocalNotifier.requestPermission() }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
@@ -37,6 +40,9 @@ struct WorkplaceApp: App {
 /// alive after backgrounding.
 final class LocalNotifier: Notifier {
     static func requestPermission() {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["WORKPLACE_NO_NOTIF_PROMPT"] == "1" { return }
+        #endif
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 

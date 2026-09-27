@@ -7,7 +7,7 @@ DD        := build/dd
 SIM       ?= iPhone 17
 DEVICE    ?= 00008140-001E50C61487001C
 BUNDLE    := com.irisforu.workplace
-MOCK_PORT ?= 4317
+MOCK_PORT ?= 4399
 
 .PHONY: help gen fixtures check build test sim-build sim-run mock device shots
 
@@ -32,6 +32,9 @@ check:
 
 build: gen
 	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination 'platform=iOS Simulator,name=$(SIM)' -derivedDataPath $(DD) build 2>&1 | grep -E "error:|BUILD"
+
+uitest: gen
+	xcodebuild -project $(PROJECT) -scheme IrisWorkplaceUI -destination 'platform=iOS Simulator,name=$(SIM)' -derivedDataPath $(DD) test 2>&1 | grep -E "error:|Executed|Test Suite .All tests.|failed" | grep -v hapticpattern
 
 test: check gen
 	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination 'platform=iOS Simulator,name=$(SIM)' -derivedDataPath $(DD) test 2>&1 | grep -E "error:|Executed|Test Suite 'All tests'|failed" | grep -v hapticpattern

@@ -3,7 +3,7 @@
 // REST + WebSocket, bearer-token auth off loopback, pairing, answers that mutate state,
 // and a scripted stream of socket events so live updates can be seen.
 //
-//   node mock/server.mjs [--host 0.0.0.0] [--port 4317] [--quiet]
+//   node mock/server.mjs [--host 0.0.0.0] [--port 4399] [--quiet]
 //
 // Pairing code: 482913 (printed at start). Token after exchange: mock-token-0123456789abcdef.
 // Any request with that bearer token is accepted; loopback needs none (as the real server).
@@ -16,7 +16,7 @@ import * as D from './data.mjs';
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : def; };
 const HOST = opt('--host', '127.0.0.1');
-const PORT = Number(opt('--port', 4317));
+const PORT = Number(opt("--port", 4399));
 const QUIET = args.includes('--quiet');
 const TOKEN = 'mock-token-0123456789abcdef';
 const PAIR_CODE = '482913';

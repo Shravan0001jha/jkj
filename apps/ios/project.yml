@@ -60,14 +60,34 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/IrisWorkplace.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/IrisWorkplace
         BUNDLE_LOADER: $(TEST_HOST)
+  IrisWorkplaceUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [IrisWorkplaceUITests]
+    dependencies:
+      - target: IrisWorkplace
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.irisforu.workplace.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: IrisWorkplace
 schemes:
   IrisWorkplace:
     build:
       targets:
         IrisWorkplace: all
         IrisWorkplaceTests: [test]
+        IrisWorkplaceUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets: [IrisWorkplaceTests]
+  IrisWorkplaceUI:
+    build:
+      targets:
+        IrisWorkplace: all
+        IrisWorkplaceUITests: [test]
+    test:
+      config: Debug
+      targets: [IrisWorkplaceUITests]

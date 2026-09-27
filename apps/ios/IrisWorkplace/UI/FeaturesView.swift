@@ -4,11 +4,12 @@ struct FeaturesView: View {
     @Environment(AppModel.self) private var model
     @State private var mode: Mode = .board
     @State private var pivotRows: PivotRows = .charter
+    @State private var path: [String] = []
 
     private enum Mode: String, CaseIterable { case board = "Board", pivot = "Pivot" }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 switch mode {
                 case .board: board
@@ -27,7 +28,20 @@ struct FeaturesView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
+            .navigationDestination(for: String.self) { id in FeatureDetailView(id: id) }
             .task { if model.features.board == nil { await reload() } }
+            .onChange(of: model.router.featureId, initial: true) { _, id in
+                guard let id else { return }
+                mode = .board
+                path = [id]
+                model.router.featureId = nil
+            }
+            .onChange(of: model.router.pivot, initial: true) { _, rows in
+                guard let rows else { return }
+                pivotRows = rows
+                mode = .pivot
+                model.router.pivot = nil
+            }
         }
     }
 
@@ -42,7 +56,7 @@ struct FeaturesView: View {
             ForEach(model.features.byState, id: \.state) { group in
                 Section {
                     ForEach(group.features) { f in
-                        NavigationLink { FeatureDetailView(id: f.id) } label: { FeatureRow(feature: f) }
+                        NavigationLink(value: f.id) { FeatureRow(feature: f) }
                     }
                 } header: {
                     HStack {
