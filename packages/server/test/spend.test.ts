@@ -4,12 +4,15 @@ import * as spend from '../src/services/spend.js';
 import * as inbox from '../src/services/inbox.js';
 import { testWorkplace } from './fakes/workplace.js';
 
+/** Real money, ₹ = usd × the configured rate, so the old expectations still read naturally. */
 const usage = (employeeId: string, usd: number, at?: string) => ({
-  employeeId, sessionId: 's1', model: 'claude-sonnet-5', inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0, usd, ...(at ? { at } : {}),
+  employeeId, sessionId: 's1', source: 'anthropic-api' as const, basis: 'metered' as const, what: 'test', inr: usd * RATE, detail: { usd }, ...(at ? { at } : {}),
 });
+let RATE = 88;
 
 test('usd converts to inr at the configured rate and buckets by IST day', () => {
   const { wp, tmp } = testWorkplace({ WORKPLACE_USD_INR: '80' });
+  RATE = 80;
   try {
     const e = spend.record(wp, usage('tara', 0.5, '2026-09-27T18:00:00.000Z'));   // 23:30 IST on 27 Sep
     assert.equal(e.inr, 40);
@@ -25,6 +28,7 @@ test('usd converts to inr at the configured rate and buckets by IST day', () => 
 
 test('the company cap pauses spawns and files exactly one Inbox item; raising it unpauses', () => {
   const { wp, tmp } = testWorkplace({ WORKPLACE_CAP_INR: '100', WORKPLACE_USD_INR: '100' });
+  RATE = 100;
   try {
     const day = '2026-09-27';
     const paused: string[] = [];
@@ -60,6 +64,7 @@ test('the company cap pauses spawns and files exactly one Inbox item; raising it
 
 test('employee and unit caps are independent of the company cap', () => {
   const { wp, tmp } = testWorkplace({ WORKPLACE_CAP_INR: '100000', WORKPLACE_USD_INR: '100' });
+  RATE = 100;
   try {
     const day = '2026-09-27';
     // tara: ₹150/day; platforms unit: ₹350/day
@@ -81,6 +86,7 @@ test('employee and unit caps are independent of the company cap', () => {
 
 test('remaining budget in USD is the smaller of the employee and company headroom', () => {
   const { wp, tmp } = testWorkplace({ WORKPLACE_CAP_INR: '200', WORKPLACE_USD_INR: '100' });
+  RATE = 100;
   try {
     const day = '2026-09-27';
     spend.record(wp, usage('nikhil', 0.2, `${day}T05:00:00.000Z`));  // ₹20 of nikhil's 120; company 20 of 200

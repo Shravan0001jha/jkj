@@ -20,6 +20,11 @@ export interface GuardContext {
   map: MapEntry[];
   /** Absolute roots of every main checkout: never to be touched. */
   mainCheckouts: string[];
+  /**
+   * Set while the employee is paused by a spend cap and the owner is only talking: reads and
+   * answers are fine, edits and commands are not until the owner says "continue".
+   */
+  readOnly?: string;
 }
 
 export interface GuardDecision {
@@ -42,6 +47,7 @@ export const FORBIDDEN_COMMANDS: { pattern: RegExp; why: string }[] = [
 ];
 
 export function guardTool(tool: string, input: Record<string, unknown>, ctx: GuardContext): GuardDecision {
+  if (ctx.readOnly && (EDIT_TOOLS.has(tool) || tool === 'Bash')) return { decision: 'deny', reason: ctx.readOnly };
   if (EDIT_TOOLS.has(tool)) return guardEdit(String(input['file_path'] ?? input['notebook_path'] ?? ''), ctx);
   if (tool === 'Bash') return guardCommand(String(input['command'] ?? ''), ctx);
   return { decision: 'allow' };

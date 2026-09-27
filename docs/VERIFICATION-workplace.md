@@ -78,6 +78,42 @@ there (the two that pass are confirmations of things that were already right), s
    (bearer rotation, half-dead tunnel, token in the access log, pairing via the relay, sockets outliving logout, unit
    hardening, and ten smaller items) — every point fixed with a test that failed first.
 
+## The owner's first day on the phone (27–28 Sep): RCA per item
+
+1. **"Asha needs you: 9" but her page was empty.** The card counted items raised by the employee; the
+   page had no list. Now `EmployeeDetail.needsYou` lists every open item that concerns the employee
+   (`affects`: raiser, assignee, charter holders, cap scope; the Chief of Staff always).
+2. **Asha's status/handoff overwritten.** `git log` showed her files written exactly once, by a probe
+   session; her real spec session had been shut down at 22:13 without any handoff (the shutdown path
+   never asked). Two causes, two fixes: probe sessions (`talk({probe: true})`) get no handoff prompt
+   and their status/handoff tools refuse to write; a shutdown appends a machine note with what the
+   transcript shows. Her files were reconstructed from the Workplace's records (feature, spec,
+   decomposition, decisions, proposal) and committed as such; the other six employees' files were
+   intact.
+3. **Mira showed idle while cap-paused.** The pause lived in an in-memory override lost on every
+   restart; the ledger was never consulted. State now reads the ledger and says "Paused — daily budget
+   reached (₹151/₹150). You can still talk to Mira." (Superseded the same night by A: the pause was
+   on free usage and is lifted.)
+4. **Stalled work invisible.** Four leads had planned and stopped; restarts ended the rest; nothing
+   showed. `stalledSince` is derived at read time (30 min without session activity), counted on the
+   Office, and the Chief of Staff's routine resumes one stalled item per tick (once a day each) or
+   files one Inbox note per item saying why it waits.
+5. **Owner talk never blocked.** A talk from the owner runs at any cap, read-only on the paused work
+   until "continue", which lifts the pause for the day and is written to the events table.
+
+**A. Budget is real money only.** The ₹ figure was the SDK's list-price estimate of subscription
+turns: never money. The ledger is now two: subscription usage (free; turns, tokens, equivalent ₹, the
+plan's limit windows from `rate_limit_event`) and real spend (Anthropic API, AWS, third parties) with
+a basis (metered / estimated / reported). The 27 Sep rows (₹502) were relabelled subscription; Mira's
+pause was lifted and its Inbox item resolved with the note. AWS actuals come from Cost Explorer once a
+day and supersede that day's estimates. Not live-verified: a real Cost Explorer call (the fetcher is
+faked in tests; the live poller runs at 09:05 IST tomorrow).
+
+**B. Approvals in three places** and **C. the Team Room** are unit-tested (affects, live resolution,
+denial delivery; threads, mentions, owner marking, context layer, resolve with follow-ups, escalation,
+moderation hand-off, the seed from the real plans). Live: the five seed threads exist after the
+restart; Asha's moderation session runs on the next routine tick.
+
 ## Spend
 
 Own verification spend on the owner's subscription (equivalent API cost): about ₹300 across the live checks above,

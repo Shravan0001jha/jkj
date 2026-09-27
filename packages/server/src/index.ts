@@ -9,6 +9,9 @@ import { createWorkplace, type Workplace } from './services/workplace.js';
 import { Telegram } from './services/telegram.js';
 import * as digestService from './services/digest.js';
 import * as features from './services/features.js';
+import * as cos from './services/cos.js';
+import * as room from './services/room.js';
+import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
 import * as employees from './services/employees.js';
 import * as spend from './services/spend.js';
@@ -39,6 +42,8 @@ export async function start(config: Config): Promise<Running> {
   seedDecisions(wp);
   // Sessions that were open when the last process died are reported, never forgotten.
   employees.recoverAfterRestart(wp);
+  // Budget is real money only (28 Sep): relabel the old ledger, lift pauses that were on free usage.
+  spend.migrateToRealMoney(wp);
 
   // Caps pause sessions; the owner's answer unpauses.
   spend.onPause((w, scope) => employees.pauseScope(w, scope));
@@ -52,8 +57,9 @@ export async function start(config: Config): Promise<Running> {
     on: () => (tunnel ? (tunnel.on() ? 'Publishing again: the tunnel is reconnecting.' : `Nothing to do: published access is ${tunnel.status}.`) : 'Nothing is published; no tunnel is configured.'),
   });
 
-  // The first real feature, with Iris's real statuses, once.
+  // The first real feature, with Iris's real statuses, once; then the Team Room's real threads.
   try { features.seedFeature(wp); } catch (err) { log.warn('boot', `feature seed failed: ${err instanceof Error ? err.message : err}`); }
+  try { const made = room.seedThreads(wp); if (made.length) log.info('boot', `seeded ${made.length} Team Room threads from the 27 Sep plans`); } catch (err) { log.warn('boot', `room seed failed: ${err instanceof Error ? err.message : err}`); }
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   const tunnel = createTunnel(config, telegram);
@@ -69,6 +75,10 @@ export async function start(config: Config): Promise<Running> {
     health.handleParkedApprovals(wp);
     void health.handleStalls(wp).catch(err => log.warn('health', String(err)));
   }, 30_000);
+  // The Chief of Staff's routine: stalled work is resumed within budget or explained in the Inbox.
+  const cosTimer = setInterval(() => { try { cos.tick(wp); } catch (err) { log.warn('cos', String(err)); } }, 5 * 60_000);
+  // AWS actuals once a day, after the digest hour.
+  const awsTimer = setInterval(() => { if (config.awsCost) void awsCost.reconcileYesterday(wp).catch(err => log.warn('aws-cost', String(err))); }, 60 * 60_000);
   const digestTimer = setInterval(() => void digestService.maybeSend(wp, telegram, config.digestHour), 60_000);
 
   if (config.host !== '127.0.0.1' && config.host !== 'localhost') {
@@ -80,6 +90,8 @@ export async function start(config: Config): Promise<Running> {
     stop: async () => {
       tunnel?.stop();
       clearInterval(stallTimer);
+      clearInterval(cosTimer);
+      clearInterval(awsTimer);
       clearInterval(digestTimer);
       telegram.stop();
       employees.closeAll(wp);

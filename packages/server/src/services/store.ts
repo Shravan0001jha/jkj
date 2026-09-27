@@ -75,6 +75,44 @@ create table if not exists spend (
 );
 create index if not exists spend_day on spend(day, employee_id);
 
+create table if not exists usage (
+  seq integer primary key autoincrement,
+  at text not null,
+  day text not null,
+  employee_id text not null,
+  session_id text not null,
+  model text not null,
+  turns integer not null default 1,
+  input_tokens integer not null,
+  output_tokens integer not null,
+  cache_read integer not null,
+  cache_write integer not null,
+  equivalent_inr real not null,
+  tag text
+);
+create index if not exists usage_day on usage(day, employee_id);
+
+create table if not exists threads (
+  id text primary key,
+  title text not null,
+  charter_ids text not null,
+  created_by text not null,
+  created_at text not null,
+  state text not null,
+  last_at text not null,
+  json text not null
+);
+create table if not exists messages (
+  id text primary key,
+  thread_id text not null,
+  at text not null,
+  by text not null,
+  text text not null,
+  mentions text not null,
+  json text not null
+);
+create index if not exists messages_thread on messages(thread_id, at);
+
 create table if not exists settings (
   key text primary key,
   value text not null
@@ -103,6 +141,10 @@ export function openStore(path: string): Db {
   const db = new DatabaseSync(path);
   db.exec('pragma journal_mode = wal');
   db.exec(SCHEMA);
+  // Additive migrations: a column that an older database lacks.
+  for (const col of ['tag text', 'source text', 'basis text', 'what text', 'detail text']) {
+    try { db.exec(`alter table spend add column ${col}`); } catch { /* already there */ }
+  }
   return db;
 }
 

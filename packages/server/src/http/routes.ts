@@ -14,6 +14,8 @@ import * as releases from '../services/releases.js';
 import * as spend from '../services/spend.js';
 import * as health from '../services/health.js';
 import * as views from '../services/views.js';
+import * as stall from '../services/stall.js';
+import * as room from '../services/room.js';
 import * as features from '../services/features.js';
 import * as digest from '../services/digest.js';
 import type { Telegram } from '../services/telegram.js';
@@ -116,7 +118,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
     r('POST', '/api/employees/:id/talk', async (req, res, _url, [id]) => {
       const body = await readJson(req);
       const { text, attachments } = validateMessage(body);
-      json(res, 201, employees.talk(wp, dec(id), text, attachments));
+      json(res, 201, employees.talk(wp, dec(id), text, attachments, { probe: body['probe'] === true }));
     }),
     r('POST', '/api/employees/:id/end-session', async (_req, res, _url, [id]) => {
       const open = employees.openSession(dec(id));
@@ -165,13 +167,13 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
     r('POST', '/api/agents', async (req, res) => json(res, 201, await agents.createAgent(validateCreate(await readJson(req))))),
 
     /* ---------- work ---------- */
-    r('GET', '/api/work', (_req, res, url) => json(res, 200, work.list(wp, {
+    r('GET', '/api/work', (_req, res, url) => json(res, 200, stall.annotate(wp, work.list(wp, {
       ...(url.searchParams.get('kind') ? { kind: url.searchParams.get('kind') as WorkKind } : {}),
       ...(url.searchParams.get('state') ? { state: url.searchParams.get('state') as WorkState } : {}),
       ...(url.searchParams.get('charterId') ? { charterId: url.searchParams.get('charterId')! } : {}),
       ...(url.searchParams.get('employeeId') ? { employeeId: url.searchParams.get('employeeId')! } : {}),
       ...(url.searchParams.get('featureId') ? { featureId: url.searchParams.get('featureId')! } : {}),
-    }))),
+    })))),
     r('POST', '/api/work', async (req, res) => {
       const body = await readJson(req);
       const kind = body['kind'];
@@ -282,6 +284,27 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
       if (!tunnel) return json(res, 200, { published: 'not-configured' });
       tunnel.off();
       json(res, 200, { published: tunnel.status });
+    }),
+
+    /* ---------- the Team Room ---------- */
+    r('GET', '/api/room', (_req, res) => json(res, 200, { threads: room.listThreads(wp) })),
+    r('POST', '/api/room', async (req, res) => {
+      const body = await readJson(req);
+      const { thread } = room.createThread(wp, { title: str(body['title']), text: str(body['text']), by: 'owner', charterIds: strs(body['charterIds']), mentions: strs(body['mentions']) });
+      json(res, 201, { thread, messages: room.messages(wp, thread.id) });
+    }),
+    r('GET', '/api/room/:id', (_req, res, _url, [id]) => {
+      const thread = room.getThread(wp, dec(id));
+      if (!thread) throw new NotFound(`No thread ${dec(id)}`);
+      json(res, 200, { thread, messages: room.messages(wp, thread.id) });
+    }),
+    r('POST', '/api/room/:id/messages', async (req, res, _url, [id]) => {
+      const body = await readJson(req);
+      json(res, 201, room.post(wp, dec(id), { text: str(body['text']), by: 'owner', mentions: strs(body['mentions']) }));
+    }),
+    r('POST', '/api/room/:id/resolve', async (req, res, _url, [id]) => {
+      const body = await readJson(req);
+      json(res, 200, room.resolve(wp, dec(id), { summary: str(body['summary']), by: 'owner' }));
     }),
 
     /* ---------- digest ---------- */

@@ -13,6 +13,8 @@ import { assembleContext } from './context-layers.js';
 import { changedFiles, commitsSince, ensureWorktree, isMainCheckout, type Worktree } from './worktrees.js';
 import { guardTool, type GuardContext } from './guards.js';
 import { resolve as resolveOwner } from './ownership.js';
+import * as stall from './stall.js';
+import * as room from './room.js';
 import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
 import { now } from './store.js';
 import { BadRequest } from '../util/errors.js';
@@ -34,6 +36,11 @@ interface Session {
   assignmentId?: string;
   worktree?: Worktree;
   unsubscribe?: () => void;
+  /** A probe or verification session: never writes the employee's status or handoff. */
+  probe?: boolean;
+  /** Started by the owner talking (web, phone, Telegram): runs past any cap, tagged in spend. */
+  ownerTalk?: boolean;
+  guard?: GuardContext;
   startedAt: string;
   /** Last cumulative usage seen per model, so each result is recorded as a delta. */
   seen: Record<string, { costUSD: number; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number }>;
@@ -42,7 +49,13 @@ interface Session {
 
 const sessions = new Map<string, Session>();   // by agent id
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature'] as const;
+/** How much an owner-talk turn may spend past the cap, ₹ equivalent. */
+export const OWNER_TALK_TURN_INR = 100;
+
+/** The owner saying, in a talk, that paused work may go on. */
+export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
+
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -90,12 +103,20 @@ export interface SpawnOptions {
   attachments?: Attachment[];
   /** Continue this SDK session instead of starting a fresh one. */
   resume?: string;
+  /**
+   * A probe (a verification question, a smoke test): the session gets no handoff prompt at the
+   * end and its status/handoff tools refuse to write. A probe once overwrote Asha's real
+   * handoff with "this session did no substantive work" (27 Sep).
+   */
+  probe?: boolean;
+  /** The owner is talking: the session runs even at a cap (read-only on paused work until "continue"). */
+  ownerTalk?: boolean;
 }
 
 export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions): Agent {
   const emp = employee(wp, employeeId);
   const budget = spend.canSpend(wp, employeeId);
-  if (!budget.ok) throw new BadRequest(`${emp.name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox.`);
+  if (!budget.ok && !options.ownerTalk) throw new BadRequest(`${emp.name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox, or talk to ${emp.name} and say "continue".`);
   if (sessionsOf(employeeId).length >= emp.budget.concurrentSessions) {
     throw new BadRequest(`${emp.name} already has ${emp.budget.concurrentSessions} session(s) open. End one first, or talk to the open one.`);
   }
@@ -105,11 +126,14 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
   const worktree = ensureWorktree(wp.config.workDir, emp, options.assignment?.id ?? null);
   if (isMainCheckout(wp.org, worktree.path)) throw new BadRequest(`Refusing to run ${emp.name} in a main checkout (${worktree.path}).`);
   const repoId = wp.org.repos.find(r => r.root === emp.workspace.repo)?.id ?? 'iris';
-  const guard: GuardContext = { worktree: worktree.path, repoId, charterIds: emp.charterIds, map: wp.org.map, mainCheckouts: wp.org.repos.map(r => r.root) };
-  const context = assembleContext(wp.org, emp, { ...(options.assignment ? { assignment: options.assignment } : {}), maxTokens: wp.config.contextTokens, worktree: worktree.path, ownedPaths: ownedPaths(wp, emp, repoId) });
+  const guard: GuardContext = {
+    worktree: worktree.path, repoId, charterIds: emp.charterIds, map: wp.org.map, mainCheckouts: wp.org.repos.map(r => r.root),
+    ...(!budget.ok ? { readOnly: `${emp.name} is paused by the ${budget.scope} spend cap: read and answer, but do not edit or run commands until the owner says "continue" in this talk` } : {}),
+  };
+  const context = assembleContext(wp.org, emp, { ...(options.assignment ? { assignment: options.assignment } : {}), maxTokens: wp.config.contextTokens, worktree: worktree.path, ownedPaths: ownedPaths(wp, emp, repoId), room: room.contextFor(wp, employeeId) });
   const remaining = spend.remainingUsd(wp, employeeId);
 
-  const session: Session = { agentId: '', employeeId, ...(options.assignment ? { assignmentId: options.assignment.id } : {}), worktree, startedAt: now(), seen: {}, planCaptured: !!options.assignment?.plan };
+  const session: Session = { agentId: '', employeeId, ...(options.assignment ? { assignmentId: options.assignment.id } : {}), worktree, guard, startedAt: now(), seen: {}, planCaptured: !!options.assignment?.plan, ...(options.probe ? { probe: true } : {}), ...(options.ownerTalk ? { ownerTalk: true } : {}) };
 
   const agent = runs.createRunDirect({
     projectId: `employee:${employeeId}`,
@@ -144,10 +168,12 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
           }],
         }],
       },
-      maxBudgetUsd: Math.max(0.05, remaining),
+      // An owner-talk turn at the cap still needs room to answer: one turn's worth.
+      maxBudgetUsd: Math.max(options.ownerTalk ? OWNER_TALK_TURN_INR / wp.config.usdInr : 0.05, remaining),
       mcpServers: { workplace: workplaceTools(wp, employeeId, () => session) },
     },
     onResult: result => recordUsage(wp, session, result),
+    onRateLimit: info => spend.recordRateLimit(wp, info),
     onSessionId: sdkId => { if (session.assignmentId) work.setSession(wp, session.assignmentId, sdkId); },
   });
 
@@ -180,6 +206,15 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
   session.unsubscribe = unsubscribe;
 
   return agent;
+}
+
+/** A denial goes back to the raiser as a reason to act on: into its session, else into its handoff. */
+export function deliverDenial(wp: Workplace, employeeId: string, title: string, note: string | undefined): void {
+  const text = `The owner denied "${title}"${note ? `: ${note}` : ''}. Act on it: change the plan, or ask again with what is different.`;
+  const open = openSession(employeeId);
+  if (open) { runs.sendMessage(open.agentId, text); return; }
+  const current = readEmployeeFile(wp.org, employeeId, 'handoff.md').trimEnd();
+  writeEmployeeFile(wp.org, employeeId, 'handoff.md', `${current}\n\n## Denied: ${title}\n${note ? `Reason: ${note}\n` : ''}${text}\n`);
 }
 
 /** The map's path keys this employee's charters own, in its repo, as relative paths. */
@@ -224,15 +259,48 @@ export function readOauthToken(wp: Workplace): string | null {
 /* ---------- talking, ending ---------- */
 
 /** Continue the open session, or start one from the files. */
-export function talk(wp: Workplace, employeeId: string, text: string, attachments: Attachment[] = []): Agent {
+/**
+ * The owner talking to an employee (web, phone, Telegram). Always runs, even at a cap: the cap
+ * protects the shared subscription from unattended work, not the owner from his staff. At a cap
+ * the talk is read-only on the paused work until the owner explicitly says "continue", which
+ * lifts that employee's pause for the day and resumes its work; that is his approval, recorded.
+ * `autonomous: true` is for the Workplace's own use of talk (the Chief of Staff's spec), which
+ * stays under the cap.
+ */
+export function talk(wp: Workplace, employeeId: string, text: string, attachments: Attachment[] = [], opts: { probe?: boolean; autonomous?: boolean } = {}): Agent {
+  const ownerTalk = !opts.autonomous;
+  if (ownerTalk) maybeLiftPause(wp, employeeId, text);
   const open = openSession(employeeId);
   if (open) {
     const budget = spend.canSpend(wp, employeeId);
-    if (!budget.ok) throw new BadRequest(`${employee(wp, employeeId).name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox.`);
+    if (!budget.ok && !ownerTalk) throw new BadRequest(`${employee(wp, employeeId).name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox.`);
+    if (ownerTalk) open.ownerTalk = true;
     runs.sendMessage(open.agentId, text, attachments);
     return runs.getRunAgent(open.agentId)!;
   }
-  return spawn(wp, employeeId, { prompt: text, attachments });
+  return spawn(wp, employeeId, { prompt: text, attachments, ...(opts.probe ? { probe: true } : {}), ...(ownerTalk ? { ownerTalk: true } : {}) });
+}
+
+/** "Go ahead and continue" to a cap-paused employee: lift the pause for today, unlock the session, resume the work. */
+function maybeLiftPause(wp: Workplace, employeeId: string, text: string): void {
+  const budget = spend.canSpend(wp, employeeId);
+  if (budget.ok || !CONTINUE_PHRASE.test(text)) return;
+  const day = spend.dayOf();
+  const scope = `employee:${employeeId}`;
+  spend.liftPause(wp, scope, day, 'owner-talk');
+  const emp = employee(wp, employeeId);
+  for (const s of sessionsOf(employeeId)) {
+    if (s.guard?.readOnly) { delete s.guard.readOnly; runs.note(s.agentId, 'Resumed', `The owner lifted ${emp.name}'s pause for today ("${text.slice(0, 60)}"); edits and commands are allowed again.`); }
+  }
+  setState(wp, employeeId, sessionsOf(employeeId).length ? 'working' : 'idle');
+  const active = new Set(['planned', 'building', 'proposed']);
+  const item = work.list(wp, { kind: 'assignment', employeeId }).find(a => active.has(a.state));
+  if (item && !openSession(employeeId)) {
+    try { assign(wp, item.id); } catch (err) { log.warn('employees', `resume after lift: ${err instanceof Error ? err.message : err}`); }
+  } else if (item && openSession(employeeId)) {
+    runs.sendMessage(openSession(employeeId)!.agentId, `The owner says to continue. Resume assignment ${item.id}: ${item.title}. Work only in your worktree; report_done with evidence when done.`);
+  }
+  log.info('employees', `${emp.name}'s pause lifted for ${day} by the owner in talk`);
 }
 
 /** Start the session for an assignment (the assignment block is the fifth layer). */
@@ -261,13 +329,16 @@ export function assign(wp: Workplace, assignmentId: string): Agent {
 
 const HANDOFF_PROMPT =
   'This session is ending. Using the Workplace tools: call report_status with three lines (doing / done / blocked) ' +
-  'and write_handoff with what the next session needs to continue. Then stop.';
+  'and write_handoff with what the next session needs to continue. Your current status and handoff are in your ' +
+  'context: keep everything in them that is still true and add what changed; never replace real work with ' +
+  '"nothing done". Then stop.';
 
 /** Ask for the handoff, wait a bounded time, close. */
 export async function endSession(wp: Workplace, agentId: string, waitMs = 150_000): Promise<void> {
   const session = sessions.get(agentId);
   if (!session) return;
   const agent = runs.getRunAgent(agentId);
+  if (session.probe) { close(wp, agentId, 'probe ended'); return; }
   if (agent && (agent.status === 'running' || agent.status === 'waiting') && waitMs > 0) {
     // Subscribe before sending, so a turn that ends at once is not missed.
     const waiting = waitForHandoff(wp, session, waitMs);
@@ -300,8 +371,13 @@ function waitForHandoff(wp: Workplace, session: Session, waitMs: number): Promis
 export function close(wp: Workplace, agentId: string, reason: string): void {
   const session = sessions.get(agentId);
   if (!session) return;
-  // An orderly shutdown loses a pending decision as surely as a crash does: report it the same way.
-  if (reason === 'shutdown') reportInterrupted(wp, session, runs.getRunAgent(agentId)?.approval ?? null, 'shut down');
+  // An orderly shutdown loses a pending decision as surely as a crash does: report it the same way,
+  // and leave a machine-written note in the handoff so the work the model did is not forgotten
+  // (Asha's spec session was shut down with no handoff on 27 Sep and her files stayed empty).
+  if (reason === 'shutdown') {
+    reportInterrupted(wp, session, runs.getRunAgent(agentId)?.approval ?? null, 'shut down');
+    if (!session.probe) appendShutdownNote(wp, session);
+  }
   runs.note(agentId, 'Session', `Closed by the Workplace: ${reason}.`);
   runs.closeRun(agentId);
   session.unsubscribe?.();
@@ -335,6 +411,24 @@ export function unpauseAll(wp: Workplace): void {
 /** Close every open session (shutdown, tests). */
 export function closeAll(wp: Workplace, reason = 'shutdown'): void {
   for (const s of allSessions()) close(wp, s.agentId, reason);
+}
+
+function appendShutdownNote(wp: Workplace, s: Session): void {
+  const entries = runs.getRunTranscript(s.agentId) ?? [];
+  const said = entries.filter(e => e.kind === 'assistant');
+  const tools = entries.filter(e => ['edit', 'bash', 'tool', 'read', 'search'].includes(e.kind));
+  if (said.length === 0 && tools.length === 0) return;
+  const last = said.at(-1)?.text.replace(/\s+/g, ' ').slice(0, 300) ?? '';
+  const edits = entries.filter(e => e.kind === 'edit').map(e => e.text).slice(-5);
+  const note = [
+    '',
+    `## Shut down by the Workplace at ${now()} (session ${s.agentId}${s.assignmentId ? `, assignment ${s.assignmentId}` : ''})`,
+    'No handoff could be asked for. What the transcript shows:',
+    `- ${said.length} replies, ${tools.length} tool calls${edits.length ? `; last edits: ${edits.join(', ')}` : ''}`,
+    last ? `- last reply: ${last}` : '',
+    '',
+  ].filter(l => l !== undefined).join('\n');
+  writeEmployeeFile(wp.org, s.employeeId, 'handoff.md', readEmployeeFile(wp.org, s.employeeId, 'handoff.md').trimEnd() + note);
 }
 
 /**
@@ -420,35 +514,70 @@ export function setState(wp: Workplace, employeeId: string, state: EmployeeState
 }
 
 export function stateOf(wp: Workplace, employeeId: string): EmployeeState {
-  const e = employee(wp, employeeId);
-  const override = stateOverride.get(employeeId);
-  if (override === 'paused') return 'paused';
-  if (inbox.list(wp, 'open').some(i => i.raisedBy === employeeId)) return 'needs-owner';
-  const open = openSession(employeeId);
-  if (open) {
-    const agent = runs.getRunAgent(open.agentId);
-    if (agent?.status === 'waiting' && agent.approval) return 'needs-owner';
-    if (agent?.status === 'error') return 'blocked';
-    return 'working';
-  }
-  if (work.list(wp, { kind: 'assignment', employeeId, state: 'blocked' }).length > 0) return 'blocked';
-  return override === 'working' ? 'idle' : override ?? e.state ?? 'idle';
+  return stateWithReason(wp, employeeId).state;
 }
+
+/**
+ * The honest state, with the reason when it is blocked or needs the owner. A spend cap is read
+ * from the ledger, not from memory: the in-memory override was lost on every restart, so a
+ * cap-paused employee showed "idle" (27 Sep).
+ */
+export function stateWithReason(wp: Workplace, employeeId: string): { state: EmployeeState; reason?: string } {
+  const e = employee(wp, employeeId);
+  // Order: what needs the owner first (a parked tool call, an open question), then live work,
+  // then what stops autonomous work (a cap, a blocked assignment), then idle.
+  const open = openSession(employeeId);
+  const agent = open ? runs.getRunAgent(open.agentId) : undefined;
+  if (agent?.status === 'waiting' && agent.approval) return { state: 'needs-owner', reason: `waiting for approval of ${agent.approval.tool}` };
+  const raised = inbox.list(wp, 'open').find(i => i.raisedBy === employeeId);
+  if (raised) return { state: 'needs-owner', reason: raised.title };
+  if (agent?.status === 'error') return { state: 'blocked', reason: 'the session hit an error' };
+  if (open) return { state: 'working' };
+  const budget = spend.canSpend(wp, employeeId);
+  if (!budget.ok) return { state: 'blocked', reason: pausedReason(wp, e, budget.scope!) };
+  const blockedItem = work.list(wp, { kind: 'assignment', employeeId, state: 'blocked' })[0];
+  if (blockedItem) return { state: 'blocked', reason: blockedItem.history.at(-1)?.note ?? `${blockedItem.title} is blocked` };
+  const override = stateOverride.get(employeeId);
+  return { state: override === 'working' || override === 'paused' ? 'idle' : override ?? e.state ?? 'idle' };
+}
+
+/** "Paused — daily budget reached (₹151/₹150). You can still talk to Mira." */
+export function pausedReason(wp: Workplace, e: Employee, scope: string): string {
+  const s = spend.summary(wp);
+  const [kind, id] = scope.split(':');
+  const spent = kind === 'company' ? s.companyInr : kind === 'unit' ? (s.byUnit[id ?? ''] ?? 0) : (s.byEmployee[e.id] ?? 0);
+  const cap = kind === 'company' ? s.capInr : kind === 'unit' ? (wp.org.units.find(u => u.id === id)?.budget?.inrPerDay ?? 0) : e.budget.inrPerDay;
+  const whose = kind === 'company' ? 'company' : kind === 'unit' ? `${wp.org.units.find(u => u.id === id)?.title ?? id} unit` : 'daily';
+  return `Paused — ${whose} budget reached (₹${Math.round(spent)}/₹${cap}). You can still talk to ${e.name}.`;
+}
+
+/** Open Inbox items raised by, or addressed to, this employee: what the owner can answer on the page. */
+export function needsYouItems(wp: Workplace, employeeId: string) {
+  return inbox.forEmployee(wp, employeeId);
+}
+
+// A denial reaches the raiser (an employee) as a reason to act on.
+inbox.onAnswer((wp, item) => {
+  if (!item.answer || !['reject', 'deny', 'no'].includes(item.answer.optionId)) return;
+  if (!wp.org.employees.some(e => e.id === item.raisedBy)) return;
+  try { deliverDenial(wp, item.raisedBy, item.title, item.answer.note); } catch (err) { log.warn('employees', `denial to ${item.raisedBy}: ${err instanceof Error ? err.message : err}`); }
+});
 
 export function card(wp: Workplace, employeeId: string): EmployeeCard {
   const e = employee(wp, employeeId);
   const open = openSession(employeeId);
   const active = new Set(['proposed', 'planned', 'building', 'review', 'blocked']);
-  const current = work.list(wp, { kind: 'assignment', employeeId }).find(a => active.has(a.state)) ?? null;
+  const current = stall.annotate(wp, work.list(wp, { kind: 'assignment', employeeId })).find(a => active.has(a.state)) ?? null;
   const status = readEmployeeFile(wp.org, employeeId, 'status.md').trim();
+  const { state, reason } = stateWithReason(wp, employeeId);
   return {
-    employee: { ...e, state: stateOf(wp, employeeId) },
+    employee: { ...e, state, ...(reason ? { stateReason: reason } : {}) },
     charters: e.charterIds.map(id => wp.org.charters.get(id)).filter((c): c is NonNullable<typeof c> => !!c).map(summarise),
     currentWork: current,
     lastReport: lastReport.get(employeeId) ?? (status || null),
     session: open ? runs.getRunAgent(open.agentId) ?? null : null,
     spendTodayInr: spend.summary(wp).byEmployee[employeeId] ?? 0,
-    needsYou: inbox.list(wp, 'open').filter(i => i.raisedBy === employeeId).length,
+    needsYou: needsYouItems(wp, employeeId).length,
   };
 }
 
@@ -466,7 +595,8 @@ function recordUsage(wp: Workplace, session: Session, result: RunResult): void {
     };
     session.seen[model] = { costUSD: usage.costUSD, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheRead: usage.cacheReadInputTokens, cacheWrite: usage.cacheCreationInputTokens };
     if (delta.usd === 0 && delta.inputTokens === 0 && delta.outputTokens === 0) continue;
-    spend.record(wp, { employeeId: session.employeeId, sessionId: session.agentId, model, ...delta });
+    // Subscription usage: free, tracked for visibility (HLD D9b).
+    spend.recordUsage(wp, { employeeId: session.employeeId, sessionId: session.agentId, model, ...delta, ...(session.ownerTalk ? { tag: 'owner-talk' as const } : {}) });
   }
 }
 
@@ -481,6 +611,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
       tool('report_status', 'Write your status file: three short lines, doing / done / blocked. Do this before you stop.',
         { doing: z.string(), done: z.string(), blocked: z.string() },
         async ({ doing, done, blocked }) => {
+          if (session().probe) return ok('This is a probe session; the status file is not written.');
           const body = `doing: ${doing}\ndone: ${done}\nblocked: ${blocked}\n`;
           writeEmployeeFile(wp.org, employeeId, 'status.md', body);
           lastReport.set(employeeId, body.trim());
@@ -489,7 +620,11 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         }),
       tool('write_handoff', 'Write your handoff: what the next session needs to continue this work.',
         { handoff: z.string() },
-        async ({ handoff }) => { writeEmployeeFile(wp.org, employeeId, 'handoff.md', `${handoff.trim()}\n`); return ok('Handoff written.'); }),
+        async ({ handoff }) => {
+          if (session().probe) return ok('This is a probe session; the handoff is not written.');
+          writeEmployeeFile(wp.org, employeeId, 'handoff.md', `${handoff.trim()}\n`);
+          return ok('Handoff written.');
+        }),
       tool('report_done', 'Report an assignment as done, with evidence. It goes to review; a verifier marks it done.',
         {
           assignmentId: z.string().optional(),
@@ -563,6 +698,51 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           } catch (err) {
             return ok(`Not decomposed: ${err instanceof Error ? err.message : String(err)}`);
           }
+        }),
+      tool('record_spend', 'Record real money this session caused: an Anthropic API call on a key (e.g. through Iris\'s llm-gateway during a test), AWS work, or a paid third-party API. Give the provider\'s own units when it reported them; then the row is metered, otherwise reported.',
+        // No z.record(): it makes the MCP SDK fail to list every tool of this server (27 Sep). Units come as a JSON string.
+        { source: z.enum(['anthropic-api', 'aws', 'third-party']), what: z.string(), inr: z.number().min(0).optional(), usd: z.number().min(0).optional(), unitsJson: z.string().optional() },
+        async ({ source, what, inr, usd, unitsJson }) => {
+          const amount = inr ?? (usd !== undefined ? usd * wp.config.usdInr : undefined);
+          if (amount === undefined) return ok('Give inr or usd.');
+          let units: Record<string, number> | undefined;
+          if (unitsJson) { try { units = JSON.parse(unitsJson) as Record<string, number>; } catch { return ok('unitsJson is not valid JSON.'); } }
+          const e = spend.record(wp, { employeeId, sessionId: session().agentId, source, basis: units ? 'metered' : 'reported', what, inr: amount, detail: { ...(usd !== undefined ? { usd } : {}), ...(units ?? {}) } });
+          return ok(`Recorded ₹${e.inr} (${e.basis}, ${source}). Real money today: ₹${spend.summary(wp).companyInr} of ₹${spend.capFor(wp)}.`);
+        }),
+      tool('room_post', 'Post in the Team Room: to an existing thread by id, or open a new one with a title. Use it when your work needs another team (an interface, a contract, a handoff, an ownership conflict) instead of editing outside your charter. Mention people with @id.',
+        { threadId: z.string().optional(), title: z.string().optional(), text: z.string(), charterIds: z.array(z.string()).optional() },
+        async ({ threadId, title, text, charterIds }) => {
+          try {
+            if (threadId) { const m = room.post(wp, threadId, { text, by: employeeId }); return ok(`Posted ${m.id} in ${threadId}.`); }
+            if (!title) return ok('Give a threadId to reply, or a title to open a thread.');
+            const { thread } = room.createThread(wp, { title, text, by: employeeId, ...(charterIds ? { charterIds } : {}) });
+            return ok(`Opened thread ${thread.id}: ${thread.title}.`);
+          } catch (err) { return ok(`Not posted: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('room_read', 'Read a Team Room thread, or list the open threads that concern you.',
+        { threadId: z.string().optional() },
+        async ({ threadId }) => {
+          if (!threadId) return ok(room.threadsFor(wp, employeeId).map(t => `${t.id}: ${t.title} (${t.messageCount} messages, last ${t.lastAt})`).join('\n') || 'No open threads concern you.');
+          const t = room.getThread(wp, threadId);
+          if (!t) return ok(`No thread ${threadId}.`);
+          return ok(`# ${t.title} [${t.state}]\n` + room.messages(wp, threadId).map(m => `${m.owner ? 'OWNER' : m.by} (${m.at}): ${m.text}`).join('\n'));
+        }),
+      tool('room_resolve', 'Chief of Staff only: resolve a Team Room thread with a summary (written into the relevant charter or contract by you) and optional follow-up assignments.',
+        { threadId: z.string(), summary: z.string(), followUps: z.array(z.object({ employeeId: z.string(), title: z.string(), body: z.string() })).optional() },
+        async ({ threadId, summary, followUps }) => {
+          const emp = employee(wp, employeeId);
+          if (!emp.charterIds.includes('chief-of-staff') && emp.level !== 0) return ok('Only the Chief of Staff resolves threads; post your view with room_post.');
+          try { const r = room.resolve(wp, threadId, { summary, by: employeeId, ...(followUps ? { followUps } : {}) }); return ok(`Resolved ${threadId}${r.followUps.length ? `; follow-ups ${r.followUps.join(', ')}` : ''}.`); }
+          catch (err) { return ok(`Not resolved: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('escalate', 'Chief of Staff only: escalate a Team Room thread to the owner as an Inbox decision. Only for what the approvals table reserves for him.',
+        { threadId: z.string(), title: z.string(), body: z.string(), options: z.array(z.string()).optional() },
+        async ({ threadId, title, body, options }) => {
+          const emp = employee(wp, employeeId);
+          if (!emp.charterIds.includes('chief-of-staff') && emp.level !== 0) return ok('Only the Chief of Staff escalates; mention @asha in the thread.');
+          try { const item = room.escalate(wp, threadId, { title, body, by: employeeId, ...(options ? { options } : {}) }); return ok(`Escalated as ${item.id}.`); }
+          catch (err) { return ok(`Not escalated: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('propose_org_change', 'Propose a hire, split, merge, reassign or restructure with a reason. The owner approves it in the Inbox. `paramsJson` is a JSON object as a string (see the handbook for the shape of each kind).',
         // A z.record() here makes the MCP SDK fail to list ANY tool of this server; a JSON string does not.

@@ -5,6 +5,7 @@ import type { Workplace } from './workplace.js';
 import { gate, requestApproval } from './approvals.js';
 import * as inbox from './inbox.js';
 import * as work from './work.js';
+import * as spend from './spend.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { BadRequest, Conflict } from '../util/errors.js';
 import { log } from '../util/logger.js';
@@ -129,6 +130,9 @@ export async function run(wp: Workplace, id: string): Promise<Release> {
   });
   const finished: Release = { ...release, state: code === 0 ? 'done' : 'failed', log: lines.join('\n') };
   save(wp, finished);
+  // Real money, estimated (HLD D9b): an upload, transfer and a CloudFront invalidation, or a deploy's transfer.
+  const estimate = spec.action === 'release' ? 2 : 1;
+  spend.record(wp, { employeeId: 'nikhil', source: 'aws', basis: 'estimated', what: `${spec.action} ${release.shippable} ${release.version} (${spec.command.split('/').pop()})`, inr: estimate });
   wp.emit({ type: 'alert', level: code === 0 ? 'info' : 'blocked', title: `${release.shippable} ${release.version} ${code === 0 ? 'released' : 'failed'}`, body: lines.slice(-3).join(' · ') });
   return finished;
 }

@@ -76,6 +76,36 @@ employee's context change on the next spawn. Hires cannot hire (no level 3).
 To edit a charter by hand: Org → charter → edit, or edit `~/iris-workplace/charters/<id>.md` and
 commit. The map is `map.yaml`; the org is `org.yaml`; roles are `roles.yaml`.
 
+## Money, and what is free
+
+Sessions run on the Claude subscription, which is **free**: the Office shows it as "Subscription usage
+(free)" (turns, tokens, the list-price equivalent, and the plan's own five-hour / seven-day limits as
+the SDK reports them). The **₹1000/day cap counts real money only**: Anthropic API calls on a key
+(Iris's llm-gateway during tests), AWS work employees trigger (a release ≈ ₹2, a deploy ≈ ₹1,
+estimated until the daily Cost Explorer actual replaces them), and paid third-party APIs, recorded by
+the session with `record_spend`. A cap pauses paid actions and unattended work only; talking to any
+employee always works, and "go ahead and continue" in that talk lifts the pause for the day (audited).
+
+## Approvals, everywhere
+
+Every Inbox item shows in the Inbox, on Asha's page, and on the page of each employee it concerns
+(raiser, assignee, charter holders), with its options and a note; answering in one place resolves it
+everywhere. A denial reaches the raiser: into its open session, or into its handoff for the next one.
+
+## The Team Room
+
+Cross-team work (an interface, a contract, a handoff, an ownership conflict) is a thread in the Team
+Room (`#/room`), not an edit outside one's charter. Employees post with `room_post` and @mentions;
+Asha moderates: assigns follow-ups, resolves with a summary, and escalates to you only what the
+approvals table reserves for you (an Inbox item linked to the thread). You can read and comment
+anytime; your messages are marked as yours.
+
+## Stalled work
+
+An assignment with no session activity for 30 minutes (`WORKPLACE_STALL_MINUTES`) is stalled: it shows
+on the card and in the Office counts. Every five minutes Asha's routine resumes one (once a day per
+item) or leaves one Inbox note saying why it waits ("Resume it now" starts it regardless).
+
 ## Approvals, caps, releases
 
 Outward actions (release, deploy, TestFlight, store, external messages, deleting data, spending

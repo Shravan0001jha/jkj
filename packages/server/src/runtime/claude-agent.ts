@@ -46,6 +46,8 @@ export interface RunEvents {
   onInit?(init: { mcpServers: string[]; workplaceTools: number; tools: number }): void;
   /** Lines the CLI process writes to stderr; the only place MCP start-up errors appear. */
   onStderr?(line: string): void;
+  /** The subscription's own limit windows, as the CLI reports them. */
+  onRateLimit?(info: { rateLimitType?: string; status: string; utilization?: number; resetsAt?: number }): void;
   /**
    * The end of a turn, with the SDK's cumulative accounting for the whole
    * query: per-model tokens and estimated cost. Cumulative, so callers diff.
@@ -241,6 +243,12 @@ async function consume(stream: Query, events: RunEvents): Promise<void> {
             }])),
           });
           events.onDone(String(message.subtype));
+          break;
+        }
+
+        case 'rate_limit_event': {
+          const info = (message as { rate_limit_info?: { status: string; rateLimitType?: string; utilization?: number; resetsAt?: number } }).rate_limit_info;
+          if (info) events.onRateLimit?.(info);
           break;
         }
 

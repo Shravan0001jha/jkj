@@ -12,7 +12,7 @@ import type {
   CharterSummary, Coverage, Employee, EmployeeCard, EmployeeSignals, HealthSignals,
   InboxItem, LintFinding, MapEntry, OrgHistoryEntry, OrgProposal, ProposalKind, Release,
   Requirement, Role, RouteResult, Shippable, SpendSummary, Unit, WorkItem, WorkKind, WorkState,
-  Evidence,
+  Evidence, RoomThread, RoomMessage,
 } from './workplace.js';
 
 export const WORKPLACE_API = {
@@ -55,6 +55,10 @@ export const WORKPLACE_API = {
   releases: '/api/releases',
   releaseRun: (id: string) => `/api/releases/${encodeURIComponent(id)}/run`,
   spend: (day?: string) => withQuery('/api/spend', day ? { day } : undefined),
+  room: '/api/room',
+  roomThread: (id: string) => `/api/room/${encodeURIComponent(id)}`,
+  roomMessages: (id: string) => `/api/room/${encodeURIComponent(id)}/messages`,
+  roomResolve: (id: string) => `/api/room/${encodeURIComponent(id)}/resolve`,
   signals: '/api/health/signals',
   pair: '/api/pair',
   pairExchange: '/api/pair/exchange',
@@ -91,6 +95,17 @@ export interface OfficeResponse {
   needsYou: number;
   spend: SpendSummary;
   lintErrors: number;
+  /** Headline counts over the employees and their work. */
+  counts: OfficeCounts;
+}
+
+export interface OfficeCounts {
+  working: number;
+  blocked: number;
+  /** Assignments in progress with no session activity past the stall threshold. */
+  stalled: number;
+  needsYou: number;
+  total: number;
 }
 
 export interface OrgResponse {
@@ -113,6 +128,8 @@ export interface EmployeeDetail {
   assignments: WorkItem[];
   spendTodayInr: number;
   signals: EmployeeSignals;
+  /** Open Inbox items raised by, or addressed to, this employee: what the owner can answer here. */
+  needsYou: InboxItem[];
 }
 
 export interface FeatureBoard {
@@ -144,12 +161,28 @@ export interface DecomposeResponse {
   route: RouteResult;
 }
 
+export interface RoomResponse {
+  threads: RoomThread[];
+}
+export interface RoomThreadDetail {
+  thread: RoomThread;
+  messages: RoomMessage[];
+}
+export interface CreateThreadRequest { title: string; text: string; charterIds?: string[]; mentions?: string[] }
+export interface PostMessageRequest { text: string; mentions?: string[] }
+export interface ResolveThreadRequest { summary: string }
+
 export interface PairResponse { code: string; expiresAt: string }
 export interface PairExchangeResponse { token: string }
 
 /* ---------- requests ---------- */
 
-export interface TalkRequest { text: string; attachments?: Attachment[] }
+export interface TalkRequest {
+  text: string;
+  attachments?: Attachment[];
+  /** A probe or verification session: it never writes the employee's status or handoff. */
+  probe?: boolean;
+}
 export interface AnswerInboxRequest { optionId: string; note?: string }
 export interface CreateWorkRequest {
   kind: WorkKind;
@@ -192,6 +225,8 @@ export type WorkplaceServerEvent =
   | { type: 'release.log'; id: string; line: string }
   | { type: 'spend.updated'; summary: SpendSummary }
   | { type: 'signals.updated'; signals: HealthSignals }
+  | { type: 'room.thread'; thread: RoomThread }
+  | { type: 'room.message'; message: RoomMessage; thread: RoomThread }
   | { type: 'alert'; level: 'info' | 'needs-you' | 'blocked' | 'cap'; title: string; body: string; inboxId?: string };
 
 export type WorkplaceClientCommand =

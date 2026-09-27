@@ -32,7 +32,7 @@ export function requestSpec(wp: Workplace, feature: WorkItem): string | null {
     'Produce numbered acceptance criteria (AC1..ACn), each testable, plus the evidence expected. ' +
     'Then call the Workplace tool write_spec with featureId and the spec text. Do not build anything.';
   try {
-    const agent = employees.talk(wp, cos, prompt);
+    const agent = employees.talk(wp, cos, prompt, [], { autonomous: true });
     return agent.id;
   } catch (err) {
     log.warn('features', `could not ask ${cos} for a spec: ${err instanceof Error ? err.message : err}`);

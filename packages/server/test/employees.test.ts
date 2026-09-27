@@ -56,24 +56,32 @@ test('a session gets the layered context, the subscription token, and no API key
   }
 });
 
-test('usage is recorded as deltas of the cumulative totals, and the cap pauses the employee', async () => {
+test('usage is recorded as free subscription deltas; only real money pauses the employee', async () => {
   const { wp, tmp } = testWorkplace({ WORKPLACE_USD_INR: '100', WORKPLACE_CAP_INR: '100000' });
   const fake = installFakeRuntime();
   spend.onPause((w, scope) => employees.pauseScope(w, scope));
   try {
     withOauth(tmp.dir);
-    employees.talk(wp, 'nikhil', 'hi');   // nikhil: ₹120/day
+    employees.talk(wp, 'nikhil', 'hi', [], { autonomous: true });   // nikhil: ₹120/day of real money
     await tick();
     const s = fake.last();
-    s.result({ costUsd: 0.5 });   // cumulative 0.5 → ₹50
+    s.result({ costUsd: 0.5 });   // cumulative 0.5 → ₹50 equivalent
     s.result({ costUsd: 0.4 });   // cumulative 0.9 → delta ₹40
     const day = spend.dayOf();
-    assert.equal(spend.summary(wp, day).byEmployee['nikhil'], 90);
-    s.result({ costUsd: 0.4 });   // cumulative 1.3 → ₹130 ≥ 120: paused
-    assert.equal(spend.summary(wp, day).byEmployee['nikhil'], 130);
-    assert.equal(employees.stateOf(wp, 'nikhil'), 'paused');
+    assert.equal(spend.summary(wp, day).subscription.byEmployee['nikhil']!.equivalentInr, 90, 'deltas, not the running total');
+    assert.equal(spend.summary(wp, day).subscription.byEmployee['nikhil']!.turns, 2);
+    s.result({ costUsd: 0.4 });   // ₹130 equivalent: far past ₹120, and nothing happens
+    assert.equal(spend.canSpend(wp, 'nikhil', day).ok, true, 'subscription usage never pauses');
+    assert.equal(s.interrupted, 0);
+
+    // Real money does.
+    spend.record(wp, { employeeId: 'nikhil', source: 'third-party', basis: 'reported', what: 'ElevenLabs test', inr: 130 });
     assert.equal(s.interrupted, 1);
-    assert.throws(() => employees.talk(wp, 'nikhil', 'more'), /paused/);
+    employees.closeAll(wp, 'test');
+    assert.equal(employees.stateOf(wp, 'nikhil'), 'blocked');
+    assert.match(employees.stateWithReason(wp, 'nikhil').reason!, /Paused — daily budget reached \(₹130\/₹120\)\. You can still talk to Nikhil\./);
+    assert.throws(() => employees.talk(wp, 'nikhil', 'more', [], { autonomous: true }), /paused/, 'the Workplace itself stays under the cap');
+    assert.ok(employees.talk(wp, 'nikhil', 'more'), 'the owner can still talk');
   } finally {
     fake.restore();
     tmp.cleanup();

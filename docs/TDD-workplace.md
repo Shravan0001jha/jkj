@@ -111,6 +111,25 @@ session, failure pings rate-limited, a second live tunnel refused and reported, 
 health leaks nothing, 256-bit tokens stored hashed, audit free of secrets). Seven of the nine security
 tests fail on the pre-fix commit.
 
+**`fix-batch.test.ts`** (the owner's first day on the phone) — the employee page lists what the card
+counts; a probe session never writes status or handoff and a shutdown leaves a note; a cap-paused
+employee shows blocked with the plain reason and is counted; stalled work is derived and the routine
+resumes once or explains; owner talk always runs and "continue" lifts the pause, audited.
+
+**`money.test.ts`** — subscription usage is recorded as free (turns, tokens, equivalent ₹) and never
+pauses; real spend from `record_spend` (reported/metered), from a release (estimated) and from the
+daily AWS actual (metered, replacing estimates) sums into the caps; the migration relabels old rows
+and lifts Mira's pause with a note; rate-limit events are kept per window.
+
+**`approvals-everywhere.test.ts`** — `affects` is computed from raiser, assignment, charter and cap
+scope, and always includes the Chief of Staff; answering once resolves it on every page; a denial
+reaches the raiser's open session or its handoff.
+
+**`room.test.ts`** — threads and messages persist; @mentions; the owner's messages are marked;
+employees see their open threads in context; Asha's `room_resolve` writes the summary and creates the
+follow-ups; `escalate` files an Inbox item linked to the thread; non-Asha cannot resolve; the seed
+threads from the 27 Sep plans exist and mention the right people.
+
 **Kept from JKJ, now under test:** `session-reader` (parse a fixture transcript: entries, subagents,
 images, cleaned user text), `context.ts` (ancestry chain, memory notes not counted),
 `projects.encodeProjectKey`, `routes` validation (`validateCreate`, `validateMessage`).

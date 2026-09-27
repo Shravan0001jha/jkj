@@ -32,7 +32,7 @@ export const PLAN_FIRST =
 export function assembleContext(
   org: Org,
   employee: Employee,
-  options: { assignment?: WorkItem; maxTokens?: number; role?: string; worktree?: string; ownedPaths?: string[] } = {},
+  options: { assignment?: WorkItem; maxTokens?: number; role?: string; worktree?: string; ownedPaths?: string[]; room?: string } = {},
 ): AssembledContext {
   const layers: ContextLayer[] = [];
   const push = (id: string, kind: ContextLayer['kind'], label: string, summary: string, path: string, body: string): void => {
@@ -63,6 +63,9 @@ export function assembleContext(
   push('status', 'memory', 'Status', 'Three lines: doing, done, blocked. Written before every session ends.', `${org.dir}/employees/${employee.id}/status.md`, readEmployeeFile(org, employee.id, 'status.md'));
   push('handoff', 'memory', 'Handoff', 'What the next session needs to know.', `${org.dir}/employees/${employee.id}/handoff.md`, readEmployeeFile(org, employee.id, 'handoff.md'));
 
+  if (options.room) {
+    push('room', 'memory', 'Team Room', 'Open threads that concern you.', '', options.room);
+  }
   if (options.assignment) {
     push('assignment', 'local', `Assignment: ${options.assignment.title}`, 'The work this session is for.', '', renderAssignment(options.assignment));
   }

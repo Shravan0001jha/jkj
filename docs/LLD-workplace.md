@@ -180,6 +180,29 @@ system line, sets `state: paused`), files an Inbox item of kind `cap` with optio
 (asks for a number) / `keep`. Company cap `WORKPLACE_CAP_INR` default 1000; per-day override stored
 in the db by the answered inbox item.
 
+### 9b. Real money (`services/spend.ts`, `services/usage.ts`, `services/aws-cost.ts`) — HLD D9b
+
+Two ledgers. **`usage`** (subscription, free): one row per session result (`employeeId, sessionId,
+model, turns, inputTokens, outputTokens, cacheRead, cacheWrite, equivalentInr`), plus the latest
+`rate_limit_event` per window (`five_hour`, `seven_day*`: status, utilization, resetsAt) kept in
+`settings`. **`spend`** (real money): `source: 'anthropic-api' | 'aws' | 'third-party'`, `basis:
+'metered' | 'estimated' | 'reported'`, `employeeId`, `sessionId?`, `what`, `inr`, `day`. Rows written
+before 28 Sep carry `source: 'subscription'` and are excluded from every cap; the migration relabels
+them. `SpendSummary.companyInr` is real money only; `subscription` holds the free figures.
+
+| Source | How it is measured | Basis |
+|---|---|---|
+| Anthropic API via Iris's llm-gateway / iris-api during an employee's tests | the gateway's per-request usage (tokens × list price) read from its response or its `/usage` endpoint by the session and recorded with `record_spend` | metered |
+| A paid third-party API an employee runs (Deepgram, ElevenLabs, OpenAI, web search) | `record_spend` from the session, with the provider's reported units where it gives them | metered / reported |
+| A release (`release-iris.sh`) | S3 PUT + ~200 MB transfer + one CloudFront invalidation: ₹2 estimate; `release-iris-x64` the same | estimated |
+| A deploy (`deploy-api.sh`, `deploy-agent.sh`, `deploy-web.sh`) | data transfer + invalidation: ₹1 estimate | estimated |
+| AWS, actual | Cost Explorer `GetCostAndUsage` for the previous IST day, once a day at 09:05 (`WORKPLACE_AWS_COST`, default on; each call costs ~₹1 and is itself recorded) → one `metered` row "AWS actual (unattributed)" replacing that day's estimates in the day's total | metered |
+
+`record_spend({ source, inr | usd, what, units? })` is a Workplace MCP tool; the row is `reported`
+unless the session passes provider units, then `metered`. Caps (`check`) sum only real sources; a
+pause stops `spawn` for **autonomous** work and the guard denies commands that would spend (release,
+deploy, the paid-provider CLIs) for the paused scope; reads, plans and owner talk are never paused.
+
 ## 10. Stall and loop detection (`services/health.ts`)
 
 Every 30 s over running sessions: `idleMs > 600 000` → stalled; last 5 tool entries identical
@@ -187,6 +210,41 @@ Every 30 s over running sessions: `idleMs > 600 000` → stalled; last 5 tool en
 computed on request: throughput, rework, false-done rate, cost per completed item (7-day window).
 Org signals: queue length per charter > 5, context-limit hits ≥ 3 in 7 days, mutual blocking pairs,
 orphans → listed as "proposal triggers" on the Org screen.
+
+### 10b. Stalled work and the Chief of Staff's routine (`services/stall.ts`, `services/cos.ts`)
+
+An assignment in `proposed | planned | building` with no session activity (its own updates, its last
+session, its live transcript) for more than `WORKPLACE_STALL_MINUTES` (30) is **stalled**: derived at
+read time (`WorkItem.stalledSince`), counted on the Office (`counts.stalled`), shown on the card.
+Every five minutes `cos.tick` resumes the oldest stalled item that can be resumed (assignee not
+paused, ≥ ₹50 real headroom, not already resumed today; one per tick) or raises one Inbox note per
+item per day saying why it waits: a cap, an open question to the owner, a pending org change touching
+its charter, or "resumed once already". "Resume it now" on the note starts it regardless.
+
+### 10c. Approvals in three places (`employees.needsYouItems`, `inbox.affects`) — HLD D7b
+
+`InboxItem` gains `affects: string[]` (employee ids the item concerns), `onApprove`, `onDeny` (one
+line each) and `links`. `affects` is computed at raise time: the raiser, the assignee of
+`context.assignmentId`, the holders of `context.charterId` and of a proposal's charters, the scope of
+a cap; the Chief of Staff always. `EmployeeDetail.needsYou` lists open items whose `affects` includes
+the employee. A denial (`reject`/`deny`/`no`) is delivered to the raiser: `runs.sendMessage` into its
+open session, else appended to its `handoff.md` as "## Denied: <title> — <note>".
+
+### 10d. The Team Room (`services/room.ts`) — HLD D3b
+
+Tables `threads (id, title, charter_ids, created_by, created_at, state, summary, json)` and
+`messages (id, thread_id, at, by, text, mentions, json)`. `by` is an employee id, `owner` or
+`workplace`; the owner's messages carry `owner: true`. Routes: `GET /api/room` (threads, newest
+activity first, with the last message and unread-for-owner count), `GET /api/room/:id`, `POST
+/api/room { title, text, charterIds?, mentions? }`, `POST /api/room/:id/messages { text }` (the owner),
+`POST /api/room/:id/resolve { summary }`. Socket: `room.thread`, `room.message`. Session tools:
+`room_post({ threadId | title, text, mentions })`, `room_read({ threadId })`; Chief of Staff only:
+`room_resolve({ threadId, summary, followUps: [{ employeeId, title, body }] })` (follow-ups become
+assignments to those employees) and `escalate({ threadId, title, body, options })` (an Inbox item with
+`context.threadId`). Context: each employee's assembled context gets a "Team Room" layer with its
+open threads (title, last three messages). Moderation: `cos.tick` also hands Asha any thread with
+messages newer than her last look (a session turn, free under D9b): she is asked to reply, assign or
+resolve, and to escalate only above her authority.
 
 ## 11. Telegram (`services/telegram.ts`)
 
