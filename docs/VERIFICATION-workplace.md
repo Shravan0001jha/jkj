@@ -7,8 +7,8 @@ Tests are counts from `npm test` in `~/jkj` and `pytest` in `~/claude-dev-deploy
 
 | Suite | Count | Time |
 |---|---|---|
-| Workplace (`~/jkj`, `node --test` via tsx): unit + HTTP/socket integration | **95** | ~30 s |
-| Relay (`workplace-relay`, pytest): behaviour + the security review | **20** | ~2 s |
+| Workplace (`~/jkj`, `node --test` via tsx): unit + HTTP/socket integration | **99** | ~30 s |
+| Relay (`workplace-relay`, pytest): behaviour + the lead's review + the independent review | **27** | ~2.5 s |
 
 All green at the time of writing. The security tests were run against the pre-fix relay commit: 7 of 9 fail
 there (the two that pass are confirmations of things that were already right), so they fail first.
@@ -28,6 +28,9 @@ there (the two that pass are confirmations of things that were already right), s
 | Bearer auth off loopback | from the LAN interface: 401 without or with a wrong token, 200 with it; pair refused off loopback (400); exchange returns the token once; socket 401 without a token, `office.snapshot` with it |
 | Telegram out | milestone notes and Inbox pings delivered (`sent`) |
 | Digest | one real send from `POST /api/digest` |
+| Worktree isolation with a real build | Mira built `greeting.py`, the `app.py` wiring and a test in `~/iris-work/mira/claude-dev` on `emp/mira/<assignment>`; the main checkout stayed at 0 tracked changes; her employee cap paused her at the test run |
+| Restart recovery | an orderly shutdown closed her session as `shutdown`; a `lost-on-restart` row becomes an Inbox question (unit-tested; no crash happened live) |
+| Published at https://work.irisforu.com (23:15 IST) | relay deployed as its own user; from this Mac over the internet: no session → 302 to /login, /api → 401, login page 200, HSTS/nosniff/no-referrer, /docs 401, bad factor 401 ×5 then 429, /ws without session 403, /api/pair 401, bad JSON 400, tunnel down → mac:"offline" with the login page up, back online in seconds; api.irisforu.com/healthz 200 and iris-agent active throughout |
 
 ## Not live-verified (and why)
 
@@ -44,8 +47,8 @@ there (the two that pass are confirmations of things that were already right), s
 - **Cap pause with a real overspend**: unit-tested at the boundary; the real ledger never reached ₹1000.
 - **Stall and loop detection on a real session**: unit-tested (idle 10 min, 5 identical tool calls); the detector
   runs every 30 s in the live server but no real session stalled.
-- **The relay in production**: built, 20 tests, security-reviewed; not deployed at the time of writing (the lead's
-  go was pending). The tunnel client is verified against a fake relay only.
+- **Passkey sign-in and the new-device Telegram ping**: need the owner's enrolment (asked on Telegram at 23:16);
+  the flow is unit-tested with the WebAuthn verifier stubbed, and the ping goes through the real tunnel.
 - **Tailscale**: not installed (needs the owner). The LAN listener was used for the iOS device test instead.
 - **GitHub Apps**: JWT, installation-token caching and PR plumbing verified against a fake `fetch`; no App exists
   yet (the lead creates them; the list is in the LLD §12).
@@ -65,6 +68,11 @@ there (the two that pass are confirmations of things that were already right), s
    ran a second event loop. All fixed with tests.
 7. The first test run after adding worktrees cut `emp/*` branches in the real checkouts (no file changes); removed,
    and tests now build temp repos.
+8. The Mac's resolver had cached NXDOMAIN for `work.irisforu.com` from before the record existed; the tunnel now
+   resolves the relay with a direct DNS query (and Node's `all: true` lookup shape was wrong at first).
+9. Relay: the lead's review (spoofable XFF, brute-forceable enrolment, `!=` on the secret) and the independent review
+   (bearer rotation, half-dead tunnel, token in the access log, pairing via the relay, sockets outliving logout, unit
+   hardening, and ten smaller items) — every point fixed with a test that failed first.
 
 ## Spend
 
