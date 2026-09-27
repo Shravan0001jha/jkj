@@ -49,6 +49,7 @@ export class Tunnel {
   private locals = new Map<string, WebSocket>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private watchdog: ReturnType<typeof setInterval> | null = null;
+  private lastError = '';
   private backoff: number;
   private stopped = false;
   private _status: TunnelStatus = 'offline';
@@ -106,6 +107,7 @@ export class Tunnel {
     this.ws = ws;
 
     ws.on('open', () => {
+      this.lastError = '';
       this.backoff = this.options.minBackoffMs ?? 1000;
       this.lastPong = Date.now();
       this.setStatus('connected');
@@ -128,7 +130,8 @@ export class Tunnel {
       if (!this.stopped) this.schedule(`closed (${code})`);
     });
     ws.on('error', err => {
-      log.warn('tunnel', `error: ${err.message}`);
+      // The same failure every retry (DNS not there yet, relay down) is logged once, not per attempt.
+      if (err.message !== this.lastError) { log.warn('tunnel', `error: ${err.message}`); this.lastError = err.message; }
       ws.close();
     });
   }

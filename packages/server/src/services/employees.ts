@@ -300,6 +300,8 @@ function waitForHandoff(wp: Workplace, session: Session, waitMs: number): Promis
 export function close(wp: Workplace, agentId: string, reason: string): void {
   const session = sessions.get(agentId);
   if (!session) return;
+  // An orderly shutdown loses a pending decision as surely as a crash does: report it the same way.
+  if (reason === 'shutdown') reportInterrupted(wp, session, runs.getRunAgent(agentId)?.approval ?? null, 'shut down');
   runs.note(agentId, 'Session', `Closed by the Workplace: ${reason}.`);
   runs.closeRun(agentId);
   session.unsubscribe?.();
@@ -333,6 +335,30 @@ export function unpauseAll(wp: Workplace): void {
 /** Close every open session (shutdown, tests). */
 export function closeAll(wp: Workplace, reason = 'shutdown'): void {
   for (const s of allSessions()) close(wp, s.agentId, reason);
+}
+
+/**
+ * A session that ended without finishing its work: block the assignment with the reason, and ask
+ * the owner when it was waiting for a decision. Used by shutdown and by recovery after a crash.
+ */
+function reportInterrupted(wp: Workplace, s: { agentId: string; employeeId: string; assignmentId?: string }, pending: { tool: string; input: string } | null, how: string): void {
+  const name = wp.org.employees.find(e => e.id === s.employeeId)?.name ?? s.employeeId;
+  if (s.assignmentId) {
+    try {
+      const item = work.get(wp, s.assignmentId);
+      if (item && item.state === 'building') work.transition(wp, item.id, { to: 'blocked', by: 'workplace', note: `session ${s.agentId} was ${how} by the Workplace${pending ? ` while waiting for approval of ${pending.tool}` : ''}; start it again to continue from the branch and the handoff` });
+    } catch (err) { log.warn('employees', String(err)); }
+  }
+  if (pending) {
+    inbox.raise(wp, {
+      kind: 'question',
+      title: `${name} lost a pending approval (${how}): ${pending.tool}`,
+      body: `The Workplace ${how} while ${name} was waiting for approval of ${pending.tool}: ${pending.input.slice(0, 300)}\n\nAnswer with what ${name} should do next, or start the assignment again.`,
+      raisedBy: s.employeeId,
+      context: { lostSession: s.agentId, assignmentId: s.assignmentId ?? null, pending },
+      dedupeKey: `lost:${s.agentId}`,
+    });
+  }
 }
 
 /* ---------- recovery after a restart ---------- */

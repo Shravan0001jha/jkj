@@ -234,3 +234,28 @@ test('a restart reports every open session and re-raises a pending approval as a
     tmp.cleanup();
   }
 });
+
+test('an orderly shutdown with a pending approval files the same question and blocks the build', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+    const a = work.create(wp, { kind: 'assignment', title: 'Doze', body: 'x', charterId: 'character' });
+    work.attachPlan(wp, a.id, 'p', 'dev');
+    employees.assign(wp, a.id);
+    await tick();
+    void fake.last().events.onPermission({ tool: 'Bash', input: { command: 'npm test' }, title: 't', suggestions: [] });
+    await tick();
+    const inbox = await import('../src/services/inbox.js');
+    const before = inbox.list(wp, 'open').length;
+    employees.closeAll(wp, 'shutdown');
+    const items = inbox.list(wp, 'open');
+    assert.equal(items.length, before + 1);
+    assert.match(items[0]!.title, /Dev lost a pending approval \(shut down\): Bash/);
+    assert.equal(work.get(wp, a.id)!.state, 'blocked');
+    assert.equal(employees.allSessions().length, 0);
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});
