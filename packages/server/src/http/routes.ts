@@ -48,9 +48,11 @@ export interface RouterDeps {
   auth: Auth;
   telegram?: Telegram;
   tunnel?: Tunnel | null;
+  /** Boots, uptime, the tunnel's stats and the watchdog's state for /api/health (docs/RESILIENCE-workplace.md §5). */
+  resilience?: () => unknown;
 }
 
-export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps) {
+export function createRouter({ config, wp, auth, telegram, tunnel, resilience }: RouterDeps) {
   const startedAt = Date.now();
   const r = (method: string, pattern: string, handler: Handler): Route => ({
     method,
@@ -66,6 +68,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
         uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
         claudeHome: home.present ? home.configDir : null,
         workplace: { dataDir: config.workplaceDir, capInr: spend.capFor(wp), day: spend.dayOf(), telegram: config.telegram, published: tunnel ? tunnel.status : 'not-configured' },
+        ...(resilience ? { resilience: resilience() } : {}),
       });
     }),
 
