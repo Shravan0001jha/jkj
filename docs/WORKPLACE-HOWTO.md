@@ -31,6 +31,14 @@ organisation exits with the running pid; a start on a taken port exits; a stop t
 after 20 s. If a start says "already running" and nothing is, the pid in the file is dead and the
 next start takes over.
 
+## Where things stand (end of 28 Sep, 01:00 IST)
+
+Live: the D16/D17 build started 00:46 (pid in `workplace.lock`), tunnel connected, relay `mac: online`.
+Not yet live: the 202 release-run route and the off-switch fix (committed, restart pending); the web
+UI for `summary`/`details`/`headline` (not built). The phone end-to-end test
+(`test/phone-e2e.test.ts`, real relay + real tunnel + bearer session) is written but opt-in
+(`WORKPLACE_PHONE_E2E=1`): its first run hung before the first assertion and is not diagnosed.
+
 ## Who talks to the owner
 
 The Workplace sends only its own automatic pings: Inbox items, enrolment and sign-in codes, new-device and

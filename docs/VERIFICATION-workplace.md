@@ -135,6 +135,22 @@ Telegram cursor is shared and consistent with the file size; no item was ever an
 Telegram). The batch's `stop()` already calls `closeAllConnections()`; the lock, the listen
 error and the 20 s exit deadline (HLD D17) make the failure impossible to repeat silently.
 
+## The phone through the relay (item 3, 28 Sep, in progress)
+
+Code review of every phone path (relay `proxy` + `/ws`, tunnel `proxyHttp`/`openLocal`, routes):
+answering the Inbox, talk (also to a paused employee), Team Room posts and approvals all reach the
+same routes as the web, with `via: 'phone'` from the app's User-Agent. Two things only worked on
+loopback or the web and are fixed in code (not yet on the live server): **`POST
+/api/releases/:id/run` awaited the whole script** (minutes) while the relay drops a request after
+180 s, so the phone would see a failure while the release ran on; it now answers 202 with the
+`running` row and `done` arrives as `release.updated` (api.test updated). **`POST /api/relay/off`
+accepted a relay-forwarded request** because it arrives on loopback; it now refuses `x-via-tunnel`
+like pairing. Live verification through work.irisforu.com needs a bearer session, which only the
+owner's passkey login mints; SSH to the relay host timed out from tonight's network (the security
+group allows port 22 from an earlier address), so the check was written as `phone-e2e.test.ts`
+against a locally booted relay and the real tunnel. Its first run hung before the first assertion;
+it is opt-in until diagnosed. Not verified live: anything on the phone.
+
 ## Spend
 
 Own verification spend on the owner's subscription (equivalent API cost): about ₹300 across the live checks above,

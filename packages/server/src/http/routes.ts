@@ -21,6 +21,7 @@ import * as digest from '../services/digest.js';
 import type { Telegram } from '../services/telegram.js';
 import type { Tunnel } from '../services/tunnel.js';
 import { isLoopback } from './auth.js';
+import { log } from '../util/logger.js';
 import { route as routeThings } from '../services/ownership.js';
 import { coverage } from '../services/requirements.js';
 import { commitOrg, parseCharter, renderCharter, writeCharter } from '../services/org.js';
@@ -276,11 +277,13 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
       const shippable = str(body['shippable']) as Shippable;
       json(res, 201, releases.propose(wp, shippable, str(body['version']), typeof body['by'] === 'string' ? body['by'] : 'owner'));
     }),
-    r('POST', '/api/releases/:id/run', async (_req, res, _url, [id]) => json(res, 200, await releases.run(wp, dec(id)))),
+    // 202: the script runs on; a release takes minutes and the relay's request timeout would drop a 200.
+    r('POST', '/api/releases/:id/run', async (_req, res, _url, [id]) => { const { release, done } = releases.start(wp, dec(id)); done.catch(err => log.warn('releases', String(err))); json(res, 202, release); }),
 
     /* ---------- published access: the emergency off switch ---------- */
     r('POST', '/api/relay/off', (req, res) => {
-      if (!isLoopback(req.socket.remoteAddress)) throw new BadRequest('The off switch is pressed from this Mac (or Telegram: "off").');
+      // A relay request arrives on loopback too (the tunnel forwards it); the header the tunnel sets keeps the phone out (as for pairing).
+      if (!isLoopback(req.socket.remoteAddress) || req.headers['x-via-tunnel']) throw new BadRequest('The off switch is pressed from this Mac (or Telegram: "off").');
       if (!tunnel) return json(res, 200, { published: 'not-configured' });
       tunnel.off();
       json(res, 200, { published: tunnel.status });
