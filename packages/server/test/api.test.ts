@@ -49,6 +49,7 @@ test('the Office answers with the seed organisation, coverage, the open decision
     assert.equal(body.coverage.total, 206);
     assert.equal(body.coverage.owned, 206);
     assert.equal(body.needsYou, 8, 'the eight open product decisions are in the Inbox on first boot');
+    assert.equal(body.coverage.planned, 4, 'the seeded feature plans four cross-device requirements');
     assert.equal(body.spend.capInr, 1000);
     assert.equal(body.lintErrors, 0);
     const health = await call<{ workplace: { capInr: number } }>(b.base, 'GET', '/api/health');
@@ -93,8 +94,9 @@ test('a stated feature is specced, decomposed by the map, and every assignee get
       assert.equal('ANTHROPIC_API_KEY' in s.options.env!, false);
       assert.equal(s.options.env!['CLAUDE_CODE_OAUTH_TOKEN'], 'sk-ant-oat-test');
     }
-    const mobile = b.fake.sessions.find(s => s.options.cwd === '/Users/shravan0001jha/claude-dev-mobile');
-    assert.ok(mobile, 'Tara works in the mobile worktree');
+    const mobile = b.fake.sessions.find(s => s.options.cwd.includes('/tara/'));
+    assert.ok(mobile, 'Tara works in her own worktree');
+    assert.ok(b.fake.sessions.every(s => !s.options.cwd.startsWith('/Users/shravan0001jha/claude-dev')), 'never a main checkout');
 
     const after = await call<{ assignments: WorkItem[] }>(b.base, 'GET', `/api/features/${feature.body.id}`);
     assert.ok(after.body.assignments.every(a => a.state === 'planned' && a.plan?.startsWith('1. Read')));
@@ -104,8 +106,13 @@ test('a stated feature is specced, decomposed by the map, and every assignee get
     assert.ok(events.includes('work.updated') && events.includes('office.updated') && events.includes('agent.log'));
 
     const pivot = await call<{ rows: string[]; cells: Record<string, Record<string, { total: number }>> }>(b.base, 'GET', '/api/features/pivot?rows=platform');
-    assert.deepEqual(pivot.body.rows, ['android', 'ios', 'mac']);
-    assert.equal(pivot.body.cells['ios']![feature.body.id]!.total, 5);
+    // The seeded phone→Mac feature adds its own rows; ours is the second column.
+    assert.deepEqual(pivot.body.rows, ['android', 'ios', 'mac', 'server']);
+    // ios: mobile, experts, conversation (server's piece is for 'server' only; desktop-mac's for 'mac').
+    assert.equal(pivot.body.cells['ios']![feature.body.id]!.total, 3);
+    assert.equal(pivot.body.cells['mac']![feature.body.id]!.total, 3);
+    assert.equal(pivot.body.cells['server']![feature.body.id]!.total, 1, 'the server piece is for the server platform even though the feature did not name it');
+    assert.equal(Object.keys(pivot.body.cells['ios']!).length, 2, 'the seeded feature and ours');
     ws.close();
   } finally {
     delete process.env['ANTHROPIC_API_KEY'];
@@ -133,7 +140,7 @@ test('a release waits in the Inbox, runs only after approval, and streams its lo
     assert.equal(answered.body.state, 'answered');
     const ran = await call<Release>(b.base, 'POST', `/api/releases/${rel.body.id}/run`);
     assert.equal(ran.body.state, 'done');
-    assert.deepEqual(spawned, ['/Users/shravan0001jha/claude-dev/scripts/release-iris.sh']);
+    assert.ok(spawned[0]!.endsWith('/scripts/release-iris.sh') && spawned.length === 1);
     await tick();
     assert.deepEqual(logs, ['line one']);
     ws.close();
@@ -170,8 +177,14 @@ test('talk, context, charter edit and org history over HTTP', async () => {
 
     const missing = await call<{ error: string }>(b.base, 'GET', '/api/charters/nope');
     assert.equal(missing.status, 404);
+    // The handoff prompt is answered like a real session: a turn that ends.
+    b.fake.onSend = (s, text) => { if (text.includes('write_handoff')) { s.say('Status and handoff written.'); s.result(); } };
+    const started = Date.now();
     const ended = await call<{ ok: boolean }>(b.base, 'POST', '/api/employees/asha/end-session');
     assert.equal(ended.status, 200);
+    assert.ok(Date.now() - started < 5000, 'end-session returns as soon as the handoff turn is done');
+    const after = await call<EmployeeDetail>(b.base, 'GET', '/api/employees/asha');
+    assert.equal(after.body.sessions.length, 0);
   } finally {
     await b.stop();
   }

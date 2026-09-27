@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { InboxItem } from '@jkj/shared';
-import { answerInbox } from '../../state/store.js';
+import { answerInbox, hrefFor } from '../../state/store.js';
 import { ago } from '../../lib/format.js';
 import { Markdown } from '../../components/Markdown.js';
 import { Pill } from '../../components/Pill.js';
@@ -44,6 +44,21 @@ export function InboxCard({ item, compact = false }: { item: InboxItem; compact?
 
       {typeof item.context['diff'] === 'string' && item.context['diff'] && (
         <details className="diff"><summary>Diff</summary><pre>{String(item.context['diff'])}</pre></details>
+      )}
+
+      {(item.affects.length > 0 || (item.links?.length ?? 0) > 0) && (
+        <div className="affects">
+          {item.affects.length > 0 && <span className="muted">concerns</span>}
+          {item.affects.map(id => <a key={id} className="chip" href={hrefFor('employee', id)}>{id}</a>)}
+          {item.links?.map(l => <a key={l.href} className="chip link" href={l.href}>{l.label} →</a>)}
+        </div>
+      )}
+
+      {open && (item.onApprove || item.onDeny) && (
+        <dl className="effects">
+          {item.onApprove && <div><dt>{item.options[0]?.label ?? 'Yes'}</dt><dd>{item.onApprove}</dd></div>}
+          {item.onDeny && <div><dt>{item.options.find(o => o.danger)?.label ?? 'No'}</dt><dd>{item.onDeny}</dd></div>}
+        </dl>
       )}
 
       {open ? (

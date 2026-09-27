@@ -6,6 +6,7 @@ import { GrowTextarea } from '../../components/GrowTextarea.js';
 import { AgentChat } from '../agents/AgentChat.js';
 import { AssignmentRow } from '../features/FeatureDetail.js';
 import { EmployeeContext } from './EmployeeContext.js';
+import { InboxCard } from '../inbox/InboxCard.js';
 
 /**
  * One employee: who they are, what they hold, what they are on, and the
@@ -35,6 +36,7 @@ export function EmployeeView({ id }: { id: string }) {
         <div className="r1">
           <h2>{employee.name}</h2>
           <Pill tone={stateTone(employee.state)}>{stateLabel(employee.state)}</Pill>
+          {employee.stateReason && <span className="reason">{employee.stateReason}</span>}
           <span className="muted">{employee.roleId} · {employee.unitId}{employee.level === 2 ? ' · contractor' : ''}{employee.reportsTo ? ` · reports to ${employee.reportsTo}` : ' · reports to the owner'}</span>
         </div>
         <div className="chips" style={{ marginTop: 6 }}>
@@ -42,7 +44,7 @@ export function EmployeeView({ id }: { id: string }) {
           {employee.githubApp && <span className="chip" title="GitHub App identity; the credential is never shown">{employee.githubApp}[bot]</span>}
         </div>
         <dl className="kv">
-          <div><dt>Today</dt><dd>{inr(detail.spendTodayInr)} of {inr(employee.budget.inrPerDay)}</dd></div>
+          <div><dt>Real money today</dt><dd>{inr(detail.spendTodayInr)} of {inr(employee.budget.inrPerDay)}</dd></div>
           <div><dt>Done 7d</dt><dd>{signals.throughput7d}</dd></div>
           <div><dt>Rework</dt><dd>{signals.rework7d}</dd></div>
           <div><dt>False done</dt><dd>{Math.round(signals.falseDoneRate7d * 100)}%</dd></div>
@@ -50,6 +52,15 @@ export function EmployeeView({ id }: { id: string }) {
           <div><dt>Workspace</dt><dd title={employee.workspace.repo}>{employee.workspace.branch ?? employee.workspace.repo}</dd></div>
         </dl>
       </div>
+
+      {detail.needsYou.length > 0 && (
+        <section className="needsyou">
+          <h3 className="group">Needs you · {detail.needsYou.length}</h3>
+          <div className="stack">
+            {detail.needsYou.map(item => <InboxCard key={item.id} item={item} />)}
+          </div>
+        </section>
+      )}
 
       <div className="dactions">
         <div className="seg small">

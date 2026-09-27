@@ -27,6 +27,12 @@ export interface Config {
   telegram: boolean;
   /** Copy the seed into an empty workplace directory. */
   seed: boolean;
+  /** Where employees' git worktrees live: <workDir>/<employee>/<repo>. Never a main checkout. */
+  workDir: string;
+  /** An assignment in progress with no session activity for this long is stalled. */
+  stallMinutes: number;
+  /** Poll AWS Cost Explorer once a day for the previous day's actual (about ₹1 per call). */
+  awsCost: boolean;
 }
 
 export function loadConfig(argv: string[] = process.argv.slice(2), env = process.env): Config {
@@ -54,5 +60,8 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
     digestHour: num(env['WORKPLACE_DIGEST_HOUR'], 9),
     telegram: !argv.includes('--no-telegram') && env['WORKPLACE_TELEGRAM'] !== '0',
     seed: !argv.includes('--no-seed'),
+    workDir: env['IRIS_WORK_DIR'] ?? join(homedir(), 'iris-work'),
+    stallMinutes: num(env['WORKPLACE_STALL_MINUTES'], 30),
+    awsCost: env['WORKPLACE_AWS_COST'] !== '0' && !argv.includes('--no-telegram'),
   };
 }

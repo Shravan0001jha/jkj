@@ -40,6 +40,27 @@ export function detectStalls(nowMs = Date.now()): StallCheck[] {
 }
 
 const stalledOnce = new Set<string>();
+const parkedOnce = new Set<string>();
+export const PARKED_MS = 2 * 60 * 1000;
+
+/**
+ * A tool call parked on a permission prompt is "needs you", and if nobody is
+ * looking at the page the owner must hear about it: one alert per prompt.
+ */
+export function handleParkedApprovals(wp: Workplace, nowMs = Date.now()): string[] {
+  const alerted: string[] = [];
+  for (const s of employees.allSessions()) {
+    const agent = runs.getRunAgent(s.agentId);
+    const approval = agent?.approval;
+    if (!approval || nowMs - new Date(approval.requestedAt).getTime() < PARKED_MS) continue;
+    if (parkedOnce.has(approval.id)) continue;
+    parkedOnce.add(approval.id);
+    const emp = wp.org.employees.find(e => e.id === s.employeeId);
+    wp.emit({ type: 'alert', level: 'needs-you', title: `${emp?.name ?? s.employeeId} is waiting for a tool approval`, body: `${approval.tool}: ${approval.input.slice(0, 120)} — open the employee page to allow or deny.` });
+    alerted.push(approval.id);
+  }
+  return alerted;
+}
 
 /** Interrupt each stalled session once, mark the employee blocked, and ask the owner. */
 export async function handleStalls(wp: Workplace, nowMs = Date.now()): Promise<StallCheck[]> {

@@ -95,6 +95,8 @@ export interface Employee {
   /** The GitHub App slug that gives this employee its identity. Never a credential. */
   githubApp?: string;
   state: EmployeeState;
+  /** Why the state is blocked or needs-owner, e.g. "spend cap reached (employee:mira)". */
+  stateReason?: string;
 }
 
 export interface Unit {
@@ -224,6 +226,12 @@ export interface WorkItem {
   /** Who verified a `done`. */
   verifiedBy?: string;
   sessionId?: string;
+  /**
+   * Derived, never stored: set when an assignment in progress has had no session activity for
+   * longer than the stall threshold (WORKPLACE_STALL_MINUTES, default 30). The Chief of Staff's
+   * routine resumes it within budget or raises an Inbox note saying why it waits.
+   */
+  stalledSince?: string;
   createdAt: string;
   updatedAt: string;
   history: WorkHistoryEntry[];
@@ -245,7 +253,8 @@ export interface InboxAnswer {
   optionId: string;
   note?: string;
   at: string;
-  via: 'web' | 'phone' | 'telegram';
+  /** 'workplace': resolved by the Workplace itself (a migration, a superseded item), with a note. */
+  via: 'web' | 'phone' | 'telegram' | 'workplace';
 }
 
 export interface InboxItem {
@@ -260,6 +269,12 @@ export interface InboxItem {
   answer?: InboxAnswer;
   raisedBy: string;
   createdAt: string;
+  /** Employee ids the item concerns: the raiser, the assignee, the charter holders, the Chief of Staff. It shows on each of their pages. */
+  affects: string[];
+  /** One line each: what happens on the first option and on a refusal. */
+  onApprove?: string;
+  onDeny?: string;
+  links?: { label: string; href: string }[];
 }
 
 /* ---------- org changes ---------- */
@@ -299,28 +314,68 @@ export interface OrgHistoryEntry {
 
 /* ---------- spend and health ---------- */
 
+/**
+ * Real money spent by the organisation's work (HLD D9b). Subscription usage is not money and lives
+ * in `SubscriptionUsage`; rows with source 'subscription' are the pre-28-Sep ledger, kept for
+ * history and excluded from every cap.
+ */
+export type SpendSource = 'anthropic-api' | 'aws' | 'third-party' | 'subscription';
+export type SpendBasis = 'metered' | 'estimated' | 'reported';
+
 export interface SpendEntry {
   at: string;
   employeeId: string;
   sessionId: string;
-  model: string;
+  source: SpendSource;
+  basis: SpendBasis;
+  /** What was paid for: "release-iris.sh 0.2.16", "llm-gateway test run", "AWS actual (unattributed)". */
+  what: string;
+  inr: number;
+  /** The provider's own figure when it gave one (usd, tokens, units). */
+  detail?: Record<string, number | string>;
+  /** 'owner-talk': a turn the owner started (free under D9b, kept for the record). */
+  tag?: 'owner-talk';
+}
+
+/** The subscription's own limits as the Agent SDK reports them, per window. */
+export interface RateLimitWindow {
+  window: 'five_hour' | 'seven_day' | 'seven_day_opus' | 'seven_day_sonnet' | 'seven_day_overage_included' | 'overage' | 'unknown';
+  status: 'allowed' | 'allowed_warning' | 'rejected';
+  /** 0..1 when the SDK gives it. */
+  utilization?: number;
+  resetsAt?: string;
+  seenAt: string;
+}
+
+export interface SubscriptionUsage {
+  turns: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
-  usd: number;
-  inr: number;
+  /** List price × tokens, for information only. Never against a cap. */
+  equivalentInr: number;
+  byEmployee: Record<string, { turns: number; equivalentInr: number }>;
+  windows: RateLimitWindow[];
 }
 
 export interface SpendSummary {
   /** IST calendar day, YYYY-MM-DD. */
   day: string;
+  /** Real money today, ₹. */
   companyInr: number;
   capInr: number;
+  /** Real money by source and by basis, so an estimate is never mistaken for a bill. */
+  bySource: Record<string, number>;
+  byBasis: Record<string, number>;
   byEmployee: Record<string, number>;
   byUnit: Record<string, number>;
-  /** Scopes paused at their cap: 'company', 'unit:<id>', 'employee:<id>'. */
+  /** Scopes paused at their cap: 'company', 'unit:<id>', 'employee:<id>'. Real money only. */
   paused: string[];
+  /** Free: the subscription's usage today. */
+  subscription: SubscriptionUsage;
+  /** Kept from the earlier model: the part of the subscription usage that was owner talk, ₹ equivalent. */
+  ownerTalkInr: number;
 }
 
 export interface EmployeeSignals {
@@ -367,4 +422,36 @@ export interface EmployeeCard {
   spendTodayInr: number;
   /** Open inbox items raised by this employee. */
   needsYou: number;
+}
+
+/* ---------- the Team Room ---------- */
+
+export interface RoomThread {
+  id: string;
+  title: string;
+  /** Charters the topic touches. */
+  charterIds: string[];
+  createdBy: string;
+  createdAt: string;
+  state: 'open' | 'resolved';
+  /** Asha's summary when resolved; written into the relevant charter or contract. */
+  summary?: string;
+  lastAt: string;
+  messageCount: number;
+  /** Employees mentioned or posting in the thread. */
+  participants: string[];
+  /** Inbox items escalated from this thread. */
+  escalations: string[];
+}
+
+export interface RoomMessage {
+  id: string;
+  threadId: string;
+  at: string;
+  /** An employee id, 'owner' or 'workplace'. */
+  by: string;
+  /** True when the owner wrote it. */
+  owner: boolean;
+  text: string;
+  mentions: string[];
 }

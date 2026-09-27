@@ -5,7 +5,8 @@ import type {
   FeatureDetail, Pivot, PivotRows, Requirement, Coverage, RouteResult, OrgProposal, Release,
   SpendSummary, HealthSignals, WorkplaceHealthResponse, DecomposeResponse, WorkQuery,
   CreateWorkRequest, CreateFeatureRequest, CreateProposalRequest, CreateReleaseRequest,
-  TransitionRequest,
+  TransitionRequest, RoomResponse, RoomThreadDetail, RoomThread, RoomMessage, CreateThreadRequest, PostMessageRequest,
+  ResolveThreadRequest,
 } from '@jkj/shared';
 
 /**
@@ -13,10 +14,21 @@ import type {
  * change that breaks the UI breaks the build instead of the page.
  */
 
+/**
+ * Behind the published relay (https://work.irisforu.com) every mutating request must carry the
+ * CSRF token the relay set in the readable `wp_csrf` cookie. On the Mac (loopback) there is no
+ * cookie and the header is simply absent.
+ */
+function csrfHeader(): Record<string, string> {
+  const m = /(?:^|;\s*)wp_csrf=([^;]+)/.exec(document.cookie);
+  return m ? { 'x-csrf-token': decodeURIComponent(m[1]!) } : {};
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? 'GET').toUpperCase();
   const res = await fetch(path, {
     ...init,
-    headers: { 'content-type': 'application/json', ...init?.headers },
+    headers: { 'content-type': 'application/json', ...(method !== 'GET' ? csrfHeader() : {}), ...init?.headers },
   });
   if (!res.ok) {
     let detail = '';
@@ -78,6 +90,14 @@ export const createProposal = (body: CreateProposalRequest) => post<OrgProposal>
 export const getReleases = () => request<Release[]>(W.releases);
 export const createRelease = (body: CreateReleaseRequest) => post<Release>(W.releases, body);
 export const runRelease = (id: string) => post<Release>(W.releaseRun(id));
+
+/* ---------- the Team Room ---------- */
+
+export const getRoom = () => request<RoomResponse>(W.room);
+export const getThread = (id: string) => request<RoomThreadDetail>(W.roomThread(id));
+export const createThread = (body: CreateThreadRequest) => post<RoomThreadDetail>(W.room, body);
+export const postRoomMessage = (id: string, body: PostMessageRequest) => post<RoomMessage>(W.roomMessages(id), body);
+export const resolveThread = (id: string, body: ResolveThreadRequest) => post<RoomThread>(W.roomResolve(id), body);
 
 export const getSpend = (day?: string) => request<SpendSummary>(W.spend(day));
 export const getSignals = () => request<HealthSignals>(W.signals);

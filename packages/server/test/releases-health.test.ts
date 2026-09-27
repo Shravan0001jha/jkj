@@ -4,6 +4,7 @@ import * as releases from '../src/services/releases.js';
 import * as inbox from '../src/services/inbox.js';
 import * as work from '../src/services/work.js';
 import * as employees from '../src/services/employees.js';
+import * as runs from '../src/services/runs.js';
 import * as health from '../src/services/health.js';
 import type { WorkplaceEvent } from '../src/services/workplace.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
@@ -34,7 +35,8 @@ test('a release runs the real script only after the owner approves it, and never
     assert.equal(releases.get(wp, rel.id)!.state, 'approved');
     const ran = await releases.run(wp, rel.id);
     assert.equal(ran.state, 'done');
-    assert.deepEqual(spawned, [{ command: '/Users/shravan0001jha/claude-dev/scripts/release-iris.sh', args: ['0.2.16'], cwd: '/Users/shravan0001jha/claude-dev' }]);
+    const iris = wp.org.repos.find(r => r.id === 'iris')!.root;
+    assert.deepEqual(spawned, [{ command: `${iris}/scripts/release-iris.sh`, args: ['0.2.16'], cwd: iris }]);
     assert.ok(events.some(e => e.type === 'release.log' && e.line === '▶ releasing Iris 0.2.16'));
     assert.match(ran.log!, /releasing Iris 0.2.16/);
     await assert.rejects(releases.run(wp, rel.id), /already ran/);
@@ -61,7 +63,8 @@ test('a server deploy runs from the deploy worktree and is refused when rejected
     inbox.answer(wp, again.inboxId, 'approve', undefined, 'web');
     const ran = await releases.run(wp, again.id);
     assert.equal(ran.state, 'failed');
-    assert.deepEqual(spawned, ['/Users/shravan0001jha/claude-dev-deploy /Users/shravan0001jha/claude-dev-deploy/scripts/deploy-api.sh']);
+    const deploy = wp.org.repos.find(r => r.id === 'iris-deploy')!.root;
+    assert.deepEqual(spawned, [`${deploy} ${deploy}/scripts/deploy-api.sh`]);
   } finally {
     releases.useSpawner(null);
     tmp.cleanup();
@@ -85,6 +88,33 @@ test('a session idle for ten minutes is stalled once: interrupted, blocked, one 
     await health.handleStalls(wp, started + 12 * 60 * 1000);
     assert.equal(inbox.list(wp).filter(i => i.kind === 'question').length, 1);
     assert.equal(fake.last().interrupted, 1);
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});
+
+test('a tool call parked for two minutes raises one needs-you alert', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    const agent = employees.talk(wp, 'asha', 'go');
+    await tick();
+    const alerts: string[] = [];
+    wp.on(e => { if (e.type === 'alert') alerts.push(e.title); });
+    const decided: string[] = [];
+    void fake.last().events.onPermission({ tool: 'Bash', input: { command: 'rm -rf build' }, title: 'Run a command', suggestions: [] }).then(d => decided.push(d));
+    await tick();
+    const now = Date.now();
+    assert.deepEqual(health.handleParkedApprovals(wp, now + 60_000), []);
+    const first = health.handleParkedApprovals(wp, now + 3 * 60_000);
+    assert.equal(first.length, 1);
+    assert.deepEqual(health.handleParkedApprovals(wp, now + 4 * 60_000), [], 'once per prompt');
+    assert.ok(alerts.some(t => t.startsWith('Asha is waiting for a tool approval')));
+    assert.equal(employees.stateOf(wp, 'asha'), 'needs-owner');
+    runs.resolveApproval(agent.id, 'deny');
+    await tick();
+    assert.deepEqual(decided, ['deny']);
   } finally {
     fake.restore();
     tmp.cleanup();

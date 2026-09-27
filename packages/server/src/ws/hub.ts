@@ -18,7 +18,12 @@ import { log } from '../util/logger.js';
 
 type Command = ClientCommand | WorkplaceClientCommand;
 
-export function attachSocket(server: Server, wp: Workplace, auth: Auth): void {
+export interface SocketHub {
+  /** Terminate every client; a server.close() otherwise waits for them forever. */
+  close(): void;
+}
+
+export function attachSocket(server: Server, wp: Workplace, auth: Auth): SocketHub {
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Set<WebSocket>();
 
@@ -70,6 +75,14 @@ export function attachSocket(server: Server, wp: Workplace, auth: Auth): void {
       log.info('ws', `client disconnected (${clients.size} open)`);
     });
   });
+
+  return {
+    close: () => {
+      for (const ws of clients) ws.terminate();
+      clients.clear();
+      wss.close();
+    },
+  };
 }
 
 function handleCommand(wp: Workplace, ws: WebSocket, command: Command): void {

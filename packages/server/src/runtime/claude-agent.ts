@@ -1,7 +1,7 @@
 import {
   query,
-  type McpServerConfig, type Options, type PermissionMode as SdkPermissionMode, type PermissionResult,
-  type PermissionUpdate, type Query, type SDKUserMessage, type SettingSource,
+  type HookCallbackMatcher, type HookEvent, type McpServerConfig, type Options, type PermissionMode as SdkPermissionMode,
+  type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage, type SettingSource,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { PermissionMode } from '@jkj/shared';
 
@@ -46,6 +46,8 @@ export interface RunEvents {
   onInit?(init: { mcpServers: string[]; workplaceTools: number; tools: number }): void;
   /** Lines the CLI process writes to stderr; the only place MCP start-up errors appear. */
   onStderr?(line: string): void;
+  /** The subscription's own limit windows, as the CLI reports them. */
+  onRateLimit?(info: { rateLimitType?: string; status: string; utilization?: number; resetsAt?: number }): void;
   /**
    * The end of a turn, with the SDK's cumulative accounting for the whole
    * query: per-model tokens and estimated cost. Cumulative, so callers diff.
@@ -114,6 +116,8 @@ export interface RunOptions {
   maxTurns?: number;
   /** In-process MCP servers: the Workplace's own tools for the employee. */
   mcpServers?: Record<string, McpServerConfig>;
+  /** Hooks run inside the CLI before/after tools: the Workplace's guards. */
+  hooks?: Partial<Record<HookEvent, HookCallbackMatcher[]>>;
 }
 
 export function startRun(options: RunOptions, events: RunEvents): RunHandle {
@@ -141,6 +145,7 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
     ...(options.maxBudgetUsd !== undefined ? { maxBudgetUsd: options.maxBudgetUsd } : {}),
     ...(options.maxTurns !== undefined ? { maxTurns: options.maxTurns } : {}),
     ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
+    ...(options.hooks ? { hooks: options.hooks } : {}),
     stderr: (data: string) => { for (const line of data.split('\n')) if (line.trim()) events.onStderr?.(line); },
 
     // Every tool call routes through the browser unless the mode auto-allows.
@@ -238,6 +243,12 @@ async function consume(stream: Query, events: RunEvents): Promise<void> {
             }])),
           });
           events.onDone(String(message.subtype));
+          break;
+        }
+
+        case 'rate_limit_event': {
+          const info = (message as { rate_limit_info?: { status: string; rateLimitType?: string; utilization?: number; resetsAt?: number } }).rate_limit_info;
+          if (info) events.onRateLimit?.(info);
           break;
         }
 

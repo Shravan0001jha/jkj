@@ -9,6 +9,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const connection = useStore(s => s.connection);
   const needsYou = useStore(needsYouCount);
   const spend = useStore(s => s.spend ?? s.office?.spend ?? null);
+  const published = useStore(s => s.health?.workplace?.published ?? 'not-configured');
 
   return (
     <div className="app">
@@ -26,6 +27,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
 
         <div className="spacer" />
+        {published !== 'not-configured' && (
+          <span className={`published ${published}`} title="The outbound tunnel to work.irisforu.com">
+            {published === 'connected' ? 'published' : published === 'off' ? 'published: OFF' : `published: ${published}`}
+          </span>
+        )}
         <button className="btn ghost sm" onClick={toggleTheme}>Theme</button>
       </header>
 

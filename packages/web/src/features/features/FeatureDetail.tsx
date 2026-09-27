@@ -81,6 +81,7 @@ export function AssignmentRow({ item }: { item: WorkItem }) {
     <div className="assignrow">
       <div className="ar1">
         <Pill tone={workTone(item.state)}>{item.state}</Pill>
+        {item.stalledSince && <Pill tone="waiting">stalled {ago(item.stalledSince)}</Pill>}
         <span className="rowtitle">{item.title}</span>
         {item.employeeId && <a className="chip" href={hrefFor('employee', item.employeeId)}>{item.employeeId}</a>}
         {item.charterId && <span className="chip">{item.charterId}</span>}

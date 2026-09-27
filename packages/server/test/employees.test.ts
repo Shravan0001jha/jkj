@@ -28,9 +28,10 @@ test('a session gets the layered context, the subscription token, and no API key
     await tick();
     const s = fake.last();
     assert.equal(agent.employeeId, 'mira');
-    assert.equal(s.options.cwd, '/Users/shravan0001jha/claude-dev');
+    assert.ok(s.options.cwd.includes('/mira/') && !s.options.cwd.startsWith('/Users/shravan0001jha/claude-dev'), `own worktree: ${s.options.cwd}`);
     assert.equal(s.options.model, 'sonnet');
-    assert.equal(s.options.permissionMode, 'acceptEdits');
+    assert.equal(s.options.permissionMode, 'auto');
+    assert.ok(s.options.allowedTools!.includes('mcp__travsr__*') && s.options.allowedTools!.includes('Bash(npm test:*)'), 'reads and tests never prompt');
     assert.ok(s.options.systemPromptAppend!.startsWith('You are Mira'));
     assert.ok(s.options.systemPromptAppend!.includes('## Charter: Experts'));
     assert.ok(s.options.systemPromptAppend!.includes('Next: the info expert card.'));
@@ -55,24 +56,32 @@ test('a session gets the layered context, the subscription token, and no API key
   }
 });
 
-test('usage is recorded as deltas of the cumulative totals, and the cap pauses the employee', async () => {
+test('usage is recorded as free subscription deltas; only real money pauses the employee', async () => {
   const { wp, tmp } = testWorkplace({ WORKPLACE_USD_INR: '100', WORKPLACE_CAP_INR: '100000' });
   const fake = installFakeRuntime();
   spend.onPause((w, scope) => employees.pauseScope(w, scope));
   try {
     withOauth(tmp.dir);
-    employees.talk(wp, 'nikhil', 'hi');   // nikhil: ₹120/day
+    employees.talk(wp, 'nikhil', 'hi', [], { autonomous: true });   // nikhil: ₹120/day of real money
     await tick();
     const s = fake.last();
-    s.result({ costUsd: 0.5 });   // cumulative 0.5 → ₹50
+    s.result({ costUsd: 0.5 });   // cumulative 0.5 → ₹50 equivalent
     s.result({ costUsd: 0.4 });   // cumulative 0.9 → delta ₹40
     const day = spend.dayOf();
-    assert.equal(spend.summary(wp, day).byEmployee['nikhil'], 90);
-    s.result({ costUsd: 0.4 });   // cumulative 1.3 → ₹130 ≥ 120: paused
-    assert.equal(spend.summary(wp, day).byEmployee['nikhil'], 130);
-    assert.equal(employees.stateOf(wp, 'nikhil'), 'paused');
+    assert.equal(spend.summary(wp, day).subscription.byEmployee['nikhil']!.equivalentInr, 90, 'deltas, not the running total');
+    assert.equal(spend.summary(wp, day).subscription.byEmployee['nikhil']!.turns, 2);
+    s.result({ costUsd: 0.4 });   // ₹130 equivalent: far past ₹120, and nothing happens
+    assert.equal(spend.canSpend(wp, 'nikhil', day).ok, true, 'subscription usage never pauses');
+    assert.equal(s.interrupted, 0);
+
+    // Real money does.
+    spend.record(wp, { employeeId: 'nikhil', source: 'third-party', basis: 'reported', what: 'ElevenLabs test', inr: 130 });
     assert.equal(s.interrupted, 1);
-    assert.throws(() => employees.talk(wp, 'nikhil', 'more'), /paused/);
+    employees.closeAll(wp, 'test');
+    assert.equal(employees.stateOf(wp, 'nikhil'), 'blocked');
+    assert.match(employees.stateWithReason(wp, 'nikhil').reason!, /Paused — daily budget reached \(₹130\/₹120\)\. You can still talk to Nikhil\./);
+    assert.throws(() => employees.talk(wp, 'nikhil', 'more', [], { autonomous: true }), /paused/, 'the Workplace itself stays under the cap');
+    assert.ok(employees.talk(wp, 'nikhil', 'more'), 'the owner can still talk');
   } finally {
     fake.restore();
     tmp.cleanup();
@@ -95,6 +104,25 @@ test('an assignment session captures the first "## Plan" reply and moves the ass
     assert.equal(planned.plan, '1. Read the screen code\n2. Add the composer\n3. Test on the iPhone');
     assert.equal(planned.sessionId, 'fake-1');
     assert.equal(employees.card(wp, 'tara').currentWork?.id, a.id);
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});
+
+test('a planned assignment starts a build session and moves to building', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+    const a = work.create(wp, { kind: 'assignment', title: 'Doze', body: 'Build the doze', charterId: 'character' });
+    work.attachPlan(wp, a.id, '1. add the doze state 2. test', 'dev');
+    const agent = employees.assign(wp, a.id);
+    await tick();
+    assert.equal(work.get(wp, a.id)!.state, 'building');
+    assert.ok(fake.last().options.prompt.startsWith(`Build assignment ${a.id}`));
+    assert.ok(fake.last().options.systemPromptAppend!.includes('### Your plan so far'));
+    assert.ok(agent.assignmentId === a.id);
   } finally {
     fake.restore();
     tmp.cleanup();
@@ -146,6 +174,94 @@ test('concurrent sessions are capped per employee', async () => {
     assert.ok(agent);
     employees.close(wp, agent.id, 'test');
     assert.equal(fake.sessions.length, 1);
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});
+
+test('an interrupt leaves the session idle with nothing pending, not "waiting for you"', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+    const agent = employees.talk(wp, 'mira', 'go');
+    await tick();
+    const decided: string[] = [];
+    void fake.last().events.onPermission({ tool: 'Bash', input: { command: 'x' }, title: 't', suggestions: [] }).then(d => decided.push(d));
+    await tick();
+    assert.equal(runs.getRunAgent(agent.id)!.status, 'waiting');
+    assert.ok(runs.getRunAgent(agent.id)!.approval);
+    await runs.interruptRun(agent.id);
+    const after = runs.getRunAgent(agent.id)!;
+    assert.equal(after.status, 'idle');
+    assert.equal(after.approval, undefined);
+    assert.equal(employees.stateOf(wp, 'mira'), 'working', 'a session is open; nothing needs the owner');
+    assert.throws(() => runs.resolveApproval(agent.id, 'once'), /already been answered/);
+    employees.talk(wp, 'mira', 'carry on');
+    assert.equal(runs.getRunAgent(agent.id)!.status, 'running');
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});
+
+test('a restart reports every open session and re-raises a pending approval as an Inbox question', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+    const a = work.create(wp, { kind: 'assignment', title: 'Doze', body: 'x', charterId: 'character' });
+    work.attachPlan(wp, a.id, 'p', 'dev');
+    const building = employees.assign(wp, a.id);
+    await tick();
+    void fake.last().events.onPermission({ tool: 'mcp__travsr__get_context', input: { query: 'presence' }, title: 't', suggestions: [] });
+    await tick();
+    const row = wp.db.prepare('select sdk_session_id, status, json from sessions where id = ?').get(building.id) as { sdk_session_id: string; status: string; json: string };
+    assert.equal(row.sdk_session_id, fake.last().sessionId);
+    assert.equal(row.status, 'waiting');
+    assert.equal((JSON.parse(row.json) as { pending: { tool: string } }).pending.tool, 'mcp__travsr__get_context');
+
+    // The process dies: the in-memory register is empty, the rows are still open.
+    const inbox = await import('../src/services/inbox.js');
+    const before = inbox.list(wp, 'open').length;
+    const lost = employees.recoverAfterRestart(wp);
+    assert.equal(lost.length, 1);
+    assert.equal(lost[0]!.pending?.tool, 'mcp__travsr__get_context');
+    assert.equal(lost[0]!.sdkSessionId, fake.last().sessionId);
+    const items = inbox.list(wp, 'open');
+    assert.equal(items.length, before + 1);
+    assert.match(items[0]!.title, /Dev lost a pending approval on restart: mcp__travsr__get_context/);
+    assert.equal(items[0]!.context['sdkSessionId'], fake.last().sessionId);
+    assert.equal(work.get(wp, a.id)!.state, 'blocked');
+    assert.match(work.get(wp, a.id)!.history.at(-1)!.note!, /lost when the Workplace restarted while waiting for approval/);
+    assert.deepEqual(employees.recoverAfterRestart(wp), [], 'rows are closed; a second recovery finds nothing');
+    assert.equal((wp.db.prepare('select status from sessions where id = ?').get(building.id) as { status: string }).status, 'lost-on-restart');
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});
+
+test('an orderly shutdown with a pending approval files the same question and blocks the build', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+    const a = work.create(wp, { kind: 'assignment', title: 'Doze', body: 'x', charterId: 'character' });
+    work.attachPlan(wp, a.id, 'p', 'dev');
+    employees.assign(wp, a.id);
+    await tick();
+    void fake.last().events.onPermission({ tool: 'Bash', input: { command: 'npm test' }, title: 't', suggestions: [] });
+    await tick();
+    const inbox = await import('../src/services/inbox.js');
+    const before = inbox.list(wp, 'open').length;
+    employees.closeAll(wp, 'shutdown');
+    const items = inbox.list(wp, 'open');
+    assert.equal(items.length, before + 1);
+    assert.match(items[0]!.title, /Dev lost a pending approval \(shut down\): Bash/);
+    assert.equal(work.get(wp, a.id)!.state, 'blocked');
+    assert.equal(employees.allSessions().length, 0);
   } finally {
     fake.restore();
     tmp.cleanup();

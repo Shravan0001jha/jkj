@@ -65,10 +65,10 @@ An **agent** is one employee's session, run through the Claude Agent SDK, and de
 | Identity | employee id + name + role; for leads, the GitHub App identity `iris-<charter>-lead[bot]` | `org.yaml`, App config |
 | Context | five layers, assembled at spawn (D4) | handbook, unit doc, charter, status/handoff, assignment |
 | Tools | Claude Code's tools; the role template may restrict (`allowedTools`/`disallowedTools`) | `roles.yaml` |
-| Permission mode | from the role, overridable per session in the UI: `acceptEdits` for engineers in their own worktree, `plan` for analysts, `ask` for anything touching another charter | `roles.yaml` |
+| Permission mode | from the role, overridable per session in the UI: `auto` for working roles (a classifier lets ordinary work through and parks only risky calls), `plan` for analysts. Reads, searches, the code graph and the charters' test commands never prompt; a PreToolUse guard denies edits outside the worktree or outside owned paths and denies push/merge/rebase/release/deploy/ssh outright (27 Sep: `acceptEdits` parked a read-only query for five minutes with nobody to answer, against §0) | `roles.yaml`, `guards.ts` |
 | Freedom | branch work in own repo/worktree, run tests, read anything; nothing outward (§0 approvals table) | handbook + approval gates |
 | Budget | ₹/day per employee, ₹/day per team, ₹1000/day company; concurrent sessions per employee | `org.yaml` |
-| Workspace | repo + worktree/branch; hires get a branch in the lead's repo | `org.yaml` employee.workspace |
+| Workspace | its own git worktree `~/iris-work/<employee>/<repo>` on `emp/<employee>/<work-item>` cut from the base branch's tip; never the owner's or the lead's main checkout (lead's rule, 27 Sep, until the repo split); the lead merges | `org.yaml` employee.workspace, `worktrees.ts` |
 | Memory | the files: `status.md`, `handoff.md`; sessions are disposable | data dir |
 
 Leads (level 1) are permanent employees; hires (level 2) are contractors spawned per assignment
@@ -149,6 +149,58 @@ and the company's ₹1000. Reaching a cap **pauses** new spawns and interrupts r
 that scope, and files an Inbox request ("raise the cap for today?"). The number the owner stated is
 a hard contract; there is no soft threshold that quietly lets it through.
 
+### D9b. Budget is real money only (owner, 28 Sep; replaces D9's equivalent-cost model)
+
+**What changed and why.** D9 counted every agent turn at list price against the ₹1000/day cap. The
+agents run on the owner's Claude **subscription**, so that figure was never money: on 27 Sep it
+paused Mira at "₹151" of work that cost nothing, and the cap protected the wrong thing. The cap now
+counts **actual money**, attributed to the work that caused it; subscription usage is tracked for
+visibility only.
+
+- **Subscription usage (free):** turns, tokens, the equivalent list-price figure for information, and
+  the plan's own limit utilisation as the SDK reports it (`rate_limit_event`: five-hour and seven-day
+  windows, status and reset time). Shown as "Subscription usage (free)", never in ₹ against the cap.
+- **Real spend (₹, against the caps):** Anthropic **API** calls (anything on an API key, including
+  Iris's own llm-gateway/cloud usage during an employee's tests), **AWS** (EC2, S3, CloudFront,
+  Route 53, SES) for work employees trigger, and paid third-party APIs (Deepgram, ElevenLabs, OpenAI,
+  web search). Per-employee and unit caps are caps on real spend; a cap pause stops only actions that
+  would spend real money and unattended work that would incur it. Owner talk is free by construction.
+- **Measured honestly, three ways, and labelled:** `metered` where the Workplace itself makes the call
+  or reads a provider usage figure (Iris's llm-gateway reports tokens and cost per request; the
+  employee's session records it through `record_spend`); `estimated` from known actions (a release =
+  one S3 upload + one CloudFront invalidation; a deploy = data transfer; the estimate table is in the
+  LLD); `reported` when an employee declares a paid action it ran. AWS Cost Explorer is itself billed
+  per request, so it is polled **once a day** (config, default on) for the previous day's total, which
+  reconciles the estimates and is shown as the day's actual. Every entry carries its basis.
+- **Migration:** every ledger row before this change is subscription-equivalent and is relabelled
+  `subscription` (free); today's ₹502 becomes free usage; Mira's cap pause is lifted and the Inbox
+  item resolved with that note.
+
+### D7b. Approvals live in three places (owner, 28 Sep)
+
+Every Inbox item (approval, decision, org change, cap, question) appears in the Inbox, on the Chief
+of Staff's page, and on the page of each employee it **concerns** (the raiser, the assignee of the
+work it is about, the holders of the charter it affects). All three show the item's options with an
+optional note; answering in one resolves it everywhere, live (`inbox.updated`). Each item states who
+raised it, whom it affects, what happens on approve and on deny, and links to its context. A denial
+goes back to the raiser as a reason to act on: into its open session, or into its handoff for the
+next one. Why: the owner on the phone opens an employee, sees "needs you: 9", and must be able to act
+there; and a decision must never be answered twice.
+
+### D3b. The Team Room: cross-team work is a moderated group chat (owner, 28 Sep)
+
+Work that needs another team (an interface, a contract, a handoff, a conflict of ownership) goes to a
+persistent **Team Room** instead of an edit outside one's charter. Threads are per topic, with
+@mentions; each employee sees the open threads that concern it in its context layer. **Asha
+moderates:** she assigns follow-ups (work items), decides within her authority, keeps threads short,
+and resolves each with a summary written into the relevant charter or contract. The owner reads
+everything and may comment anytime (his comments are marked); Asha escalates to him **only** for
+decisions above her authority (the §0 table), and an escalation is an Inbox item linked to the
+thread. Contract-repo changes are discussed there and still need every affected lead plus Asha. Why:
+on 27 Sep four leads planned the same feature and three of them found ownership gaps (a misrouted
+piece, an unowned sensor, an interface nobody had defined) with nowhere to say so but their own
+handoff files.
+
 ### D10. Sessions are disposable; memory is the files
 
 A session ends when its assignment reaches `review`, when the employee writes a handoff, when the
@@ -170,6 +222,39 @@ out through `notify.sh`, and replies `approve <id>` / `reject <id>` / `talk <emp
 read from `inbox.jsonl` and applied, so one-tap approvals work from the phone on day one. A relay
 was considered and rejected: any relay that needs no setup on his side is a public endpoint, and the
 page drives sessions that edit code and run commands.
+
+### D11b. Publishing it: an outbound tunnel to a relay, a passkey login, no inbound port (27 Sep, owner)
+
+The owner asked for the Workplace to be reachable from anywhere, behind a login only he can pass.
+Anyone who passes that login drives agents that edit code and run commands on his Mac, so it is
+treated as remote code execution. The lead's decisions, and why:
+
+- **No inbound port on the Mac.** The Workplace server opens an outbound, authenticated WSS
+  connection to a small **relay** on the existing Iris API box and reconnects with backoff. The LAN
+  listener (D11) is turned off once the iOS device test is done. Why: a listening port on a laptop
+  behind a hotspot is neither reachable nor safe; an outbound tunnel is both, and the box already
+  has a public address, TLS and a deploy procedure.
+- **Public URL `https://work.irisforu.com`**, an A record in the irisforu.com Route 53 zone to the
+  box; TLS the way the box already does it (Caddy). The relay proxies HTTP and WebSocket to the
+  tunnel **only for an authenticated session**; with the tunnel down it serves a clean "Mac
+  offline" page.
+- **One user, the owner**, by the email in the Iris credentials on this Mac. Primary factor: a
+  **passkey** (WebAuthn, Face ID on his iPhone). Enrolment needs a one-time code sent to him on
+  Telegram. Fallback: an email code **plus** a Telegram code. Never a password alone. Why: a
+  passkey is phishing-resistant and needs the phone in hand; the Telegram code reuses the channel
+  only he holds; there is no password to leak.
+- **Sessions** are short and rotating (12 h idle, 7 d max), httpOnly/secure/SameSite=strict
+  cookies, CSRF-protected for cookie sessions, rate-limited with lockout, with an audit log of
+  logins and every mutating request, "sign out everywhere", and an **emergency off switch** that
+  drops the tunnel (from the Mac, from Telegram, or from the relay). Every login from a new device
+  pings Telegram.
+- **Telegram codes travel through the tunnel**: the relay asks the Mac to run `notify.sh`, so the
+  bot token never leaves the Mac. With the Mac offline there is nothing to reach anyway.
+- **The iOS app** uses the same URL: sign-in through `ASWebAuthenticationSession` with the passkey,
+  then a session bearer token in the Keychain (bearer sessions are exempt from CSRF: browsers never
+  send them on their own).
+- **Defence in depth:** the Workplace's own gates stay. Releases, deploys, org changes, spend and
+  secrets still need the owner's Inbox approval whatever the login.
 
 ### D12. GitHub Apps: one per lead, credentials held by the Workplace, created by the lead
 

@@ -12,6 +12,7 @@ import * as runs from './runs.js';
 import { coverage } from './requirements.js';
 import { lint } from './ownership.js';
 import { orgHistory, readEmployeeFile, summarise } from './org.js';
+import * as stall from './stall.js';
 
 /**
  * Screens are views over the data (brief §6). Each function here builds one
@@ -20,14 +21,23 @@ import { orgHistory, readEmployeeFile, summarise } from './org.js';
 
 export function office(wp: Workplace): OfficeResponse {
   const reqs = wp.requirements();
+  const units = wp.org.units
+    .filter(u => u.kind === 'unit')
+    .map(unit => ({ unit, employees: wp.org.employees.filter(e => e.unitId === unit.id).map(e => employees.card(wp, e.id)) }));
+  const cards = units.flatMap(u => u.employees);
   return {
-    units: wp.org.units
-      .filter(u => u.kind === 'unit')
-      .map(unit => ({ unit, employees: wp.org.employees.filter(e => e.unitId === unit.id).map(e => employees.card(wp, e.id)) })),
+    units,
     coverage: coverage(reqs),
     needsYou: inbox.openCount(wp),
     spend: spend.summary(wp),
     lintErrors: lint(wp.org, reqs).filter(f => f.severity === 'error').length,
+    counts: {
+      working: cards.filter(c => c.employee.state === 'working').length,
+      blocked: cards.filter(c => c.employee.state === 'blocked').length,
+      stalled: stall.stalledAssignments(wp).length,
+      needsYou: inbox.openCount(wp),
+      total: cards.length,
+    },
   };
 }
 
@@ -47,15 +57,17 @@ export function org(wp: Workplace): OrgResponse {
 export function employeeDetail(wp: Workplace, id: string): EmployeeDetail {
   const e = employees.employee(wp, id);
   const open = employees.sessionsOf(id).map(s => runs.getRunAgent(s.agentId)).filter((a): a is NonNullable<typeof a> => !!a);
+  const { state, reason } = employees.stateWithReason(wp, id);
   return {
-    employee: { ...e, state: employees.stateOf(wp, id) },
+    employee: { ...e, state, ...(reason ? { stateReason: reason } : {}) },
     charters: e.charterIds.map(c => wp.org.charters.get(c)).filter((c): c is NonNullable<typeof c> => !!c).map(summarise),
     status: readEmployeeFile(wp.org, id, 'status.md'),
     handoff: readEmployeeFile(wp.org, id, 'handoff.md'),
     sessions: open,
-    assignments: work.list(wp, { employeeId: id }),
+    assignments: stall.annotate(wp, work.list(wp, { employeeId: id })),
     spendTodayInr: spend.summary(wp).byEmployee[id] ?? 0,
     signals: health.signals(wp).employees[id] ?? { throughput7d: 0, rework7d: 0, falseDoneRate7d: 0, costPerDoneInr: 0 },
+    needsYou: employees.needsYouItems(wp, id),
   };
 }
 
@@ -71,7 +83,7 @@ export function featureDetail(wp: Workplace, id: string): FeatureDetail {
   const reqs = wp.requirements();
   return {
     feature,
-    assignments: work.list(wp, { kind: 'assignment', featureId: id }),
+    assignments: stall.annotate(wp, work.list(wp, { kind: 'assignment', featureId: id })),
     requirements: reqs.filter(r => feature.requirementIds.includes(r.id)),
     route: work.routeFeature(wp, feature),
   };

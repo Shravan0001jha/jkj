@@ -2,7 +2,7 @@ import { useRef, useSyncExternalStore } from 'react';
 import type {
   Agent, ApprovalDecision, Attachment, ContextResponse, Coverage, EmployeeCard, EmployeeDetail,
   FeatureBoard, FeatureDetail, HealthSignals, InboxItem, LogEntry, OfficeResponse, OrgResponse,
-  PermissionMode, Pivot, PivotRows, Release, Requirement, ServerEvent, SpendSummary,
+  PermissionMode, Pivot, PivotRows, Release, Requirement, RoomThread, RoomThreadDetail, ServerEvent, SpendSummary,
   WorkplaceHealthResponse, WorkplaceServerEvent,
 } from '@jkj/shared';
 import * as api from '../api/client.js';
@@ -17,7 +17,7 @@ import { sendCommand, type SocketStatus } from '../api/socket.js';
  * from the server; the socket keeps it current.
  */
 
-export type RouteName = 'office' | 'org' | 'inbox' | 'features' | 'employee' | 'assign' | 'releases' | 'spend';
+export type RouteName = 'office' | 'org' | 'inbox' | 'room' | 'features' | 'employee' | 'assign' | 'releases' | 'spend';
 
 export interface Route {
   name: RouteName;
@@ -45,6 +45,9 @@ export interface AppState {
   releaseLogs: Record<string, string[]>;
   spend: SpendSummary | null;
   signals: HealthSignals | null;
+  /* the Team Room: every thread, and the messages of the ones opened */
+  room: RoomThread[];
+  roomThreads: Record<string, RoomThreadDetail>;
 
   /* sessions */
   agents: Agent[];
@@ -78,6 +81,8 @@ let state: AppState = {
   releaseLogs: {},
   spend: null,
   signals: null,
+  room: [],
+  roomThreads: {},
 
   agents: [],
   transcripts: {},
@@ -133,7 +138,7 @@ function shallowEqual(a: unknown, b: unknown): boolean {
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   const name = (parts[0] ?? 'office') as RouteName;
-  const known: RouteName[] = ['office', 'org', 'inbox', 'features', 'employee', 'assign', 'releases', 'spend'];
+  const known: RouteName[] = ['office', 'org', 'inbox', 'room', 'features', 'employee', 'assign', 'releases', 'spend'];
   if (!known.includes(name)) return { name: 'office' };
   return parts[1] ? { name, id: decodeURIComponent(parts[1]) } : { name };
 }
@@ -164,6 +169,10 @@ export async function loadRoute(route: Route): Promise<void> {
       case 'office': await loadOffice(); break;
       case 'org': await loadOrg(); break;
       case 'inbox': await loadInbox(); break;
+      case 'room':
+        await Promise.all([loadRoom(), state.org ? Promise.resolve() : loadOrg()]);
+        if (route.id) await loadThread(route.id);
+        break;
       case 'features':
         await Promise.all([loadFeatures(), loadCoverage(), loadPivot(state.pivotRows)]);
         if (route.id) await loadFeature(route.id);
@@ -237,6 +246,15 @@ export async function loadReleases(): Promise<void> {
   set({ releases: await api.getReleases() });
 }
 
+export async function loadRoom(): Promise<void> {
+  set({ room: (await api.getRoom()).threads });
+}
+
+export async function loadThread(id: string): Promise<void> {
+  const detail = await api.getThread(id);
+  set({ roomThreads: { ...state.roomThreads, [id]: detail } });
+}
+
 export async function loadSpend(): Promise<void> {
   set({ spend: await api.getSpend() });
 }
@@ -303,7 +321,35 @@ export function applyServerEvent(event: ServerEvent | WorkplaceServerEvent): voi
     case 'inbox.updated': {
       const known = state.inbox.some(i => i.id === event.item.id);
       const inbox = known ? state.inbox.map(i => (i.id === event.item.id ? event.item : i)) : [event.item, ...state.inbox];
-      set({ inbox, ...(state.office ? { office: { ...state.office, needsYou: inbox.filter(i => i.state === 'open').length } } : {}) });
+      const openCount = inbox.filter(i => i.state === 'open').length;
+      // The same item sits on every concerned employee's page; an answer anywhere clears it there too.
+      const employees = { ...state.employees };
+      for (const [id, detail] of Object.entries(employees)) {
+        const rest = detail.needsYou.filter(i => i.id !== event.item.id);
+        const mine = event.item.state === 'open' && event.item.affects.includes(id);
+        employees[id] = { ...detail, needsYou: mine ? [event.item, ...rest] : rest };
+      }
+      set({
+        inbox, employees,
+        ...(state.office ? { office: { ...state.office, needsYou: openCount, counts: { ...state.office.counts, needsYou: openCount } } } : {}),
+      });
+      break;
+    }
+
+    case 'room.thread': {
+      const known = state.room.some(t => t.id === event.thread.id);
+      const room = known ? state.room.map(t => (t.id === event.thread.id ? event.thread : t)) : [event.thread, ...state.room];
+      const detail = state.roomThreads[event.thread.id];
+      set({ room, ...(detail ? { roomThreads: { ...state.roomThreads, [event.thread.id]: { ...detail, thread: event.thread } } } : {}) });
+      break;
+    }
+
+    case 'room.message': {
+      const known = state.room.some(t => t.id === event.thread.id);
+      const room = known ? state.room.map(t => (t.id === event.thread.id ? event.thread : t)) : [event.thread, ...state.room];
+      const detail = state.roomThreads[event.thread.id];
+      const messages = detail && !detail.messages.some(m => m.id === event.message.id) ? [...detail.messages, event.message] : detail?.messages;
+      set({ room, ...(detail ? { roomThreads: { ...state.roomThreads, [event.thread.id]: { thread: event.thread, messages: messages ?? [] } } } : {}) });
       break;
     }
 
@@ -419,6 +465,40 @@ export async function answerInbox(id: string, optionId: string, note?: string): 
     const item = await api.answerInbox(id, optionId, note);
     set({ inbox: state.inbox.map(i => (i.id === id ? item : i)) });
     showToast(`Answered: ${item.title}`);
+  } catch (err) {
+    showToast(message(err));
+  }
+}
+
+/* ---------- the Team Room ---------- */
+
+export async function openThread(title: string, text: string, charterIds: string[] = []): Promise<string | null> {
+  try {
+    const detail = await api.createThread({ title, text, charterIds });
+    set({ roomThreads: { ...state.roomThreads, [detail.thread.id]: detail }, room: [detail.thread, ...state.room.filter(t => t.id !== detail.thread.id)] });
+    return detail.thread.id;
+  } catch (err) {
+    showToast(message(err));
+    return null;
+  }
+}
+
+export async function postToThread(id: string, text: string): Promise<void> {
+  try {
+    const m = await api.postRoomMessage(id, { text });
+    const detail = state.roomThreads[id];
+    if (detail && !detail.messages.some(x => x.id === m.id)) set({ roomThreads: { ...state.roomThreads, [id]: { ...detail, messages: [...detail.messages, m] } } });
+  } catch (err) {
+    showToast(message(err));
+  }
+}
+
+export async function resolveThread(id: string, summary: string): Promise<void> {
+  try {
+    const thread = await api.resolveThread(id, { summary });
+    const detail = state.roomThreads[id];
+    set({ room: state.room.map(t => (t.id === id ? thread : t)), ...(detail ? { roomThreads: { ...state.roomThreads, [id]: { ...detail, thread } } } : {}) });
+    showToast('Thread resolved.');
   } catch (err) {
     showToast(message(err));
   }

@@ -83,6 +83,53 @@ token passes; wrong token 401 (and constant-time compare used); pairing code sin
 **`telegram.test.ts`** — new Inbox item sends one line ≤ 5 lines; digest format; cursor file is
 the Workplace's own, `read_inbox.sh`'s cursor untouched.
 
+**`guards-worktrees.test.ts`** — edits stay inside the worktree and inside owned paths (the owner is
+named), scratch is free, main checkouts never; commands that push/merge/rebase/reset/filter-repo, switch
+to base branches, run release/deploy/testflight/ssh-window scripts, use ssh/scp/aws/gh/sudo/devicectl or
+`rm -rf`, or name a main checkout are denied; a worktree is cut from the base tip on an `emp/` branch
+with the venv linked and the main checkout untouched; a session's cwd is never a main checkout; the hook
+denies/allows as the guard says; foreign changes are refused as evidence.
+
+**`tunnel.test.ts`** — against a fake relay: the secret is checked, HTTP and sockets are proxied to
+loopback, Telegram frames reach `notify`, ping/pong, reconnect after a drop, the off switch; a wrong secret
+never connects and keeps retrying with backoff.
+
+**`workplace-tools.test.ts`** — every Workplace MCP tool is listed through a real MCP client (the test that
+caught the `z.record()` schema hiding all of them); `report_status`, `write_handoff`, `propose_org_change`
+do what they say.
+
+**`features.test.ts`** — the seeded phone→Mac feature routes to five charters with the real statuses and
+marks its requirements planned; a feature stated without a spec is handed to the Chief of Staff whose
+`write_spec`/`decompose_feature` tools move it on; the digest text.
+
+**Relay (`workplace-relay`, pytest, 20):** `test_relay.py` (sessions rotate and expire, codes one-use with
+five attempts, lockouts, no session → login page or 401, tunnel needs the secret, both factors or nothing,
+CSRF on cookie sessions, proxying and socket bridging through a fake Mac, bearer sessions for the app,
+offline page, the off switch) and `test_relay_security.py` (the lead's review: spoofed XFF, global send
+limits with an alert, enrolment disabled after five wrong codes until `enrol on`, a second passkey needs a
+session, failure pings rate-limited, a second live tunnel refused and reported, the allow-list enumerated,
+health leaks nothing, 256-bit tokens stored hashed, audit free of secrets). Seven of the nine security
+tests fail on the pre-fix commit.
+
+**`fix-batch.test.ts`** (the owner's first day on the phone) — the employee page lists what the card
+counts; a probe session never writes status or handoff and a shutdown leaves a note; a cap-paused
+employee shows blocked with the plain reason and is counted; stalled work is derived and the routine
+resumes once or explains; owner talk always runs and "continue" lifts the pause, audited.
+
+**`money.test.ts`** — subscription usage is recorded as free (turns, tokens, equivalent ₹) and never
+pauses; real spend from `record_spend` (reported/metered), from a release (estimated) and from the
+daily AWS actual (metered, replacing estimates) sums into the caps; the migration relabels old rows
+and lifts Mira's pause with a note; rate-limit events are kept per window.
+
+**`approvals-everywhere.test.ts`** — `affects` is computed from raiser, assignment, charter and cap
+scope, and always includes the Chief of Staff; answering once resolves it on every page; a denial
+reaches the raiser's open session or its handoff.
+
+**`room.test.ts`** — threads and messages persist; @mentions; the owner's messages are marked;
+employees see their open threads in context; Asha's `room_resolve` writes the summary and creates the
+follow-ups; `escalate` files an Inbox item linked to the thread; non-Asha cannot resolve; the seed
+threads from the 27 Sep plans exist and mention the right people.
+
 **Kept from JKJ, now under test:** `session-reader` (parse a fixture transcript: entries, subagents,
 images, cleaned user text), `context.ts` (ancestry chain, memory notes not counted),
 `projects.encodeProjectKey`, `routes` validation (`validateCreate`, `validateMessage`).

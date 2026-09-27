@@ -142,6 +142,27 @@ MCP SDK fail to list *any* tool of the server (found 27 Sep, pinned by `workplac
 text)` = send to the open session or spawn. `endSession` asks for the handoff (a final prompt),
 waits up to 90 s, then closes.
 
+### 7a. Isolation (`services/worktrees.ts`, `services/guards.ts`)
+
+Before a session starts, `ensureWorktree` cuts (or reuses) `~/iris-work/<employee>/<repo-name>` on
+`emp/<employee>/<work-item-id>` from the base branch tip and links `.venv`, `.venv-x64` and the
+`node_modules` directories from the main checkout; `spawn` refuses a cwd inside any org repo root. A
+PreToolUse hook runs `guardTool`: edits must be inside the worktree and inside a path the employee's
+charters own in the map (scratch under the OS temp dir is free); commands matching push/merge/rebase/
+reset --hard/filter-repo/worktree/remote, a switch to a base branch, the release/deploy/testflight/
+ssh-window scripts, ssh/scp/aws/gh/sudo/devicectl, `rm -rf`, or naming a main checkout are denied; the
+same commands are also `disallowedTools`. `report_done` refuses evidence when `git diff base...HEAD`
+plus uncommitted files include anything the employee does not own, and records only real commits on the
+branch. Merging into the base branch is the lead's (a different identity), until real PRs exist.
+
+### 7b. Sessions across a restart, and interrupts
+
+Every session row records its SDK session id, its status and any pending tool approval as they change.
+On boot, rows still open are closed as `lost-on-restart`; a `building` assignment is marked blocked with
+the reason; and one Inbox question per lost session names the pending tool and the resumable SDK id, so
+a decision is never dropped silently (iOS device test, 27 Sep). An interrupt leaves a session `idle`
+with no approval attached; a message wakes it.
+
 ## 8. Approvals and gates (`services/approvals.ts`)
 
 `POLICY: Record<Action, Approver>` from the brief §0. `gate(action, ctx)` returns `{ allowed: true }`
@@ -159,6 +180,29 @@ system line, sets `state: paused`), files an Inbox item of kind `cap` with optio
 (asks for a number) / `keep`. Company cap `WORKPLACE_CAP_INR` default 1000; per-day override stored
 in the db by the answered inbox item.
 
+### 9b. Real money (`services/spend.ts`, `services/usage.ts`, `services/aws-cost.ts`) — HLD D9b
+
+Two ledgers. **`usage`** (subscription, free): one row per session result (`employeeId, sessionId,
+model, turns, inputTokens, outputTokens, cacheRead, cacheWrite, equivalentInr`), plus the latest
+`rate_limit_event` per window (`five_hour`, `seven_day*`: status, utilization, resetsAt) kept in
+`settings`. **`spend`** (real money): `source: 'anthropic-api' | 'aws' | 'third-party'`, `basis:
+'metered' | 'estimated' | 'reported'`, `employeeId`, `sessionId?`, `what`, `inr`, `day`. Rows written
+before 28 Sep carry `source: 'subscription'` and are excluded from every cap; the migration relabels
+them. `SpendSummary.companyInr` is real money only; `subscription` holds the free figures.
+
+| Source | How it is measured | Basis |
+|---|---|---|
+| Anthropic API via Iris's llm-gateway / iris-api during an employee's tests | the gateway's per-request usage (tokens × list price) read from its response or its `/usage` endpoint by the session and recorded with `record_spend` | metered |
+| A paid third-party API an employee runs (Deepgram, ElevenLabs, OpenAI, web search) | `record_spend` from the session, with the provider's reported units where it gives them | metered / reported |
+| A release (`release-iris.sh`) | S3 PUT + ~200 MB transfer + one CloudFront invalidation: ₹2 estimate; `release-iris-x64` the same | estimated |
+| A deploy (`deploy-api.sh`, `deploy-agent.sh`, `deploy-web.sh`) | data transfer + invalidation: ₹1 estimate | estimated |
+| AWS, actual | Cost Explorer `GetCostAndUsage` for the previous IST day, once a day at 09:05 (`WORKPLACE_AWS_COST`, default on; each call costs ~₹1 and is itself recorded) → one `metered` row "AWS actual (unattributed)" replacing that day's estimates in the day's total | metered |
+
+`record_spend({ source, inr | usd, what, units? })` is a Workplace MCP tool; the row is `reported`
+unless the session passes provider units, then `metered`. Caps (`check`) sum only real sources; a
+pause stops `spawn` for **autonomous** work and the guard denies commands that would spend (release,
+deploy, the paid-provider CLIs) for the paused scope; reads, plans and owner talk are never paused.
+
 ## 10. Stall and loop detection (`services/health.ts`)
 
 Every 30 s over running sessions: `idleMs > 600 000` → stalled; last 5 tool entries identical
@@ -166,6 +210,43 @@ Every 30 s over running sessions: `idleMs > 600 000` → stalled; last 5 tool en
 computed on request: throughput, rework, false-done rate, cost per completed item (7-day window).
 Org signals: queue length per charter > 5, context-limit hits ≥ 3 in 7 days, mutual blocking pairs,
 orphans → listed as "proposal triggers" on the Org screen.
+
+### 10b. Stalled work and the Chief of Staff's routine (`services/stall.ts`, `services/cos.ts`)
+
+An assignment in `proposed | planned | building` with no session activity (its own updates, its last
+session, its live transcript) for more than `WORKPLACE_STALL_MINUTES` (30) is **stalled**: derived at
+read time (`WorkItem.stalledSince`), counted on the Office (`counts.stalled`), shown on the card.
+Every five minutes `cos.tick` resumes the oldest stalled item that can be resumed (assignee not
+paused, ≥ ₹50 real headroom, not already resumed today; one per tick) or raises one Inbox note per
+item per day saying why it waits: a cap, an open question to the owner, a pending org change touching
+its charter, or "resumed once already". "Resume it now" on the note starts it regardless. Items
+that could be resumed but lost this tick's one slot are **queued** (`TickResult.queued`), not noted:
+the next tick takes them, so a restart with ten stalled items costs the owner no pings.
+
+### 10c. Approvals in three places (`employees.needsYouItems`, `inbox.affects`) — HLD D7b
+
+`InboxItem` gains `affects: string[]` (employee ids the item concerns), `onApprove`, `onDeny` (one
+line each) and `links`. `affects` is computed at raise time: the raiser, the assignee of
+`context.assignmentId`, the holders of `context.charterId` and of a proposal's charters, the scope of
+a cap; the Chief of Staff always. `EmployeeDetail.needsYou` lists open items whose `affects` includes
+the employee. A denial (`reject`/`deny`/`no`) is delivered to the raiser: `runs.sendMessage` into its
+open session, else appended to its `handoff.md` as "## Denied: <title> — <note>".
+
+### 10d. The Team Room (`services/room.ts`) — HLD D3b
+
+Tables `threads (id, title, charter_ids, created_by, created_at, state, summary, json)` and
+`messages (id, thread_id, at, by, text, mentions, json)`. `by` is an employee id, `owner` or
+`workplace`; the owner's messages carry `owner: true`. Routes: `GET /api/room` (threads, newest
+activity first, with the last message and unread-for-owner count), `GET /api/room/:id`, `POST
+/api/room { title, text, charterIds?, mentions? }`, `POST /api/room/:id/messages { text }` (the owner),
+`POST /api/room/:id/resolve { summary }`. Socket: `room.thread`, `room.message`. Session tools:
+`room_post({ threadId | title, text, mentions })`, `room_read({ threadId })`; Chief of Staff only:
+`room_resolve({ threadId, summary, followUps: [{ employeeId, title, body }] })` (follow-ups become
+assignments to those employees) and `escalate({ threadId, title, body, options })` (an Inbox item with
+`context.threadId`). Context: each employee's assembled context gets a "Team Room" layer with its
+open threads (title, last three messages). Moderation: `cos.tick` also hands Asha any thread with
+messages newer than her last look (a session turn, free under D9b): she is asked to reply, assign or
+resolve, and to escalate only above her authority.
 
 ## 11. Telegram (`services/telegram.ts`)
 
@@ -276,3 +357,66 @@ composer, approvals, permission mode) plus a Context panel using `ContextView`.
 `IRIS_WORKPLACE_DIR`, `IRIS_OPS_DIR` (default `~/iris-ops`), `WORKPLACE_CAP_INR` (1000),
 `WORKPLACE_USD_INR` (88), `WORKPLACE_CONTEXT_TOKENS` (24000), `WORKPLACE_DIGEST_HOUR` (9),
 `--port` (4317), `--host` (127.0.0.1), `--no-open`, `--no-telegram` (tests), `--no-seed`.
+
+## 17. Publishing: the relay and the login (HLD D11b)
+
+**Relay service** `services/workplace-relay/` in the deploy worktree (`~/claude-dev-deploy`): Python
+3.12, FastAPI + `websockets`, its own SQLite (`/opt/workplace-relay/relay.db`), systemd unit
+`workplace-relay` on `127.0.0.1:9200`, Caddy site `work.irisforu.com { reverse_proxy 127.0.0.1:9200 }`
+(Caddy issues the certificate). Deploy script `scripts/deploy-workplace-relay.sh` follows
+`deploy-agent.sh`: tests locally, `ssh-window.sh open`, scp, venv, unit, Caddy reload, health check,
+`ssh-window.sh close`. It never touches `/opt/iris-api`.
+
+**Tunnel protocol** (one WSS `/tunnel` from the Mac, `Authorization: Bearer <tunnel secret>`; the
+secret is in `~/iris-ops/workplace/relay.env` on the Mac and `/opt/workplace-relay/.env` on the box,
+mode 600, generated once):
+
+| Frame | Direction | Fields |
+|---|---|---|
+| `http` | relay → Mac | `id, method, path, headers, body` (base64); Mac answers `response { id, status, headers, body }` |
+| `ws-open` / `ws-frame` / `ws-close` | both | `id, path` / `id, data` / `id` — one relay client socket ↔ one local socket to `127.0.0.1:<port>/ws` |
+| `telegram` | relay → Mac | `text` — the Mac runs `notify.sh` (codes, new-device pings) |
+| `off` | Mac → relay | drops every session and refuses until `on` |
+| `ping`/`pong` | both | liveness: the relay pings every 15 s and closes a Mac that has not answered for 45 s; the Mac reconnects when it has had no pong for 45 s |
+| `on` / `enrol-on` | Mac → relay | `on` is sent on every connect (the relay stays off across restarts until the Mac says so); `enrol-on` re-enables passkey enrolment after it disabled itself |
+
+The Mac side is `services/tunnel.ts`: reconnect with backoff (1 s → 30 s), forwards to its own
+loopback port (trusted, D11), reports `published: connected | offline` on `/api/health` and the Office.
+
+**Login** (`/login`, `/login/*` on the relay; single allowed email from config):
+- Passkey: `webauthn` (py_webauthn), RP id `work.irisforu.com`, user handle = the email; enrolment
+  at `/login/enrol` needs a Telegram code first (6 digits, 10 min, 5 attempts).
+- Fallback: `/login/code` sends an email code (SES, as iris-api's email sign-in does) **and** a
+  Telegram code; both must match.
+- Session: 32-byte random id, server-side row `{ id, created, last_seen, device, ua, ip }`; cookie
+  `wp_session` httpOnly/Secure/SameSite=Strict; idle 12 h, max 7 d; the id rotates every hour of use.
+  Bearer form for the app: the same id in `Authorization: Bearer`. CSRF: cookie sessions must send
+  `X-CSRF-Token` equal to the `wp_csrf` cookie on every non-GET; bearer sessions are exempt.
+- Rate limits: 5 failed factors per IP or per email in 15 min → 15 min lockout; audit table
+  `{ at, session, ip, kind, path, ok }` for every login step and every non-GET.
+- `/logout`, `/logout-all`; `POST /off` (from the tunnel) and `/on`; a new device (new session
+  without a `wp_device` cookie) → Telegram ping through the tunnel.
+- iOS: `ASWebAuthenticationSession` opens `/login?app=1`; on success the relay redirects to
+  `irisworkplace://auth#token=<session id>`; the app stores it in the Keychain and sends it as a
+  bearer. Contract change announced to "main".
+
+**Hardening from the reviews (27 Sep), all pinned by tests in `test_relay_security.py`:** the relay
+reads only the real client address (uvicorn's proxy headers from Caddy; never `X-Forwarded-For`);
+code requests are limited globally (3/hour, 10/day) with an owner alert; five wrong enrolment codes in a
+day disable enrolment until `enrol on` from the Mac or Telegram; once a passkey exists, another needs a
+signed-in session plus the code; failures ping the owner (throttled); the tunnel secret is compared in
+constant time and a second live tunnel is refused, audited and reported; session tokens are 256-bit and
+stored as SHA-256; bearer sessions never rotate, cookie sessions rotate hourly only on the proxy path
+with a 60 s grace for the old token; `logout-all` closes live sockets; a cookie socket must come from
+our origin; `/api/pair*` is refused through the relay and forwarded requests carry `x-via-tunnel`, which
+the Mac's pairing route refuses; the unit runs as its own user with `--no-access-log` (the app's socket
+token is in the query string), NoNewPrivileges, ProtectSystem=strict, ProtectHome; Caddy caps bodies at
+32 MB and sets HSTS/nosniff/no-referrer; the Mac validates relay-supplied paths and caps responses at
+12 MB; health shows counts only on loopback; cookies are `__Host-`; the WebAuthn handle is opaque.
+Known trade-off: a stranger can exhaust the shared code budget or lock the owner's email fallback for
+15 minutes; passkey login is unaffected.
+
+**Verification (live, from outside the LAN):** no session → login page; wrong or absent factor →
+refused; passkey → in; WebSocket without a session → rejected; tunnel down → "Mac offline";
+new-device Telegram ping arrives.
+

@@ -64,7 +64,9 @@ export function propose(wp: Workplace, opts: ProposeOptions): OrgProposal {
       kind: 'org-change',
       title: `${titleOf(opts.kind)}: ${describe(opts.kind, opts.params)}`,
       body: `${opts.reason}\n\n${errors.length ? `Cannot be approved: ${errors.map(e => e.message).join('; ')}\n\n` : ''}${diff.split('\n').slice(0, 40).join('\n')}`,
-      context: { proposalId: proposal.id, kind: opts.kind, lintErrors: errors.length },
+      context: { proposalId: proposal.id, kind: opts.kind, lintErrors: errors.length, params: opts.params },
+      onApprove: 'the org files are written and committed; routing and every affected context change on the next session',
+      onDeny: 'nothing changes; the proposal is kept with your reason',
       raisedBy: opts.proposedBy,
       options: errors.length
         ? [{ id: 'reject', label: 'Reject (lint errors)', danger: true }]

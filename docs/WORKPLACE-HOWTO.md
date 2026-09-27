@@ -18,6 +18,12 @@ First boot copies the seed organisation into `~/iris-workplace` (its own git rep
 at `~/iris-ops/workplace/api-token` (mode 600). Agents use `~/iris-ops/workplace/claude-oauth.env`;
 `ANTHROPIC_API_KEY` never reaches them.
 
+## Who talks to the owner
+
+The Workplace sends only its own automatic pings: Inbox items, enrolment and sign-in codes, new-device and
+security alerts, cap notices, and the daily digest. Status updates and answers to the owner's questions go
+through the lead, so he never hears the same thing twice.
+
 ## The screens
 
 - **Office** — who is working on what, what needs you, coverage of the product definition, spend
@@ -70,6 +76,37 @@ employee's context change on the next spawn. Hires cannot hire (no level 3).
 To edit a charter by hand: Org → charter → edit, or edit `~/iris-workplace/charters/<id>.md` and
 commit. The map is `map.yaml`; the org is `org.yaml`; roles are `roles.yaml`.
 
+## Money, and what is free
+
+Sessions run on the Claude subscription, which is **free**: the Office shows it as "Subscription usage
+(free)" (turns, tokens, the list-price equivalent, and the plan's own five-hour / seven-day limits as
+the SDK reports them). The **₹1000/day cap counts real money only**: Anthropic API calls on a key
+(Iris's llm-gateway during tests), AWS work employees trigger (a release ≈ ₹2, a deploy ≈ ₹1,
+estimated until the daily Cost Explorer actual replaces them), and paid third-party APIs, recorded by
+the session with `record_spend`. A cap pauses paid actions and unattended work only; talking to any
+employee always works, and "go ahead and continue" in that talk lifts the pause for the day (audited).
+
+## Approvals, everywhere
+
+Every Inbox item shows in the Inbox, on Asha's page, and on the page of each employee it concerns
+(raiser, assignee, charter holders), with its options and a note; answering in one place resolves it
+everywhere. A denial reaches the raiser: into its open session, or into its handoff for the next one.
+
+## The Team Room
+
+Cross-team work (an interface, a contract, a handoff, an ownership conflict) is a thread in the Team
+Room (`#/room`), not an edit outside one's charter. Employees post with `room_post` and @mentions;
+Asha moderates: assigns follow-ups, resolves with a summary, and escalates to you only what the
+approvals table reserves for you (an Inbox item linked to the thread). You can read and comment
+anytime; your messages are marked as yours.
+
+## Stalled work
+
+An assignment with no session activity for 30 minutes (`WORKPLACE_STALL_MINUTES`) is stalled: it shows
+on the card and in the Office counts. Every five minutes Asha's routine resumes one (once a day per
+item) or leaves one Inbox note saying why it waits ("Resume it now" starts it regardless). Items
+that only wait for a later tick's slot are not noted.
+
 ## Approvals, caps, releases
 
 Outward actions (release, deploy, TestFlight, store, external messages, deleting data, spending
@@ -78,11 +115,29 @@ release/deploy scripts are the real ones (`scripts/release-iris.sh`, `scripts/de
 `~/claude-dev-deploy`, ...) and refuse to run otherwise. At a cap (employee, unit, company) sessions
 pause and a `cap` item asks whether to raise today's cap.
 
-## The phone
+## From anywhere: https://work.irisforu.com
 
-Install Tailscale on the Mac and the phone (needs you). Start with `--host <tailnet ip>`. Pair the
-app: from this Mac `POST /api/pair` gives a six-digit code; the app exchanges it within five
-minutes for the bearer token. Until then, Telegram carries the Inbox.
+The Workplace on this Mac keeps an outbound tunnel to a small relay on the Iris API box; nothing
+listens on the Mac. The relay proxies only an authenticated session. Sign in with your **passkey**
+(Face ID on the iPhone); enrol it once at `/login/enrol` with a Telegram code. Fallback: an email
+code **and** a Telegram code. Sessions expire after 12 h idle / 7 days; every new device pings
+Telegram. **Emergency off:** reply `off` on Telegram, or `curl -X POST http://127.0.0.1:4317/api/relay/off`
+on this Mac: the tunnel drops and every remote session is gone until the Workplace is restarted.
+Files: `~/iris-ops/workplace/relay.env` (this Mac: `RELAY_URL`, `TUNNEL_SECRET`) and
+`relay-server.env` (copied to the box by `~/claude-dev-deploy/scripts/deploy-workplace-relay.sh`).
+The iOS app signs in through the same page and keeps a bearer session in the Keychain.
+
+**If the name does not resolve on a device** ("not working" while the relay is up): a resolver that
+looked the name up before the record existed caches the negative answer, up to the zone's SOA minimum
+(irisforu.com: 86400 s; Route 53 caps it at 900 s, some resolvers hold longer). To recover: toggle
+airplane mode on the phone, or flush the Mac's cache (`sudo dscacheutil -flushcache; sudo killall -HUP
+mDNSResponder`), or wait. New hostnames: create the DNS record before anything looks the name up. The
+Mac-side tunnel is immune: it resolves the relay with a direct DNS query and falls back to the OS.
+
+## The phone on the LAN (development only)
+
+`--host <lan or tailnet ip>` adds a token-protected listener; pair the app with `POST /api/pair`
+from this Mac (a six-digit code the app exchanges within five minutes). Off by default.
 
 ## GitHub Apps (the lead creates them)
 

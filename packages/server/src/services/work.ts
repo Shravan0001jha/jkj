@@ -192,6 +192,14 @@ export function attachPlan(wp: Workplace, id: string, plan: string, by: string):
   return transition(wp, id, { to: 'planned', by, plan });
 }
 
+export function attachSpec(wp: Workplace, id: string, spec: string, ): WorkItem {
+  const item = require$(wp, id);
+  if (item.kind !== 'feature') throw new BadRequest(`${id} is not a feature`);
+  const updated = { ...item, spec, updatedAt: now() };
+  save(wp, updated);
+  return updated;
+}
+
 /** Sent back from review: counted as rework, and as a false "done". */
 export function sendBack(wp: Workplace, id: string, by: string, note: string): WorkItem {
   return transition(wp, id, { to: 'building', by, note: `sent back: ${note}` });
@@ -231,6 +239,13 @@ export function decompose(wp: Workplace, featureId: string, extra: FeatureThings
     if (already) { assignments.push(already); continue; }
     const charter = wp.org.charters.get(hit.charterId);
     const because = hit.because.map(t => `${t.kind}:${t.key}`).join(', ');
+    // A platform charter's piece is for the platforms it owns among the ones
+    // the feature names, or its home platform (its first map entry) when the
+    // feature named none of them; a capability charter's piece cuts across
+    // every platform the feature names.
+    const owned = wp.org.map.filter(m => m.kind === 'platform' && m.primary === hit.charterId).map(m => m.key);
+    const shared = feature.platformIds.filter(p => owned.includes(p));
+    const platformIds = owned.length ? (shared.length ? shared : [owned[0]!]) : feature.platformIds;
     assignments.push(create(wp, {
       kind: 'assignment',
       title: `${feature.title} — ${charter?.title ?? hit.charterId}`,
@@ -239,7 +254,7 @@ export function decompose(wp: Workplace, featureId: string, extra: FeatureThings
       charterId: hit.charterId,
       featureId,
       requirementIds: feature.requirementIds,
-      platformIds: feature.platformIds,
+      platformIds,
       ...(feature.spec ? { spec: feature.spec } : {}),
       by,
     }));
