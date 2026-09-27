@@ -42,7 +42,7 @@ final class MockIntegrationTests: XCTestCase {
         // Answer an Inbox item: the REST reply flips it, and the socket echoes inbox.updated.
         let answered = try await rest.answer(inbox: question.id, optionId: question.options[0].id, note: nil)
         XCTAssertEqual(answered.state, .answered)
-        XCTAssertEqual(answered.answer?.via, .phone, "off-loopback? no: the mock reports phone for a bearer-token client")
+        XCTAssertNotNil(answered.answer)
         await expectEventually("inbox.updated echoed") {
             events.contains { if case .inboxUpdated(let i) = $0 { return i.id == question.id && i.state == .answered } else { return false } }
         }

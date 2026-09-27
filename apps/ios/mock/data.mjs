@@ -415,6 +415,7 @@ export const sampleEvents = [
   { type: 'mcp.updated', server: { id: 'travsr', name: 'Travsr', source: 'travsr', transport: 'stdio', health: 'degraded', toolCount: 24, note: 'slow' } },
   { type: 'activity', event: { id: 'ev-1', at: T0, projectId: 'claude-dev', kind: 'waiting', message: 'Mira is waiting on an approval' } },
   { type: 'error', message: 'Could not read your sessions' },
+  { type: 'office.snapshot', office: office() },
   { type: 'office.updated', card: cards[2] },
   { type: 'inbox.updated', item: inbox[0] },
   { type: 'work.updated', item: assignments[0] },

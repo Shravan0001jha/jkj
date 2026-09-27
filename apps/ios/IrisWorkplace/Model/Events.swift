@@ -29,6 +29,7 @@ enum ServerEvent: Equatable {
     case activity(ActivityEvent)
     case error(message: String)
     // workplace-api.ts
+    case officeSnapshot(OfficeResponse)
     case officeUpdated(EmployeeCard)
     case inboxUpdated(InboxItem)
     case workUpdated(WorkItem)
@@ -42,7 +43,7 @@ enum ServerEvent: Equatable {
 
     static let knownTypes: [String] = [
         "hello", "snapshot", "agent.updated", "agent.removed", "agent.log", "mcp.updated", "activity", "error",
-        "office.updated", "inbox.updated", "work.updated", "proposal.updated", "release.updated", "release.log",
+        "office.snapshot", "office.updated", "inbox.updated", "work.updated", "proposal.updated", "release.updated", "release.log",
         "spend.updated", "signals.updated", "alert",
     ]
 }
@@ -50,7 +51,7 @@ enum ServerEvent: Equatable {
 extension ServerEvent: Decodable {
     private enum Keys: String, CodingKey {
         case type, version, startedAt, agents, agent, agentId, entry, server, event, message
-        case card, item, proposal, release, id, line, summary, signals, level, title, body, inboxId
+        case office, card, item, proposal, release, id, line, summary, signals, level, title, body, inboxId
     }
 
     init(from decoder: Decoder) throws {
@@ -74,6 +75,8 @@ extension ServerEvent: Decodable {
             self = .activity(try c.decode(ActivityEvent.self, forKey: .event))
         case "error":
             self = .error(message: try c.decode(String.self, forKey: .message))
+        case "office.snapshot":
+            self = .officeSnapshot(try c.decode(OfficeResponse.self, forKey: .office))
         case "office.updated":
             self = .officeUpdated(try c.decode(EmployeeCard.self, forKey: .card))
         case "inbox.updated":

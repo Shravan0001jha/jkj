@@ -48,13 +48,22 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder private var connection: some View {
-        switch model.connection {
-        case .online(let v): Label(v.isEmpty ? "Online" : "Online", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-        case .connecting: Label("Connecting…", systemImage: "antenna.radiowaves.left.and.right").foregroundStyle(.secondary)
-        case .offline(let reason, _): Label(reason, systemImage: "wifi.exclamationmark").foregroundStyle(.orange)
-        case .unauthorized: Label("Token refused", systemImage: "key.slash").foregroundStyle(.red)
-        case .unpaired: Label("Not paired", systemImage: "circle.dotted").foregroundStyle(.secondary)
+    private var connection: some View {
+        let (text, symbol, tint): (String, String, Color) = {
+            switch model.connection {
+            case .online: return ("Online", "checkmark.circle.fill", .green)
+            case .connecting: return ("Connecting…", "antenna.radiowaves.left.and.right", .secondary)
+            case .offline(let reason, _): return (reason, "wifi.exclamationmark", .orange)
+            case .unauthorized: return ("Token refused", "key.slash", .red)
+            case .unpaired: return ("Not paired", "circle.dotted", .secondary)
+            }
+        }()
+        return HStack(spacing: 6) {
+            Image(systemName: symbol)
+            Text(text)
         }
+        .foregroundStyle(tint)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Connection \(text)")
     }
 }

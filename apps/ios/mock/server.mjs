@@ -21,20 +21,22 @@ const QUIET = args.includes('--quiet');
 const TOKEN = 'mock-token-0123456789abcdef';
 const PAIR_CODE = '482913';
 
-// Mutable state: a fresh copy of the data on every start.
-const state = {
+// Mutable state: a fresh copy of the data on every start, and on POST /api/_reset (tests).
+const fresh = () => ({
   inbox: structuredClone(D.inbox),
   cards: structuredClone(D.cards),
-  agents: structuredClone(D.agents),
+  agents: Object.fromEntries(Object.values(structuredClone(D.agents)).map(a => [a.id, a])),
   logs: structuredClone(D.logs),
   features: structuredClone(D.features),
   assignments: structuredClone(D.assignments),
   spend: structuredClone(D.spend),
   usedCodes: new Set(),
-};
+});
+let state = fresh();
 let logSeq = 100;
 
 const clients = new Set();
+let tick = 0;
 const log = (...a) => { if (!QUIET) console.log(new Date().toISOString().slice(11, 19), ...a); };
 
 const json = (res, status, body) => {
@@ -87,6 +89,7 @@ const server = createServer(async (req, res) => {
     state.usedCodes.add(body.code);
     return json(res, 200, { token: TOKEN });
   }
+  if (m === 'POST' && p === '/api/_reset') { state = fresh(); tick = 0; log('state reset'); return json(res, 200, { ok: true }); }
   if (!p.startsWith('/api/')) return json(res, 404, { error: 'not found' });
   if (!authed(req, url)) return json(res, 401, { error: 'unauthorized' });
 
@@ -197,6 +200,7 @@ server.on('upgrade', (req, socket) => {
   log('ws open', `(${clients.size})`);
   socket.write(encodeFrame(JSON.stringify({ type: 'hello', version: D.health.version, startedAt: new Date().toISOString() })));
   socket.write(encodeFrame(JSON.stringify({ type: 'snapshot', projects: [], agents: Object.values(state.agents), mcp: [] })));
+  socket.write(encodeFrame(JSON.stringify({ type: 'office.snapshot', office: office() })));
 
   let buf = Buffer.alloc(0);
   socket.on('data', (chunk) => {
@@ -296,7 +300,6 @@ function decodeFrame(buf) {
 
 // ---- A scripted stream of live events, so the screens visibly change ----
 
-let tick = 0;
 setInterval(() => {
   if (clients.size === 0) return;
   tick++;
@@ -309,7 +312,7 @@ setInterval(() => {
       break;
     }
     case 2: {
-      const a = state.agents.rohan ?? Object.values(state.agents).find(x => x.name === 'rohan');
+      const a = Object.values(state.agents).find(x => x.name === 'rohan');
       if (!a) break;
       const entry = { id: `l-${logSeq++}`, agentId: a.id, at: new Date().toISOString(), kind: 'bash', label: 'Bash', text: `npm test -- --grep errand  # run ${tick}` };
       (state.logs[a.id] ??= []).push(entry);

@@ -27,6 +27,13 @@ final class OfficeStore {
     }
 
     func handle(_ event: ServerEvent) {
+        if case .officeSnapshot(let office) = event {
+            // Sent once per socket connect: the whole Office, fresher than any REST load in flight.
+            data = office
+            error = nil
+            loadedAt = Date()
+            return
+        }
         guard var d = data else { return }
         switch event {
         case .officeUpdated(let card):

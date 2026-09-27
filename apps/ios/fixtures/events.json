@@ -198,6 +198,835 @@
     "message": "Could not read your sessions"
   },
   {
+    "type": "office.snapshot",
+    "office": {
+      "units": [
+        {
+          "unit": {
+            "id": "product",
+            "title": "Product",
+            "parentId": null,
+            "kind": "unit"
+          },
+          "employees": [
+            {
+              "employee": {
+                "id": "asha",
+                "name": "Asha",
+                "roleId": "chief-of-staff",
+                "level": 0,
+                "permanent": true,
+                "charterIds": [
+                  "chief-of-staff",
+                  "product-and-business"
+                ],
+                "unitId": "product",
+                "chapterIds": [],
+                "reportsTo": null,
+                "workspace": {
+                  "repo": "/Users/shravan0001jha/claude-dev",
+                  "worktree": "/Users/shravan0001jha/claude-dev-asha",
+                  "branch": "wp/asha"
+                },
+                "budget": {
+                  "inrPerDay": 150,
+                  "concurrentSessions": 2
+                },
+                "githubApp": "iris-chief-of-staff",
+                "state": "working"
+              },
+              "charters": [
+                {
+                  "id": "chief-of-staff",
+                  "title": "Chief of Staff",
+                  "axis": "function",
+                  "version": 1,
+                  "mission": "Keep the organisation coherent: specs, routing, org proposals, the owner's decisions.",
+                  "holderIds": [
+                    "asha"
+                  ],
+                  "tokens": 900
+                },
+                {
+                  "id": "product-and-business",
+                  "title": "Product and business",
+                  "axis": "segment",
+                  "version": 2,
+                  "mission": "Pricing, legal and privacy, growth segments and the platform roadmap; decisions go to the owner.",
+                  "holderIds": [
+                    "asha"
+                  ],
+                  "tokens": 1020
+                }
+              ],
+              "currentWork": {
+                "id": "f-errands",
+                "kind": "feature",
+                "title": "Phone→Mac errands: say it on the phone, it happens on the Mac",
+                "body": "The owner says \"open the deck on my Mac\" on the phone. The cloud agent turns it into an errand, the Mac runs it through the experts, and the phone shows an honest result: never \"Done\" before it happened.",
+                "state": "in-progress",
+                "requirementIds": [
+                  "REQ-CROSS-01",
+                  "REQ-CROSS-03",
+                  "REQ-SYS-07"
+                ],
+                "platformIds": [
+                  "ios",
+                  "android",
+                  "mac",
+                  "server"
+                ],
+                "createdAt": "2026-09-27T07:00:00.000Z",
+                "updatedAt": "2026-09-27T08:55:00.000Z",
+                "history": [
+                  {
+                    "at": "2026-09-27T07:00:00.000Z",
+                    "from": null,
+                    "to": "stated",
+                    "by": "owner"
+                  },
+                  {
+                    "at": "2026-09-27T07:20:00.000Z",
+                    "from": "stated",
+                    "to": "specced",
+                    "by": "asha"
+                  },
+                  {
+                    "at": "2026-09-27T07:25:00.000Z",
+                    "from": "specced",
+                    "to": "decomposed",
+                    "by": "workplace"
+                  },
+                  {
+                    "at": "2026-09-27T08:00:00.000Z",
+                    "from": "decomposed",
+                    "to": "in-progress",
+                    "by": "workplace"
+                  }
+                ],
+                "spec": "## Spec\n1. Phone sends the instruction whole.\n2. Cloud agent asks the Mac (ask_mac); a busy Mac is online.\n3. No \"Done\" without a Mac result.\n\n## Acceptance\n- Round trip under 3 s on LAN.\n- False-done rate 0 over 20 errands."
+              },
+              "lastReport": "Spec written for the errand flow; decomposed into 5 assignments across 5 charters.",
+              "session": {
+                "id": "s-asha-1",
+                "projectId": "claude-dev",
+                "name": "asha",
+                "task": "Spec: phone→Mac errand flow",
+                "model": "sonnet",
+                "status": "running",
+                "workspace": "worktree",
+                "cwd": "/Users/shravan0001jha/claude-dev-mira",
+                "startedAt": "2026-09-27T08:20:00.000Z",
+                "usage": {
+                  "inputTokens": 18400,
+                  "outputTokens": 6200,
+                  "costUsd": 0.41
+                },
+                "messageCount": 14,
+                "permissionMode": "acceptEdits",
+                "alwaysAllowed": [
+                  "Read"
+                ],
+                "driven": true
+              },
+              "spendTodayInr": 96.2,
+              "needsYou": 1
+            }
+          ]
+        },
+        {
+          "unit": {
+            "id": "capabilities",
+            "title": "Capabilities",
+            "parentId": null,
+            "kind": "unit",
+            "budget": {
+              "inrPerDay": 500
+            }
+          },
+          "employees": [
+            {
+              "employee": {
+                "id": "dev",
+                "name": "Dev",
+                "roleId": "lead",
+                "level": 1,
+                "permanent": true,
+                "charterIds": [
+                  "conversation",
+                  "character"
+                ],
+                "unitId": "capabilities",
+                "chapterIds": [],
+                "reportsTo": "asha",
+                "workspace": {
+                  "repo": "/Users/shravan0001jha/claude-dev",
+                  "worktree": "/Users/shravan0001jha/claude-dev-dev",
+                  "branch": "wp/dev"
+                },
+                "budget": {
+                  "inrPerDay": 150,
+                  "concurrentSessions": 2
+                },
+                "githubApp": "iris-conversation-lead",
+                "state": "idle"
+              },
+              "charters": [
+                {
+                  "id": "conversation",
+                  "title": "Conversation",
+                  "axis": "capability",
+                  "version": 3,
+                  "mission": "Voice, STT/TTS, personality and the responsiveness ladder: something visible within 500 ms.",
+                  "holderIds": [
+                    "dev"
+                  ],
+                  "tokens": 1140
+                },
+                {
+                  "id": "character",
+                  "title": "Character",
+                  "axis": "capability",
+                  "version": 1,
+                  "mission": "The on-screen character: expressions, movement, moods, lip-sync, quiet by default.",
+                  "holderIds": [
+                    "dev"
+                  ],
+                  "tokens": 1260
+                }
+              ],
+              "currentWork": null,
+              "lastReport": "Spoken confirmations done, verified by Nikhil (48 tests, 3 live).",
+              "session": null,
+              "spendTodayInr": 21.5,
+              "needsYou": 1
+            },
+            {
+              "employee": {
+                "id": "mira",
+                "name": "Mira",
+                "roleId": "lead",
+                "level": 1,
+                "permanent": true,
+                "charterIds": [
+                  "experts"
+                ],
+                "unitId": "capabilities",
+                "chapterIds": [],
+                "reportsTo": "asha",
+                "workspace": {
+                  "repo": "/Users/shravan0001jha/claude-dev",
+                  "worktree": "/Users/shravan0001jha/claude-dev-mira",
+                  "branch": "wp/mira"
+                },
+                "budget": {
+                  "inrPerDay": 150,
+                  "concurrentSessions": 2
+                },
+                "githubApp": "iris-experts-lead",
+                "state": "needs-owner"
+              },
+              "charters": [
+                {
+                  "id": "experts",
+                  "title": "Experts",
+                  "axis": "capability",
+                  "version": 2,
+                  "mission": "Device actions with the no-lie guard: act first, then acknowledge.",
+                  "holderIds": [
+                    "mira"
+                  ],
+                  "tokens": 1380
+                }
+              ],
+              "currentWork": {
+                "id": "a-1",
+                "kind": "assignment",
+                "title": "Errand receiver on the Mac (experts)",
+                "body": "Errand receiver on the Mac (experts)",
+                "state": "building",
+                "requirementIds": [],
+                "platformIds": [
+                  "mac"
+                ],
+                "createdAt": "2026-09-27T07:00:00.000Z",
+                "updatedAt": "2026-09-27T08:55:00.000Z",
+                "history": [
+                  {
+                    "at": "2026-09-27T07:00:00.000Z",
+                    "from": null,
+                    "to": "proposed",
+                    "by": "owner"
+                  }
+                ],
+                "featureId": "f-errands",
+                "charterId": "experts",
+                "employeeId": "mira",
+                "sessionId": "s-mira-1",
+                "plan": "## Plan\n1. Add an `errand` expert that validates the instruction.\n2. Run it through the existing act-then-ack path.\n3. Tests for a busy Mac."
+              },
+              "lastReport": "Errand expert validates instructions; running the test suite needs your approval.",
+              "session": {
+                "id": "s-mira-1",
+                "projectId": "claude-dev",
+                "name": "mira",
+                "task": "Errand receiver on the Mac",
+                "model": "sonnet",
+                "status": "waiting",
+                "workspace": "worktree",
+                "cwd": "/Users/shravan0001jha/claude-dev-mira",
+                "startedAt": "2026-09-27T08:35:00.000Z",
+                "usage": {
+                  "inputTokens": 18400,
+                  "outputTokens": 6200,
+                  "costUsd": 0.41
+                },
+                "messageCount": 14,
+                "permissionMode": "acceptEdits",
+                "alwaysAllowed": [
+                  "Read"
+                ],
+                "driven": true,
+                "approval": {
+                  "id": "ap-1",
+                  "tool": "Bash",
+                  "input": "cd services/agent-svc && ../../.venv/bin/python -m pytest -q tests/test_errands.py",
+                  "reason": "Runs a command",
+                  "requestedAt": "2026-09-27T08:59:00.000Z"
+                }
+              },
+              "spendTodayInr": 131.8,
+              "needsYou": 0
+            },
+            {
+              "employee": {
+                "id": "kabir",
+                "name": "Kabir",
+                "roleId": "lead",
+                "level": 1,
+                "permanent": true,
+                "charterIds": [
+                  "memory",
+                  "server"
+                ],
+                "unitId": "capabilities",
+                "chapterIds": [
+                  "platforms-chapter"
+                ],
+                "reportsTo": "asha",
+                "workspace": {
+                  "repo": "/Users/shravan0001jha/claude-dev",
+                  "worktree": "/Users/shravan0001jha/claude-dev-kabir",
+                  "branch": "wp/kabir"
+                },
+                "budget": {
+                  "inrPerDay": 150,
+                  "concurrentSessions": 2
+                },
+                "githubApp": "iris-memory-lead",
+                "state": "blocked"
+              },
+              "charters": [
+                {
+                  "id": "memory",
+                  "title": "Memory",
+                  "axis": "capability",
+                  "version": 3,
+                  "mission": "Account beliefs across devices; L1/L2/L3 memory layers.",
+                  "holderIds": [
+                    "kabir"
+                  ],
+                  "tokens": 1500
+                },
+                {
+                  "id": "server",
+                  "title": "Server",
+                  "axis": "platform",
+                  "version": 1,
+                  "mission": "iris-api and the cloud agent; deploy only from the deploy worktree, back up iris.db first.",
+                  "holderIds": [
+                    "kabir"
+                  ],
+                  "tokens": 1620
+                }
+              ],
+              "currentWork": {
+                "id": "a-2",
+                "kind": "assignment",
+                "title": "Errand endpoint on iris-api",
+                "body": "Errand endpoint on iris-api",
+                "state": "blocked",
+                "requirementIds": [],
+                "platformIds": [
+                  "server"
+                ],
+                "createdAt": "2026-09-27T07:00:00.000Z",
+                "updatedAt": "2026-09-27T08:55:00.000Z",
+                "history": [
+                  {
+                    "at": "2026-09-27T08:00:00.000Z",
+                    "from": "planned",
+                    "to": "building",
+                    "by": "kabir"
+                  },
+                  {
+                    "at": "2026-09-27T08:30:00.000Z",
+                    "from": "building",
+                    "to": "blocked",
+                    "by": "kabir",
+                    "note": "Needs the contract for the Mac socket from experts."
+                  }
+                ],
+                "featureId": "f-errands",
+                "charterId": "server",
+                "employeeId": "kabir",
+                "sessionId": "s-kabir-1",
+                "plan": "## Plan\n1. POST /v1/errands.\n2. Persist and relay to the Mac socket."
+              },
+              "lastReport": "Blocked: no Mac socket contract from experts yet.",
+              "session": {
+                "id": "s-kabir-1",
+                "projectId": "claude-dev",
+                "name": "kabir",
+                "task": "Errand endpoint on iris-api",
+                "model": "sonnet",
+                "status": "error",
+                "workspace": "worktree",
+                "cwd": "/Users/shravan0001jha/claude-dev-mira",
+                "startedAt": "2026-09-27T07:30:00.000Z",
+                "usage": {
+                  "inputTokens": 18400,
+                  "outputTokens": 6200,
+                  "costUsd": 0.41
+                },
+                "messageCount": 14,
+                "permissionMode": "acceptEdits",
+                "alwaysAllowed": [
+                  "Read"
+                ],
+                "driven": true,
+                "endedAt": "2026-09-27T08:30:00.000Z"
+              },
+              "spendTodayInr": 74.6,
+              "needsYou": 1
+            }
+          ]
+        },
+        {
+          "unit": {
+            "id": "platforms",
+            "title": "Platforms",
+            "parentId": null,
+            "kind": "unit",
+            "budget": {
+              "inrPerDay": 300
+            }
+          },
+          "employees": [
+            {
+              "employee": {
+                "id": "rohan",
+                "name": "Rohan",
+                "roleId": "lead",
+                "level": 1,
+                "permanent": true,
+                "charterIds": [
+                  "desktop-mac",
+                  "windows"
+                ],
+                "unitId": "platforms",
+                "chapterIds": [],
+                "reportsTo": "asha",
+                "workspace": {
+                  "repo": "/Users/shravan0001jha/claude-dev",
+                  "worktree": "/Users/shravan0001jha/claude-dev-rohan",
+                  "branch": "wp/rohan"
+                },
+                "budget": {
+                  "inrPerDay": 150,
+                  "concurrentSessions": 2
+                },
+                "githubApp": "iris-desktop-mac-lead",
+                "state": "working"
+              },
+              "charters": [
+                {
+                  "id": "desktop-mac",
+                  "title": "Desktop (Mac)",
+                  "axis": "platform",
+                  "version": 2,
+                  "mission": "The Electron app on Apple Silicon and Intel; release via the notarised script.",
+                  "holderIds": [
+                    "rohan"
+                  ],
+                  "tokens": 1740
+                },
+                {
+                  "id": "windows",
+                  "title": "Windows",
+                  "axis": "platform",
+                  "version": 3,
+                  "mission": "The Windows build. A human teammate also develops here: coordinate, never overwrite.",
+                  "holderIds": [
+                    "rohan"
+                  ],
+                  "tokens": 1860
+                }
+              ],
+              "currentWork": {
+                "id": "a-3",
+                "kind": "assignment",
+                "title": "Desktop errand handler",
+                "body": "Desktop errand handler",
+                "state": "review",
+                "requirementIds": [],
+                "platformIds": [
+                  "mac"
+                ],
+                "createdAt": "2026-09-27T07:00:00.000Z",
+                "updatedAt": "2026-09-27T08:55:00.000Z",
+                "history": [
+                  {
+                    "at": "2026-09-27T07:00:00.000Z",
+                    "from": null,
+                    "to": "proposed",
+                    "by": "owner"
+                  }
+                ],
+                "featureId": "f-errands",
+                "charterId": "desktop-mac",
+                "employeeId": "rohan",
+                "sessionId": "s-rohan-1",
+                "plan": "## Plan\n1. Wire the socket message to the expert runner.\n2. Show the result in the pet bubble.",
+                "evidence": {
+                  "tests": {
+                    "passed": 212,
+                    "failed": 0,
+                    "command": "npm test"
+                  },
+                  "commits": [
+                    "8034a09 Phone actions on the Mac: no false Done",
+                    "ce943c7 Core round 9: errand lifecycle"
+                  ],
+                  "liveVerified": [
+                    "20 errands from the iPhone on LAN, 0 false done",
+                    "busy Mac reported online"
+                  ],
+                  "notVerified": [
+                    "Android sender",
+                    "Tailscale path"
+                  ],
+                  "notes": "https://github.com/Shravan0001jha/hivemind-prototype/pull/41"
+                }
+              },
+              "lastReport": "Desktop handler in review: 212 tests, 20 live errands, 0 false done.",
+              "session": {
+                "id": "s-rohan-1",
+                "projectId": "claude-dev",
+                "name": "rohan",
+                "task": "Desktop errand handler",
+                "model": "sonnet",
+                "status": "running",
+                "workspace": "worktree",
+                "cwd": "/Users/shravan0001jha/claude-dev-mira",
+                "startedAt": "2026-09-27T08:45:00.000Z",
+                "usage": {
+                  "inputTokens": 18400,
+                  "outputTokens": 6200,
+                  "costUsd": 0.41
+                },
+                "messageCount": 14,
+                "permissionMode": "acceptEdits",
+                "alwaysAllowed": [
+                  "Read"
+                ],
+                "driven": true
+              },
+              "spendTodayInr": 88.4,
+              "needsYou": 0
+            },
+            {
+              "employee": {
+                "id": "tara",
+                "name": "Tara",
+                "roleId": "lead",
+                "level": 1,
+                "permanent": true,
+                "charterIds": [
+                  "mobile"
+                ],
+                "unitId": "platforms",
+                "chapterIds": [],
+                "reportsTo": "asha",
+                "workspace": {
+                  "repo": "/Users/shravan0001jha/claude-dev",
+                  "worktree": "/Users/shravan0001jha/claude-dev-tara",
+                  "branch": "wp/tara"
+                },
+                "budget": {
+                  "inrPerDay": 150,
+                  "concurrentSessions": 2
+                },
+                "githubApp": "iris-mobile-lead",
+                "state": "paused"
+              },
+              "charters": [
+                {
+                  "id": "mobile",
+                  "title": "Mobile",
+                  "axis": "platform",
+                  "version": 1,
+                  "mission": "iPhone, iPad and Android apps; TestFlight via App Store Connect.",
+                  "holderIds": [
+                    "tara"
+                  ],
+                  "tokens": 1980
+                }
+              ],
+              "currentWork": {
+                "id": "a-4",
+                "kind": "assignment",
+                "title": "Errand sender in the iOS and Android apps",
+                "body": "Errand sender in the iOS and Android apps",
+                "state": "planned",
+                "requirementIds": [],
+                "platformIds": [
+                  "ios",
+                  "android"
+                ],
+                "createdAt": "2026-09-27T07:00:00.000Z",
+                "updatedAt": "2026-09-27T08:55:00.000Z",
+                "history": [
+                  {
+                    "at": "2026-09-27T07:00:00.000Z",
+                    "from": null,
+                    "to": "proposed",
+                    "by": "owner"
+                  }
+                ],
+                "featureId": "f-errands",
+                "charterId": "mobile",
+                "employeeId": "tara",
+                "plan": "## Plan\n1. iOS: send the whole instruction, show the ask_mac state.\n2. Android: same."
+              },
+              "lastReport": "Paused at the daily cap with the iOS sender half built.",
+              "session": null,
+              "spendTodayInr": 0,
+              "needsYou": 0
+            }
+          ]
+        },
+        {
+          "unit": {
+            "id": "quality",
+            "title": "Quality",
+            "parentId": null,
+            "kind": "unit"
+          },
+          "employees": [
+            {
+              "employee": {
+                "id": "nikhil",
+                "name": "Nikhil",
+                "roleId": "qa",
+                "level": 1,
+                "permanent": true,
+                "charterIds": [
+                  "qa-release",
+                  "beta-ops"
+                ],
+                "unitId": "quality",
+                "chapterIds": [],
+                "reportsTo": "asha",
+                "workspace": {
+                  "repo": "/Users/shravan0001jha/claude-dev",
+                  "worktree": "/Users/shravan0001jha/claude-dev-nikhil",
+                  "branch": "wp/nikhil"
+                },
+                "budget": {
+                  "inrPerDay": 150,
+                  "concurrentSessions": 2
+                },
+                "githubApp": "iris-qa",
+                "state": "idle"
+              },
+              "charters": [
+                {
+                  "id": "qa-release",
+                  "title": "QA and release",
+                  "axis": "function",
+                  "version": 2,
+                  "mission": "The different identity on every lead's PR; prepares releases the owner approves.",
+                  "holderIds": [
+                    "nikhil"
+                  ],
+                  "tokens": 2100
+                },
+                {
+                  "id": "beta-ops",
+                  "title": "Beta ops",
+                  "axis": "function",
+                  "version": 3,
+                  "mission": "Tester digests, alerts and crash reporting.",
+                  "holderIds": [
+                    "nikhil"
+                  ],
+                  "tokens": 2220
+                }
+              ],
+              "currentWork": null,
+              "lastReport": "Release 0.2.16 prepared and waiting for your approval.",
+              "session": null,
+              "spendTodayInr": 0,
+              "needsYou": 1
+            }
+          ]
+        }
+      ],
+      "coverage": {
+        "total": 118,
+        "owned": 118,
+        "planned": 61,
+        "built": 52,
+        "verified": 9,
+        "released": 0,
+        "byGroup": {
+          "Expressions": {
+            "total": 9,
+            "owned": 9,
+            "planned": 6,
+            "built": 5,
+            "verified": 1,
+            "released": 0
+          },
+          "Voice": {
+            "total": 11,
+            "owned": 11,
+            "planned": 8,
+            "built": 7,
+            "verified": 2,
+            "released": 0
+          },
+          "System actions": {
+            "total": 14,
+            "owned": 14,
+            "planned": 9,
+            "built": 8,
+            "verified": 3,
+            "released": 0
+          },
+          "Memory": {
+            "total": 8,
+            "owned": 8,
+            "planned": 5,
+            "built": 4,
+            "verified": 1,
+            "released": 0
+          },
+          "Cross-device": {
+            "total": 7,
+            "owned": 7,
+            "planned": 4,
+            "built": 2,
+            "verified": 0,
+            "released": 0
+          },
+          "Privacy and safety": {
+            "total": 9,
+            "owned": 9,
+            "planned": 2,
+            "built": 3,
+            "verified": 1,
+            "released": 0
+          },
+          "Pricing": {
+            "total": 6,
+            "owned": 6,
+            "planned": 1,
+            "built": 0,
+            "verified": 0,
+            "released": 0
+          }
+        },
+        "byCharter": {
+          "character": {
+            "total": 22,
+            "owned": 22,
+            "planned": 12,
+            "built": 11,
+            "verified": 2,
+            "released": 0
+          },
+          "conversation": {
+            "total": 18,
+            "owned": 18,
+            "planned": 11,
+            "built": 9,
+            "verified": 2,
+            "released": 0
+          },
+          "experts": {
+            "total": 24,
+            "owned": 24,
+            "planned": 14,
+            "built": 13,
+            "verified": 3,
+            "released": 0
+          },
+          "memory": {
+            "total": 8,
+            "owned": 8,
+            "planned": 5,
+            "built": 4,
+            "verified": 1,
+            "released": 0
+          },
+          "mobile": {
+            "total": 7,
+            "owned": 7,
+            "planned": 4,
+            "built": 2,
+            "verified": 0,
+            "released": 0
+          },
+          "product-and-business": {
+            "total": 39,
+            "owned": 39,
+            "planned": 15,
+            "built": 13,
+            "verified": 1,
+            "released": 0
+          }
+        }
+      },
+      "needsYou": 5,
+      "spend": {
+        "day": "2026-09-27",
+        "companyInr": 412.5,
+        "capInr": 1000,
+        "byEmployee": {
+          "asha": 96.2,
+          "mira": 131.8,
+          "rohan": 88.4,
+          "kabir": 74.6,
+          "dev": 21.5,
+          "tara": 0,
+          "nikhil": 0
+        },
+        "byUnit": {
+          "product": 96.2,
+          "capabilities": 227.9,
+          "platforms": 88.4,
+          "quality": 0
+        },
+        "paused": [
+          "employee:tara"
+        ]
+      },
+      "lintErrors": 0
+    }
+  },
+  {
     "type": "office.updated",
     "card": {
       "employee": {

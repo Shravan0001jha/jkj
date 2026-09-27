@@ -71,6 +71,9 @@ struct Agent: Codable, Equatable, Hashable, Identifiable {
     var alwaysAllowed: [String]?
     var driven: Bool?
     var approval: PendingApproval?
+    var employeeId: String?
+    var assignmentId: String?
+    var contextTokens: Int?
 }
 
 struct Project: Codable, Equatable, Hashable, Identifiable {

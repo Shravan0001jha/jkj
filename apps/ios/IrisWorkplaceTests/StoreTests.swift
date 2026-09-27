@@ -54,6 +54,18 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(s.data?.spend.companyInr, 999)
     }
 
+    func testOfficeSnapshotReplacesTheWholeOffice() async throws {
+        let s = OfficeStore()
+        XCTAssertNil(s.data)
+        var office = try Fixtures.decode("office", as: OfficeResponse.self)
+        office.needsYou = 1
+        s.handle(.officeSnapshot(office))
+        XCTAssertEqual(s.data?.needsYou, 1, "a snapshot fills an empty store")
+        office.needsYou = 3
+        s.handle(.officeSnapshot(office))
+        XCTAssertEqual(s.data?.needsYou, 3, "and replaces a loaded one")
+    }
+
     func testOfficeKeepsOldDataOnALoadError() async {
         let s = OfficeStore()
         await s.load(rest)
