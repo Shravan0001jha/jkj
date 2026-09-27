@@ -209,6 +209,7 @@ final class WorkplaceUITests: XCTestCase {
         sleep(3)
         shot("real-talk-interrupted")
         XCTAssertFalse(app.buttons["Allow once"].exists, "no tool approval was requested by a no-tools prompt")
+        app.swipeDown()   // the keyboard covers the tab bar until dismissed
         app.tabBars.buttons["Office"].tap()
         XCTAssertTrue(app.staticTexts["Spend today"].waitForExistence(timeout: 10))
         shot("real-office-after-talk")
