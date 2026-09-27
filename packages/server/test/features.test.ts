@@ -50,7 +50,7 @@ test('a feature stated without a spec is handed to the Chief of Staff, whose wri
     await tick();
     assert.ok(agentId);
     assert.ok(fake.last().options.prompt.includes('write_spec'));
-    assert.equal(fake.last().options.cwd, '/Users/shravan0001jha/claude-dev');
+    assert.ok(fake.last().options.cwd.includes('/asha/'), 'Asha works in her own worktree');
 
     const server = workplaceTools(wp, 'asha', () => ({ agentId: agentId!, employeeId: 'asha', startedAt: '', seen: {}, planCaptured: false }));
     const [ct, st] = InMemoryTransport.createLinkedPair();

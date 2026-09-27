@@ -1,7 +1,7 @@
 import {
   query,
-  type McpServerConfig, type Options, type PermissionMode as SdkPermissionMode, type PermissionResult,
-  type PermissionUpdate, type Query, type SDKUserMessage, type SettingSource,
+  type HookCallbackMatcher, type HookEvent, type McpServerConfig, type Options, type PermissionMode as SdkPermissionMode,
+  type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage, type SettingSource,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { PermissionMode } from '@jkj/shared';
 
@@ -114,6 +114,8 @@ export interface RunOptions {
   maxTurns?: number;
   /** In-process MCP servers: the Workplace's own tools for the employee. */
   mcpServers?: Record<string, McpServerConfig>;
+  /** Hooks run inside the CLI before/after tools: the Workplace's guards. */
+  hooks?: Partial<Record<HookEvent, HookCallbackMatcher[]>>;
 }
 
 export function startRun(options: RunOptions, events: RunEvents): RunHandle {
@@ -141,6 +143,7 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
     ...(options.maxBudgetUsd !== undefined ? { maxBudgetUsd: options.maxBudgetUsd } : {}),
     ...(options.maxTurns !== undefined ? { maxTurns: options.maxTurns } : {}),
     ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
+    ...(options.hooks ? { hooks: options.hooks } : {}),
     stderr: (data: string) => { for (const line of data.split('\n')) if (line.trim()) events.onStderr?.(line); },
 
     // Every tool call routes through the browser unless the mode auto-allows.

@@ -32,7 +32,7 @@ export const PLAN_FIRST =
 export function assembleContext(
   org: Org,
   employee: Employee,
-  options: { assignment?: WorkItem; maxTokens?: number; role?: string } = {},
+  options: { assignment?: WorkItem; maxTokens?: number; role?: string; worktree?: string; ownedPaths?: string[] } = {},
 ): AssembledContext {
   const layers: ContextLayer[] = [];
   const push = (id: string, kind: ContextLayer['kind'], label: string, summary: string, path: string, body: string): void => {
@@ -67,6 +67,12 @@ export function assembleContext(
     push('assignment', 'local', `Assignment: ${options.assignment.title}`, 'The work this session is for.', '', renderAssignment(options.assignment));
   }
 
+  if (options.worktree) {
+    push('workspace', 'local', 'Your workspace', 'Where you work, and what you may change.', '',
+      `Worktree: ${options.worktree} (your own branch; the base branch is ${employee.workspace.branch ?? 'main'}). Never work in the main checkout.\n` +
+      `Commit on your branch; never push, merge or rebase. The lead reviews and merges.\n` +
+      `Paths your charters own (the only ones you may change): ${(options.ownedPaths ?? []).join(', ') || 'none listed; ask the Chief of Staff'}.`);
+  }
   return render(employee, layers, options.maxTokens ?? 24_000);
 }
 

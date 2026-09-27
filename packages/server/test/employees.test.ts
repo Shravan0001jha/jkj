@@ -28,7 +28,7 @@ test('a session gets the layered context, the subscription token, and no API key
     await tick();
     const s = fake.last();
     assert.equal(agent.employeeId, 'mira');
-    assert.equal(s.options.cwd, '/Users/shravan0001jha/claude-dev');
+    assert.ok(s.options.cwd.includes('/mira/') && !s.options.cwd.startsWith('/Users/shravan0001jha/claude-dev'), `own worktree: ${s.options.cwd}`);
     assert.equal(s.options.model, 'sonnet');
     assert.equal(s.options.permissionMode, 'auto');
     assert.ok(s.options.allowedTools!.includes('mcp__travsr__*') && s.options.allowedTools!.includes('Bash(npm test:*)'), 'reads and tests never prompt');

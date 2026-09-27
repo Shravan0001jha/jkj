@@ -27,6 +27,8 @@ export interface Config {
   telegram: boolean;
   /** Copy the seed into an empty workplace directory. */
   seed: boolean;
+  /** Where employees' git worktrees live: <workDir>/<employee>/<repo>. Never a main checkout. */
+  workDir: string;
 }
 
 export function loadConfig(argv: string[] = process.argv.slice(2), env = process.env): Config {
@@ -54,5 +56,6 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
     digestHour: num(env['WORKPLACE_DIGEST_HOUR'], 9),
     telegram: !argv.includes('--no-telegram') && env['WORKPLACE_TELEGRAM'] !== '0',
     seed: !argv.includes('--no-seed'),
+    workDir: env['IRIS_WORK_DIR'] ?? join(homedir(), 'iris-work'),
   };
 }

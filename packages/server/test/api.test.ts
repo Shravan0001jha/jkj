@@ -94,8 +94,9 @@ test('a stated feature is specced, decomposed by the map, and every assignee get
       assert.equal('ANTHROPIC_API_KEY' in s.options.env!, false);
       assert.equal(s.options.env!['CLAUDE_CODE_OAUTH_TOKEN'], 'sk-ant-oat-test');
     }
-    const mobile = b.fake.sessions.find(s => s.options.cwd === '/Users/shravan0001jha/claude-dev-mobile');
-    assert.ok(mobile, 'Tara works in the mobile worktree');
+    const mobile = b.fake.sessions.find(s => s.options.cwd.includes('/tara/'));
+    assert.ok(mobile, 'Tara works in her own worktree');
+    assert.ok(b.fake.sessions.every(s => !s.options.cwd.startsWith('/Users/shravan0001jha/claude-dev')), 'never a main checkout');
 
     const after = await call<{ assignments: WorkItem[] }>(b.base, 'GET', `/api/features/${feature.body.id}`);
     assert.ok(after.body.assignments.every(a => a.state === 'planned' && a.plan?.startsWith('1. Read')));
@@ -139,7 +140,7 @@ test('a release waits in the Inbox, runs only after approval, and streams its lo
     assert.equal(answered.body.state, 'answered');
     const ran = await call<Release>(b.base, 'POST', `/api/releases/${rel.body.id}/run`);
     assert.equal(ran.body.state, 'done');
-    assert.deepEqual(spawned, ['/Users/shravan0001jha/claude-dev/scripts/release-iris.sh']);
+    assert.ok(spawned[0]!.endsWith('/scripts/release-iris.sh') && spawned.length === 1);
     await tick();
     assert.deepEqual(logs, ['line one']);
     ws.close();

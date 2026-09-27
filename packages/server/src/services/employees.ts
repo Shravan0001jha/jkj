@@ -10,6 +10,9 @@ import * as work from './work.js';
 import * as spend from './spend.js';
 import * as inbox from './inbox.js';
 import { assembleContext } from './context-layers.js';
+import { changedFiles, commitsSince, ensureWorktree, isMainCheckout, type Worktree } from './worktrees.js';
+import { guardTool, type GuardContext } from './guards.js';
+import { resolve as resolveOwner } from './ownership.js';
 import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
 import { now } from './store.js';
 import { BadRequest } from '../util/errors.js';
@@ -29,6 +32,7 @@ interface Session {
   agentId: string;
   employeeId: string;
   assignmentId?: string;
+  worktree?: Worktree;
   startedAt: string;
   /** Last cumulative usage seen per model, so each result is recorded as a delta. */
   seen: Record<string, { costUSD: number; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number }>;
@@ -44,6 +48,13 @@ export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done',
  * and the commands the charters name for building and testing. Everything
  * outward still goes through the Workplace's gates, not through a prompt.
  */
+/** Never, whatever the mode: the branch, the remotes and the release path are not the employee's. */
+export const FORBIDDEN_TOOLS = [
+  'Bash(git push:*)', 'Bash(git merge:*)', 'Bash(git rebase:*)', 'Bash(git reset --hard:*)', 'Bash(git filter-repo:*)',
+  'Bash(git worktree:*)', 'Bash(git remote:*)', 'Bash(ssh:*)', 'Bash(scp:*)', 'Bash(aws:*)', 'Bash(gh:*)', 'Bash(sudo:*)',
+  'Bash(scripts/release-iris.sh:*)', 'Bash(scripts/release-iris-x64.sh:*)', 'Bash(scripts/deploy-api.sh:*)', 'Bash(scripts/deploy-agent.sh:*)', 'Bash(scripts/deploy-web.sh:*)',
+];
+
 export const FREE_TOOLS = [
   'Read', 'Grep', 'Glob', 'LS', 'WebFetch', 'WebSearch', 'ToolSearch', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
   'mcp__travsr__*', 'mcp__prior__prior_recall',
@@ -89,18 +100,23 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
   }
 
   const role = wp.org.roles.find(r => r.id === emp.roleId);
-  const context = assembleContext(wp.org, emp, { ...(options.assignment ? { assignment: options.assignment } : {}), maxTokens: wp.config.contextTokens });
+  // Its own worktree, cut from the base branch: never the owner's checkout.
+  const worktree = ensureWorktree(wp.config.workDir, emp, options.assignment?.id ?? null);
+  if (isMainCheckout(wp.org, worktree.path)) throw new BadRequest(`Refusing to run ${emp.name} in a main checkout (${worktree.path}).`);
+  const repoId = wp.org.repos.find(r => r.root === emp.workspace.repo)?.id ?? 'iris';
+  const guard: GuardContext = { worktree: worktree.path, repoId, charterIds: emp.charterIds, map: wp.org.map, mainCheckouts: wp.org.repos.map(r => r.root) };
+  const context = assembleContext(wp.org, emp, { ...(options.assignment ? { assignment: options.assignment } : {}), maxTokens: wp.config.contextTokens, worktree: worktree.path, ownedPaths: ownedPaths(wp, emp, repoId) });
   const remaining = spend.remainingUsd(wp, employeeId);
 
-  const session: Session = { agentId: '', employeeId, ...(options.assignment ? { assignmentId: options.assignment.id } : {}), startedAt: now(), seen: {}, planCaptured: !!options.assignment?.plan };
+  const session: Session = { agentId: '', employeeId, ...(options.assignment ? { assignmentId: options.assignment.id } : {}), worktree, startedAt: now(), seen: {}, planCaptured: !!options.assignment?.plan };
 
   const agent = runs.createRunDirect({
     projectId: `employee:${employeeId}`,
     name: options.assignment ? options.assignment.title : `${emp.name}`,
     task: options.prompt,
     model: role?.model ?? 'sonnet',
-    cwd: emp.workspace.worktree ?? emp.workspace.repo,
-    workspace: emp.workspace.worktree ? 'worktree' : 'branch',
+    cwd: worktree.path,
+    workspace: 'worktree',
     prompt: options.prompt,
     permissionMode: role?.permissionMode ?? 'ask',
     ...(options.attachments ? { attachments: options.attachments } : {}),
@@ -114,7 +130,19 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
       settingSources: ['user', 'project'],
       // The Workplace's own tools are the reporting channel; they never prompt.
       allowedTools: [...WORKPLACE_TOOLS.map(t => `mcp__workplace__${t}`), ...FREE_TOOLS, ...(role?.tools.allowed ?? [])],
-      ...(role?.tools.disallowed?.length ? { disallowedTools: role.tools.disallowed.map(t => t.startsWith('mcp__') || /^[A-Z]/.test(t) ? t : `mcp__workplace__${t}`) } : {}),
+      disallowedTools: [...FORBIDDEN_TOOLS, ...(role?.tools.disallowed ?? []).map(t => t.startsWith('mcp__') || /^[A-Z]/.test(t) ? t : `mcp__workplace__${t}`)],
+      hooks: {
+        PreToolUse: [{
+          matcher: 'Edit|Write|MultiEdit|NotebookEdit|Bash',
+          hooks: [async input => {
+            const i = input as { tool_name: string; tool_input: Record<string, unknown> };
+            const d = guardTool(i.tool_name, i.tool_input ?? {}, guard);
+            return d.decision === 'allow'
+              ? { continue: true }
+              : { continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const, permissionDecisionReason: `Workplace guard: ${d.reason}` } };
+          }],
+        }],
+      },
       maxBudgetUsd: Math.max(0.05, remaining),
       mcpServers: { workplace: workplaceTools(wp, employeeId, () => session) },
     },
@@ -139,6 +167,23 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
   });
 
   return agent;
+}
+
+/** The map's path keys this employee's charters own, in its repo, as relative paths. */
+export function ownedPaths(wp: Workplace, emp: Employee, repoId: string): string[] {
+  return wp.org.map
+    .filter(m => m.kind === 'path' && emp.charterIds.includes(m.primary) && m.key.startsWith(`${repoId}:`))
+    .map(m => m.key.slice(repoId.length + 1).replace(/\/+$/, '') || '(whole repo)')
+    .sort();
+}
+
+/** Files changed on the branch that no charter of the employee owns. Empty is the only acceptable answer. */
+export function foreignChanges(wp: Workplace, emp: Employee, worktree: Worktree): string[] {
+  const repoId = wp.org.repos.find(r => r.root === worktree.repo)?.id ?? 'iris';
+  return changedFiles(worktree.path, worktree.base).filter(f => {
+    const owner = resolveOwner(wp.org.map, { kind: 'path', key: `${repoId}:${f}` });
+    return !owner || !emp.charterIds.includes(owner.primary);
+  });
 }
 
 /** The child gets the subscription token; the API key is absent, not blank. */
@@ -350,6 +395,15 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           const id = args.assignmentId ?? session().assignmentId;
           if (!id) return ok('No assignment is attached to this session; say what you did in your handoff instead.');
           const evidence: Evidence = { tests: { passed: args.testsPassed, failed: args.testsFailed, ...(args.testCommand ? { command: args.testCommand } : {}) }, commits: args.commits, liveVerified: args.liveVerified, notVerified: args.notVerified, ...(args.notes ? { notes: args.notes } : {}) };
+          // Before a commit counts as evidence: every changed file must be owned by one of the employee's charters.
+          const wt = session().worktree;
+          if (wt) {
+            const foreign = foreignChanges(wp, employee(wp, employeeId), wt);
+            if (foreign.length) return ok(`Not recorded: your branch changes files outside your charters: ${foreign.slice(0, 10).join(', ')}. Revert them or route them through their owner.`);
+            const real = commitsSince(wt.path, wt.base);
+            if (evidence.commits.length && real.length === 0) return ok('Not recorded: no commits on your branch since the base; commit your work first.');
+            if (real.length) evidence.commits = [...new Set([...evidence.commits, ...real.map(c => c.split(' ')[0]!)])];
+          }
           try {
             const item = work.reportDone(wp, id, evidence, employeeId);
             lastReport.set(employeeId, `Reported ${item.title}: ${evidence.tests.passed} passed / ${evidence.tests.failed} failed; ${evidence.commits.length} commits; live: ${evidence.liveVerified.join(', ') || 'none'}; not verified: ${evidence.notVerified.join(', ') || 'none'}`);
