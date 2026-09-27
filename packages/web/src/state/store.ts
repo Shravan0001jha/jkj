@@ -1,7 +1,9 @@
 import { useRef, useSyncExternalStore } from 'react';
 import type {
-  ActivityEvent, Agent, ApprovalDecision, Attachment, ContextResponse,
-  LogEntry, McpServer, PermissionMode, Project, ServerEvent,
+  Agent, ApprovalDecision, Attachment, ContextResponse, Coverage, EmployeeCard, EmployeeDetail,
+  FeatureBoard, FeatureDetail, HealthSignals, InboxItem, LogEntry, OfficeResponse, OrgResponse,
+  PermissionMode, Pivot, PivotRows, Release, Requirement, ServerEvent, SpendSummary,
+  WorkplaceHealthResponse, WorkplaceServerEvent,
 } from '@jkj/shared';
 import * as api from '../api/client.js';
 import { sendCommand, type SocketStatus } from '../api/socket.js';
@@ -11,58 +13,79 @@ import { sendCommand, type SocketStatus } from '../api/socket.js';
  *
  * A plain object plus subscribers — no state library until one earns its
  * place. Components read through `useStore(selector)`; nothing mutates
- * `state` outside the actions below.
- *
- * Data comes from the server and only from the server. Actions that would
- * change a Claude Code session are not silently dropped: JKJ is read-only for
- * now, and the ones that cannot work say so.
+ * `state` outside the actions below. Data comes from the server and only
+ * from the server; the socket keeps it current.
  */
 
-export type TabId = 'agents' | 'context' | 'mcp' | 'activity';
+export type RouteName = 'office' | 'org' | 'inbox' | 'features' | 'employee' | 'assign' | 'releases' | 'spend';
+
+export interface Route {
+  name: RouteName;
+  id?: string;
+}
 
 export interface AppState {
-  /* data */
-  projects: Project[];
+  /* navigation */
+  route: Route;
+
+  /* workplace data */
+  health: WorkplaceHealthResponse | null;
+  office: OfficeResponse | null;
+  org: OrgResponse | null;
+  inbox: InboxItem[];
+  features: FeatureBoard | null;
+  featureDetails: Record<string, FeatureDetail>;
+  pivot: Pivot | null;
+  pivotRows: PivotRows;
+  coverage: Coverage | null;
+  requirements: Requirement[];
+  employees: Record<string, EmployeeDetail>;
+  employeeContext: Record<string, ContextResponse>;
+  releases: Release[];
+  releaseLogs: Record<string, string[]>;
+  spend: SpendSummary | null;
+  signals: HealthSignals | null;
+
+  /* sessions */
   agents: Agent[];
   transcripts: Record<string, LogEntry[]>;
-  mcpInstalled: McpServer[];
-  /** Every context layer for the selected project, as it is on disk. */
-  context: ContextResponse | null;
-  activity: ActivityEvent[];
+  /** The session open on the employee page (a subagent run, when one is drilled into). */
+  openAgentId: string | null;
 
   /* ui */
-  selectedProjectId: string | null;
-  tab: TabId;
-  openAgentId: string | null;
-  focusCentral: boolean;
   connection: SocketStatus;
   loading: boolean;
   error: string | null;
-  /** Set when this machine has no Claude Code state to read. */
-  claudeHome: string | null;
-  newAgentOpen: boolean;
-  addProjectOpen: boolean;
   toast: string | null;
 }
 
 let state: AppState = {
-  projects: [],
+  route: parseHash(location.hash),
+
+  health: null,
+  office: null,
+  org: null,
+  inbox: [],
+  features: null,
+  featureDetails: {},
+  pivot: null,
+  pivotRows: 'charter',
+  coverage: null,
+  requirements: [],
+  employees: {},
+  employeeContext: {},
+  releases: [],
+  releaseLogs: {},
+  spend: null,
+  signals: null,
+
   agents: [],
   transcripts: {},
-  mcpInstalled: [],
-  context: null,
-  activity: [],
-
-  selectedProjectId: null,
-  tab: 'agents',
   openAgentId: null,
-  focusCentral: false,
+
   connection: 'connecting',
   loading: true,
   error: null,
-  claudeHome: null,
-  newAgentOpen: false,
-  addProjectOpen: false,
   toast: null,
 };
 
@@ -81,11 +104,8 @@ function subscribe(fn: () => void): () => void {
 }
 
 /**
- * Read a slice of state.
- *
- * The snapshot is cached and compared one level deep, because most selectors
- * derive a new array every call (`agents.filter(...)`). Without the cache
- * useSyncExternalStore would see a new value on every render and spin.
+ * Read a slice of state. The snapshot is cached and compared one level deep,
+ * because most selectors derive a new array every call.
  */
 export function useStore<T>(selector: (s: AppState) => T): T {
   const cache = useRef<{ value: T } | null>(null);
@@ -108,48 +128,121 @@ function shallowEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
-/* ---------- derived reads ---------- */
+/* ---------- routing ---------- */
 
-export const currentProject = (s: AppState): Project | undefined =>
-  s.projects.find(p => p.id === s.selectedProjectId);
+export function parseHash(hash: string): Route {
+  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  const name = (parts[0] ?? 'office') as RouteName;
+  const known: RouteName[] = ['office', 'org', 'inbox', 'features', 'employee', 'assign', 'releases', 'spend'];
+  if (!known.includes(name)) return { name: 'office' };
+  return parts[1] ? { name, id: decodeURIComponent(parts[1]) } : { name };
+}
 
-export const projectAgents = (s: AppState, projectId: string | null): Agent[] =>
-  projectId ? s.agents.filter(a => a.projectId === projectId && !a.parentAgentId) : [];
+export const hrefFor = (name: RouteName, id?: string): string =>
+  id ? `#/${name}/${encodeURIComponent(id)}` : `#/${name}`;
 
-export const agentById = (s: AppState, id: string | null): Agent | undefined =>
-  id ? s.agents.find(a => a.id === id) : undefined;
+export function navigate(name: RouteName, id?: string): void {
+  location.hash = hrefFor(name, id);
+}
 
-export const transcriptOf = (s: AppState, agentId: string): LogEntry[] =>
-  s.transcripts[agentId] ?? [];
+/** Called once from the App; the hash is the source of truth. */
+export function watchHash(): () => void {
+  const apply = (): void => {
+    const route = parseHash(location.hash);
+    set({ route, openAgentId: null });
+    void loadRoute(route);
+  };
+  window.addEventListener('hashchange', apply);
+  apply();
+  return () => window.removeEventListener('hashchange', apply);
+}
 
-/** One layer of the selected project's context, by its id. */
-export const contextLayer = (s: AppState, id: string) =>
-  s.context?.layers.find(l => l.id === id);
+/** What each screen needs, re-read every time it is opened. */
+export async function loadRoute(route: Route): Promise<void> {
+  try {
+    switch (route.name) {
+      case 'office': await loadOffice(); break;
+      case 'org': await loadOrg(); break;
+      case 'inbox': await loadInbox(); break;
+      case 'features':
+        await Promise.all([loadFeatures(), loadCoverage(), loadPivot(state.pivotRows)]);
+        if (route.id) await loadFeature(route.id);
+        break;
+      case 'employee': if (route.id) await loadEmployee(route.id); break;
+      case 'assign': await Promise.all([loadOrg(), loadRequirements()]); break;
+      case 'releases': await loadReleases(); break;
+      case 'spend': await Promise.all([loadSpend(), loadSignals()]); break;
+    }
+  } catch (err) {
+    showToast(message(err));
+  }
+}
 
 /* ---------- loading ---------- */
 
-/** First paint: everything the shell needs before it can render anything. */
 export async function loadWorkspace(): Promise<void> {
   try {
-    const [health, projects, agents] = await Promise.all([
-      api.getHealth(), api.getProjects(), api.getAgents(),
-    ]);
-
-    set({
-      claudeHome: health.claudeHome,
-      projects,
-      agents,
-      selectedProjectId: state.selectedProjectId ?? projects[0]?.id ?? null,
-      loading: false,
-      error: null,
-    });
-
-    if (state.selectedProjectId) void loadContext(state.selectedProjectId);
-    void loadMcp();
-    void loadActivity();
+    const [health, office, inbox] = await Promise.all([api.getHealth(), api.getOffice(), api.getInbox()]);
+    set({ health, office, inbox, loading: false, error: null });
   } catch (err) {
     set({ loading: false, error: message(err) });
   }
+}
+
+export async function loadOffice(): Promise<void> {
+  set({ office: await api.getOffice() });
+}
+
+export async function loadOrg(): Promise<void> {
+  set({ org: await api.getOrg() });
+}
+
+export async function loadInbox(): Promise<void> {
+  set({ inbox: await api.getInbox() });
+}
+
+export async function loadFeatures(): Promise<void> {
+  set({ features: await api.getFeatures() });
+}
+
+export async function loadFeature(id: string): Promise<void> {
+  const detail = await api.getFeature(id);
+  set({ featureDetails: { ...state.featureDetails, [id]: detail } });
+}
+
+export async function loadPivot(rows: PivotRows): Promise<void> {
+  set({ pivotRows: rows, pivot: await api.getPivot(rows) });
+}
+
+export async function loadCoverage(): Promise<void> {
+  set({ coverage: await api.getCoverage() });
+}
+
+export async function loadRequirements(group?: string): Promise<void> {
+  set({ requirements: await api.getRequirements(group) });
+}
+
+export async function loadEmployee(id: string): Promise<void> {
+  const [detail, context] = await Promise.all([api.getEmployee(id), api.getEmployeeContext(id).catch(() => null)]);
+  const known = new Map(state.agents.map(a => [a.id, a]));
+  for (const session of detail.sessions) known.set(session.id, session);
+  set({
+    employees: { ...state.employees, [id]: detail },
+    ...(context ? { employeeContext: { ...state.employeeContext, [id]: context } } : {}),
+    agents: [...known.values()],
+  });
+}
+
+export async function loadReleases(): Promise<void> {
+  set({ releases: await api.getReleases() });
+}
+
+export async function loadSpend(): Promise<void> {
+  set({ spend: await api.getSpend() });
+}
+
+export async function loadSignals(): Promise<void> {
+  set({ signals: await api.getSignals() });
 }
 
 export async function loadTranscript(agentId: string): Promise<void> {
@@ -161,37 +254,12 @@ export async function loadTranscript(agentId: string): Promise<void> {
   }
 }
 
-export async function loadContext(projectId: string): Promise<void> {
-  try {
-    set({ context: await api.getContext(projectId) });
-  } catch (err) {
-    set({ error: message(err) });
-  }
-}
+/* ---------- socket ---------- */
 
-export async function loadMcp(): Promise<void> {
-  try {
-    const { installed } = await api.getMcp();
-    set({ mcpInstalled: installed });
-  } catch (err) {
-    set({ error: message(err) });
-  }
-}
-
-export async function loadActivity(): Promise<void> {
-  try {
-    set({ activity: await api.getActivity() });
-  } catch (err) {
-    set({ error: message(err) });
-  }
-}
-
-/** Apply one event from the socket. */
-export function applyServerEvent(event: ServerEvent): void {
+export function applyServerEvent(event: ServerEvent | WorkplaceServerEvent): void {
   switch (event.type) {
     case 'snapshot':
-      set({ projects: event.projects, agents: event.agents, mcpInstalled: event.mcp, loading: false });
-      if (!state.selectedProjectId && event.projects[0]) set({ selectedProjectId: event.projects[0].id });
+      set({ agents: mergeAgents(state.agents, event.agents), loading: false });
       break;
 
     case 'agent.updated': {
@@ -201,29 +269,94 @@ export function applyServerEvent(event: ServerEvent): void {
           ? state.agents.map(a => (a.id === event.agent.id ? event.agent : a))
           : [...state.agents, event.agent],
       });
-      // A session JKJ drives streams its own lines, so only re-read the ones
-      // being written by a CLI somewhere else.
-      if (state.openAgentId === event.agent.id && !event.agent.driven) {
-        void loadTranscript(event.agent.id);
+      // The employee page shows the session, so keep the detail in step.
+      if (event.agent.employeeId && state.employees[event.agent.employeeId]) {
+        const detail = state.employees[event.agent.employeeId]!;
+        const sessions = detail.sessions.some(s => s.id === event.agent.id)
+          ? detail.sessions.map(s => (s.id === event.agent.id ? event.agent : s))
+          : [event.agent, ...detail.sessions];
+        set({ employees: { ...state.employees, [event.agent.employeeId]: { ...detail, sessions } } });
       }
       break;
     }
 
     case 'agent.log': {
       const existing = state.transcripts[event.entry.agentId];
-      if (!existing) break;   // not open, so nothing to append to
-      if (existing.some(e => e.id === event.entry.id)) break;   // already have it
-      set({
-        transcripts: {
-          ...state.transcripts,
-          [event.entry.agentId]: [...existing, event.entry],
-        },
-      });
+      if (!existing) break;
+      if (existing.some(e => e.id === event.entry.id)) break;
+      set({ transcripts: { ...state.transcripts, [event.entry.agentId]: [...existing, event.entry] } });
       break;
     }
 
     case 'agent.removed':
       set({ agents: state.agents.filter(a => a.id !== event.agentId) });
+      break;
+
+    case 'office.updated':
+      set({ office: patchCard(state.office, event.card) });
+      if (state.employees[event.card.employee.id]) {
+        const detail = state.employees[event.card.employee.id]!;
+        set({ employees: { ...state.employees, [event.card.employee.id]: { ...detail, employee: event.card.employee, spendTodayInr: event.card.spendTodayInr } } });
+      }
+      break;
+
+    case 'inbox.updated': {
+      const known = state.inbox.some(i => i.id === event.item.id);
+      const inbox = known ? state.inbox.map(i => (i.id === event.item.id ? event.item : i)) : [event.item, ...state.inbox];
+      set({ inbox, ...(state.office ? { office: { ...state.office, needsYou: inbox.filter(i => i.state === 'open').length } } : {}) });
+      break;
+    }
+
+    case 'work.updated':
+      if (event.item.kind === 'feature' && state.features) {
+        const known = state.features.features.some(f => f.id === event.item.id);
+        const features = known ? state.features.features.map(f => (f.id === event.item.id ? event.item : f)) : [event.item, ...state.features.features];
+        set({ features: { features, byState: countBy(features.map(f => f.state)) } });
+      }
+      if (event.item.featureId && state.featureDetails[event.item.featureId]) {
+        const detail = state.featureDetails[event.item.featureId]!;
+        const known = detail.assignments.some(a => a.id === event.item.id);
+        const assignments = known ? detail.assignments.map(a => (a.id === event.item.id ? event.item : a)) : [...detail.assignments, event.item];
+        set({ featureDetails: { ...state.featureDetails, [event.item.featureId]: { ...detail, assignments } } });
+      }
+      if (event.item.employeeId && state.employees[event.item.employeeId]) {
+        const detail = state.employees[event.item.employeeId]!;
+        const known = detail.assignments.some(a => a.id === event.item.id);
+        const assignments = known ? detail.assignments.map(a => (a.id === event.item.id ? event.item : a)) : [event.item, ...detail.assignments];
+        set({ employees: { ...state.employees, [event.item.employeeId]: { ...detail, assignments } } });
+      }
+      break;
+
+    case 'proposal.updated':
+      if (state.org) {
+        const known = state.org.proposals.some(p => p.id === event.proposal.id);
+        const proposals = known ? state.org.proposals.map(p => (p.id === event.proposal.id ? event.proposal : p)) : [event.proposal, ...state.org.proposals];
+        set({ org: { ...state.org, proposals } });
+        // An applied proposal changes the org; re-read it rather than guess.
+        if (event.proposal.state === 'applied' && state.route.name === 'org') void loadOrg();
+      }
+      break;
+
+    case 'release.updated': {
+      const known = state.releases.some(r => r.id === event.release.id);
+      set({ releases: known ? state.releases.map(r => (r.id === event.release.id ? event.release : r)) : [event.release, ...state.releases] });
+      break;
+    }
+
+    case 'release.log':
+      set({ releaseLogs: { ...state.releaseLogs, [event.id]: [...(state.releaseLogs[event.id] ?? []), event.line] } });
+      break;
+
+    case 'spend.updated':
+      set({ spend: event.summary, ...(state.office ? { office: { ...state.office, spend: event.summary } } : {}) });
+      break;
+
+    case 'signals.updated':
+      set({ signals: event.signals });
+      break;
+
+    case 'alert':
+      showToast(event.level === 'info' ? event.title : `${event.title} — ${event.body}`);
       break;
 
     case 'error':
@@ -235,80 +368,183 @@ export function applyServerEvent(event: ServerEvent): void {
   }
 }
 
+function mergeAgents(current: Agent[], incoming: Agent[]): Agent[] {
+  const byId = new Map(current.map(a => [a.id, a]));
+  for (const a of incoming) byId.set(a.id, a);
+  return [...byId.values()];
+}
+
+function patchCard(office: OfficeResponse | null, card: EmployeeCard): OfficeResponse | null {
+  if (!office) return office;
+  let found = false;
+  const units = office.units.map(u => ({
+    ...u,
+    employees: u.employees.map(e => {
+      if (e.employee.id !== card.employee.id) return e;
+      found = true;
+      return card;
+    }),
+  }));
+  if (!found) {
+    // A new hire: put it in its unit, or the first one.
+    const target = units.find(u => u.unit.id === card.employee.unitId) ?? units[0];
+    if (target) target.employees = [...target.employees, card];
+  }
+  return { ...office, units };
+}
+
+const countBy = (keys: string[]): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const k of keys) out[k] = (out[k] ?? 0) + 1;
+  return out;
+};
+
 export const setConnection = (connection: SocketStatus): void => set({ connection });
 
-/* ---------- ui actions ---------- */
+/* ---------- derived reads ---------- */
 
-export function selectProject(projectId: string): void {
-  set({ selectedProjectId: projectId, openAgentId: null, focusCentral: false });
-  void loadContext(projectId);
+export const agentById = (s: AppState, id: string | null): Agent | undefined =>
+  id ? s.agents.find(a => a.id === id) : undefined;
+
+export const transcriptOf = (s: AppState, agentId: string): LogEntry[] =>
+  s.transcripts[agentId] ?? [];
+
+export const needsYouCount = (s: AppState): number =>
+  s.office?.needsYou ?? s.inbox.filter(i => i.state === 'open').length;
+
+/* ---------- actions ---------- */
+
+export async function answerInbox(id: string, optionId: string, note?: string): Promise<void> {
+  try {
+    const item = await api.answerInbox(id, optionId, note);
+    set({ inbox: state.inbox.map(i => (i.id === id ? item : i)) });
+    showToast(`Answered: ${item.title}`);
+  } catch (err) {
+    showToast(message(err));
+  }
 }
 
-export function setTab(tab: TabId): void {
-  set({ tab });
-  // These files are edited outside JKJ all the time — by you in an editor, by
-  // Claude as it learns. Re-read them whenever the tab is opened rather than
-  // showing whatever was true when the page loaded.
-  if (tab === 'context' && state.selectedProjectId) void loadContext(state.selectedProjectId);
+export async function saveCharter(id: string, body: string): Promise<void> {
+  try {
+    await api.putCharter(id, body);
+    showToast('Charter saved.');
+    await loadOrg();
+  } catch (err) {
+    showToast(message(err));
+  }
 }
 
-export function openAgent(agentId: string): void {
-  set({ openAgentId: agentId, tab: 'agents' });
+/** Talk to an employee: continues its open session, or starts one from the files. */
+export async function talkTo(employeeId: string, text: string, attachments: Attachment[] = []): Promise<void> {
+  try {
+    const agent = await api.talkTo(employeeId, text, attachments);
+    set({ agents: mergeAgents(state.agents, [agent]), openAgentId: agent.id });
+    await loadTranscript(agent.id);
+    await loadEmployee(employeeId);
+  } catch (err) {
+    showToast(message(err));
+  }
+}
+
+export async function endEmployeeSession(employeeId: string): Promise<void> {
+  try {
+    showToast('Asking for the handoff…');
+    await api.endSession(employeeId);
+    set({ openAgentId: null });
+    await loadEmployee(employeeId);
+    showToast('Session ended. The handoff is in the files.');
+  } catch (err) {
+    showToast(message(err));
+  }
+}
+
+export const openAgent = (agentId: string): void => {
+  set({ openAgentId: agentId });
   void loadTranscript(agentId);
-}
+};
 
 export const closeAgent = (): void => set({ openAgentId: null });
 
-export function openCentralContext(): void {
-  set({ tab: 'context', focusCentral: true });
-  if (state.selectedProjectId) void loadContext(state.selectedProjectId);
-}
-
-export const setNewAgentOpen = (open: boolean): void => set({ newAgentOpen: open });
-
-export const setAddProjectOpen = (open: boolean): void => set({ addProjectOpen: open });
-
-/** A directory Claude Code has never run in has nothing to discover. */
-export async function addProject(path: string): Promise<void> {
+/** A message to a session the Workplace drives. */
+export async function sendMessage(agentId: string, text: string, attachments: Attachment[] = []): Promise<void> {
+  const agent = agentById(state, agentId);
+  if (!agent) return;
   try {
-    const project = await api.addProject(path);
-    const known = state.projects.some(p => p.id === project.id);
-    set({
-      projects: known ? state.projects : [...state.projects, project].sort((a, b) => a.name.localeCompare(b.name)),
-      selectedProjectId: project.id,
-      addProjectOpen: false,
-      openAgentId: null,
-    });
-    void loadContext(project.id);
+    if (agent.driven) {
+      await api.postMessage(agentId, text, attachments);
+      return;
+    }
+    if (agent.employeeId) {
+      await talkTo(agent.employeeId, text, attachments);
+      return;
+    }
+    showToast('That session has ended. Talk to the employee to start a new one.');
   } catch (err) {
     showToast(message(err));
   }
 }
 
-/** Forgets a directory. Nothing on disk is touched, sessions included. */
-export async function forgetProject(id: string): Promise<void> {
-  try {
-    await api.removeProject(id);
-    const remaining = state.projects.filter(p => p.id !== id);
-    set({
-      projects: remaining,
-      selectedProjectId: state.selectedProjectId === id ? remaining[0]?.id ?? null : state.selectedProjectId,
-    });
-  } catch (err) {
-    showToast(message(err));
-  }
+export function interruptAgent(agentId: string): void {
+  if (!sendCommand({ type: 'agent.interrupt', agentId })) showToast('Not connected to the server.');
 }
 
-/** Change how much a running session asks before touching your machine. */
+export function resolveApproval(agentId: string, decision: ApprovalDecision): void {
+  sendCommand({ type: 'agent.approve', agentId, approvalId: '', decision });
+}
+
 export function setPermissionMode(agentId: string, mode: PermissionMode): void {
   if (!sendCommand({ type: 'agent.mode', agentId, mode })) showToast('Not connected to the server.');
 }
 
+/** Context edits go straight to the files; debounced rather than saved per keystroke. */
+const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+export function editEmployeeContext(employeeId: string, id: string, body: string): void {
+  const context = state.employeeContext[employeeId];
+  if (!context) return;
+  set({
+    employeeContext: {
+      ...state.employeeContext,
+      [employeeId]: {
+        ...context,
+        layers: context.layers.map(layer =>
+          layer.id === id ? { ...layer, body, tokens: Math.round(body.length / 3.6) } : layer),
+      },
+    },
+  });
+  const key = `${employeeId}:${id}`;
+  clearTimeout(saveTimers.get(key));
+  saveTimers.set(key, setTimeout(() => {
+    api.putEmployeeContext(employeeId, id, body).catch(err => showToast(`Could not save: ${message(err)}`));
+  }, 700));
+}
+
+export async function decompose(featureId: string): Promise<void> {
+  try {
+    await api.decomposeFeature(featureId);
+    await Promise.all([loadFeature(featureId), loadFeatures()]);
+    showToast('Decomposed through the ownership map.');
+  } catch (err) {
+    showToast(message(err));
+  }
+}
+
+export async function startRelease(id: string): Promise<void> {
+  try {
+    set({ releaseLogs: { ...state.releaseLogs, [id]: [] } });
+    await api.runRelease(id);
+    await loadReleases();
+  } catch (err) {
+    showToast(message(err));
+    await loadReleases();
+  }
+}
+
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
-export function showToast(message: string): void {
-  set({ toast: message });
+export function showToast(text: string): void {
+  set({ toast: text });
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => set({ toast: null }), 4000);
+  toastTimer = setTimeout(() => set({ toast: null }), 4500);
 }
 
 export function toggleTheme(): void {
@@ -322,137 +558,6 @@ export function toggleTheme(): void {
   }
 }
 
-/* ---------- context edits ---------- */
-
-/**
- * Context edits go straight to the CLAUDE.md files Claude Code already reads,
- * so they are debounced rather than saved on every keystroke.
- */
-const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-function debounceSave(key: string, save: () => Promise<unknown>): void {
-  clearTimeout(saveTimers.get(key));
-  saveTimers.set(key, setTimeout(() => {
-    save().catch(err => showToast(`Could not save: ${message(err)}`));
-  }, 700));
-}
-
-export function editContext(id: string, body: string): void {
-  const context = state.context;
-  if (!context) return;
-
-  set({
-    context: {
-      ...context,
-      layers: context.layers.map(layer =>
-        layer.id === id ? { ...layer, body, tokens: Math.round(body.length / 3.6) } : layer),
-    },
-  });
-
-  debounceSave(id, () => api.putContext(context.projectId, id, body));
-}
-
-/* ---------- driving a session ---------- */
-
-/**
- * Only sessions JKJ started can be driven. One started in a terminal belongs
- * to that process, and nothing here can type into it.
- */
-const NOT_OURS = 'That session is open in a terminal. Close it there, then continue it here.';
-
-export async function createSession(
-  task: string,
-  model: string,
-  permissionMode: PermissionMode,
-  attachments: Attachment[] = [],
-): Promise<void> {
-  const projectId = state.selectedProjectId;
-  if (!projectId) return;
-
-  try {
-    const agent = await api.createAgent({
-      projectId, task, model, workspace: 'branch', permissionMode, attachments,
-    });
-    set({
-      agents: [agent, ...state.agents],
-      openAgentId: agent.id,
-      tab: 'agents',
-      newAgentOpen: false,
-    });
-
-    // The run starts logging the moment it is created, which is before this
-    // client has anywhere to put those lines. Read what it already has rather
-    // than starting from an empty transcript that is missing the prompt.
-    await loadTranscript(agent.id);
-  } catch (err) {
-    showToast(`Could not start it: ${message(err)}`);
-  }
-}
-
-/**
- * One box, two behaviours. A session JKJ drives takes the message straight
- * away; a finished one is picked back up first, and the message becomes its
- * next turn. A session still open in a terminal is the only one that cannot
- * be typed into, and it says so instead of offering a box.
- */
-export async function sendMessage(
-  agentId: string,
-  text: string,
-  attachments: Attachment[] = [],
-): Promise<void> {
-  const agent = agentById(state, agentId);
-  if (!agent) return;
-
-  try {
-    if (agent.driven) {
-      // Sent over REST rather than the socket: attachments are far larger
-      // than anything else the socket carries, and one path is easier to
-      // trust than a fast one beside a slow one.
-      await api.postMessage(agentId, text, attachments);
-      return;
-    }
-
-    if (agent.status === 'running' || agent.status === 'waiting') return showToast(NOT_OURS);
-
-    const resumed = await api.resumeAgent(agentId, text, attachments);
-    set({
-      agents: [resumed, ...state.agents.filter(a => a.id !== agentId)],
-      openAgentId: resumed.id,
-    });
-    await loadTranscript(resumed.id);
-  } catch (err) {
-    showToast(message(err));
-  }
-}
-
-export function interruptAgent(agentId: string): void {
-  const agent = agentById(state, agentId);
-  if (!agent?.driven) return showToast(NOT_OURS);
-  sendCommand({ type: 'agent.interrupt', agentId });
-}
-
-export function resolveApproval(agentId: string, decision: ApprovalDecision): void {
-  sendCommand({ type: 'agent.approve', agentId, approvalId: '', decision });
-}
-
-export async function archiveAgent(agentId: string): Promise<void> {
-  const agent = agentById(state, agentId);
-  if (!agent?.driven) return showToast('Only sessions JKJ started can be closed from here.');
-
-  try {
-    await api.archiveAgent(agentId);
-    set({ agents: state.agents.filter(a => a.id !== agentId), openAgentId: null });
-  } catch (err) {
-    showToast(message(err));
-  }
-}
-
-export const forkAgent = (): void =>
-  showToast('Forking a session is not wired up yet.');
-
-export const toggleMcp = (): void =>
-  showToast('MCP servers are configured with the claude CLI. JKJ shows them read-only.');
-
-function message(err: unknown): string {
+export function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

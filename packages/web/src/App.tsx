@@ -1,45 +1,48 @@
 import { useEffect } from 'react';
 import { AppShell } from './components/AppShell.js';
-import { NewAgentDialog } from './features/agents/NewAgentDialog.js';
-import { AgentsView } from './features/agents/AgentsView.js';
-import { ContextView } from './features/context/ContextView.js';
-import { McpView } from './features/mcp/McpView.js';
-import { ActivityFeed } from './features/activity/ActivityFeed.js';
-import { EmptyWorkspace } from './components/EmptyWorkspace.js';
-import { AddProjectDialog } from './components/AddProjectDialog.js';
-import { applyServerEvent, loadWorkspace, setConnection, useStore } from './state/store.js';
+import { OfficeView } from './features/office/OfficeView.js';
+import { OrgView } from './features/org/OrgView.js';
+import { InboxView } from './features/inbox/InboxView.js';
+import { FeaturesView } from './features/features/FeaturesView.js';
+import { EmployeeView } from './features/employee/EmployeeView.js';
+import { AssignView } from './features/assign/AssignView.js';
+import { ReleasesView } from './features/releases/ReleasesView.js';
+import { SpendView } from './features/spend/SpendView.js';
+import { applyServerEvent, loadWorkspace, setConnection, useStore, watchHash } from './state/store.js';
 import { connect } from './api/socket.js';
 
 /**
- * Composition root. Loads the workspace once, then lets the socket keep it
- * current — the server watches Claude Code's files so the UI never polls.
+ * Composition root. The hash is the router; the socket keeps every screen
+ * current once it has loaded.
  */
 export function App() {
-  const tab = useStore(s => s.tab);
+  const route = useStore(s => s.route);
+  const error = useStore(s => s.error);
   const loading = useStore(s => s.loading);
-  const projects = useStore(s => s.projects);
-  const newAgentOpen = useStore(s => s.newAgentOpen);
-  const addProjectOpen = useStore(s => s.addProjectOpen);
 
   useEffect(() => {
     void loadWorkspace();
-    return connect(applyServerEvent, setConnection);
+    const stopHash = watchHash();
+    const stopSocket = connect(applyServerEvent, setConnection);
+    return () => { stopHash(); stopSocket(); };
   }, []);
 
   return (
     <AppShell>
-      {loading || projects.length === 0
-        ? <div className="pane"><EmptyWorkspace /></div>
-        : (
-          <>
-            {tab === 'agents' && <AgentsView />}
-            {tab === 'context' && <div className="pane"><ContextView /></div>}
-            {tab === 'mcp' && <div className="pane"><McpView /></div>}
-            {tab === 'activity' && <div className="pane"><ActivityFeed /></div>}
-          </>
-        )}
-      {newAgentOpen && <NewAgentDialog />}
-      {addProjectOpen && <AddProjectDialog />}
+      {error && !loading ? (
+        <div className="pane"><div className="note"><b>The Workplace server is not reachable.</b> {error}</div></div>
+      ) : (
+        <>
+          {route.name === 'office' && <OfficeView />}
+          {route.name === 'org' && <OrgView />}
+          {route.name === 'inbox' && <InboxView />}
+          {route.name === 'features' && <FeaturesView />}
+          {route.name === 'employee' && route.id && <EmployeeView id={route.id} />}
+          {route.name === 'assign' && <AssignView />}
+          {route.name === 'releases' && <ReleasesView />}
+          {route.name === 'spend' && <SpendView />}
+        </>
+      )}
     </AppShell>
   );
 }

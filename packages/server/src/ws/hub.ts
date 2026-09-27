@@ -1,105 +1,78 @@
 import type { Server } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { Agent, ClientCommand, ServerEvent } from '@jkj/shared';
+import type { ClientCommand, ServerEvent, WorkplaceClientCommand, WorkplaceServerEvent } from '@jkj/shared';
 import { API } from '@jkj/shared';
-import { getSnapshot } from '../services/workspace.js';
-import { listInstalled } from '../services/mcp.js';
+import type { Workplace } from '../services/workplace.js';
+import type { Auth } from '../http/auth.js';
 import * as agents from '../services/agents.js';
+import * as inbox from '../services/inbox.js';
+import * as views from '../services/views.js';
 import { onRunEvent } from '../services/runs.js';
 import { log } from '../util/logger.js';
 
 /**
- * The socket hub.
- *
- * Claude Code writes its state to disk; nothing notifies us when it changes.
- * So the hub re-reads the snapshot on a timer and pushes only what differs,
- * which keeps every open tab current without any client polling.
+ * The socket hub: one connection per open page or phone, every Workplace
+ * event fanned out. Sessions report themselves; the org and the work emit on
+ * change; nothing is polled from disk.
  */
 
-const POLL_MS = 2500;
+type Command = ClientCommand | WorkplaceClientCommand;
 
-export function attachSocket(server: Server, version: string): void {
-  const wss = new WebSocketServer({ server, path: API.socket });
+export function attachSocket(server: Server, wp: Workplace, auth: Auth): void {
+  const wss = new WebSocketServer({ noServer: true });
   const clients = new Set<WebSocket>();
-  let previous = new Map<string, string>();   // agent id -> fingerprint
-  let timer: ReturnType<typeof setInterval> | null = null;
 
-  const broadcast = (event: ServerEvent): void => {
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    if (url.pathname !== API.socket) return;
+    if (!auth.allows(req)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+  });
+
+  const broadcast = (event: unknown): void => {
     const payload = JSON.stringify(event);
     for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(payload);
   };
 
-  // A session JKJ drives reports itself; there is nothing to poll for.
   onRunEvent(({ agent, entry }) => {
     if (agent) broadcast({ type: 'agent.updated', agent });
     if (entry) broadcast({ type: 'agent.log', entry });
   });
-
-  async function poll(): Promise<void> {
-    if (clients.size === 0) return;
-    try {
-      const { agents } = await getSnapshot(true);
-      const next = new Map(agents.map(a => [a.id, fingerprint(a)]));
-
-      for (const agent of agents) {
-        if (previous.get(agent.id) !== next.get(agent.id)) broadcast({ type: 'agent.updated', agent });
-      }
-      for (const id of previous.keys()) {
-        if (!next.has(id)) broadcast({ type: 'agent.removed', agentId: id });
-      }
-      previous = next;
-    } catch (err) {
-      log.warn('ws', `poll failed: ${err instanceof Error ? err.message : err}`);
-    }
-  }
+  wp.on(event => broadcast(event));
 
   wss.on('connection', async ws => {
     clients.add(ws);
     log.info('ws', `client connected (${clients.size} open)`);
-
-    send(ws, { type: 'hello', version, startedAt: new Date().toISOString() });
-
+    send(ws, { type: 'hello', version: wp.config.version, startedAt: new Date().toISOString() });
     try {
-      const snapshot = await getSnapshot();
-      previous = new Map(snapshot.agents.map(a => [a.id, fingerprint(a)]));
-      send(ws, {
-        type: 'snapshot',
-        projects: snapshot.projects,
-        agents: snapshot.agents,
-        mcp: await listInstalled(),
-      });
+      send(ws, { type: 'snapshot', projects: [], agents: await agents.listAgents(), mcp: [] });
+      broadcastTo(ws, { type: 'office.snapshot', office: views.office(wp) });
     } catch (err) {
-      send(ws, { type: 'error', message: err instanceof Error ? err.message : 'Could not read your sessions' });
+      send(ws, { type: 'error', message: err instanceof Error ? err.message : 'Could not read the workplace' });
     }
 
-    if (!timer) timer = setInterval(() => void poll(), POLL_MS);
-
     ws.on('message', raw => {
-      let command: ClientCommand;
+      let command: Command;
       try {
-        command = JSON.parse(String(raw)) as ClientCommand;
+        command = JSON.parse(String(raw)) as Command;
       } catch {
         return send(ws, { type: 'error', message: 'Malformed command' });
       }
-      handleCommand(ws, command);
+      handleCommand(wp, ws, command);
     });
 
     ws.on('close', () => {
       clients.delete(ws);
       log.info('ws', `client disconnected (${clients.size} open)`);
-      if (clients.size === 0 && timer) {
-        clearInterval(timer);
-        timer = null;
-      }
     });
   });
 }
 
-/**
- * Commands only apply to sessions JKJ started. The services throw a sentence
- * worth showing when they do not, which is better than a silent no-op.
- */
-function handleCommand(ws: WebSocket, command: ClientCommand): void {
+function handleCommand(wp: Workplace, ws: WebSocket, command: Command): void {
   try {
     switch (command.type) {
       case 'subscribe':
@@ -115,9 +88,11 @@ function handleCommand(ws: WebSocket, command: ClientCommand): void {
         break;
       case 'agent.mode':
         agents.setPermissionMode(command.agentId, command.mode).catch(err => send(ws, {
-          type: 'error',
-          message: err instanceof Error ? err.message : 'Could not change the mode',
+          type: 'error', message: err instanceof Error ? err.message : 'Could not change the mode',
         }));
+        break;
+      case 'inbox.answer':
+        inbox.answer(wp, command.id, command.optionId, command.note, 'web');
         break;
     }
   } catch (err) {
@@ -125,11 +100,10 @@ function handleCommand(ws: WebSocket, command: ClientCommand): void {
   }
 }
 
-/** Cheap change detection — the fields the UI actually renders. */
-function fingerprint(agent: Agent): string {
-  return [agent.status, agent.name, agent.task, agent.usage.inputTokens, agent.usage.outputTokens].join('|');
+function send(ws: WebSocket, event: ServerEvent): void {
+  ws.send(JSON.stringify(event));
 }
 
-function send(ws: WebSocket, event: ServerEvent): void {
+function broadcastTo(ws: WebSocket, event: WorkplaceServerEvent): void {
   ws.send(JSON.stringify(event));
 }

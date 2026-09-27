@@ -1,0 +1,115 @@
+# The first organisation. Seven employees, twelve charters, four units.
+# Why this shape: docs/HLD-workplace.md §3. Every change after the seed is a
+# proposal approved in the Inbox and a commit in this directory.
+
+repos:
+  - id: iris
+    root: /Users/shravan0001jha/claude-dev
+    branch: feat/iris-character
+  - id: iris-mobile
+    root: /Users/shravan0001jha/claude-dev-mobile
+    branch: feat/mobile
+  - id: iris-deploy
+    root: /Users/shravan0001jha/claude-dev-deploy
+    branch: deploy/api-2026-09-22
+  - id: iris-site
+    root: /Users/shravan0001jha/claude-dev-site
+    branch: site/app-downloads
+
+units:
+  - id: product
+    title: Product
+    parentId: null
+    kind: unit
+  - id: capabilities
+    title: Capabilities
+    parentId: null
+    kind: unit
+    budget: { inrPerDay: 500 }
+  - id: platforms
+    title: Platforms
+    parentId: null
+    kind: unit
+    budget: { inrPerDay: 350 }
+  - id: quality
+    title: Quality
+    parentId: null
+    kind: unit
+
+employees:
+  - id: asha
+    name: Asha
+    roleId: chief-of-staff
+    charterIds: [chief-of-staff, product-and-business]
+    unitId: product
+    chapterIds: []
+    reportsTo: null
+    workspace: { repo: /Users/shravan0001jha/claude-dev, branch: feat/iris-character }
+    budget: { inrPerDay: 250, concurrentSessions: 1 }
+    githubApp: iris-chief-of-staff
+
+  - id: dev
+    name: Dev
+    roleId: lead
+    charterIds: [conversation, character]
+    unitId: capabilities
+    chapterIds: []
+    reportsTo: asha
+    workspace: { repo: /Users/shravan0001jha/claude-dev, branch: feat/iris-character }
+    budget: { inrPerDay: 150, concurrentSessions: 1 }
+    githubApp: iris-conversation-lead
+
+  - id: mira
+    name: Mira
+    roleId: lead
+    charterIds: [experts]
+    unitId: capabilities
+    chapterIds: []
+    reportsTo: asha
+    workspace: { repo: /Users/shravan0001jha/claude-dev, branch: feat/iris-character }
+    budget: { inrPerDay: 150, concurrentSessions: 1 }
+    githubApp: iris-experts-lead
+
+  - id: kabir
+    name: Kabir
+    roleId: lead
+    charterIds: [memory, server]
+    unitId: capabilities
+    chapterIds: [platforms]
+    reportsTo: asha
+    workspace: { repo: /Users/shravan0001jha/claude-dev, branch: feat/iris-character }
+    budget: { inrPerDay: 150, concurrentSessions: 1 }
+    githubApp: iris-memory-lead
+
+  - id: rohan
+    name: Rohan
+    roleId: lead
+    charterIds: [desktop-mac, windows]
+    unitId: platforms
+    chapterIds: []
+    reportsTo: asha
+    workspace: { repo: /Users/shravan0001jha/claude-dev, branch: feat/iris-character }
+    budget: { inrPerDay: 150, concurrentSessions: 1 }
+    githubApp: iris-desktop-lead
+
+  - id: tara
+    name: Tara
+    roleId: lead
+    charterIds: [mobile]
+    unitId: platforms
+    chapterIds: []
+    reportsTo: asha
+    workspace: { repo: /Users/shravan0001jha/claude-dev-mobile, branch: feat/mobile }
+    budget: { inrPerDay: 150, concurrentSessions: 1 }
+    githubApp: iris-mobile-lead
+
+  - id: nikhil
+    name: Nikhil
+    roleId: qa
+    charterIds: [qa-release, beta-ops]
+    unitId: quality
+    chapterIds: []
+    reportsTo: asha
+    workspace: { repo: /Users/shravan0001jha/claude-dev, branch: feat/iris-character }
+    budget: { inrPerDay: 120, concurrentSessions: 1 }
+    githubApp: iris-qa

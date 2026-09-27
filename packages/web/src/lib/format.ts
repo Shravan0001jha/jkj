@@ -1,4 +1,4 @@
-import type { AgentStatus, McpHealth, Usage } from '@jkj/shared';
+import type { AgentStatus, EmployeeState, Usage, WorkState } from '@jkj/shared';
 
 /** Formatting helpers. Pure functions only — no React, no state. */
 
@@ -23,39 +23,36 @@ export function fmtTokens(n: number): string {
 
 export const fmtCost = (usd: number): string => `$${usd.toFixed(2)}`;
 
-/** Rough enough for a budget bar. The server owns the real count. */
-export const estimateTokens = (text: string): number => Math.round(text.length / 3.6);
+/** Rupees, whole numbers: the cap is a whole number and the ledger is an estimate. */
+export const inr = (n: number): string => `₹${Math.round(n).toLocaleString('en-IN')}`;
 
-/**
- * Status drives the stripe on a card and the dot in a list.
- *
- * A session that ended is neutral, not green: it stopped, which says nothing
- * about whether it went well. Colour is spent on the three states that want
- * your attention — working, waiting on you, failed.
- */
-export const statusColor: Record<AgentStatus, string> = {
-  running: 'var(--run)',
-  waiting: 'var(--wait)',
-  done: 'var(--line-strong)',
-  error: 'var(--err)',
-  idle: 'var(--line-strong)',
-};
+export const pct = (part: number, total: number): number => (total > 0 ? Math.round((part / total) * 100) : 0);
 
-/** Which pill a status wears. Ended sessions take the quiet one. */
+/** Which pill a session status wears. Ended sessions take the quiet one. */
 export const statusTone = (status: AgentStatus): string =>
   status === 'done' ? 'idle' : status;
 
-/** MCP health maps onto the same three semantic colours as agent status. */
-export const healthPill: Record<McpHealth, { cls: string; label: string }> = {
-  healthy: { cls: 'done', label: 'healthy' },
-  degraded: { cls: 'waiting', label: 'degraded' },
-  unreachable: { cls: 'error', label: 'unreachable' },
-  starting: { cls: 'waiting', label: 'starting' },
-  // Nothing has connected to it, so nothing is claimed about it.
-  unknown: { cls: 'idle', label: 'not probed' },
-};
+/**
+ * Employee states reuse the four session colours: working is the running
+ * teal, needs-you the amber, blocked the red, idle and paused the quiet grey.
+ */
+export const stateTone = (state: EmployeeState): string => ({
+  idle: 'idle',
+  working: 'running',
+  blocked: 'error',
+  'needs-owner': 'waiting',
+  paused: 'idle',
+} as Record<EmployeeState, string>)[state] ?? 'idle';
 
-export const slugify = (task: string): string =>
-  task.toLowerCase().split(/\s+/).slice(0, 3).join('-').replace(/[^a-z0-9-]/g, '') || 'agent';
+export const stateLabel = (state: EmployeeState): string =>
+  state === 'needs-owner' ? 'needs you' : state;
+
+export const workTone = (state: WorkState): string => ({
+  stated: 'idle', specced: 'idle', decomposed: 'running', 'in-progress': 'running', built: 'done', released: 'done',
+  proposed: 'idle', planned: 'running', building: 'running', review: 'waiting', done: 'done', blocked: 'error', rejected: 'error',
+} as Record<WorkState, string>)[state] ?? 'idle';
+
+export const firstLines = (text: string, n = 2): string =>
+  text.split('\n').map(l => l.trim()).filter(Boolean).slice(0, n).join(' · ');
 
 export const uid = (prefix: string): string => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;

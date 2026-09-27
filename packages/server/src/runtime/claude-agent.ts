@@ -1,7 +1,7 @@
 import {
   query,
-  type Options, type PermissionMode as SdkPermissionMode, type PermissionResult,
-  type PermissionUpdate, type Query, type SDKUserMessage,
+  type McpServerConfig, type Options, type PermissionMode as SdkPermissionMode, type PermissionResult,
+  type PermissionUpdate, type Query, type SDKUserMessage, type SettingSource,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { PermissionMode } from '@jkj/shared';
 
@@ -42,6 +42,15 @@ export interface RunEvents {
    */
   onPermission(request: PermissionRequest): Promise<'allow' | 'always' | 'deny'>;
   onUsage(inputTokens: number, outputTokens: number): void;
+  /** The SDK's init message: which MCP servers connected and how many tools exist. */
+  onInit?(init: { mcpServers: string[]; workplaceTools: number; tools: number }): void;
+  /** Lines the CLI process writes to stderr; the only place MCP start-up errors appear. */
+  onStderr?(line: string): void;
+  /**
+   * The end of a turn, with the SDK's cumulative accounting for the whole
+   * query: per-model tokens and estimated cost. Cumulative, so callers diff.
+   */
+  onResult?(result: RunResult): void;
   onDone(summary: string): void;
   onError(message: string): void;
 }
@@ -64,6 +73,21 @@ export interface RunHandle {
   close(): void;
 }
 
+export interface RunModelUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  costUSD: number;
+}
+
+export interface RunResult {
+  subtype: string;
+  totalCostUsd: number;
+  numTurns: number;
+  modelUsage: Record<string, RunModelUsage>;
+}
+
 export interface RunOptions {
   cwd: string;
   model: string;
@@ -73,13 +97,32 @@ export interface RunOptions {
   /** Continue an existing session by id rather than starting a new one. */
   resume?: string;
   permissionMode?: PermissionMode;
+  /**
+   * The child's environment. When given it REPLACES process.env, which is how
+   * ANTHROPIC_API_KEY is kept out of an employee's process: the subscription
+   * token is in, the key is simply absent.
+   */
+  env?: Record<string, string | undefined>;
+  /** Text appended to Claude Code's own system prompt: the layered context. */
+  systemPromptAppend?: string;
+  /** Which settings files load. 'project' is needed for the repo's CLAUDE.md. */
+  settingSources?: SettingSource[];
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  /** The SDK stops the query at this estimated cost. */
+  maxBudgetUsd?: number;
+  maxTurns?: number;
+  /** In-process MCP servers: the Workplace's own tools for the employee. */
+  mcpServers?: Record<string, McpServerConfig>;
 }
 
 export function startRun(options: RunOptions, events: RunEvents): RunHandle {
   const input = createInputQueue();
   input.push(options.prompt, options.images);
+  const abort = new AbortController();
 
   const sdkOptions: Options = {
+    abortController: abort,
     cwd: options.cwd,
     model: options.model,
     permissionMode: SDK_MODES[options.permissionMode ?? 'ask'],
@@ -88,6 +131,17 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
     // control rather than the deliberate rail it is.
     allowDangerouslySkipPermissions: true,
     ...(options.resume ? { resume: options.resume } : {}),
+    ...(options.env ? { env: options.env } : {}),
+    ...(options.systemPromptAppend
+      ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: options.systemPromptAppend } }
+      : {}),
+    ...(options.settingSources ? { settingSources: options.settingSources } : {}),
+    ...(options.allowedTools ? { allowedTools: options.allowedTools } : {}),
+    ...(options.disallowedTools ? { disallowedTools: options.disallowedTools } : {}),
+    ...(options.maxBudgetUsd !== undefined ? { maxBudgetUsd: options.maxBudgetUsd } : {}),
+    ...(options.maxTurns !== undefined ? { maxTurns: options.maxTurns } : {}),
+    ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
+    stderr: (data: string) => { for (const line of data.split('\n')) if (line.trim()) events.onStderr?.(line); },
 
     // Every tool call routes through the browser unless the mode auto-allows.
     canUseTool: async (toolName, toolInput, meta): Promise<PermissionResult> => {
@@ -130,7 +184,9 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
     // it was launched, and a refusal the caller cannot see becomes a UI that
     // claims a mode it does not have.
     setMode: mode => stream.setPermissionMode(SDK_MODES[mode]),
-    close: () => input.end(),
+    // Ending the input is not enough: a turn in flight would keep running
+    // tools with nobody watching. Abort the query so the process stops.
+    close: () => { input.end(); abort.abort(); },
   };
 }
 
@@ -141,6 +197,14 @@ async function consume(stream: Query, events: RunEvents): Promise<void> {
       switch (message.type) {
         case 'system':
           if ('session_id' in message && message.session_id) events.onSessionId(message.session_id);
+          if ('subtype' in message && message.subtype === 'init') {
+            const init = message as unknown as { mcp_servers?: { name: string; status: string }[]; tools?: string[] };
+            events.onInit?.({
+              mcpServers: (init.mcp_servers ?? []).map(s => `${s.name}:${s.status}`),
+              workplaceTools: (init.tools ?? []).filter(t => t.startsWith('mcp__workplace__')).length,
+              tools: (init.tools ?? []).length,
+            });
+          }
           break;
 
         case 'assistant': {
@@ -156,12 +220,26 @@ async function consume(stream: Query, events: RunEvents): Promise<void> {
           break;
         }
 
-        case 'result':
+        case 'result': {
           // The end of a turn, not the end of the session. With streaming
           // input the query keeps running and waits for the next message —
           // returning here would make every session answer exactly once.
-          events.onDone('subtype' in message ? String(message.subtype) : 'done');
+          const usage = message.modelUsage ?? {};
+          events.onResult?.({
+            subtype: String(message.subtype),
+            totalCostUsd: message.total_cost_usd ?? 0,
+            numTurns: message.num_turns ?? 0,
+            modelUsage: Object.fromEntries(Object.entries(usage).map(([model, u]) => [model, {
+              inputTokens: u.inputTokens ?? 0,
+              outputTokens: u.outputTokens ?? 0,
+              cacheReadInputTokens: u.cacheReadInputTokens ?? 0,
+              cacheCreationInputTokens: u.cacheCreationInputTokens ?? 0,
+              costUSD: u.costUSD ?? 0,
+            }])),
+          });
+          events.onDone(String(message.subtype));
           break;
+        }
 
         default:
           break;   // partials, hooks, progress: nothing the transcript needs
