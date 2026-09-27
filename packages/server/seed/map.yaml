@@ -1,0 +1,272 @@
+# The ownership map: things → the charter that owns them.
+# Path keys are "<repo>:<path>" with repos from org.yaml; paths match by the
+# longest prefix, everything else exactly. Keywords route free text.
+# Requirement groups are the 15 groups of the checklist plus the definition's
+# other sections; a "requirement" entry overrides its group for one id.
+
+entries:
+  # ---------- capability: conversation ----------
+  - { kind: path, key: "iris:services/agent-svc/speaker.py", primary: conversation }
+  - { kind: path, key: "iris:services/agent-svc/speaker_gate.py", primary: conversation }
+  - { kind: path, key: "iris:services/agent-svc/speech.py", primary: conversation }
+  - { kind: path, key: "iris:services/agent-svc/speech_acts.py", primary: conversation }
+  - { kind: path, key: "iris:services/agent-svc/stt_stream.py", primary: conversation }
+  - { kind: path, key: "iris:services/agent-svc/responsiveness.py", primary: conversation, consulted: [character] }
+  - { kind: path, key: "iris:services/agent-svc/reply_stream.py", primary: conversation }
+  - { kind: path, key: "iris:services/agent-svc/state_intent.py", primary: conversation }
+  - { kind: path, key: "iris:services/agent-svc/email_speech.py", primary: conversation, consulted: [experts] }
+  - { kind: path, key: "iris:services/agent-svc/prompt_cache.py", primary: conversation, consulted: [server] }
+  - { kind: path, key: "iris:services/agent-svc/speculate.py", primary: conversation }
+  - { kind: path, key: "iris:services/agent-svc/jokes.py", primary: conversation }
+  - { kind: path, key: "iris:harness", primary: conversation, consulted: [qa-release] }
+  - { kind: path, key: "iris:docs/HLD-responsiveness.md", primary: conversation }
+  - { kind: path, key: "iris:docs/HLD-single-speaker.md", primary: conversation }
+  - { kind: path, key: "iris:docs/HLD-live-voice.md", primary: conversation }
+  - { kind: path, key: "iris:docs/HLD-voice-expressivity.md", primary: conversation }
+  - { kind: path, key: "iris:desktop/renderer", primary: conversation, consulted: [character, desktop-mac] }
+  - { kind: keyword, key: "voice", primary: conversation }
+  - { kind: keyword, key: "stt", primary: conversation }
+  - { kind: keyword, key: "tts", primary: conversation }
+  - { kind: keyword, key: "wake word", primary: conversation }
+  - { kind: keyword, key: "responsiveness", primary: conversation }
+  - { kind: keyword, key: "500 ms", primary: conversation }
+  - { kind: keyword, key: "push-to-talk", primary: conversation, consulted: [product-and-business] }
+  - { kind: keyword, key: "speaks", primary: conversation }
+  - { kind: requirement-group, key: "Voice", primary: conversation, consulted: [product-and-business] }
+  - { kind: requirement-group, key: "Personality", primary: conversation, consulted: [character] }
+
+  # ---------- capability: character ----------
+  - { kind: path, key: "iris:desktop/character", primary: character }
+  - { kind: path, key: "iris:desktop/pet", primary: character }
+  - { kind: path, key: "iris:desktop/hud", primary: character }
+  - { kind: path, key: "iris:desktop/drop", primary: character, consulted: [experts] }
+  - { kind: path, key: "iris:services/agent-svc/expression.py", primary: character }
+  - { kind: path, key: "iris:services/agent-svc/character_spec.py", primary: character }
+  - { kind: path, key: "iris:services/agent-svc/proactive_trigger.py", primary: character, consulted: [conversation] }
+  - { kind: path, key: "iris:docs/PRODUCT-character.md", primary: character }
+  - { kind: path, key: "iris:docs/HLD-emotion-engine.md", primary: character }
+  - { kind: keyword, key: "character", primary: character }
+  - { kind: keyword, key: "expression", primary: character }
+  - { kind: keyword, key: "lip-sync", primary: character }
+  - { kind: keyword, key: "animation", primary: character }
+  - { kind: keyword, key: "mood", primary: character }
+  - { kind: requirement-group, key: "Expressions", primary: character }
+  - { kind: requirement-group, key: "Movement", primary: character }
+  - { kind: requirement-group, key: "Touch", primary: character }
+  - { kind: requirement-group, key: "Looks", primary: character }
+
+  # ---------- capability: experts ----------
+  - { kind: path, key: "iris:services/agent-svc", primary: experts, consulted: [conversation, memory] }
+  - { kind: path, key: "iris:services/agent-svc/experts", primary: experts }
+  - { kind: path, key: "iris:services/agent-svc/router.py", primary: experts }
+  - { kind: path, key: "iris:services/agent-svc/task_orchestrator.py", primary: experts }
+  - { kind: path, key: "iris:services/agent-svc/dispatch_policy.py", primary: experts }
+  - { kind: path, key: "iris:services/agent-svc/action_detect.py", primary: experts }
+  - { kind: path, key: "iris:services/agent-svc/arg_ground.py", primary: experts }
+  - { kind: path, key: "iris:services/agent-svc/phone.py", primary: experts, consulted: [mobile, server] }
+  - { kind: path, key: "iris:services/agent-svc/cloud_client.py", primary: experts, consulted: [server] }
+  - { kind: path, key: "iris:services/agent-svc/info_answer.py", primary: experts, consulted: [server] }
+  - { kind: path, key: "iris:services/agent-svc/task_registry.py", primary: experts }
+  - { kind: path, key: "iris:services/agent-svc/send_guard.py", primary: experts }
+  - { kind: path, key: "iris:services/agent-svc/pocket.py", primary: experts }
+  - { kind: path, key: "iris:services/agent-svc/media.py", primary: experts }
+  - { kind: path, key: "iris:services/agent-svc/context", primary: experts, consulted: [character] }
+  - { kind: path, key: "iris:docs/experts", primary: experts }
+  - { kind: path, key: "iris:docs/HLD-delegation.md", primary: experts }
+  - { kind: path, key: "iris:docs/HLD-lie-engine.md", primary: experts }
+  - { kind: keyword, key: "expert", primary: experts }
+  - { kind: keyword, key: "errand", primary: experts, consulted: [mobile, server] }
+  - { kind: keyword, key: "whatsapp", primary: experts, consulted: [product-and-business] }
+  - { kind: keyword, key: "calendar", primary: experts }
+  - { kind: keyword, key: "reminder", primary: experts }
+  - { kind: keyword, key: "timer", primary: experts }
+  - { kind: keyword, key: "browser", primary: experts }
+  - { kind: keyword, key: "terminal", primary: experts }
+  - { kind: keyword, key: "router", primary: experts }
+  - { kind: keyword, key: "no-lie", primary: experts }
+  - { kind: requirement-group, key: "System actions", primary: experts }
+  - { kind: requirement-group, key: "Communication", primary: experts, consulted: [product-and-business] }
+  - { kind: requirement-group, key: "Productivity", primary: experts }
+  - { kind: requirement-group, key: "Context reactions", primary: experts, consulted: [character] }
+
+  # ---------- capability: memory ----------
+  - { kind: path, key: "iris:services/agent-svc/memory_client.py", primary: memory }
+  - { kind: path, key: "iris:services/agent-svc/memory_api.py", primary: memory }
+  - { kind: path, key: "iris:services/agent-svc/memory_intent.py", primary: memory }
+  - { kind: path, key: "iris:services/agent-svc/memory_lookup.py", primary: memory }
+  - { kind: path, key: "iris:services/iris-api/memory.py", primary: memory, consulted: [server] }
+  - { kind: path, key: "iris:services/iris-api/test_memory.py", primary: memory }
+  - { kind: path, key: "iris:services/iris-api/test_api_memory.py", primary: memory }
+  - { kind: path, key: "iris:docs/HLD-iris-memory.md", primary: memory }
+  - { kind: path, key: "iris:docs/LLD-iris-memory.md", primary: memory }
+  - { kind: path, key: "iris:docs/HLD-memory.md", primary: memory }
+  - { kind: path, key: "iris:docs/experts/memory-client.md", primary: memory }
+  - { kind: path, key: "iris:docs/experts/memory-server.md", primary: memory }
+  - { kind: path, key: "iris:services/memory-svc", primary: memory }
+  - { kind: path, key: "iris:services/embeddings-svc", primary: memory }
+  - { kind: keyword, key: "memory", primary: memory }
+  - { kind: keyword, key: "belief", primary: memory }
+  - { kind: keyword, key: "consolidat", primary: memory }
+  - { kind: requirement-group, key: "Memory", primary: memory, consulted: [server, product-and-business] }
+
+  # ---------- platform: server ----------
+  - { kind: path, key: "iris:services/iris-api", primary: server }
+  - { kind: path, key: "iris:services/cloud-agent", primary: server, consulted: [experts] }
+  - { kind: path, key: "iris:services/llm-gateway", primary: server }
+  - { kind: path, key: "iris:services/orchestrator", primary: server }
+  - { kind: path, key: "iris:services/judgement-svc", primary: server }
+  - { kind: path, key: "iris:services/org-svc", primary: server }
+  - { kind: path, key: "iris:services/policy-svc", primary: server }
+  - { kind: path, key: "iris:services/cover-svc", primary: server }
+  - { kind: path, key: "iris:services/emotion-svc", primary: server, consulted: [character] }
+  - { kind: path, key: "iris:services/voice-svc", primary: server, consulted: [conversation] }
+  - { kind: path, key: "iris:services/brain-mcp", primary: server }
+  - { kind: path, key: "iris:services/README.md", primary: server }
+  - { kind: path, key: "iris:scripts/deploy-api.sh", primary: server }
+  - { kind: path, key: "iris:scripts/deploy-agent.sh", primary: server }
+  - { kind: path, key: "iris:scripts/deploy-web.sh", primary: server }
+  - { kind: path, key: "iris:scripts/ssh-window.sh", primary: server }
+  - { kind: path, key: "iris:scripts/set-quota.sh", primary: server }
+  - { kind: path, key: "iris:scripts/set-tier.sh", primary: server }
+  - { kind: path, key: "iris:scripts/revoke-user.sh", primary: server }
+  - { kind: path, key: "iris:scripts/attach-domain.sh", primary: server }
+  - { kind: path, key: "iris:web", primary: server, consulted: [product-and-business] }
+  - { kind: path, key: "iris:docker-compose.yml", primary: server }
+  - { kind: path, key: "iris:Procfile", primary: server }
+  - { kind: path, key: "iris:requirements.txt", primary: server }
+  - { kind: path, key: "iris:Makefile", primary: server }
+  - { kind: path, key: "iris:HLD.md", primary: server }
+  - { kind: path, key: "iris:docs/LLD", primary: server }
+  - { kind: path, key: "iris-deploy:", primary: server }
+  - { kind: path, key: "iris-site:", primary: server }
+  - { kind: service, key: "iris-api", primary: server }
+  - { kind: service, key: "cloud-agent", primary: server, consulted: [experts] }
+  - { kind: service, key: "website", primary: server }
+  - { kind: platform, key: "server", primary: server }
+  - { kind: platform, key: "web", primary: server }
+  - { kind: route, key: "/v1/chat", primary: server, consulted: [experts, mobile] }
+  - { kind: route, key: "/v1/memory", primary: memory, consulted: [server] }
+  - { kind: route, key: "/v1/relay", primary: server, consulted: [experts, mobile] }
+  - { kind: route, key: "/admin/logs", primary: server, consulted: [beta-ops] }
+  - { kind: keyword, key: "deploy", primary: server, consulted: [qa-release] }
+  - { kind: keyword, key: "cloud agent", primary: server, consulted: [experts] }
+  - { kind: keyword, key: "iris-api", primary: server }
+  - { kind: keyword, key: "quota", primary: server, consulted: [product-and-business] }
+  - { kind: keyword, key: "relay", primary: server }
+
+  # ---------- platform: desktop-mac ----------
+  - { kind: path, key: "iris:desktop", primary: desktop-mac, consulted: [character, conversation] }
+  - { kind: path, key: "iris:desktop/updater.js", primary: desktop-mac }
+  - { kind: path, key: "iris:desktop/release", primary: desktop-mac }
+  - { kind: path, key: "iris:desktop/onboarding", primary: desktop-mac, consulted: [product-and-business] }
+  - { kind: path, key: "iris:desktop/signin.js", primary: desktop-mac, consulted: [server] }
+  - { kind: path, key: "iris:desktop/auth.js", primary: desktop-mac, consulted: [server] }
+  - { kind: path, key: "iris:desktop/chat", primary: desktop-mac, consulted: [memory, conversation] }
+  - { kind: path, key: "iris:desktop/panel", primary: desktop-mac }
+  - { kind: path, key: "iris:desktop/slate", primary: desktop-mac, consulted: [experts] }
+  - { kind: path, key: "iris:services/agent-svc/iris-agent.spec", primary: desktop-mac }
+  - { kind: path, key: "iris:services/agent-svc/app.py", primary: experts, consulted: [conversation, desktop-mac] }
+  - { kind: path, key: "iris:services/agent-svc/iris_settings.py", primary: desktop-mac }
+  - { kind: path, key: "iris:scripts/release-iris.sh", primary: desktop-mac, consulted: [qa-release] }
+  - { kind: path, key: "iris:scripts/release-iris-x64.sh", primary: desktop-mac, consulted: [qa-release] }
+  - { kind: path, key: "iris:scripts/build-agent.sh", primary: desktop-mac }
+  - { kind: path, key: "iris:scripts/sign-app.sh", primary: desktop-mac }
+  - { kind: path, key: "iris:scripts/rollback-iris.sh", primary: qa-release, consulted: [desktop-mac] }
+  - { kind: path, key: "iris:scripts/smoke-iris.sh", primary: qa-release }
+  - { kind: path, key: "iris:scripts/run-desktop.sh", primary: desktop-mac }
+  - { kind: path, key: "iris:scripts", primary: desktop-mac, consulted: [server, qa-release] }
+  - { kind: path, key: "iris:Procfile.desktop", primary: desktop-mac }
+  - { kind: path, key: "iris:docs/HLD-desktop.md", primary: desktop-mac }
+  - { kind: path, key: "iris:docs/HLD-mac-workspace.md", primary: desktop-mac, consulted: [experts] }
+  - { kind: path, key: "iris:docs", primary: chief-of-staff }
+  - { kind: platform, key: "mac", primary: desktop-mac }
+  - { kind: platform, key: "intel", primary: desktop-mac }
+  - { kind: keyword, key: "electron", primary: desktop-mac }
+  - { kind: keyword, key: "notari", primary: desktop-mac }
+  - { kind: keyword, key: "dmg", primary: desktop-mac }
+  - { kind: keyword, key: "release", primary: qa-release, consulted: [desktop-mac] }
+  - { kind: keyword, key: "intel", primary: desktop-mac }
+
+  # ---------- platform: windows ----------
+  - { kind: path, key: "iris:Procfile.windows", primary: windows }
+  - { kind: path, key: "iris:scripts/release-iris-win.ps1", primary: windows }
+  - { kind: path, key: "iris:scripts/build-agent.ps1", primary: windows }
+  - { kind: path, key: "iris:scripts/run-desktop.ps1", primary: windows }
+  - { kind: path, key: "iris:scripts/make-win-icon.ps1", primary: windows }
+  - { kind: path, key: "iris:.github", primary: windows, consulted: [qa-release] }
+  - { kind: platform, key: "windows", primary: windows }
+  - { kind: keyword, key: "windows", primary: windows }
+  - { kind: keyword, key: "powershell", primary: windows }
+
+  # ---------- platform: mobile ----------
+  - { kind: path, key: "iris-mobile:", primary: mobile }
+  - { kind: path, key: "iris-mobile:mobile/ios", primary: mobile }
+  - { kind: path, key: "iris-mobile:mobile/android", primary: mobile }
+  - { kind: path, key: "iris:mobile", primary: mobile }
+  - { kind: path, key: "iris:services/iris-api/apns.py", primary: server, consulted: [mobile] }
+  - { kind: path, key: "iris:services/iris-api/fcm.py", primary: server, consulted: [mobile] }
+  - { kind: path, key: "iris:services/iris-api/asc.py", primary: mobile, consulted: [server, qa-release] }
+  - { kind: platform, key: "ios", primary: mobile }
+  - { kind: platform, key: "ipad", primary: mobile }
+  - { kind: platform, key: "android", primary: mobile }
+  - { kind: keyword, key: "iphone", primary: mobile }
+  - { kind: keyword, key: "ios", primary: mobile }
+  - { kind: keyword, key: "ipad", primary: mobile }
+  - { kind: keyword, key: "android", primary: mobile }
+  - { kind: keyword, key: "testflight", primary: mobile, consulted: [qa-release] }
+  - { kind: keyword, key: "widget", primary: mobile }
+  - { kind: keyword, key: "live activit", primary: mobile }
+  - { kind: requirement-group, key: "Cross-device", primary: mobile, consulted: [experts, server] }
+
+  # ---------- function: qa-release ----------
+  - { kind: keyword, key: "verify", primary: qa-release }
+  - { kind: keyword, key: "regression", primary: qa-release }
+  - { kind: path, key: "iris:scripts/tester-logs.sh", primary: beta-ops }
+  - { kind: path, key: "iris:scripts/ticket.sh", primary: beta-ops }
+  - { kind: path, key: "iris:docs/KNOWN-ISSUES.md", primary: beta-ops, consulted: [qa-release] }
+  - { kind: path, key: "iris:docs/ISSUE-LOG.md", primary: beta-ops }
+  - { kind: keyword, key: "tester", primary: beta-ops }
+  - { kind: keyword, key: "crash", primary: beta-ops }
+  - { kind: keyword, key: "digest", primary: beta-ops }
+  - { kind: keyword, key: "observab", primary: beta-ops }
+  - { kind: keyword, key: "alert", primary: beta-ops }
+  - { kind: requirement-group, key: "Observability", primary: beta-ops, consulted: [server] }
+
+  # ---------- function: product-and-business ----------
+  - { kind: path, key: "iris:docs/iris-mvp", primary: product-and-business }
+  - { kind: path, key: "iris:docs/board", primary: product-and-business }
+  - { kind: path, key: "iris:disclosure_policy.txt", primary: product-and-business }
+  - { kind: path, key: "iris:policies.txt", primary: product-and-business }
+  - { kind: keyword, key: "pricing", primary: product-and-business, consulted: [server] }
+  - { kind: keyword, key: "billing", primary: product-and-business, consulted: [server] }
+  - { kind: keyword, key: "payment", primary: product-and-business, consulted: [server] }
+  - { kind: keyword, key: "trial", primary: product-and-business }
+  - { kind: keyword, key: "dpdp", primary: product-and-business }
+  - { kind: keyword, key: "privacy", primary: product-and-business }
+  - { kind: keyword, key: "legal", primary: product-and-business }
+  - { kind: keyword, key: "18+", primary: product-and-business }
+  - { kind: keyword, key: "disclosure", primary: product-and-business }
+  - { kind: keyword, key: "segment", primary: product-and-business }
+  - { kind: keyword, key: "student", primary: product-and-business }
+  - { kind: keyword, key: "accessibility", primary: product-and-business, consulted: [conversation] }
+  - { kind: keyword, key: "security", primary: product-and-business, consulted: [server, experts] }
+  - { kind: keyword, key: "screen share", primary: product-and-business, consulted: [character, desktop-mac] }
+  - { kind: requirement-group, key: "Social", primary: product-and-business }
+  - { kind: requirement-group, key: "Privacy and safety", primary: product-and-business, consulted: [desktop-mac, server] }
+  - { kind: requirement-group, key: "Promises", primary: product-and-business, consulted: [conversation, experts] }
+  - { kind: requirement-group, key: "Theme", primary: product-and-business, consulted: [conversation, character] }
+  - { kind: requirement-group, key: "Platforms", primary: product-and-business, consulted: [desktop-mac, mobile, windows] }
+  - { kind: requirement-group, key: "Segments", primary: product-and-business }
+  - { kind: requirement-group, key: "Pricing", primary: product-and-business, consulted: [server] }
+  - { kind: requirement-group, key: "Plan", primary: product-and-business }
+  - { kind: requirement-group, key: "Legal", primary: product-and-business, consulted: [server, desktop-mac] }
+  - { kind: requirement-group, key: "Security", primary: product-and-business, consulted: [server, experts] }
+  - { kind: requirement-group, key: "Architecture", primary: chief-of-staff, consulted: [server, experts, memory] }
+
+  # ---------- function: chief-of-staff ----------
+  - { kind: path, key: "iris:README.md", primary: chief-of-staff }
+  - { kind: path, key: "iris:CLAUDE.md", primary: chief-of-staff }
+  - { kind: path, key: "iris:VM_is_working.md", primary: chief-of-staff }
+  - { kind: keyword, key: "repo split", primary: chief-of-staff }
+  - { kind: keyword, key: "org change", primary: chief-of-staff }
+  - { kind: keyword, key: "spec", primary: chief-of-staff }

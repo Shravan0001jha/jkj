@@ -125,7 +125,7 @@ function layer(spec: {
  * nested in a monorepo picks up the root's CLAUDE.md the way the CLI does.
  * Stops at home: nothing above that belongs to one project.
  */
-function ancestry(projectPath: string): string[] {
+export function ancestry(projectPath: string): string[] {
   const root = homedir();
   const rel = relative(root, projectPath);
   if (rel.startsWith('..')) return [projectPath];   // outside home, no chain to walk

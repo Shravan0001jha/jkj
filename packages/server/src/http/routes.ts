@@ -207,7 +207,7 @@ const isMode = (value: unknown): value is PermissionMode =>
   typeof value === 'string' && (MODES as string[]).includes(value);
 
 /** Attachments are decoded on the server, so the wire is checked first. */
-function validateMessage(body: Record<string, unknown>): { text: string; attachments: Attachment[] } {
+export function validateMessage(body: Record<string, unknown>): { text: string; attachments: Attachment[] } {
   const text = typeof body['text'] === 'string' ? body['text'].trim() : '';
   const raw = Array.isArray(body['attachments']) ? body['attachments'] : [];
 
@@ -225,7 +225,7 @@ function validateMessage(body: Record<string, unknown>): { text: string; attachm
 }
 
 /** A request body is untrusted until every field has been checked. */
-function validateCreate(body: Record<string, unknown>): CreateAgentRequest {
+export function validateCreate(body: Record<string, unknown>): CreateAgentRequest {
   const task = typeof body['task'] === 'string' ? body['task'].trim() : '';
   const projectId = typeof body['projectId'] === 'string' ? body['projectId'] : '';
   if (!task) throw new BadRequest('A session needs something to do.');

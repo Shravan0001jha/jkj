@@ -1,15 +1,44 @@
 /**
- * Errors the caller caused, separated from errors JKJ caused.
+ * Errors the caller caused, separated from errors the Workplace caused.
  *
  * Without the distinction every mistake is a 500, which tells the browser
  * "the server broke" when the truth is "that file cannot be read".
  */
 export class BadRequest extends Error {
-  readonly status = 400;
+  readonly status: number = 400;
 
   constructor(message: string) {
     super(message);
     this.name = 'BadRequest';
+  }
+}
+
+/** The request was fine, but the world moved: answered twice, applied twice. */
+export class Conflict extends BadRequest {
+  override readonly status = 409;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'Conflict';
+  }
+}
+
+export class NotFound extends BadRequest {
+  override readonly status = 404;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'NotFound';
+  }
+}
+
+/** Off-loopback without the bearer token. */
+export class Unauthorized extends BadRequest {
+  override readonly status = 401;
+
+  constructor(message = 'A bearer token is required off loopback.') {
+    super(message);
+    this.name = 'Unauthorized';
   }
 }
 

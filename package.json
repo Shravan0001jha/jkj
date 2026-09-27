@@ -16,11 +16,14 @@
     "dev:web": "npm run dev -w @jkj/web",
     "build": "npm run build -w @jkj/shared && npm run build -w @jkj/web && npm run build -w @jkj/server",
     "typecheck": "tsc -b --pretty",
-    "start": "node packages/server/dist/cli.js"
+    "start": "node packages/server/dist/cli.js",
+    "test": "node --import tsx --test \"packages/server/test/**/*.test.ts\""
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
     "typescript": "^5.7.2"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }
