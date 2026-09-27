@@ -37,6 +37,8 @@ export async function start(config: Config): Promise<Running> {
 
   // The decisions the definition leaves open go to the owner, once.
   seedDecisions(wp);
+  // Sessions that were open when the last process died are reported, never forgotten.
+  employees.recoverAfterRestart(wp);
 
   // Caps pause sessions; the owner's answer unpauses.
   spend.onPause((w, scope) => employees.pauseScope(w, scope));
@@ -47,6 +49,7 @@ export async function start(config: Config): Promise<Running> {
     status: () => statusLine(wp),
     off: () => { tunnel?.off(); return tunnel ? 'Published access is OFF: the tunnel to the relay is dropped and every remote session is gone. Restart the Workplace to publish again.' : 'Nothing is published; no tunnel is configured.'; },
     enrolOn: () => (tunnel?.enrolOn() ? 'Passkey enrolment re-enabled on the relay.' : 'The relay is not connected; try again when the tunnel is up.'),
+    on: () => (tunnel ? (tunnel.on() ? 'Publishing again: the tunnel is reconnecting.' : `Nothing to do: published access is ${tunnel.status}.`) : 'Nothing is published; no tunnel is configured.'),
   });
 
   // The first real feature, with Iris's real statuses, once.
@@ -79,7 +82,7 @@ export async function start(config: Config): Promise<Running> {
       clearInterval(stallTimer);
       clearInterval(digestTimer);
       telegram.stop();
-      for (const s of employees.allSessions()) employees.close(wp, s.agentId, 'shutdown');
+      employees.closeAll(wp);
       hub.close();
       server.closeAllConnections();
       await new Promise<void>(resolve => server.close(() => resolve()));

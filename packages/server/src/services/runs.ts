@@ -364,8 +364,10 @@ const language = (name: string): string => name.split('.').pop()?.toLowerCase() 
 export async function interruptRun(agentId: string): Promise<void> {
   const run = require$(agentId);
   await run.handle.interrupt();
-  append(run, 'system', 'Stopped', 'Interrupted from JKJ. Anything already written stays written.');
-  update(run, { status: 'waiting' });
+  append(run, 'system', 'Stopped', 'Interrupted from the Workplace. Anything already written stays written.');
+  // Nothing is asked of the owner after an interrupt: the session simply sits until the next message.
+  run.pending = undefined;
+  update(run, { status: 'idle', approval: undefined });
 }
 
 export function resolveApproval(agentId: string, decision: ApprovalDecision): void {

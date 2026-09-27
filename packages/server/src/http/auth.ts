@@ -37,7 +37,8 @@ export class Auth {
 
   /** Only from loopback. Six digits, five minutes, one use. */
   pair(req: IncomingMessage): { code: string; expiresAt: string } {
-    if (!isLoopback(req.socket.remoteAddress)) throw new BadRequest('Pairing codes are minted from this Mac only.');
+    // A request through the published tunnel arrives on loopback but is not from this Mac (review M5).
+    if (!isLoopback(req.socket.remoteAddress) || req.headers['x-via-tunnel']) throw new BadRequest('Pairing codes are minted from this Mac only.');
     const code = String(randomBytes(4).readUInt32BE(0) % 1_000_000).padStart(6, '0');
     const expiresAt = this.now() + 5 * 60 * 1000;
     this.codes.set(code, expiresAt);

@@ -1,6 +1,7 @@
 import type { Workplace } from '../../src/services/workplace.js';
 import { createWorkplace } from '../../src/services/workplace.js';
 import { loadConfig } from '../../src/config.js';
+import { closeAll } from '../../src/services/employees.js';
 import { tmpWorkplace, type TmpWorkplace } from './tmp-workplace.js';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -42,6 +43,8 @@ export function testWorkplace(overrides: Partial<Record<string, string>> = {}): 
   }
   const cleanup = tmp.cleanup;
   tmp.cleanup = () => {
+    // Sessions are a module-level register; a test's sessions must not outlive its database.
+    try { closeAll(wp, 'test cleanup'); } catch { /* db already closed */ }
     cleanup();
     rmSync(workDir, { recursive: true, force: true });
     for (const root of repos.values()) rmSync(root, { recursive: true, force: true });

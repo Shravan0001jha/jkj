@@ -33,6 +33,7 @@ interface Session {
   employeeId: string;
   assignmentId?: string;
   worktree?: Worktree;
+  unsubscribe?: () => void;
   startedAt: string;
   /** Last cumulative usage seen per model, so each result is recorded as a delta. */
   seen: Record<string, { costUSD: number; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number }>;
@@ -157,14 +158,26 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
     .run(agent.id, employeeId, session.assignmentId ?? null, session.startedAt, 'running', context.tokens, JSON.stringify({ truncated: context.truncated }));
   log.info('employees', `${emp.name} started ${agent.id} (${context.tokens} context tokens${context.truncated ? ', truncated' : ''})`);
 
-  // Watch the transcript for the first "## Plan" reply.
-  runs.onRunEvent(({ entry }) => {
+  // Watch the transcript for the first "## Plan" reply, and keep the row current so a restart
+  // knows what the session was doing and what it was waiting for.
+  const unsubscribe = runs.onRunEvent(({ entry, agent: updated }) => {
+    if (updated?.id === agent.id) {
+      try {
+        wp.db.prepare('update sessions set sdk_session_id = ?, status = ?, json = ? where id = ?').run(
+          runs.sessionIdOf(agent.id) ?? null, updated.status,
+          JSON.stringify({ truncated: context.truncated, cwd: worktree.path, branch: worktree.branch, prompt: options.prompt.slice(0, 500), pending: updated.approval ?? null, permissionMode: updated.permissionMode }),
+          agent.id);
+      } catch (err) {
+        log.warn('employees', `could not record ${agent.id}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
     if (!entry || entry.agentId !== agent.id || entry.kind !== 'assistant' || session.planCaptured || !session.assignmentId) return;
     const plan = work.parsePlan(entry.text);
     if (!plan) return;
     session.planCaptured = true;
     try { work.attachPlan(wp, session.assignmentId, plan, employeeId); } catch (err) { log.warn('employees', String(err)); }
   });
+  session.unsubscribe = unsubscribe;
 
   return agent;
 }
@@ -289,6 +302,7 @@ export function close(wp: Workplace, agentId: string, reason: string): void {
   if (!session) return;
   runs.note(agentId, 'Session', `Closed by the Workplace: ${reason}.`);
   runs.closeRun(agentId);
+  session.unsubscribe?.();
   sessions.delete(agentId);
   wp.db.prepare('update sessions set ended_at = ?, status = ? where id = ?').run(now(), reason, agentId);
   // The memory is the files: a session's status and handoff are history too.
@@ -314,6 +328,60 @@ export function unpauseAll(wp: Workplace): void {
   for (const e of wp.org.employees) {
     if (stateOverride.get(e.id) === 'paused') setState(wp, e.id, sessionsOf(e.id).length ? 'working' : 'idle');
   }
+}
+
+/** Close every open session (shutdown, tests). */
+export function closeAll(wp: Workplace, reason = 'shutdown'): void {
+  for (const s of allSessions()) close(wp, s.agentId, reason);
+}
+
+/* ---------- recovery after a restart ---------- */
+
+export interface LostSession {
+  id: string;
+  employeeId: string;
+  assignmentId: string | null;
+  sdkSessionId: string | null;
+  pending: { tool: string; input: string } | null;
+}
+
+/**
+ * A restart kills every child process. What was running is not lost silently: each open row is
+ * closed as `lost-on-restart`, a pending tool approval becomes an Inbox question the owner can
+ * answer by telling the employee what to do, and an assignment that was building is told so in
+ * its history. The SDK session id stays on the row so the conversation can be resumed.
+ */
+export function recoverAfterRestart(wp: Workplace): LostSession[] {
+  const rows = wp.db.prepare("select id, employee_id, assignment_id, sdk_session_id, json from sessions where ended_at is null").all() as { id: string; employee_id: string; assignment_id: string | null; sdk_session_id: string | null; json: string }[];
+  const lost: LostSession[] = [];
+  for (const row of rows) {
+    let meta: { pending?: { tool: string; input: string } | null; prompt?: string } = {};
+    try { meta = JSON.parse(row.json) as typeof meta; } catch { /* an older row */ }
+    const pending = meta.pending ?? null;
+    wp.db.prepare("update sessions set ended_at = ?, status = 'lost-on-restart' where id = ?").run(now(), row.id);
+    const emp = wp.org.employees.find(e => e.id === row.employee_id);
+    const name = emp?.name ?? row.employee_id;
+    if (row.assignment_id) {
+      try {
+        const item = work.get(wp, row.assignment_id);
+        if (item && item.state === 'building') work.transition(wp, item.id, { to: 'blocked', by: 'workplace', note: `session ${row.id} was lost when the Workplace restarted${pending ? ` while waiting for approval of ${pending.tool}` : ''}; start it again to continue from the handoff` });
+      } catch (err) { log.warn('employees', String(err)); }
+    }
+    inbox.raise(wp, {
+      kind: 'question',
+      title: pending ? `${name} lost a pending approval on restart: ${pending.tool}` : `${name}'s session was lost on restart`,
+      body: (pending
+        ? `The Workplace restarted while ${name} was waiting for approval of ${pending.tool}: ${pending.input.slice(0, 300)}\n\nThe session is gone; its SDK conversation ${row.sdk_session_id ? `(${row.sdk_session_id.slice(0, 8)}…) can be resumed` : 'was not recorded'}.`
+        : `The Workplace restarted while ${name} had a session open${row.assignment_id ? ` on ${row.assignment_id}` : ''}.`) +
+        ` Answer with what ${name} should do next, or start the assignment again from its handoff.`,
+      raisedBy: row.employee_id,
+      context: { lostSession: row.id, sdkSessionId: row.sdk_session_id, assignmentId: row.assignment_id, pending },
+      dedupeKey: `lost:${row.id}`,
+    });
+    lost.push({ id: row.id, employeeId: row.employee_id, assignmentId: row.assignment_id, sdkSessionId: row.sdk_session_id, pending });
+  }
+  if (lost.length) log.warn('employees', `${lost.length} session(s) lost on restart; questions filed to the Inbox`);
+  return lost;
 }
 
 /* ---------- state and cards ---------- */

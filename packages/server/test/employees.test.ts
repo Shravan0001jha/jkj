@@ -171,3 +171,66 @@ test('concurrent sessions are capped per employee', async () => {
     tmp.cleanup();
   }
 });
+
+test('an interrupt leaves the session idle with nothing pending, not "waiting for you"', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+    const agent = employees.talk(wp, 'mira', 'go');
+    await tick();
+    const decided: string[] = [];
+    void fake.last().events.onPermission({ tool: 'Bash', input: { command: 'x' }, title: 't', suggestions: [] }).then(d => decided.push(d));
+    await tick();
+    assert.equal(runs.getRunAgent(agent.id)!.status, 'waiting');
+    assert.ok(runs.getRunAgent(agent.id)!.approval);
+    await runs.interruptRun(agent.id);
+    const after = runs.getRunAgent(agent.id)!;
+    assert.equal(after.status, 'idle');
+    assert.equal(after.approval, undefined);
+    assert.equal(employees.stateOf(wp, 'mira'), 'working', 'a session is open; nothing needs the owner');
+    assert.throws(() => runs.resolveApproval(agent.id, 'once'), /already been answered/);
+    employees.talk(wp, 'mira', 'carry on');
+    assert.equal(runs.getRunAgent(agent.id)!.status, 'running');
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});
+
+test('a restart reports every open session and re-raises a pending approval as an Inbox question', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+    const a = work.create(wp, { kind: 'assignment', title: 'Doze', body: 'x', charterId: 'character' });
+    work.attachPlan(wp, a.id, 'p', 'dev');
+    const building = employees.assign(wp, a.id);
+    await tick();
+    void fake.last().events.onPermission({ tool: 'mcp__travsr__get_context', input: { query: 'presence' }, title: 't', suggestions: [] });
+    await tick();
+    const row = wp.db.prepare('select sdk_session_id, status, json from sessions where id = ?').get(building.id) as { sdk_session_id: string; status: string; json: string };
+    assert.equal(row.sdk_session_id, fake.last().sessionId);
+    assert.equal(row.status, 'waiting');
+    assert.equal((JSON.parse(row.json) as { pending: { tool: string } }).pending.tool, 'mcp__travsr__get_context');
+
+    // The process dies: the in-memory register is empty, the rows are still open.
+    const inbox = await import('../src/services/inbox.js');
+    const before = inbox.list(wp, 'open').length;
+    const lost = employees.recoverAfterRestart(wp);
+    assert.equal(lost.length, 1);
+    assert.equal(lost[0]!.pending?.tool, 'mcp__travsr__get_context');
+    assert.equal(lost[0]!.sdkSessionId, fake.last().sessionId);
+    const items = inbox.list(wp, 'open');
+    assert.equal(items.length, before + 1);
+    assert.match(items[0]!.title, /Dev lost a pending approval on restart: mcp__travsr__get_context/);
+    assert.equal(items[0]!.context['sdkSessionId'], fake.last().sessionId);
+    assert.equal(work.get(wp, a.id)!.state, 'blocked');
+    assert.match(work.get(wp, a.id)!.history.at(-1)!.note!, /lost when the Workplace restarted while waiting for approval/);
+    assert.deepEqual(employees.recoverAfterRestart(wp), [], 'rows are closed; a second recovery finds nothing');
+    assert.equal((wp.db.prepare('select status from sessions where id = ?').get(building.id) as { status: string }).status, 'lost-on-restart');
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});

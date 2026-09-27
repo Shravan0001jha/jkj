@@ -48,6 +48,7 @@ export class Tunnel {
   private ws: WebSocket | null = null;
   private locals = new Map<string, WebSocket>();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private watchdog: ReturnType<typeof setInterval> | null = null;
   private backoff: number;
   private stopped = false;
   private _status: TunnelStatus = 'offline';
@@ -81,6 +82,15 @@ export class Tunnel {
     return true;
   }
 
+  /** Publish again after off(): reconnect; the 'on' frame goes out on connect. */
+  on(): boolean {
+    if (this._status !== 'off') return false;
+    this.stopped = false;
+    this.backoff = this.options.minBackoffMs ?? 1000;
+    this.connect();
+    return true;
+  }
+
   /** The emergency off switch: tell the relay to drop everything, then close. */
   off(): void {
     this.send({ type: 'off' });
@@ -100,9 +110,17 @@ export class Tunnel {
       this.lastPong = Date.now();
       this.setStatus('connected');
       log.info('tunnel', `connected to ${this.options.url}`);
+      // The relay stays "off" across restarts until the Mac says otherwise (review M2). A Mac that
+      // connects is publishing on purpose; the off switch stops it from connecting at all.
+      this.send({ type: 'on' });
+      this.watchdog = setInterval(() => {
+        // The relay pings every 15 s; 45 s without a pong is a half-open socket (review M3).
+        if (Date.now() - this.lastPong > 45_000) { log.warn('tunnel', 'no pong for 45 s; reconnecting'); ws.terminate(); }
+      }, 15_000);
     });
     ws.on('message', raw => { void this.handle(raw.toString()); });
     ws.on('close', code => {
+      if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; }
       if (this.ws === ws) this.ws = null;
       for (const local of this.locals.values()) local.close();
       this.locals.clear();
@@ -141,8 +159,11 @@ export class Tunnel {
       case 'ping': this.send({ type: 'pong' }); break;
       case 'pong': this.lastPong = Date.now(); break;
       case 'hello': break;
-      case 'http': await this.proxyHttp(frame); break;
-      case 'ws-open': this.openLocal(frame.id, frame.path); break;
+      case 'http':
+        if (!safePath(frame.path)) { this.send({ type: 'response', id: frame.id, status: 400, headers: {}, body: '' }); break; }
+        await this.proxyHttp(frame);
+        break;
+      case 'ws-open': if (safePath(frame.path)) this.openLocal(frame.id, frame.path); break;
       case 'ws-frame': this.locals.get(frame.id)?.send(frame.data); break;
       case 'ws-close': { const l = this.locals.get(frame.id); this.locals.delete(frame.id); l?.close(); break; }
       case 'telegram': await (this.options.notify ?? notifyViaScript)(frame.text); break;
@@ -154,8 +175,10 @@ export class Tunnel {
   private async proxyHttp(frame: Extract<Frame, { type: 'http' }>): Promise<void> {
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(frame.headers)) {
-      if (!HOP_BY_HOP.has(k.toLowerCase())) headers[k] = v;
+      if (!HOP_BY_HOP.has(k.toLowerCase()) && k.toLowerCase() !== 'x-via-tunnel') headers[k] = v;
     }
+    // Set by the Mac, never by a client: the loopback listener uses it to refuse pairing (review M5).
+    headers['x-via-tunnel'] = '1';
     try {
       const res = await fetch(`${this.options.local}${frame.path}`, {
         method: frame.method,
@@ -165,8 +188,13 @@ export class Tunnel {
       });
       const out: Record<string, string> = {};
       res.headers.forEach((v, k) => { if (!HOP_BY_HOP.has(k)) out[k] = v; });
-      const body = Buffer.from(await res.arrayBuffer()).toString('base64');
-      this.send({ type: 'response', id: frame.id, status: res.status, headers: out, body });
+      const bytes = Buffer.from(await res.arrayBuffer());
+      if (bytes.byteLength > MAX_RESPONSE_BYTES) {
+        // One oversized frame would close the whole tunnel and every session with it (review L2).
+        this.send({ type: 'response', id: frame.id, status: 502, headers: { 'content-type': 'application/json' }, body: Buffer.from(JSON.stringify({ error: `Response too large for the relay (${bytes.byteLength} bytes).` })).toString('base64') });
+        return;
+      }
+      this.send({ type: 'response', id: frame.id, status: res.status, headers: out, body: bytes.toString('base64') });
     } catch (err) {
       this.send({ type: 'response', id: frame.id, status: 502, headers: { 'content-type': 'application/json' }, body: Buffer.from(JSON.stringify({ error: `Workplace unreachable on loopback: ${err instanceof Error ? err.message : String(err)}` })).toString('base64') });
     }
@@ -181,6 +209,14 @@ export class Tunnel {
     local.on('error', () => local.close());
   }
 }
+
+/** A path the relay may ask for: absolute, on our own origin, never a userinfo trick (review L5). */
+export function safePath(path: string): boolean {
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || path.includes('\\')) return false;
+  try { return new URL(path, 'http://127.0.0.1').origin === 'http://127.0.0.1'; } catch { return false; }
+}
+
+const MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
 
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'host', 'content-length', 'te', 'trailer', 'proxy-authorization', 'proxy-authenticate']);
 

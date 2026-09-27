@@ -155,6 +155,14 @@ same commands are also `disallowedTools`. `report_done` refuses evidence when `g
 plus uncommitted files include anything the employee does not own, and records only real commits on the
 branch. Merging into the base branch is the lead's (a different identity), until real PRs exist.
 
+### 7b. Sessions across a restart, and interrupts
+
+Every session row records its SDK session id, its status and any pending tool approval as they change.
+On boot, rows still open are closed as `lost-on-restart`; a `building` assignment is marked blocked with
+the reason; and one Inbox question per lost session names the pending tool and the resumable SDK id, so
+a decision is never dropped silently (iOS device test, 27 Sep). An interrupt leaves a session `idle`
+with no approval attached; a message wakes it.
+
 ## 8. Approvals and gates (`services/approvals.ts`)
 
 `POLICY: Record<Action, Approver>` from the brief §0. `gate(action, ctx)` returns `{ allowed: true }`
@@ -309,7 +317,8 @@ mode 600, generated once):
 | `ws-open` / `ws-frame` / `ws-close` | both | `id, path` / `id, data` / `id` — one relay client socket ↔ one local socket to `127.0.0.1:<port>/ws` |
 | `telegram` | relay → Mac | `text` — the Mac runs `notify.sh` (codes, new-device pings) |
 | `off` | Mac → relay | drops every session and refuses until `on` |
-| `ping`/`pong` | both | liveness; the relay marks the Mac offline after 20 s |
+| `ping`/`pong` | both | liveness: the relay pings every 15 s and closes a Mac that has not answered for 45 s; the Mac reconnects when it has had no pong for 45 s |
+| `on` / `enrol-on` | Mac → relay | `on` is sent on every connect (the relay stays off across restarts until the Mac says so); `enrol-on` re-enables passkey enrolment after it disabled itself |
 
 The Mac side is `services/tunnel.ts`: reconnect with backoff (1 s → 30 s), forwards to its own
 loopback port (trusted, D11), reports `published: connected | offline` on `/api/health` and the Office.
@@ -330,6 +339,22 @@ loopback port (trusted, D11), reports `published: connected | offline` on `/api/
 - iOS: `ASWebAuthenticationSession` opens `/login?app=1`; on success the relay redirects to
   `irisworkplace://auth#token=<session id>`; the app stores it in the Keychain and sends it as a
   bearer. Contract change announced to "main".
+
+**Hardening from the reviews (27 Sep), all pinned by tests in `test_relay_security.py`:** the relay
+reads only the real client address (uvicorn's proxy headers from Caddy; never `X-Forwarded-For`);
+code requests are limited globally (3/hour, 10/day) with an owner alert; five wrong enrolment codes in a
+day disable enrolment until `enrol on` from the Mac or Telegram; once a passkey exists, another needs a
+signed-in session plus the code; failures ping the owner (throttled); the tunnel secret is compared in
+constant time and a second live tunnel is refused, audited and reported; session tokens are 256-bit and
+stored as SHA-256; bearer sessions never rotate, cookie sessions rotate hourly only on the proxy path
+with a 60 s grace for the old token; `logout-all` closes live sockets; a cookie socket must come from
+our origin; `/api/pair*` is refused through the relay and forwarded requests carry `x-via-tunnel`, which
+the Mac's pairing route refuses; the unit runs as its own user with `--no-access-log` (the app's socket
+token is in the query string), NoNewPrivileges, ProtectSystem=strict, ProtectHome; Caddy caps bodies at
+32 MB and sets HSTS/nosniff/no-referrer; the Mac validates relay-supplied paths and caps responses at
+12 MB; health shows counts only on loopback; cookies are `__Host-`; the WebAuthn handle is opaque.
+Known trade-off: a stranger can exhaust the shared code budget or lock the owner's email fallback for
+15 minutes; passkey login is unaffected.
 
 **Verification (live, from outside the LAN):** no session → login page; wrong or absent factor →
 refused; passkey → in; WebSocket without a session → rejected; tunnel down → "Mac offline";
