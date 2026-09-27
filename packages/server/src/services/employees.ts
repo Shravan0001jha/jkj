@@ -232,6 +232,17 @@ export function assign(wp: Workplace, assignmentId: string): Agent {
     work.setSession(wp, assignmentId, runs.sessionIdOf(open.agentId) ?? open.agentId);
     return runs.getRunAgent(open.agentId)!;
   }
+  if (item.state === 'planned' || item.state === 'building') {
+    // The plan exists (it is in the assignment layer): this session builds.
+    const started = item.state === 'planned' ? work.transition(wp, item.id, { to: 'building', by: item.employeeId }) : item;
+    return spawn(wp, item.employeeId, {
+      assignment: started,
+      prompt: `Build assignment ${item.id}: ${item.title}. Your plan is attached in your context; follow it. ` +
+        'Work only in your worktree on your own branch, change only the paths your charters own, run the tests the charter names, ' +
+        'commit on your branch (never push, merge or rebase), then call the Workplace tool report_done with the real test counts, ' +
+        'the commit hashes, what you verified live and what you did not. If something outside your charter is needed, say so and ask_owner or stop.',
+    });
+  }
   return spawn(wp, item.employeeId, { assignment: item, prompt: `Take assignment ${item.id}: ${item.title}. Read your context and reply with "## Plan" first.` });
 }
 

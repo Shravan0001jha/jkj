@@ -102,6 +102,25 @@ test('an assignment session captures the first "## Plan" reply and moves the ass
   }
 });
 
+test('a planned assignment starts a build session and moves to building', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+    const a = work.create(wp, { kind: 'assignment', title: 'Doze', body: 'Build the doze', charterId: 'character' });
+    work.attachPlan(wp, a.id, '1. add the doze state 2. test', 'dev');
+    const agent = employees.assign(wp, a.id);
+    await tick();
+    assert.equal(work.get(wp, a.id)!.state, 'building');
+    assert.ok(fake.last().options.prompt.startsWith(`Build assignment ${a.id}`));
+    assert.ok(fake.last().options.systemPromptAppend!.includes('### Your plan so far'));
+    assert.ok(agent.assignmentId === a.id);
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});
+
 test('ending a session asks for the handoff and the next session starts from it', async () => {
   const { wp, tmp } = testWorkplace();
   const fake = installFakeRuntime();
