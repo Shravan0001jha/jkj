@@ -65,10 +65,10 @@ An **agent** is one employee's session, run through the Claude Agent SDK, and de
 | Identity | employee id + name + role; for leads, the GitHub App identity `iris-<charter>-lead[bot]` | `org.yaml`, App config |
 | Context | five layers, assembled at spawn (D4) | handbook, unit doc, charter, status/handoff, assignment |
 | Tools | Claude Code's tools; the role template may restrict (`allowedTools`/`disallowedTools`) | `roles.yaml` |
-| Permission mode | from the role, overridable per session in the UI: `acceptEdits` for engineers in their own worktree, `plan` for analysts, `ask` for anything touching another charter | `roles.yaml` |
+| Permission mode | from the role, overridable per session in the UI: `auto` for working roles (a classifier lets ordinary work through and parks only risky calls), `plan` for analysts. Reads, searches, the code graph and the charters' test commands never prompt; a PreToolUse guard denies edits outside the worktree or outside owned paths and denies push/merge/rebase/release/deploy/ssh outright (27 Sep: `acceptEdits` parked a read-only query for five minutes with nobody to answer, against §0) | `roles.yaml`, `guards.ts` |
 | Freedom | branch work in own repo/worktree, run tests, read anything; nothing outward (§0 approvals table) | handbook + approval gates |
 | Budget | ₹/day per employee, ₹/day per team, ₹1000/day company; concurrent sessions per employee | `org.yaml` |
-| Workspace | repo + worktree/branch; hires get a branch in the lead's repo | `org.yaml` employee.workspace |
+| Workspace | its own git worktree `~/iris-work/<employee>/<repo>` on `emp/<employee>/<work-item>` cut from the base branch's tip; never the owner's or the lead's main checkout (lead's rule, 27 Sep, until the repo split); the lead merges | `org.yaml` employee.workspace, `worktrees.ts` |
 | Memory | the files: `status.md`, `handoff.md`; sessions are disposable | data dir |
 
 Leads (level 1) are permanent employees; hires (level 2) are contractors spawned per assignment

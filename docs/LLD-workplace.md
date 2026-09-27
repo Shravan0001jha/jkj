@@ -142,6 +142,19 @@ MCP SDK fail to list *any* tool of the server (found 27 Sep, pinned by `workplac
 text)` = send to the open session or spawn. `endSession` asks for the handoff (a final prompt),
 waits up to 90 s, then closes.
 
+### 7a. Isolation (`services/worktrees.ts`, `services/guards.ts`)
+
+Before a session starts, `ensureWorktree` cuts (or reuses) `~/iris-work/<employee>/<repo-name>` on
+`emp/<employee>/<work-item-id>` from the base branch tip and links `.venv`, `.venv-x64` and the
+`node_modules` directories from the main checkout; `spawn` refuses a cwd inside any org repo root. A
+PreToolUse hook runs `guardTool`: edits must be inside the worktree and inside a path the employee's
+charters own in the map (scratch under the OS temp dir is free); commands matching push/merge/rebase/
+reset --hard/filter-repo/worktree/remote, a switch to a base branch, the release/deploy/testflight/
+ssh-window scripts, ssh/scp/aws/gh/sudo/devicectl, `rm -rf`, or naming a main checkout are denied; the
+same commands are also `disallowedTools`. `report_done` refuses evidence when `git diff base...HEAD`
+plus uncommitted files include anything the employee does not own, and records only real commits on the
+branch. Merging into the base branch is the lead's (a different identity), until real PRs exist.
+
 ## 8. Approvals and gates (`services/approvals.ts`)
 
 `POLICY: Record<Action, Approver>` from the brief §0. `gate(action, ctx)` returns `{ allowed: true }`
