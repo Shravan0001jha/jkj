@@ -97,7 +97,10 @@ there (the two that pass are confirmations of things that were already right), s
 4. **Stalled work invisible.** Four leads had planned and stopped; restarts ended the rest; nothing
    showed. `stalledSince` is derived at read time (30 min without session activity), counted on the
    Office, and the Chief of Staff's routine resumes one stalled item per tick (once a day each) or
-   files one Inbox note per item saying why it waits.
+   files one Inbox note per item saying why it waits. Live, after the batch restart, ten assignments
+   were stalled (every lead had stopped on 27 Sep); the first build would have resumed one and pinged
+   the owner nine times "waits for the next round", so the server was stopped before its first tick
+   (00:19–00:22 IST, ~3 min offline) and items that only queue behind a resume are now not noted.
 5. **Owner talk never blocked.** A talk from the owner runs at any cap, read-only on the paused work
    until "continue", which lifts the pause for the day and is written to the events table.
 

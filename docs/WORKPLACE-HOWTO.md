@@ -104,7 +104,8 @@ anytime; your messages are marked as yours.
 
 An assignment with no session activity for 30 minutes (`WORKPLACE_STALL_MINUTES`) is stalled: it shows
 on the card and in the Office counts. Every five minutes Asha's routine resumes one (once a day per
-item) or leaves one Inbox note saying why it waits ("Resume it now" starts it regardless).
+item) or leaves one Inbox note saying why it waits ("Resume it now" starts it regardless). Items
+that only wait for a later tick's slot are not noted.
 
 ## Approvals, caps, releases
 

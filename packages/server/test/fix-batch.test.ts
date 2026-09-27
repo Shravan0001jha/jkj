@@ -118,21 +118,28 @@ test('4. stalled work is derived, counted, and the Chief of Staff resumes it onc
     assert.ok(stall.stalledSince(wp, work.get(wp, a.id)!, later), 'thirty-one minutes with no session is');
     assert.equal(stall.stalledAssignments(wp, later).length, 1);
 
-    // First tick: resumed within budget (a session starts), recorded for today.
+    // First tick: resumed within budget (a session starts), recorded for today. A second stalled
+    // item queues for the next tick without a note.
+    const q = work.create(wp, { kind: 'assignment', title: 'Queued', body: 'x', charterId: 'memory' });
+    work.attachPlan(wp, q.id, 'p', 'kabir');
     const first = cos.tick(wp, later);
-    assert.deepEqual(first.resumed, [a.id], JSON.stringify(first));
+    assert.deepEqual([...first.resumed, ...first.queued].sort(), [a.id, q.id].sort(), JSON.stringify(first));
+    assert.equal(first.resumed.length, 1, 'one resume per tick');
+    assert.deepEqual(first.noted, [], 'queued items are not silent stalls; the routine takes them next');
+    assert.equal(inbox.list(wp, 'open').filter(i => i.title.startsWith('Waiting:')).length, 0);
     await tick();
     assert.equal(fake.sessions.length, 1);
-    assert.equal(work.get(wp, a.id)!.state, 'building');
+    const resumedId = first.resumed[0]!;
+    assert.equal(work.get(wp, resumedId)!.state, 'building');
     employees.closeAll(wp, 'test');
 
     // Stalled again the same day: not resumed twice; one Inbox note with the reason, deduped.
     const evenLater = later + 40 * 60_000;
     const second = cos.tick(wp, evenLater);
-    assert.deepEqual(second.resumed, []);
+    assert.ok(!second.resumed.includes(resumedId), 'not resumed twice in a day');
     assert.equal(second.noted.length, 1);
     assert.match(second.noted[0]!.reason, /resumed once today already/);
-    const notes = inbox.list(wp, 'open').filter(i => i.title === 'Waiting: Composer');
+    const notes = inbox.list(wp, 'open').filter(i => i.title.startsWith('Waiting:'));
     assert.equal(notes.length, 1);
     const third = cos.tick(wp, evenLater + 60_000);
     assert.deepEqual(third.noted, [], `one note per item per day: ${JSON.stringify(third)} open=${JSON.stringify(inbox.list(wp, 'open').map(i => [i.title, i.context['dedupeKey']]))}`);
@@ -153,6 +160,7 @@ test('4. stalled work is derived, counted, and the Chief of Staff resumes it onc
     assert.ok(r2.noted.some(n => n.id === c.id && /org-change proposal: split mobile/.test(n.reason)));
     // "Resume it now" from the Inbox starts it regardless.
     const note = inbox.list(wp, 'open').find(i => i.context['assignmentId'] === c.id)!;
+    employees.closeAll(wp, 'test'); // Tara's session from the queued resume would otherwise hold the slot
     inbox.answer(wp, note.id, 'resume', undefined, 'phone');
     await tick();
     assert.equal(work.get(wp, c.id)!.state, 'building');

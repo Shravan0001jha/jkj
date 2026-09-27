@@ -219,7 +219,9 @@ read time (`WorkItem.stalledSince`), counted on the Office (`counts.stalled`), s
 Every five minutes `cos.tick` resumes the oldest stalled item that can be resumed (assignee not
 paused, ≥ ₹50 real headroom, not already resumed today; one per tick) or raises one Inbox note per
 item per day saying why it waits: a cap, an open question to the owner, a pending org change touching
-its charter, or "resumed once already". "Resume it now" on the note starts it regardless.
+its charter, or "resumed once already". "Resume it now" on the note starts it regardless. Items
+that could be resumed but lost this tick's one slot are **queued** (`TickResult.queued`), not noted:
+the next tick takes them, so a restart with ten stalled items costs the owner no pings.
 
 ### 10c. Approvals in three places (`employees.needsYouItems`, `inbox.affects`) — HLD D7b
 

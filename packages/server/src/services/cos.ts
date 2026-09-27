@@ -22,10 +22,12 @@ export interface TickResult {
   noted: { id: string; reason: string }[];
   /** Threads handed to the Chief of Staff this tick. */
   moderated: string[];
+  /** Resumable items that wait for a later tick (one resume per tick); no note is raised for them. */
+  queued: string[];
 }
 
 export function tick(wp: Workplace, nowMs = Date.now()): TickResult {
-  const result: TickResult = { resumed: [], noted: [], moderated: [] };
+  const result: TickResult = { resumed: [], noted: [], moderated: [], queued: [] };
   const day = spend.dayOf(new Date(nowMs));
   const cos = chiefOfStaff(wp) ?? 'workplace';
   let resumedThisTick = false;
@@ -58,9 +60,14 @@ export function tick(wp: Workplace, nowMs = Date.now()): TickResult {
         continue;
       }
     }
-    note(wp, item, reason ?? (resumedToday(wp, item.id, day)
-      ? `resumed once today already and stalled again; no session activity since ${item.stalledSince!.slice(11, 16)} UTC`
-      : 'another stalled item was resumed this round; this one waits for the next'), cos, day, result);
+    if (!reason && !resumedToday(wp, item.id, day)) {
+      // Resumable, but this round's resume went to another item: the next tick takes it. No note,
+      // or a restart with ten stalled items would ping the owner ten times for what the routine
+      // itself clears.
+      result.queued.push(item.id);
+      continue;
+    }
+    note(wp, item, reason ?? `resumed once today already and stalled again; no session activity since ${item.stalledSince!.slice(11, 16)} UTC`, cos, day, result);
   }
   return result;
 }
