@@ -5,7 +5,7 @@ import XCTest
 /// Skipped when the mock is not running, so `make test` stays green without it.
 @MainActor
 final class MockIntegrationTests: XCTestCase {
-    private let config = ServerConfig(baseURL: ServerConfig.parse("127.0.0.1:4399")!)
+    private let config = ServerConfig(mode: .lan, baseURL: ServerConfig.parse("127.0.0.1:4399")!)
 
     private func mockIsUp() async -> Bool {
         var req = URLRequest(url: config.url(API.health))

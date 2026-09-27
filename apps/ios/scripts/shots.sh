@@ -20,7 +20,7 @@ shot() {  # name wait [ENV=VAL ...]
 }
 MOCK="WORKPLACE_URL=127.0.0.1:4399 WORKPLACE_TOKEN=mock-token-0123456789abcdef WORKPLACE_NO_NOTIF_PROMPT=1"
 xcrun simctl uninstall "$SIM" $BUNDLE; xcrun simctl install "$SIM" "$APP"   # fresh: no token → pairing screen
-shot 01-pairing 3
+shot 01-signin 3 WORKPLACE_RELAY_URL=127.0.0.1:4399 WORKPLACE_FORGET=1
 shot 02-office 4 ${=MOCK}
 shot 03-inbox 4 ${=MOCK} WORKPLACE_TAB=inbox
 shot 04-inbox-release 4 ${=MOCK} WORKPLACE_INBOX_ITEM=ib-1

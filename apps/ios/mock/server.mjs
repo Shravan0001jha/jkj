@@ -6,7 +6,10 @@
 //   node mock/server.mjs [--host 0.0.0.0] [--port 4399] [--quiet]
 //
 // Pairing code: 482913 (printed at start). Token after exchange: mock-token-0123456789abcdef.
-// Any request with that bearer token is accepted; loopback needs none (as the real server).
+// Relay sign-in: GET /login?app=1 and /login/enrol?app=1 serve a page whose button redirects to
+// irisworkplace://auth#token=mock-session-<n>; any mock-session-* bearer is accepted.
+// --mac-offline (or POST /api/_offline {offline:true}) answers 503 {error:"Mac offline"} like a relay
+// whose Mac is down. Loopback needs no token (as the real server).
 
 import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
@@ -20,6 +23,8 @@ const PORT = Number(opt("--port", 4399));
 const QUIET = args.includes('--quiet');
 const TOKEN = 'mock-token-0123456789abcdef';
 const PAIR_CODE = '482913';
+const SESSION_PREFIX = 'mock-session-';
+let macOffline = args.includes('--mac-offline');
 
 // Mutable state: a fresh copy of the data on every start, and on POST /api/_reset (tests).
 const fresh = () => ({
@@ -50,12 +55,21 @@ const readJson = (req) => new Promise((resolve) => {
   req.on('end', () => { try { resolve(s ? JSON.parse(s) : {}); } catch { resolve(null); } });
 });
 const isLoopback = (req) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+const validToken = (t) => t === TOKEN || (typeof t === 'string' && t.startsWith(SESSION_PREFIX));
 const authed = (req, url) => {
-  if (isLoopback(req)) return true;
   const h = req.headers.authorization ?? '';
-  if (h === `Bearer ${TOKEN}`) return true;
-  return url.searchParams.get('token') === TOKEN;
+  if (h.startsWith('Bearer ') && validToken(h.slice(7))) return true;
+  if (validToken(url.searchParams.get('token'))) return true;
+  return isLoopback(req);
 };
+
+// The relay's sign-in pages. The button redirects to the app's callback with the session in the fragment.
+const loginPage = (title, action) => `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>
+<style>body{font-family:-apple-system,system-ui;padding:32px;max-width:420px;margin:auto}button{font-size:18px;padding:14px 20px;border-radius:12px;border:0;background:#4f66ea;color:#fff;width:100%}</style></head>
+<body><h1>Iris Workplace</h1><p>Mock relay: ${title.toLowerCase()}.</p>
+<button id="go" onclick="location.href='irisworkplace://auth#token=${SESSION_PREFIX}' + Date.now()">${action}</button>
+<p style="color:#888;font-size:14px">Redirects to <code>irisworkplace://auth#token=…</code></p></body></html>`;
+const html = (res, body) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(body); };
 
 const office = () => ({
   units: D.units.filter(u => u.kind === 'unit').map(unit => ({ unit, employees: state.cards.filter(c => c.employee.unitId === unit.id) })),
@@ -89,7 +103,11 @@ const server = createServer(async (req, res) => {
     state.usedCodes.add(body.code);
     return json(res, 200, { token: TOKEN });
   }
-  if (m === 'POST' && p === '/api/_reset') { state = fresh(); tick = 0; log('state reset'); return json(res, 200, { ok: true }); }
+  if (m === 'POST' && p === '/api/_reset') { state = fresh(); tick = 0; macOffline = false; log('state reset'); return json(res, 200, { ok: true }); }
+  if (m === 'POST' && p === '/api/_offline') { const body = await readJson(req); macOffline = !!body?.offline; log('mac offline =', macOffline); return json(res, 200, { ok: true, macOffline }); }
+  if (m === 'GET' && (p === '/login' || p === '/login/')) return html(res, loginPage('Sign in', 'Sign in with passkey (mock)'));
+  if (m === 'GET' && (p === '/login/enrol' || p === '/login/enrol/')) return html(res, loginPage('Set up a passkey', 'Create passkey (mock)'));
+  if (macOffline && p.startsWith('/api/')) { log('503 mac offline'); return json(res, 503, { error: 'Mac offline' }); }
   if (!p.startsWith('/api/')) return json(res, 404, { error: 'not found' });
   if (!authed(req, url)) return json(res, 401, { error: 'unauthorized' });
 
@@ -193,6 +211,7 @@ server.on('upgrade', (req, socket) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (url.pathname !== '/ws') { socket.end('HTTP/1.1 404 Not Found\r\n\r\n'); return; }
   if (!authed(req, url)) { socket.end('HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\n\r\n'); log('ws refused (no token)'); return; }
+  if (macOffline) { socket.end('HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\ncontent-length: 23\r\n\r\n{"error":"Mac offline"}'); log('ws refused (mac offline)'); return; }
   const key = req.headers['sec-websocket-key'];
   const accept = createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
   socket.write(['HTTP/1.1 101 Switching Protocols', 'Upgrade: websocket', 'Connection: Upgrade', `Sec-WebSocket-Accept: ${accept}`, '', ''].join('\r\n'));

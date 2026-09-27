@@ -4,12 +4,15 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var confirmRepair = false
+    @State private var confirmSignOut = false
+    @State private var showDeveloper = false
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    LabeledContent("Server", value: model.config?.baseURL.absoluteString ?? "—")
+                    LabeledContent("Reached through", value: model.mode == .relay ? "Relay" : "LAN (developer)")
+                    LabeledContent("Server", value: model.config.baseURL.absoluteString)
                     LabeledContent("Connection") { connection }
                     if let h = model.health {
                         LabeledContent("Server version", value: h.version)
@@ -17,9 +20,13 @@ struct SettingsView: View {
                         LabeledContent("Daily cap", value: Format.inr(h.workplace.capInr))
                         LabeledContent("Telegram bridge", value: h.workplace.telegram ? "on" : "off")
                     }
-                    LabeledContent("Token", value: "in the Keychain")
+                    LabeledContent(model.mode == .relay ? "Session" : "Token", value: "in the Keychain")
                 } header: {
                     SectionHeader(text: "Workplace")
+                } footer: {
+                    if model.mode == .relay {
+                        Text("Sessions end after 12 hours idle or 7 days; the app then asks you to sign in again.")
+                    }
                 }
                 if let e = model.lastSocketError {
                     Section {
@@ -28,9 +35,20 @@ struct SettingsView: View {
                 }
                 Section {
                     Button("Reconnect now") { model.foreground() }
-                    Button("Re-pair this phone", role: .destructive) { confirmRepair = true }
+                    if model.mode == .relay {
+                        Button("Sign out", role: .destructive) { confirmSignOut = true }
+                    } else {
+                        Button("Re-pair this phone", role: .destructive) { confirmRepair = true }
+                    }
                 } footer: {
-                    Text("Re-pairing forgets the token and the server address. You will need a new one-time code from the Mac.")
+                    Text(model.mode == .relay
+                         ? "Signing out forgets the session on this phone. Sign in again with your passkey or a Telegram code."
+                         : "Re-pairing forgets the LAN token and address and returns to the relay. You will need a new one-time code from the Mac to pair again.")
+                }
+                Section {
+                    Button("Developer options") { showDeveloper = true }
+                } footer: {
+                    Text("LAN pairing for a Workplace on the same network, without the relay.")
                 }
                 Section {
                     LabeledContent("App", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
@@ -41,10 +59,15 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .confirmationDialog("Forget the token and pair again?", isPresented: $confirmRepair, titleVisibility: .visible) {
+            .confirmationDialog("Forget the LAN token and pair again?", isPresented: $confirmRepair, titleVisibility: .visible) {
                 Button("Re-pair", role: .destructive) { model.unpair(); dismiss() }
                 Button("Cancel", role: .cancel) {}
             }
+            .confirmationDialog("Sign out of the Workplace on this phone?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+                Button("Sign out", role: .destructive) { model.signOut(); dismiss() }
+                Button("Cancel", role: .cancel) {}
+            }
+            .sheet(isPresented: $showDeveloper) { DeveloperOptionsView() }
         }
     }
 
@@ -54,8 +77,9 @@ struct SettingsView: View {
             case .online: return ("Online", "checkmark.circle.fill", .green)
             case .connecting: return ("Connecting…", "antenna.radiowaves.left.and.right", .secondary)
             case .offline(let reason, _): return (reason, "wifi.exclamationmark", .orange)
-            case .unauthorized: return ("Token refused", "key.slash", .red)
-            case .unpaired: return ("Not paired", "circle.dotted", .secondary)
+            case .macOffline: return ("Mac offline", "desktopcomputer.trianglebadge.exclamationmark", .red)
+            case .unauthorized: return (model.mode == .relay ? "Session ended" : "Token refused", "key.slash", .red)
+            case .signedOut: return (model.mode == .relay ? "Signed out" : "Not paired", "circle.dotted", .secondary)
             }
         }()
         return HStack(spacing: 6) {

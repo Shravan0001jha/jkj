@@ -1,8 +1,8 @@
 import Foundation
 import Security
 
-/// The pairing token, and nothing else, in the Keychain. It is written on pairing, read on every
-/// request, deleted on re-pair, and never displayed.
+/// A credential in the Keychain: written on sign-in or pairing, read on every request, deleted on
+/// sign-out or re-pair, and never displayed.
 protocol TokenStore: AnyObject {
     var token: String? { get }
     func save(token: String)
@@ -10,10 +10,17 @@ protocol TokenStore: AnyObject {
 }
 
 final class Keychain: TokenStore {
-    static let shared = Keychain()
+    /// The relay session (`irisworkplace://auth#token=…`).
+    static let relay = Keychain(account: "relay-session")
+    /// The LAN pairing token (`POST /api/pair/exchange`).
+    static let lan = Keychain(account: "api-token")
 
     private let service = "com.irisforu.workplace"
-    private let account = "api-token"
+    private let account: String
+
+    init(account: String) {
+        self.account = account
+    }
 
     var token: String? {
         var q = base()

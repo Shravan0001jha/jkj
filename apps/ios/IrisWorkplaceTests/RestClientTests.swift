@@ -2,7 +2,7 @@ import XCTest
 @testable import IrisWorkplace
 
 final class RestClientTests: XCTestCase {
-    private let config = ServerConfig(baseURL: ServerConfig.parse("192.168.1.5:4317")!)
+    private let config = ServerConfig(mode: .lan, baseURL: ServerConfig.parse("192.168.1.5:4317")!)
 
     override func setUp() { StubURLProtocol.reset() }
 

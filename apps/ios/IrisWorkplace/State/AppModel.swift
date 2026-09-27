@@ -2,10 +2,15 @@ import Foundation
 import Observation
 
 enum Connection: Equatable {
-    case unpaired
+    /// No credential for the current mode: relay → sign in; LAN → pair.
+    case signedOut
     case connecting
     case online(version: String)
+    /// Cannot reach the server (network, DNS, relay down). Retried with backoff.
     case offline(reason: String, retryAt: Date?)
+    /// The relay answers, but the Mac's tunnel to it is down. Probed every few seconds.
+    case macOffline
+    /// The credential was refused: sign in again (relay) or re-pair (LAN).
     case unauthorized
 }
 
@@ -27,13 +32,14 @@ final class Router {
     func talk(to employeeId: String) { talkEmployeeId = employeeId; tab = .talk }
 }
 
-/// Owns the connection, the clients and the stores. One per app.
+/// Owns the mode, the credential, the clients and the stores. One per app.
 @MainActor @Observable
 final class AppModel {
-    private(set) var connection: Connection = .unpaired
-    private(set) var config: ServerConfig?
+    private(set) var connection: Connection = .signedOut
+    private(set) var config: ServerConfig = .relay
     private(set) var rest: RestClient?
     private(set) var health: WorkplaceHealthResponse?
+    private(set) var lastSocketError: String?
     private var socket: SocketClient?
 
     let office = OfficeStore()
@@ -43,38 +49,55 @@ final class AppModel {
     let alerts: AlertsStore
     let router = Router()
 
-    private let tokens: TokenStore
+    private let relayTokens: TokenStore
+    private let lanTokens: TokenStore
     private let defaults: UserDefaults
     private let makeTransport: () -> SocketTransport
     private let urlSession: URLSession
     private let env: [String: String]
+    private let webAuth: WebAuth
+    private let offlineProbeInterval: TimeInterval
     private var connectTask: Task<Void, Never>?
+    private var offlineTask: Task<Void, Never>?
 
-    init(tokens: TokenStore = Keychain.shared,
+    init(relayTokens: TokenStore = Keychain.relay,
+         lanTokens: TokenStore = Keychain.lan,
          defaults: UserDefaults = .standard,
          notifier: Notifier? = nil,
          urlSession: URLSession = .shared,
          makeTransport: @escaping () -> SocketTransport = { URLSessionSocketTransport() },
-         env: [String: String] = ProcessInfo.processInfo.environment) {
-        self.tokens = tokens
+         webAuth: WebAuth? = nil,
+         env: [String: String] = ProcessInfo.processInfo.environment,
+         offlineProbeInterval: TimeInterval = 15) {
+        self.relayTokens = relayTokens
+        self.lanTokens = lanTokens
         self.defaults = defaults
         self.alerts = AlertsStore(notifier: notifier)
         self.urlSession = urlSession
         self.makeTransport = makeTransport
+        self.webAuth = webAuth ?? ASWebAuth()
         self.env = env
-        #if DEBUG
-        if let t = env["WORKPLACE_TOKEN"], !t.isEmpty { tokens.save(token: t) }
-        #endif
+        self.offlineProbeInterval = offlineProbeInterval
     }
 
-    var isPaired: Bool { config != nil && tokens.token != nil }
+    /// The credential store for the current mode.
+    private var tokens: TokenStore { config.mode == .relay ? relayTokens : lanTokens }
+    var hasCredential: Bool { tokens.token != nil }
+    var mode: ServerMode { config.mode }
+    /// The LAN address a developer paired with earlier, if any.
+    var savedLANURL: URL? { ServerConfig.savedLAN(defaults: defaults) }
 
     // MARK: lifecycle
 
-    /// Boot: load the config and token, connect if both exist.
+    /// Boot: load the mode and address, connect if there is a credential.
     func start() {
         config = ServerConfig.load(defaults: defaults, env: env)
-        guard isPaired else { connection = .unpaired; return }
+        #if DEBUG
+        // Scripted runs: start from a clean slate, or skip sign-in with a known credential.
+        if env["WORKPLACE_FORGET"] == "1" { relayTokens.clear(); lanTokens.clear() }
+        if let t = env["WORKPLACE_TOKEN"], !t.isEmpty { tokens.save(token: t) }
+        #endif
+        guard hasCredential else { connection = .signedOut; return }
         connect()
         #if DEBUG
         // Scripted runs (screenshots) open a screen directly.
@@ -87,46 +110,114 @@ final class AppModel {
         #endif
     }
 
-    /// Pairing: exchange the one-time code, keep the token, connect.
+    // MARK: relay sign-in
+
+    /// Runs the relay's web sign-in (or first-time passkey enrolment) and keeps the session.
+    func signIn(enrol: Bool = false) async throws {
+        if config.mode != .relay { useRelay(connect: false) }
+        let callback = try await webAuth.signIn(startURL: enrol ? config.enrolURL : config.loginURL)
+        guard let token = AuthCallback.parse(callback) else {
+            throw WorkplaceError.transport("The sign-in page did not return a session to the app.")
+        }
+        relayTokens.save(token: token)
+        connect()
+    }
+
+    /// A callback that reached the app outside the auth session (`.onOpenURL`).
+    @discardableResult
+    func handleOpenURL(_ url: URL) -> Bool {
+        guard let token = AuthCallback.parse(url) else { return false }
+        if config.mode != .relay { useRelay(connect: false) }
+        relayTokens.save(token: token)
+        connect()
+        return true
+    }
+
+    /// Forget the relay session and go back to the sign-in screen.
+    func signOut() {
+        stopConnections()
+        relayTokens.clear()
+        health = nil
+        rest = nil
+        connection = .signedOut
+    }
+
+    /// Switch to the public relay (the default). Keeps any LAN pairing for later.
+    func useRelay(connect shouldConnect: Bool = true) {
+        stopConnections()
+        var cfg = ServerConfig.relay
+        if let raw = defaults.string(forKey: ServerConfig.relayURLKey), let u = ServerConfig.parse(raw) { cfg.baseURL = u }
+        #if DEBUG
+        if let raw = env["WORKPLACE_RELAY_URL"], let u = ServerConfig.parse(raw) { cfg.baseURL = u }
+        #endif
+        config = cfg
+        config.save(defaults: defaults)
+        health = nil
+        rest = nil
+        if shouldConnect { if hasCredential { connect() } else { connection = .signedOut } }
+    }
+
+    // MARK: LAN pairing (developer option)
+
+    /// Pair with a LAN Workplace: exchange the one-time code, keep the token, switch to LAN mode.
     func pair(urlText: String, code: String) async throws {
         guard let url = ServerConfig.parse(urlText) else {
             throw WorkplaceError.transport("Enter the server address as host:port, for example 192.168.1.5:4317.")
         }
-        let cfg = ServerConfig(baseURL: url)
+        let cfg = ServerConfig(mode: .lan, baseURL: url)
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw WorkplaceError.transport("Enter the pairing code shown on the Mac.") }
         let token = try await RestClient.exchange(config: cfg, code: trimmed, session: urlSession)
-        tokens.save(token: token)
+        stopConnections()
+        lanTokens.save(token: token)
         cfg.save(defaults: defaults)
         config = cfg
+        health = nil
         connect()
     }
 
-    /// Forget the token (and the URL) and go back to Pairing.
+    /// Forget the LAN token and address and go back to the relay.
     func unpair() {
-        connectTask?.cancel()
-        socket?.stop(); socket = nil
-        tokens.clear()
-        ServerConfig.forget(defaults: defaults)
-        config = nil
-        rest = nil
-        health = nil
-        connection = .unpaired
+        stopConnections()
+        lanTokens.clear()
+        ServerConfig.forgetLAN(defaults: defaults)
+        useRelay()
     }
 
+    /// Switch to a LAN Workplace paired earlier (developer toggle).
+    func useSavedLAN() {
+        guard let url = savedLANURL else { return }
+        stopConnections()
+        config = ServerConfig(mode: .lan, baseURL: url)
+        config.save(defaults: defaults)
+        health = nil
+        rest = nil
+        if hasCredential { connect() } else { connection = .signedOut }
+    }
+
+    // MARK: connection
+
     func foreground() {
-        guard isPaired else { return }
-        if socket == nil { connect() } else { socket?.reconnectNow() }
+        guard hasCredential else { return }
+        switch connection {
+        case .macOffline, .unauthorized: connect()
+        default: if socket == nil { connect() } else { socket?.reconnectNow() }
+        }
     }
 
     func background() {
         // Nothing to tear down: iOS suspends the socket; on resume we reconnect.
     }
 
+    private func stopConnections() {
+        connectTask?.cancel(); connectTask = nil
+        offlineTask?.cancel(); offlineTask = nil
+        socket?.stop(); socket = nil
+    }
+
     private func connect() {
-        guard let config, let token = tokens.token else { connection = .unpaired; return }
-        connectTask?.cancel()
-        socket?.stop()
+        guard let token = tokens.token else { connection = .signedOut; return }
+        stopConnections()
         connection = .connecting
         let rest = RestClient(config: config, tokens: tokens, session: urlSession)
         self.rest = rest
@@ -136,19 +227,49 @@ final class AppModel {
         self.socket = socket
         connectTask = Task { [weak self] in
             guard let self else { return }
-            do {
-                let h = try await rest.health()
-                guard !Task.isCancelled else { return }
-                self.health = h
-                self.connection = .online(version: h.version)
-            } catch WorkplaceError.unauthorized {
-                self.connection = .unauthorized
-                return
-            } catch {
-                self.connection = .offline(reason: error.localizedDescription, retryAt: nil)
+            switch await self.probe(rest) {
+            case .online, .offline:
+                // Offline here means the network, not the Mac: the socket's backoff will recover it.
+                socket.start()
+                await self.loadAll()
+            case .macOffline:
+                self.waitForMac(rest, socket: socket)
+            case .unauthorized, .signedOut, .connecting:
+                break
             }
-            socket.start()
-            await self.loadAll()
+        }
+    }
+
+    /// One health call, translated into the connection state it implies.
+    private func probe(_ rest: RestClient) async -> Connection {
+        do {
+            let h = try await rest.health()
+            health = h
+            connection = .online(version: h.version)
+        } catch WorkplaceError.unauthorized {
+            connection = .unauthorized
+        } catch WorkplaceError.macOffline {
+            connection = .macOffline
+        } catch {
+            connection = .offline(reason: error.localizedDescription, retryAt: nil)
+        }
+        return connection
+    }
+
+    /// The Mac is down behind the relay: re-probe until it is back, then connect the socket.
+    private func waitForMac(_ rest: RestClient, socket: SocketClient) {
+        offlineTask?.cancel()
+        offlineTask = Task { [weak self, offlineProbeInterval] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(offlineProbeInterval))
+                guard !Task.isCancelled, let self else { return }
+                if case .online = await self.probe(rest) {
+                    socket.start()
+                    await self.loadAll()
+                    return
+                }
+                if case .unauthorized = self.connection { return }
+            }
         }
     }
 
@@ -163,10 +284,30 @@ final class AppModel {
     private func socketState(_ s: SocketState) {
         switch s {
         case .open:
-            if let h = health { connection = .online(version: h.version) } else { connection = .online(version: "") }
+            offlineTask?.cancel(); offlineTask = nil
+            connection = .online(version: health?.version ?? "")
         case .closed(let retryAt):
-            if case .unauthorized = connection { return }
-            if let retryAt { connection = .offline(reason: "Connection lost", retryAt: retryAt) }
+            switch connection {
+            case .unauthorized, .macOffline, .signedOut: return
+            default: break
+            }
+            guard let retryAt, let rest, let socket else { return }
+            connection = .offline(reason: "Connection lost", retryAt: retryAt)
+            // Was it the network, the Mac, or the session? One health call tells.
+            Task { [weak self] in
+                guard let self else { return }
+                switch await self.probe(rest) {
+                case .macOffline:
+                    socket.stop()
+                    self.waitForMac(rest, socket: socket)
+                case .unauthorized:
+                    socket.stop()
+                case .online:
+                    self.connection = .offline(reason: "Connection lost", retryAt: retryAt)
+                default:
+                    self.connection = .offline(reason: "Connection lost", retryAt: retryAt)
+                }
+            }
         case .connecting, .idle:
             break
         }
@@ -190,8 +331,6 @@ final class AppModel {
             break
         }
     }
-
-    private(set) var lastSocketError: String?
 
     private func syncNeedsYou() {
         if inbox.loaded { office.setNeedsYou(inbox.open.count) }

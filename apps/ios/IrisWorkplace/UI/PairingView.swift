@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// First run: the server address and the one-time code from the Mac.
+/// LAN pairing (a developer option): the server address and the one-time code from the Mac.
 struct PairingView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    /// True when shown as a sheet from Developer options; false when it is the first screen in LAN mode.
+    var embedded = false
     @State private var urlText = ""
     @State private var code = ""
     @State private var busy = false
@@ -55,9 +58,21 @@ struct PairingView: View {
                     }
                     .disabled(busy || urlText.trimmingCharacters(in: .whitespaces).isEmpty || code.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
+                if !embedded {
+                    Section {
+                        Button("Use the relay instead") { model.useRelay() }
+                    }
+                }
             }
-            .navigationTitle("Iris Workplace")
-            .onAppear { focus = .url }
+            .navigationTitle(embedded ? "Pair on the LAN" : "Iris Workplace")
+            .navigationBarTitleDisplayMode(embedded ? .inline : .large)
+            .toolbar {
+                if embedded { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            }
+            .onAppear {
+                if let saved = model.savedLANURL { urlText = saved.host.map { h in saved.port.map { "\(h):\($0)" } ?? h } ?? "" }
+                focus = urlText.isEmpty ? .url : .code
+            }
         }
     }
 
@@ -67,6 +82,7 @@ struct PairingView: View {
         defer { busy = false }
         do {
             try await model.pair(urlText: urlText, code: code)
+            if embedded { dismiss() }
         } catch {
             self.error = error.localizedDescription
         }

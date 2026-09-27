@@ -20,9 +20,9 @@ struct WorkplaceApp: App {
                     model.alerts.isActive = { UIApplication.shared.applicationState == .active }
                     model.start()
                 }
-                .onChange(of: model.isPaired, initial: true) { _, paired in
+                .onChange(of: model.hasCredential, initial: true) { _, has in
                     // Ask for notifications once there is something to be notified about.
-                    if paired { LocalNotifier.requestPermission() }
+                    if has { LocalNotifier.requestPermission() }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {

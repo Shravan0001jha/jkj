@@ -6,10 +6,13 @@ struct RootView: View {
     var body: some View {
         @Bindable var router = model.router
         Group {
-            if !model.isPaired {
-                PairingView()
+            if !model.hasCredential {
+                if model.mode == .relay { SignInView() } else { PairingView() }
             } else if model.connection == .unauthorized {
-                UnauthorizedView()
+                ReauthView()
+            } else if model.connection == .macOffline && model.office.data == nil {
+                MacOfflineView()
+                    .sheet(isPresented: $router.showSettings) { SettingsView() }
             } else {
                 TabView(selection: $router.tab) {
                     OfficeView()
@@ -34,6 +37,7 @@ struct RootView: View {
                 .sheet(isPresented: $router.showSettings) { SettingsView() }
             }
         }
+        .onOpenURL { url in model.handleOpenURL(url) }
     }
 }
 
@@ -43,10 +47,12 @@ struct ConnectionStrip: View {
 
     var body: some View {
         switch model.connection {
-        case .online, .unpaired, .unauthorized:
+        case .online, .signedOut, .unauthorized:
             EmptyView()
         case .connecting:
             strip("Connecting…", symbol: "antenna.radiowaves.left.and.right", tint: .secondary)
+        case .macOffline:
+            strip("Your Mac is offline — Workplace unavailable", symbol: "desktopcomputer.trianglebadge.exclamationmark", tint: .red)
         case .offline(let reason, let retryAt):
             let when = retryAt.map { " · retrying \($0.formatted(.relative(presentation: .numeric)))" } ?? ""
             strip("\(reason)\(when)", symbol: "wifi.exclamationmark", tint: .orange)
@@ -101,20 +107,5 @@ struct AlertBanner: View {
             .animation(.snappy, value: b.id)
             .accessibilityLabel("\(g.label): \(b.event.title). \(b.event.body)")
         }
-    }
-}
-
-struct UnauthorizedView: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "key.slash").font(.system(size: 44)).foregroundStyle(.orange)
-            Text("This phone is no longer paired").font(.title3.weight(.semibold))
-            Text("The Workplace refused the token. Pair again with a new code from the Mac.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Button("Re-pair") { model.unpair() }.buttonStyle(.borderedProminent)
-        }
-        .padding(24)
     }
 }

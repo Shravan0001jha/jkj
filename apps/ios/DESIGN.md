@@ -113,3 +113,33 @@ add one `NSExceptionDomains` entry for the tailnet domain. Decided when the tail
 - Tailscale (the app is tested on the LAN; the ATS decision above is recorded).
 - Org, Assign, Releases and Spend screens beyond what Office and Inbox show: releases, org changes and
   cap requests are approved from the Inbox, which is what the phone is for.
+
+## Public relay sign-in (added 27 Sep, evening)
+
+The Workplace becomes reachable from anywhere through an authenticated relay at
+`https://work.irisforu.com` (deployment pending its security review). The API shapes do not change;
+only how the app gets a credential and what "offline" means.
+
+- **Modes.** `ServerConfig.mode` is `relay` (default, base `https://work.irisforu.com`) or `lan`
+  (the pairing flow above, kept as a developer option behind a toggle in Settings and in the
+  sign-in screen's footer). Each mode keeps its own credential in its own Keychain item
+  (`relay-session`, `api-token`), so switching modes never leaks or loses the other's.
+- **Sign-in.** `ASWebAuthenticationSession` on `<base>/login?app=1` (passkey, or email + Telegram
+  code); first-time passkey enrolment on `<base>/login/enrol?app=1`. The page ends with a redirect to
+  `irisworkplace://auth#token=<session>`; the token is read from the **fragment** only
+  (`AuthCallback.parse`), never from the query, so it does not appear in any server log. The scheme
+  is registered in Info.plist and `.onOpenURL` is a fallback for a redirect that lands outside the
+  auth session. The session then travels as `Authorization: Bearer` on `/api` and `?token=` on `/ws`
+  exactly like the LAN token. `WebAuth` is a protocol; tests inject a fake that returns a callback URL.
+- **Expiry.** Sessions expire after 12 h idle or 7 d. Any 401 sets `Connection.unauthorized`; in relay
+  mode the screen says "Sign in again" and re-runs the web auth; in LAN mode it offers Re-pair.
+- **Mac offline.** When the Mac's tunnel to the relay is down, the relay answers 502/503/504 (JSON
+  `{ error }` or an HTML page mentioning "offline"). `RestClient` maps that to
+  `WorkplaceError.macOffline`, distinct from `.transport` (no network) and `.server`. The app shows
+  "Your Mac is offline — Workplace unavailable" (full screen when there is no data yet, otherwise
+  the strip under the navigation bar) and re-probes `/api/health` every 15 s until the Mac is back,
+  then connects the socket and reloads.
+- **Debug hooks.** `WORKPLACE_RELAY_URL` points relay mode at a local mock; `WORKPLACE_URL` +
+  `WORKPLACE_TOKEN` still select LAN mode for scripted runs. `mock/server.mjs` serves `/login?app=1`
+  and `/login/enrol?app=1` as a page whose button redirects to the callback, and `--mac-offline`
+  makes it answer like a relay whose Mac is down.

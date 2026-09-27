@@ -20,7 +20,7 @@ final class StoreTests: XCTestCase {
             default: return (404, Data(#"{"error":"no route \#(p)"}"#.utf8))
             }
         }
-        rest = RestClient(config: ServerConfig(baseURL: ServerConfig.parse("127.0.0.1:4317")!),
+        rest = RestClient(config: ServerConfig(mode: .lan, baseURL: ServerConfig.parse("127.0.0.1:4317")!),
                           tokens: MemoryTokenStore(token: "t"), session: StubURLProtocol.session())
     }
 

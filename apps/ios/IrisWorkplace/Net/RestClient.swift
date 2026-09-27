@@ -9,16 +9,19 @@ enum WorkplaceError: Error, Equatable, LocalizedError {
     case decoding(String)
     /// Could not reach the server at all.
     case transport(String)
-    /// The app has no server URL or no token.
+    /// The app has no credential for the Workplace yet.
     case notPaired
+    /// The relay is up but the Mac's tunnel to it is down (502/503/504, "Mac offline").
+    case macOffline
 
     var errorDescription: String? {
         switch self {
         case .server(_, let message): return message
-        case .unauthorized: return "This phone is no longer paired with the Workplace."
+        case .unauthorized: return "Your session with the Workplace has ended. Sign in again."
         case .decoding(let d): return "The server's answer did not match the contract: \(d)"
         case .transport(let d): return d
-        case .notPaired: return "Pair this phone with the Workplace first."
+        case .notPaired: return "Sign in to the Workplace first."
+        case .macOffline: return "Your Mac is offline — Workplace unavailable."
         }
     }
 }
@@ -100,6 +103,7 @@ final class RestClient {
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 401 { throw WorkplaceError.unauthorized }
+        if Self.isMacOffline(status: status, body: data) { throw WorkplaceError.macOffline }
         if !(200..<300).contains(status) {
             let message = (try? decoder.decode(ErrorResponse.self, from: data))?.error
             throw WorkplaceError.server(status: status, message: message ?? "HTTP \(status)")
@@ -109,6 +113,16 @@ final class RestClient {
         } catch {
             throw WorkplaceError.decoding(describe(error))
         }
+    }
+}
+
+extension RestClient {
+    /// The relay's "Mac offline" answer: a gateway status, or any error body that says so.
+    static func isMacOffline(status: Int, body: Data) -> Bool {
+        if [502, 503, 504].contains(status) { return true }
+        guard status >= 400 else { return false }
+        let text = String(decoding: body.prefix(4096), as: UTF8.self).lowercased()
+        return text.contains("mac offline") || text.contains("mac is offline")
     }
 }
 

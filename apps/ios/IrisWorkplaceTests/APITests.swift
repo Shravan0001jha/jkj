@@ -70,21 +70,23 @@ final class ServerConfigTests: XCTestCase {
     }
 
     func testURLsForPathsAndSocket() {
-        let c = ServerConfig(baseURL: ServerConfig.parse("192.168.1.5:4317")!)
+        let c = ServerConfig(mode: .lan, baseURL: ServerConfig.parse("192.168.1.5:4317")!)
         XCTAssertEqual(c.url(API.office).absoluteString, "http://192.168.1.5:4317/api/office")
         XCTAssertEqual(c.url(API.featurePivot(.team)).absoluteString, "http://192.168.1.5:4317/api/features/pivot?rows=team")
         XCTAssertEqual(c.socketURL.absoluteString, "ws://192.168.1.5:4317/ws")
-        let s = ServerConfig(baseURL: ServerConfig.parse("https://mac.ts.net")!)
+        let s = ServerConfig(mode: .lan, baseURL: ServerConfig.parse("https://mac.ts.net")!)
         XCTAssertEqual(s.socketURL.absoluteString, "wss://mac.ts.net/ws")
     }
 
     func testLoadAndSaveThroughDefaults() {
         let d = UserDefaults(suiteName: "ServerConfigTests")!
         d.removePersistentDomain(forName: "ServerConfigTests")
-        XCTAssertNil(ServerConfig.load(defaults: d, env: [:]))
-        ServerConfig(baseURL: ServerConfig.parse("10.0.0.2:4317")!).save(defaults: d)
-        XCTAssertEqual(ServerConfig.load(defaults: d, env: [:])?.baseURL.absoluteString, "http://10.0.0.2:4317")
-        ServerConfig.forget(defaults: d)
-        XCTAssertNil(ServerConfig.load(defaults: d, env: [:]))
+        XCTAssertEqual(ServerConfig.load(defaults: d, env: [:]), .relay, "nothing saved means the relay")
+        ServerConfig(mode: .lan, baseURL: ServerConfig.parse("10.0.0.2:4317")!).save(defaults: d)
+        let loaded = ServerConfig.load(defaults: d, env: [:])
+        XCTAssertEqual(loaded.mode, .lan)
+        XCTAssertEqual(loaded.baseURL.absoluteString, "http://10.0.0.2:4317")
+        ServerConfig.forgetLAN(defaults: d)
+        XCTAssertEqual(ServerConfig.load(defaults: d, env: [:]), .relay)
     }
 }

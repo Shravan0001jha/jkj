@@ -36,6 +36,9 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Iris Workplace talks to the Workplace server on your Mac over the local network.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.irisforu.workplace.auth
+            CFBundleURLSchemes: [irisworkplace]
     entitlements:
       path: IrisWorkplace/IrisWorkplace.entitlements
       properties: {}
