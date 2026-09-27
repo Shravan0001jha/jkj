@@ -133,7 +133,11 @@ assignments by state per cell, from `work` joined with `org`.
 replaces the child env, so the key is removed, not blanked), `cwd` = workspace path, `model`,
 `permissionMode`, `allowedTools`/`disallowedTools`, `maxBudgetUsd` = remaining employee budget in
 USD, and the Workplace MCP tools (`report_status`, `report_done`, `ask_owner`, `propose_org_change`,
-`request_review`) served in-process via the SDK's `createSdkMcpServer`. The result message's
+`request_review`, `write_handoff`) served in-process via the SDK's `createSdkMcpServer`. They are in
+`allowedTools` so they never prompt; the SDK lists them as deferred, so a session reaches them through
+`ToolSearch` (verified live). Their schemas must be MCP-serialisable: a `z.record()` parameter made the
+MCP SDK fail to list *any* tool of the server (found 27 Sep, pinned by `workplace-tools.test.ts`), so
+`propose_org_change` takes `paramsJson` as a string. The result message's
 `modelUsage` is diffed against the last seen totals to write `SpendEntry` rows. `talk(employeeId,
 text)` = send to the open session or spawn. `endSession` asks for the handoff (a final prompt),
 waits up to 90 s, then closes.
@@ -205,7 +209,13 @@ Token file `~/iris-ops/workplace/api-token` (32 random bytes, hex, mode 600), cr
 missing. Middleware: request from loopback → allowed; otherwise `Authorization: Bearer` must equal
 the token (constant-time compare) or 401. WebSocket upgrade checks the same header or `?token=`.
 `POST /api/pair` (loopback only) → `{ code, expiresAt }`; `POST /api/pair/exchange { code }` (any
-origin) → `{ token }` once. `--host` other than loopback logs a warning unless the token file exists.
+origin) → `{ token }` once. Loopback is **always** bound; `--host <ip>` adds one more listener on that exact address (never
+`0.0.0.0`), so the page on the Mac and the loopback-only pairing route keep working while the phone
+reaches the second listener with the token. `POST /api/pair/exchange` is the one route that needs no
+token (it carries the one-time code). Verified 27 Sep from the LAN interface: no token → 401, wrong
+token → 401, token → 200, `POST /api/pair` from the LAN → 400, exchange from the LAN → the token,
+second use of the code → 401, socket upgrade without token → 401, with `?token=` → open and
+`office.snapshot` received.
 
 ## 14. Workplace API contract (the phone app builds against this; stable from here)
 
@@ -248,7 +258,7 @@ strings. The contract is `packages/shared/src/workplace-api.ts` (`WORKPLACE_API`
 
 ### WebSocket `/ws` (`ServerEvent` additions)
 
-`office.updated { employee: EmployeeCard }`, `inbox.updated { item }`, `work.updated { item }`,
+`office.snapshot { office: OfficeResponse }` (once, on connect), `office.updated { card: EmployeeCard }`, `inbox.updated { item }`, `work.updated { item }`,
 `proposal.updated { proposal }`, `release.log { id, line }`, `spend.updated { summary }`,
 `alert { level: 'info'|'needs-you'|'blocked'|'cap'; title; body; inboxId? }`. The existing
 `agent.updated` / `agent.log` stay. `ClientCommand` additions: `inbox.answer { id, optionId, note? }`.

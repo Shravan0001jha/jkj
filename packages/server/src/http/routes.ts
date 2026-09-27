@@ -277,7 +277,9 @@ export function createRouter({ config, wp, auth }: RouterDeps) {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     if (!url.pathname.startsWith('/api/')) return false;
 
-    if (!auth.allows(req)) {
+    // The exchange is how a phone GETS the token; it carries a one-time code instead.
+    const exchanging = req.method === 'POST' && url.pathname === '/api/pair/exchange';
+    if (!exchanging && !auth.allows(req)) {
       json(res, 401, { error: 'A bearer token is required off loopback.' });
       return true;
     }
