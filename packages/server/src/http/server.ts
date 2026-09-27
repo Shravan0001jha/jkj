@@ -58,6 +58,8 @@ function serveStatic(rawUrl: string, res: import('node:http').ServerResponse): v
 export function listen(server: Server, config: Config): Promise<void> {
   const hosts = ['127.0.0.1', ...(config.host && !['127.0.0.1', 'localhost', '::1'].includes(config.host) ? [config.host] : [])];
   return new Promise((resolve, reject) => {
+    // A port already taken (another instance, or one still shutting down) fails the start; it never runs half-bound.
+    server.once('error', err => reject(new Error(`cannot listen on http://${hosts[0]}:${config.port}: ${(err as NodeJS.ErrnoException).code ?? err.message}`)));
     server.listen(config.port, hosts[0], () => {
       log.info('http', `listening on http://${hosts[0]}:${config.port}`);
       if (hosts.length === 1) return resolve();

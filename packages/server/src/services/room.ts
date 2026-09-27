@@ -4,6 +4,7 @@ import * as work from './work.js';
 import * as inbox from './inbox.js';
 import { readEmployeeFile } from './org.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
+import { oneLine } from './one-line.js';
 import { BadRequest } from '../util/errors.js';
 
 /**
@@ -16,12 +17,16 @@ export function listThreads(wp: Workplace, state?: RoomThread['state']): RoomThr
   const rows = state
     ? wp.db.prepare('select json from threads where state = ? order by last_at desc').all(state)
     : wp.db.prepare("select json from threads order by case state when 'open' then 0 else 1 end, last_at desc").all();
-  return rowsJson<RoomThread>(rows);
+  return rowsJson<RoomThread>(rows).map(withHeadline);
 }
 
 export function getThread(wp: Workplace, id: string): RoomThread | undefined {
-  return rowJson<RoomThread>(wp.db.prepare('select json from threads where id = ?').get(id));
+  const t = rowJson<RoomThread>(wp.db.prepare('select json from threads where id = ?').get(id));
+  return t ? withHeadline(t) : undefined;
 }
+
+/** Threads made before D16 read as their title until someone sets a headline. */
+const withHeadline = (t: RoomThread): RoomThread => (t.headline ? t : { ...t, headline: oneLine(t.title).summary });
 
 export function messages(wp: Workplace, threadId: string): RoomMessage[] {
   return rowsJson<RoomMessage>(wp.db.prepare('select json from messages where thread_id = ? order by at, rowid').all(threadId));
@@ -40,12 +45,12 @@ export function mentionsIn(wp: Workplace, text: string): string[] {
   return [...found];
 }
 
-export function createThread(wp: Workplace, spec: { title: string; text: string; by: string; charterIds?: string[]; mentions?: string[]; at?: string }): { thread: RoomThread; message: RoomMessage } {
+export function createThread(wp: Workplace, spec: { title: string; text: string; by: string; charterIds?: string[]; mentions?: string[]; at?: string; headline?: string }): { thread: RoomThread; message: RoomMessage } {
   if (!spec.title.trim()) throw new BadRequest('A thread needs a title.');
   const at = spec.at ?? now();
   const thread: RoomThread = {
     id: newId('th'), title: spec.title.trim(), charterIds: spec.charterIds ?? [], createdBy: spec.by, createdAt: at,
-    state: 'open', lastAt: at, messageCount: 0, participants: [], escalations: [],
+    state: 'open', headline: oneLine(spec.headline?.trim() || spec.title).summary, lastAt: at, messageCount: 0, participants: [], escalations: [],
   };
   wp.db.prepare('insert into threads (id, title, charter_ids, created_by, created_at, state, last_at, json) values (?, ?, ?, ?, ?, ?, ?, ?)')
     .run(thread.id, thread.title, JSON.stringify(thread.charterIds), thread.createdBy, at, 'open', at, JSON.stringify(thread));
@@ -53,7 +58,7 @@ export function createThread(wp: Workplace, spec: { title: string; text: string;
   return { thread: getThread(wp, thread.id)!, message };
 }
 
-export function post(wp: Workplace, threadId: string, spec: { text: string; by: string; mentions?: string[]; at?: string }): RoomMessage {
+export function post(wp: Workplace, threadId: string, spec: { text: string; by: string; mentions?: string[]; at?: string; headline?: string }): RoomMessage {
   const thread = getThread(wp, threadId);
   if (!thread) throw new BadRequest(`No thread ${threadId}`);
   if (!spec.text.trim()) throw new BadRequest('An empty message says nothing.');
@@ -65,7 +70,7 @@ export function post(wp: Workplace, threadId: string, spec: { text: string; by: 
   const participants = new Set(thread.participants);
   if (spec.by !== 'owner' && spec.by !== 'workplace') participants.add(spec.by);
   for (const m of mentions) participants.add(m);
-  const updated: RoomThread = { ...thread, lastAt: at, messageCount: thread.messageCount + 1, participants: [...participants] };
+  const updated: RoomThread = { ...thread, lastAt: at, messageCount: thread.messageCount + 1, participants: [...participants], ...(spec.headline?.trim() ? { headline: oneLine(spec.headline).summary } : {}) };
   saveThread(wp, updated);
   wp.emit({ type: 'room.message', message, thread: updated });
   return message;
@@ -82,7 +87,7 @@ export function resolve(wp: Workplace, threadId: string, spec: { summary: string
     created.push(item.id);
   }
   post(wp, threadId, { text: `Resolved: ${spec.summary.trim()}${created.length ? `\nFollow-ups: ${created.join(', ')}` : ''}`, by: spec.by });
-  const updated: RoomThread = { ...getThread(wp, threadId)!, state: 'resolved', summary: spec.summary.trim() };
+  const updated: RoomThread = { ...getThread(wp, threadId)!, state: 'resolved', summary: spec.summary.trim(), headline: oneLine(spec.summary).summary };
   saveThread(wp, updated);
   return { thread: updated, followUps: created };
 }

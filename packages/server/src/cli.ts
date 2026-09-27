@@ -19,7 +19,12 @@ async function main(): Promise<void> {
 
   const url = `http://${config.host}:${config.port}`;
   log.info('workplace', `ready at ${url}`);
-  const shutdown = () => { void running.stop().finally(() => process.exit(0)); };
+  // Stop, then exit; and exit anyway after 20 s, so a hung close (an open socket, a slow handoff)
+  // can never leave a listener-less process alive with the lock.
+  const shutdown = () => {
+    setTimeout(() => { log.warn('workplace', 'stop did not finish in 20 s; exiting'); process.exit(1); }, 20_000).unref();
+    void running.stop().then(() => process.exit(0), err => { log.error('workplace', String(err)); process.exit(1); });
+  };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 

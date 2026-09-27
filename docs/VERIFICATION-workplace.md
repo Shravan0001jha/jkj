@@ -117,6 +117,24 @@ denial delivery; threads, mentions, owner marking, context layer, resolve with f
 moderation hand-off, the seed from the real plans). Live: the five seed threads exist after the
 restart; Asha's moderation session runs on the next routine tick.
 
+## The stray process (found by the lead, 28 Sep 00:30): RCA
+
+**What it was.** pid 64515, `node packages/server/dist/cli.js --no-open`, started 20:50:42 IST:
+the first ever Workplace server, run for the M2 smoke test right after commit 3a2fcaf (20:50). Its
+one session (Asha, 20:53–20:55) and Mira's 21:03–21:08 session are in the sessions table; the
+latter ends with status `shutdown` at 21:08:38, which is when this process received SIGTERM for the
+21:08 restart (commit 787ce9c). **Why it stayed.** That build's `stop()` cleared its timers, stopped
+the Telegram tail, closed the sessions, then awaited `server.close()`, which waits for every open
+connection: a browser tab's WebSocket to the Office page was still open, so the close never
+finished, `process.exit` never ran, and the process lived on with no listener (the port was free,
+so the next start bound it), one accepted socket, an open database handle and nothing scheduled.
+The later `pkill -f` restarts did not end it either, because its SIGTERM handler was the same hung
+stop. It exited at about 00:25 when that tab's socket finally closed. **What it did after 21:08.**
+Nothing: no session, Inbox item, event, spend row or Telegram command is attributable to it (its
+Telegram cursor is shared and consistent with the file size; no item was ever answered via
+Telegram). The batch's `stop()` already calls `closeAllConnections()`; the lock, the listen
+error and the 20 s exit deadline (HLD D17) make the failure impossible to repeat silently.
+
 ## Spend
 
 Own verification spend on the owner's subscription (equivalent API cost): about ₹300 across the live checks above,

@@ -38,6 +38,9 @@ export interface LogEntry {
   label: string;
   /** The body: a file path, a command, a sentence. */
   text: string;
+  /** Assistant prose only (D16): one line for the owner, the outcome; `details` holds the rest when the text was longer. */
+  summary?: string;
+  details?: string;
   /** Set when this entry represents a subagent run. */
   subagentId?: string;
   /**

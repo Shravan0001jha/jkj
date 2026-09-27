@@ -18,6 +18,19 @@ First boot copies the seed organisation into `~/iris-workplace` (its own git rep
 at `~/iris-ops/workplace/api-token` (mode 600). Agents use `~/iris-ops/workplace/claude-oauth.env`;
 `ANTHROPIC_API_KEY` never reaches them.
 
+## One line to the owner
+
+Everything the owner reads is one line: an Inbox item's `summary`, a reply's first sentence, a Team
+Room thread's `headline`, a Telegram ping. The rest is behind "details". Employees are told so in
+the handbook; the server trims what still runs long. Ask "details?" or tap expand to see the rest.
+
+## One instance
+
+The Workplace takes `workplace.lock` (pid) next to the database. A second start against the same
+organisation exits with the running pid; a start on a taken port exits; a stop that hangs exits
+after 20 s. If a start says "already running" and nothing is, the pid in the file is dead and the
+next start takes over.
+
 ## Who talks to the owner
 
 The Workplace sends only its own automatic pings: Inbox items, enrolment and sign-in codes, new-device and

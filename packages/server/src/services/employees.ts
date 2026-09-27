@@ -710,13 +710,13 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           const e = spend.record(wp, { employeeId, sessionId: session().agentId, source, basis: units ? 'metered' : 'reported', what, inr: amount, detail: { ...(usd !== undefined ? { usd } : {}), ...(units ?? {}) } });
           return ok(`Recorded ₹${e.inr} (${e.basis}, ${source}). Real money today: ₹${spend.summary(wp).companyInr} of ₹${spend.capFor(wp)}.`);
         }),
-      tool('room_post', 'Post in the Team Room: to an existing thread by id, or open a new one with a title. Use it when your work needs another team (an interface, a contract, a handoff, an ownership conflict) instead of editing outside your charter. Mention people with @id.',
-        { threadId: z.string().optional(), title: z.string().optional(), text: z.string(), charterIds: z.array(z.string()).optional() },
-        async ({ threadId, title, text, charterIds }) => {
+      tool('room_post', 'Post in the Team Room: to an existing thread by id, or open a new one with a title. Use it when your work needs another team (an interface, a contract, a handoff, an ownership conflict) instead of editing outside your charter. Mention people with @id. The text can be as detailed as the work needs; `headline` is the one line the owner sees for the thread ("Weather source: agreed on open-meteo, Mira to wire it").',
+        { threadId: z.string().optional(), title: z.string().optional(), text: z.string(), charterIds: z.array(z.string()).optional(), headline: z.string().optional() },
+        async ({ threadId, title, text, charterIds, headline }) => {
           try {
-            if (threadId) { const m = room.post(wp, threadId, { text, by: employeeId }); return ok(`Posted ${m.id} in ${threadId}.`); }
+            if (threadId) { const m = room.post(wp, threadId, { text, by: employeeId, ...(headline ? { headline } : {}) }); return ok(`Posted ${m.id} in ${threadId}.`); }
             if (!title) return ok('Give a threadId to reply, or a title to open a thread.');
-            const { thread } = room.createThread(wp, { title, text, by: employeeId, ...(charterIds ? { charterIds } : {}) });
+            const { thread } = room.createThread(wp, { title, text, by: employeeId, ...(charterIds ? { charterIds } : {}), ...(headline ? { headline } : {}) });
             return ok(`Opened thread ${thread.id}: ${thread.title}.`);
           } catch (err) { return ok(`Not posted: ${err instanceof Error ? err.message : String(err)}`); }
         }),
