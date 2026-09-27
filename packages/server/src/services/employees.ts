@@ -10,7 +10,7 @@ import * as work from './work.js';
 import * as spend from './spend.js';
 import * as inbox from './inbox.js';
 import { assembleContext } from './context-layers.js';
-import { writeEmployeeFile, readEmployeeFile, summarise } from './org.js';
+import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
 import { now } from './store.js';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
@@ -182,25 +182,36 @@ const HANDOFF_PROMPT =
   'and write_handoff with what the next session needs to continue. Then stop.';
 
 /** Ask for the handoff, wait a bounded time, close. */
-export async function endSession(wp: Workplace, agentId: string, waitMs = 90_000): Promise<void> {
+export async function endSession(wp: Workplace, agentId: string, waitMs = 150_000): Promise<void> {
   const session = sessions.get(agentId);
   if (!session) return;
   const agent = runs.getRunAgent(agentId);
   if (agent && (agent.status === 'running' || agent.status === 'waiting') && waitMs > 0) {
+    // Subscribe before sending, so a turn that ends at once is not missed.
+    const waiting = waitForHandoff(wp, session, waitMs);
     runs.sendMessage(agentId, HANDOFF_PROMPT);
-    await waitForHandoff(wp, session, waitMs);
+    await waiting;
   }
   close(wp, agentId, 'ended');
 }
 
+/**
+ * The handoff turn is done when the run reports the end of a turn (its
+ * status leaves `running`), when the handoff file changed, or when the wait
+ * runs out. Subscribed, not polled: a turn can finish between two polls.
+ */
 function waitForHandoff(wp: Workplace, session: Session, waitMs: number): Promise<void> {
   const before = readEmployeeFile(wp.org, session.employeeId, 'handoff.md');
   return new Promise(resolve => {
-    const started = Date.now();
+    let done = false;
+    const finish = (): void => { if (done) return; done = true; clearInterval(timer); clearTimeout(limit); unsubscribe(); resolve(); };
+    const unsubscribe = runs.onRunEvent(({ agent }) => {
+      if (agent?.id === session.agentId && agent.status !== 'running') finish();
+    });
     const timer = setInterval(() => {
-      const changed = readEmployeeFile(wp.org, session.employeeId, 'handoff.md') !== before;
-      if (changed || Date.now() - started > waitMs) { clearInterval(timer); resolve(); }
+      if (readEmployeeFile(wp.org, session.employeeId, 'handoff.md') !== before && runs.getRunAgent(session.agentId)?.status !== 'running') finish();
     }, 500);
+    const limit = setTimeout(finish, waitMs);
   });
 }
 
@@ -211,6 +222,9 @@ export function close(wp: Workplace, agentId: string, reason: string): void {
   runs.closeRun(agentId);
   sessions.delete(agentId);
   wp.db.prepare('update sessions set ended_at = ?, status = ? where id = ?').run(now(), reason, agentId);
+  // The memory is the files: a session's status and handoff are history too.
+  const name = wp.org.employees.find(e => e.id === session.employeeId)?.name ?? session.employeeId;
+  commitOrg(wp.org.dir, `${name}: session ${agentId} ${reason} (status and handoff)`);
   if (sessionsOf(session.employeeId).length === 0 && stateOverride.get(session.employeeId) === 'working') setState(wp, session.employeeId, 'idle');
 }
 

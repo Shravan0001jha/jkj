@@ -113,7 +113,7 @@ export function createRouter({ config, wp, auth }: RouterDeps) {
     }),
     r('POST', '/api/employees/:id/end-session', async (_req, res, _url, [id]) => {
       const open = employees.openSession(dec(id));
-      if (open) await employees.endSession(wp, open.agentId, 60_000);
+      if (open) await employees.endSession(wp, open.agentId, 150_000);
       json(res, 200, { ok: true });
     }),
     r('GET', '/api/employees/:id/context', async (_req, res, _url, [id]) => json(res, 200, await readEmployeeContext(wp, dec(id)))),

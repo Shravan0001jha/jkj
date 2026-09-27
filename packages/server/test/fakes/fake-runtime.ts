@@ -25,6 +25,8 @@ export interface FakeRuntime {
   last(): FakeSession;
   /** Script that runs when a session starts (e.g. reply with a plan). */
   onStart?: (session: FakeSession) => void;
+  /** Script that runs when the Workplace sends a follow-up message. */
+  onSend?: (session: FakeSession, text: string) => void;
   restore(): void;
 }
 
@@ -61,7 +63,7 @@ export function installFakeRuntime(): FakeRuntime {
       runtime.onStart?.(session);
     });
     return {
-      send: (text, images) => { session.sent.push({ text, images: images?.length ?? 0 }); },
+      send: (text, images) => { session.sent.push({ text, images: images?.length ?? 0 }); queueMicrotask(() => runtime.onSend?.(session, text)); },
       interrupt: async () => { session.interrupted += 1; },
       setMode: async () => {},
       close: () => { session.closed = true; },

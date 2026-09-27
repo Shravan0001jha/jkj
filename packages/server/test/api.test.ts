@@ -170,8 +170,14 @@ test('talk, context, charter edit and org history over HTTP', async () => {
 
     const missing = await call<{ error: string }>(b.base, 'GET', '/api/charters/nope');
     assert.equal(missing.status, 404);
+    // The handoff prompt is answered like a real session: a turn that ends.
+    b.fake.onSend = (s, text) => { if (text.includes('write_handoff')) { s.say('Status and handoff written.'); s.result(); } };
+    const started = Date.now();
     const ended = await call<{ ok: boolean }>(b.base, 'POST', '/api/employees/asha/end-session');
     assert.equal(ended.status, 200);
+    assert.ok(Date.now() - started < 5000, 'end-session returns as soon as the handoff turn is done');
+    const after = await call<EmployeeDetail>(b.base, 'GET', '/api/employees/asha');
+    assert.equal(after.body.sessions.length, 0);
   } finally {
     await b.stop();
   }
