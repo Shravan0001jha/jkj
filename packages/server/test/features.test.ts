@@ -25,6 +25,10 @@ test('the seeded feature routes to five charters with the real statuses and mark
     assert.ok(parts.find(a => a.charterId === 'experts')!.evidence!.notVerified.length > 0, 'honest: not verified yet');
     assert.equal(coverage(wp.requirements()).planned, 4);
     assert.equal(seedFeature(wp), null, 'seeded once');
+    const platform = views.pivot(wp, 'platform');
+    assert.equal(platform.cells['ios']![f.id]!.total, 3, 'mobile, experts, conversation');
+    assert.equal(platform.cells['server']![f.id]!.total, 3, 'server, experts, conversation');
+    assert.equal(platform.cells['mac']![f.id]!.total, 3, 'desktop-mac, experts, conversation');
     const pivot = views.pivot(wp, 'charter');
     assert.deepEqual(pivot.rows, ['conversation', 'desktop-mac', 'experts', 'mobile', 'server']);
     assert.equal(pivot.cells['experts']![f.id]!.byState['review'], 1);

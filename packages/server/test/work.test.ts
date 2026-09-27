@@ -84,6 +84,10 @@ test('a feature is decomposed by the map into one assignment per charter, to the
     assert.deepEqual(charters, ['conversation', 'desktop-mac', 'experts', 'mobile', 'server']);
     assert.equal(route.primaries.length, 5);
     assert.ok(assignments.every(a => a.featureId === f.id && a.state === 'proposed' && a.spec === 'AC1: ... AC2: ...'));
+    // Platform pieces are for their own platforms; capability pieces cut across all of them.
+    assert.deepEqual(assignments.find(a => a.charterId === 'mobile')!.platformIds, ['ios', 'android']);
+    assert.deepEqual(assignments.find(a => a.charterId === 'desktop-mac')!.platformIds, ['mac']);
+    assert.deepEqual(assignments.find(a => a.charterId === 'experts')!.platformIds, ['ios', 'android', 'mac']);
     assert.ok(assignments.find(a => a.charterId === 'experts')!.body.includes('because of: path:iris:services/agent-svc/phone.py'));
 
     // Decomposing again is idempotent.

@@ -107,7 +107,10 @@ test('a stated feature is specced, decomposed by the map, and every assignee get
     const pivot = await call<{ rows: string[]; cells: Record<string, Record<string, { total: number }>> }>(b.base, 'GET', '/api/features/pivot?rows=platform');
     // The seeded phone→Mac feature adds its own rows; ours is the second column.
     assert.deepEqual(pivot.body.rows, ['android', 'ios', 'mac', 'server']);
-    assert.equal(pivot.body.cells['ios']![feature.body.id]!.total, 5);
+    // ios: mobile, experts, conversation (server's piece is for 'server' only; desktop-mac's for 'mac').
+    assert.equal(pivot.body.cells['ios']![feature.body.id]!.total, 3);
+    assert.equal(pivot.body.cells['mac']![feature.body.id]!.total, 3);
+    assert.equal(pivot.body.cells['server']![feature.body.id]!.total, 1, 'the server piece is for the server platform even though the feature did not name it');
     assert.equal(Object.keys(pivot.body.cells['ios']!).length, 2, 'the seeded feature and ours');
     ws.close();
   } finally {
