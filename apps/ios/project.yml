@@ -30,6 +30,8 @@ targets:
         UILaunchScreen:
           UIColorName: LaunchBackground
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # Portrait-only: App Store validation (error 90474) requires this or all four orientations.
+        UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -42,6 +44,7 @@ targets:
     entitlements:
       path: IrisWorkplace/IrisWorkplace.entitlements
       properties:
+        # Remote push. Automatic signing swaps this to "production" in the App Store export.
         aps-environment: development
     settings:
       base:

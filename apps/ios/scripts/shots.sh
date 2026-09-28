@@ -31,14 +31,23 @@ shot 08-features 4 ${=MOCK} WORKPLACE_TAB=features
 shot 09-feature-errands 5 ${=MOCK} WORKPLACE_FEATURE=f-errands
 shot 10-pivot-charter 5 ${=MOCK} WORKPLACE_PIVOT=charter
 shot 11-pivot-platform 5 ${=MOCK} WORKPLACE_PIVOT=platform
-shot 12-alerts 30 ${=MOCK} WORKPLACE_TAB=alerts
+shot 12-alerts 30 ${=MOCK} WORKPLACE_ALERTS=1
+shot 18-room 5 ${=MOCK} WORKPLACE_ROOM=list
+shot 19-thread 5 ${=MOCK} WORKPLACE_ROOM=rt-socket
+shot 20-spend 5 ${=MOCK} WORKPLACE_SPEND=1
+shot 21-inbox-cap-needsyou 5 ${=MOCK} WORKPLACE_TALK=mira
 shot 13-settings 4 ${=MOCK} WORKPLACE_SETTINGS=1
 xcrun simctl ui "$SIM" appearance dark
 shot 14-office-dark 4 ${=MOCK}
 shot 15-talk-dark 5 ${=MOCK} WORKPLACE_TALK=mira
+shot 22-room-dark 5 ${=MOCK} WORKPLACE_ROOM=rt-socket
+shot 23-spend-dark 5 ${=MOCK} WORKPLACE_SPEND=1
+shot 24-inbox-item-dark 4 ${=MOCK} WORKPLACE_INBOX_ITEM=ib-1
 xcrun simctl ui "$SIM" appearance light
 xcrun simctl ui "$SIM" content_size extra-extra-extra-large
 shot 16-office-xxxl 4 ${=MOCK}
 shot 17-inbox-release-xxxl 4 ${=MOCK} WORKPLACE_INBOX_ITEM=ib-1
+shot 25-room-xxxl 5 ${=MOCK} WORKPLACE_ROOM=rt-socket
+shot 26-talk-xxxl 5 ${=MOCK} WORKPLACE_TALK=mira
 xcrun simctl ui "$SIM" content_size medium
 echo done
