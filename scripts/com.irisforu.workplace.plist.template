@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The Iris Workplace as a launchd user agent (docs/RESILIENCE-workplace.md §2). Rendered by
+       scripts/workplace-service.sh install; __REPO__ and __HOME__ are filled in there. -->
+  <key>Label</key>
+  <string>__LABEL__</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/scripts/workplace-run.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <!-- Start at login, and again whenever it exits, for any reason. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- Never more than one start per 30 s: a broken build cannot spin the CPU. -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <!-- SIGTERM, then this long before SIGKILL; the CLI exits by itself 20 s after a stop that hangs. -->
+  <key>ExitTimeOut</key>
+  <integer>25</integer>
+  <!-- Not "Background": that class is CPU- and I/O-throttled, and this process drives agents. -->
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>__HOME__</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:__HOME__/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>WORKPLACE_PORT</key>
+    <string>__PORT__</string>
+    <key>IRIS_WORKPLACE_DIR</key>
+    <string>__WORKPLACE_DIR__</string>
+    <key>IRIS_OPS_DIR</key>
+    <string>__OPS_DIR__</string>
+  </dict>
+
+  <!-- The wrapper writes the server log itself; this catches only what happens before it can. -->
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/IrisWorkplace/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/IrisWorkplace/launchd.log</string>
+</dict>
+</plist>

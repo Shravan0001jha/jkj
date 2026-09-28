@@ -12,6 +12,8 @@ import * as digestService from './services/digest.js';
 import * as features from './services/features.js';
 import * as cos from './services/cos.js';
 import * as lock from './services/lock.js';
+import * as boots from './services/boots.js';
+import { Watchdog } from './services/watchdog.js';
 import * as room from './services/room.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
@@ -50,6 +52,10 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
 
   const wp = createWorkplace(config);
   log.info('boot', `${wp.org.employees.length} employees, ${wp.org.charters.size} charters, ${wp.requirements().length} requirements in ${config.workplaceDir}`);
+  // Every start is counted: the phone's health check shows restarts; the watchdog reports a crash loop.
+  const startedAt = Date.now();
+  const history = boots.recordBoot(wp.db, new Date(startedAt));
+  log.info('boot', `boot #${history.total} (${boots.bootsWithin(history, startedAt, 24 * 60 * 60_000)} in the last 24 h)`);
 
   // The decisions the definition leaves open go to the owner, once.
   seedDecisions(wp);
@@ -78,7 +84,22 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
   const push = new Push(wp, { send: intent => tunnel?.push(intent) ?? false });
   const tunnel = createTunnel(config, telegram, push);
-  const server = createHttpServer({ config, wp, auth, telegram, tunnel, push });
+  // The watchdog: the tunnel down for more than five minutes, or a crash loop, is one Telegram ping
+  // and one "back" ping, through the Workplace's own alert path (docs/RESILIENCE-workplace.md §4).
+  const watchdog = new Watchdog({
+    link: () => (tunnel ? tunnel.status : 'not-configured'),
+    notify: text => telegram.notify(text),
+    boots: boots.marks(wp.db),
+    bootedAt: startedAt,
+  });
+  const resilience = () => ({
+    startedAt: new Date(startedAt).toISOString(),
+    uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+    boots: { total: history.total, last24h: boots.bootsWithin(history, Date.now(), 24 * 60 * 60_000), recent: history.recent.slice(-5) },
+    tunnel: tunnel ? tunnel.stats : null,
+    watchdog: watchdog.state,
+  });
+  const server = createHttpServer({ config, wp, auth, telegram, tunnel, push, resilience });
   const hub = attachSocket(server, wp, auth);
   await listen(server, config);
 
@@ -86,6 +107,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   if (config.push && tunnel) push.attach(); else log.info('push', config.push ? 'not published: no relay, so no push' : 'off (--no-push)');
   if (config.telegram) telegram.start();
   tunnel?.start();
+  watchdog.start();
 
   const stallTimer = setInterval(() => {
     health.handleParkedApprovals(wp);
@@ -105,6 +127,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
     server, wp, telegram,
     stop: async () => {
       push.stop();
+      watchdog.stop();
       tunnel?.stop();
       clearInterval(stallTimer);
       clearInterval(cosTimer);
