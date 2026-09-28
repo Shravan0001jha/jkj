@@ -58,7 +58,7 @@ export function InboxCard({ item, compact = false }: { item: InboxItem; compact?
       {open && (item.onApprove || item.onDeny) && (
         <dl className="effects">
           {item.onApprove && <div><dt>{item.options[0]?.label ?? 'Yes'}</dt><dd>{item.onApprove}</dd></div>}
-          {item.onDeny && <div><dt>{item.options.find(o => o.danger)?.label ?? 'No'}</dt><dd>{item.onDeny}</dd></div>}
+          {item.onDeny && <div><dt>{(item.options.find(o => o.danger) ?? item.options[1])?.label ?? 'No'}</dt><dd>{item.onDeny}</dd></div>}
         </dl>
       )}
 

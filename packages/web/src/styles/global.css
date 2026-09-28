@@ -982,7 +982,8 @@ details.plan { margin-top: 6px; }
   .shot { margin-left: 0; }
   .board { grid-auto-columns: minmax(200px, 80vw); }
   .tabbar {
-    position: relative; display: grid; grid-template-columns: repeat(5, 1fr);
+    /* five screens + More on one row (QA B7: six items in five columns wrapped "More" onto a second row) */
+    position: relative; display: grid; grid-template-columns: repeat(6, 1fr);
     background: var(--surface); border-top: 1px solid var(--line);
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
