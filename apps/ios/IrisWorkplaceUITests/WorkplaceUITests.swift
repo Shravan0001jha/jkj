@@ -31,10 +31,20 @@ final class WorkplaceUITests: XCTestCase {
         add(a)
     }
 
+    /// Swipe until the element is hittable (the item's options sit below who/what/links).
+    /// Lazy lists do not instantiate rows below the fold: swipe until the element exists and is hittable.
+    @discardableResult
+    private func reveal(_ e: XCUIElement, swipes: Int = 8) -> Bool {
+        var n = 0
+        while !(e.exists && e.isHittable) && n < swipes { app.swipeUp(); n += 1; _ = e.waitForExistence(timeout: 0.5) }
+        return e.exists && e.isHittable
+    }
+
     func testDangerOptionAsksForConfirmationThenAnswers() {
         launch(["WORKPLACE_INBOX_ITEM": "ib-1"])
+        XCTAssertTrue(app.staticTexts["If you approve"].waitForExistence(timeout: 8), "the item loaded")
         let release = app.buttons["Release 0.2.16"]
-        XCTAssertTrue(release.waitForExistence(timeout: 8), "the danger option is a button on the item")
+        XCTAssertTrue(reveal(release), "the danger option is a button on the item")
         release.tap()
         let confirm = app.sheets.buttons["Release 0.2.16"].firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 4), "a danger option confirms before it acts")
@@ -47,18 +57,20 @@ final class WorkplaceUITests: XCTestCase {
         }
         XCTAssertFalse(confirm.waitForExistence(timeout: 2), "the dialog is gone")
         XCTAssertTrue(release.waitForExistence(timeout: 2), "cancel leaves the item open")
+        reveal(release)
         release.tap()
         app.sheets.buttons["Release 0.2.16"].firstMatch.tap()
         let done = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Release 0.2.16 ·'")).firstMatch
-        XCTAssertTrue(done.waitForExistence(timeout: 8), "the item shows the recorded answer after the server confirmed")
+        XCTAssertTrue(reveal(done) || done.waitForExistence(timeout: 8), "the item shows the recorded answer after the server confirmed")
         XCTAssertTrue(done.label.contains(" via "), done.label)   // web for a loopback client, phone off-loopback
         shot("danger-answered")
     }
 
     func testNeedsNoteOptionAsksForANote() {
         launch(["WORKPLACE_INBOX_ITEM": "ib-3"])
+        XCTAssertTrue(app.staticTexts["If you approve"].waitForExistence(timeout: 8), "the item loaded")
         let raise = app.buttons["Raise for today"]
-        XCTAssertTrue(raise.waitForExistence(timeout: 8))
+        XCTAssertTrue(reveal(raise))
         raise.tap()
         let field = app.alerts.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 4), "a needsNote option asks for the note")
@@ -68,7 +80,7 @@ final class WorkplaceUITests: XCTestCase {
         shot("note-prompt")
         app.alerts.buttons["Send"].tap()
         let done = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Raise for today ·'")).firstMatch
-        XCTAssertTrue(done.waitForExistence(timeout: 8))
+        XCTAssertTrue(reveal(done) || done.waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["250"].exists, "the note is shown with the answer")
     }
 
@@ -216,11 +228,15 @@ final class WorkplaceUITests: XCTestCase {
     }
 
     func testPairingScreenRefusesABadCode() {
-        app.launchEnvironment = ["WORKPLACE_NO_NOTIF_PROMPT": "1"]
-        app.launchArguments = ["-workplace.serverURL", ""]
+        app.launchEnvironment = ["WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_FORGET": "1", "WORKPLACE_RELAY_URL": "127.0.0.1:4399"]
         app.launch()
+        XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 8), "a fresh install starts at the relay sign-in")
+        app.buttons["Developer options"].tap()
+        let toggle = app.switches["Use a LAN Workplace (pairing)"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 6), "LAN pairing is behind the developer toggle")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
         let url = app.textFields["192.168.1.5:4317"]
-        XCTAssertTrue(url.waitForExistence(timeout: 8), "no saved server URL means the pairing screen")
+        XCTAssertTrue(url.waitForExistence(timeout: 8), "turning it on opens the pairing sheet")
         url.tap(); url.typeText("127.0.0.1:4399")
         let code = app.textFields["Pairing code"]
         code.tap(); code.typeText("000000")
@@ -260,7 +276,7 @@ final class NewContractUITests: XCTestCase {
         let long = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Not published yet.'")).firstMatch
         XCTAssertTrue(long.waitForExistence(timeout: 8), "messages are one line")
         long.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'source is \\"phone\\" or \\"cloud\\"'")).firstMatch.waitForExistence(timeout: 4), "tap expands the details")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'requestedAt ISO'")).firstMatch.waitForExistence(timeout: 4), "tap expands the details")
         shot("room-thread-expanded")
         let composer = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Post as you'")).firstMatch
         composer.tap(); composer.typeText("Reuse ask_mac for now. @kabir go ahead.")
@@ -301,7 +317,7 @@ final class NewContractUITests: XCTestCase {
     func testOfficeCountsStalledAndStateReason() {
         app.launch()
         XCTAssertTrue(app.staticTexts["stalled"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["Paused — daily budget reached (₹150). You can still talk to Tara."].waitForExistence(timeout: 4) || app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'daily budget reached'")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'waiting for your approval to run the errand tests'")).firstMatch.waitForExistence(timeout: 4), "the state reason shows on the card")
         app.buttons["Alerts"].tap()
         XCTAssertTrue(app.navigationBars["Alerts"].waitForExistence(timeout: 4), "alerts open as a sheet from the bell")
         app.buttons["Done"].tap()

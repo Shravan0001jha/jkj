@@ -65,6 +65,8 @@ final class RelayUITests: XCTestCase {
         XCTAssertTrue(online.waitForExistence(timeout: 8), "the socket is open with the session token")
         XCTAssertTrue(app.buttons["Sign out"].exists)
         shot("relay-settings")
+        var n = 0
+        while !app.buttons["Developer options"].isHittable && n < 5 { app.swipeUp(); n += 1 }
         app.buttons["Developer options"].tap()
         XCTAssertTrue(app.switches["Use a LAN Workplace (pairing)"].waitForExistence(timeout: 6), "LAN pairing is behind a toggle")
         shot("relay-developer-options")
@@ -83,9 +85,10 @@ final class RelayUITests: XCTestCase {
         shot("relay-recovered")
     }
 
-    func testExpiredSessionAsksToSignInAgain() {
-        // Off loopback the mock enforces the token, so a bad session is a 401.
-        app.launchEnvironment["WORKPLACE_RELAY_URL"] = "172.20.10.14:4399"
+    func testExpiredSessionAsksToSignInAgain() throws {
+        // Off loopback the mock enforces the token, so a bad session is a 401. TEST_RUNNER_LAN_IP = this Mac's address.
+        guard let ip = ProcessInfo.processInfo.environment["LAN_IP"], !ip.isEmpty else { throw XCTSkip("LAN_IP not set") }
+        app.launchEnvironment["WORKPLACE_RELAY_URL"] = "\(ip):4399"
         app.launchEnvironment["WORKPLACE_TOKEN"] = "not-a-session"
         app.launch()
         XCTAssertTrue(app.staticTexts["Your session has ended"].waitForExistence(timeout: 12))
