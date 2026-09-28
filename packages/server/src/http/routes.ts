@@ -193,10 +193,17 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const body = await readJson(req);
       const kind = body['kind'];
       if (kind !== 'assignment' && kind !== 'bug' && kind !== 'question' && kind !== 'feature') throw new BadRequest('kind must be feature, assignment, bug or question');
+      const featureId = typeof body['featureId'] === 'string' && body['featureId'] ? body['featureId'] : undefined;
+      if (featureId) {
+        const feature = work.get(wp, featureId);
+        if (!feature || feature.kind !== 'feature') throw new BadRequest(`No feature ${featureId}`);
+        if (kind === 'feature') throw new BadRequest('A feature cannot be under a feature');
+      }
       const item = work.create(wp, {
         kind, title: str(body['title']), body: str(body['body'], ''),
         ...(typeof body['charterId'] === 'string' ? { charterId: body['charterId'] } : {}),
         ...(typeof body['employeeId'] === 'string' ? { employeeId: body['employeeId'] } : {}),
+        ...(featureId ? { featureId } : {}),
         requirementIds: strs(body['requirementIds']), platformIds: strs(body['platformIds']),
         by: 'owner',
       });

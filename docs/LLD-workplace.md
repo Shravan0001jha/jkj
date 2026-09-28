@@ -343,6 +343,7 @@ strings. The contract is `packages/shared/src/workplace-api.ts` (`WORKPLACE_API`
 | GET `/api/proposals/:id` → `ProposalDetail { proposal (with diff, lint), item }`; approving the item applies it, so `/apply` after that is 409 | Org / phone |
 | GET `/api/releases/ready` → `ReleaseReadiness[]` per shippable `{ unreleased, open?, last? }`; POST `/api/releases/:id/run` → 202 `running` | Releases / phone |
 | POST `/api/work/:id/start` → 201 `Agent` (the session that took the assignment) | Assign |
+| POST `/api/work` accepts `featureId?` (the assignment attaches to that feature: its status and the pivot count it; 400 if it is not a feature) and `start?: false` | Assign / phone |
 
 `RequestStatus { stage: with-asha | specced | routed | building | review | blocked | built | released; line; assignments[]; askedAgentId? }`
 is derived (`services/requests.ts`): `stated` → with-asha (whether Asha's session was started is in the

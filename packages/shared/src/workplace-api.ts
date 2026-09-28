@@ -268,6 +268,10 @@ export interface CreateWorkRequest {
   employeeId?: string;
   requirementIds?: string[];
   platformIds?: string[];
+  /** An assignment under a feature: it counts in the feature's status and the pivot (29 Sep, iOS). */
+  featureId?: string;
+  /** false: create the assignment without starting its session. */
+  start?: boolean;
 }
 export interface TransitionRequest { to: WorkState; note?: string; evidence?: Evidence; by?: string }
 export interface CreateFeatureRequest {
