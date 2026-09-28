@@ -146,19 +146,57 @@ test('B4: a dead run is closed, the state reads true, and the next assignment ge
     assert.equal(employees.allSessions().length, 0);
     assert.equal(employees.stateOf(wp, 'kabir'), 'idle');
 
-    // The stall detector ends an idle session rather than leaving it open, and asks the owner once.
+    // The stall detector ends a silent session rather than leaving it open, and asks the owner once.
+    health.setHandoffWait(100);
     const s = employees.talk(wp, 'mira', 'go');
     await tick();
-    fake.last().result();                                             // turn over: waiting between turns
     const found = await health.handleStalls(wp, Date.now() + 11 * 60_000);
     assert.equal(found.length, 1);
-    assert.ok(fake.sessions.at(-1)!.sent.some(m => /handoff/i.test(m.text)), 'asked for its handoff first');
+    assert.equal(fake.sessions.at(-1)!.interrupted, 1, 'the silent turn is interrupted');
+    assert.ok(fake.sessions.at(-1)!.sent.some(m => /handoff/i.test(m.text)), 'then asked for its handoff');
     assert.equal(employees.allSessions().some(x => x.agentId === s.id), false, 'ended');
     assert.equal(employees.stateOf(wp, 'mira'), 'needs-owner');
     const item = inbox.list(wp, 'open').find(i => i.raisedBy === 'mira')!;
     assert.match(item.body, /was ended/);
     assert.ok(cos.isStallDetectorItem(item));
   } finally {
+    health.setHandoffWait(30_000);
+    fake.restore();
+    tmp.cleanup();
+  }
+});
+
+test('B15: a message with no model output for the silence window is flagged in the transcript with the last SDK message and the rate limit', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  // Half a second, not 60 ms: a spawn commits the org repo, which can hold the loop past a short timer.
+  runs.setSilentMs(500);
+  try {
+    mkdirSync(join(tmp.dir, 'ops', 'workplace'), { recursive: true });
+    writeFileSync(join(tmp.dir, 'ops', 'workplace', 'claude-oauth.env'), 'CLAUDE_CODE_OAUTH_TOKEN=x\n');
+    const agent = employees.talk(wp, 'rohan', 'go');
+    fake.last().events.onSdkMessage?.('system', 'init');
+    fake.last().events.onRateLimit?.({ rateLimitType: 'five_hour', status: 'rejected', utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 3600 });
+    await new Promise(r => setTimeout(r, 800));
+    const entries = runs.getRunTranscript(agent.id)!;
+    const silent = entries.find(e => e.label === 'Silent');
+    assert.ok(silent, JSON.stringify(entries.map(e => e.label)));
+    assert.match(silent!.text, /Last SDK message: system\/init/);
+    assert.match(silent!.text, /Rate limit: five_hour rejected until \d\d:\d\d UTC/);
+    assert.ok(entries.some(e => e.label === 'Rate limit' && /rejected/.test(e.text)), 'a non-allowed rate limit is in the transcript');
+    assert.ok(runs.silentSince(agent.id));
+    // Output clears it; a later message re-arms it.
+    fake.last().say('Here I am.');
+    assert.equal(runs.silentSince(agent.id), undefined);
+    runs.sendMessage(agent.id, 'and now?');
+    await new Promise(r => setTimeout(r, 800));
+    assert.equal(entries.filter(e => e.label === 'Silent').length, 2);
+    // The history of rate-limit reports is kept, not just the latest.
+    const rows = wp.db.prepare("select json from events where kind = 'rate-limit'").all() as { json: string }[];
+    assert.equal(rows.length, 1);
+    assert.match(rows[0]!.json, /rejected/);
+  } finally {
+    runs.setSilentMs(60_000);
     fake.restore();
     tmp.cleanup();
   }

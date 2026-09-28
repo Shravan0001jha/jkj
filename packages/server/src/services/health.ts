@@ -40,6 +40,9 @@ export function detectStalls(nowMs = Date.now()): StallCheck[] {
 }
 
 const stalledOnce = new Set<string>();
+/** How long a stalled session gets to write its handoff before it is closed. Tests shorten it. */
+export let handoffWaitMs = 30_000;
+export function setHandoffWait(ms: number): void { handoffWaitMs = ms; }
 const parkedOnce = new Set<string>();
 export const PARKED_MS = 2 * 60 * 1000;
 
@@ -70,10 +73,10 @@ export async function handleStalls(wp: Workplace, nowMs = Date.now()): Promise<S
     stalledOnce.add(s.agentId);
     const emp = wp.org.employees.find(e => e.id === s.employeeId);
     runs.note(s.agentId, 'Stalled', s.reason === 'idle' ? 'No activity for 10 minutes; the session is ended.' : 'The same tool call repeated 5 times; interrupted and ended.');
-    // The session is ended, not left open (QA B4): a looping run is interrupted first; an idle one is
-    // asked for its handoff (it is between turns and can answer), then closed either way.
-    if (s.reason === 'loop') await runs.interruptRun(s.agentId).catch(() => {});
-    await employees.endSession(wp, s.agentId, s.reason === 'idle' ? 60_000 : 0).catch(() => {});
+    // The session is ended, not left open (QA B4): the silent or looping turn is interrupted, the run
+    // is asked for its handoff (briefly; it may be as silent as before), then closed either way.
+    await runs.interruptRun(s.agentId).catch(() => {});
+    await employees.endSession(wp, s.agentId, handoffWaitMs, true).catch(() => {});
     employees.setState(wp, s.employeeId, 'blocked');
     inbox.raise(wp, {
       kind: 'question',

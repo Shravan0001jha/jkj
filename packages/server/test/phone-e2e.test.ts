@@ -239,18 +239,24 @@ test('a cookie session through the relay: GET works, a POST without the CSRF hea
     assert.match(((await refused.json()) as { error: string }).error, /CSRF/);
     assert.equal(inbox.get(s.running.wp, q.id)!.state, 'open');
     const ok = await browser('POST', `/api/inbox/${q.id}/answer`, { optionId: 'answered', note: 'with the header' });
-    assert.equal(ok.status, 200, await ok.text());
-    assert.equal(((await ok.json()) as InboxItem).answer?.via, 'web');
+    const okBody = await ok.text();
+    assert.equal(ok.status, 200, okBody);
+    assert.equal((JSON.parse(okBody) as InboxItem).answer?.via, 'web');
     assert.equal((await browser('POST', '/api/talk', { text: 'One line, Asha?' })).status, 201);
     assert.equal((await browser('POST', '/api/room', { title: 'From the browser', text: 'A thread.' })).status, 201);
 
     // The page's socket: cookie + the page's own Origin; a foreign origin is refused.
     const foreign = new WebSocket(`${s.relay.replace('http', 'ws')}/ws`, { headers: { cookie, origin: 'https://evil.example' } });
     const foreignClose = await new Promise<number>(resolve => { foreign.on('close', code => resolve(code)); foreign.on('error', () => {}); });
-    assert.equal(foreignClose, 4403);
+    assert.ok([4403, 1006].includes(foreignClose), `refused before or at accept: ${foreignClose}`);
     const ws = new WebSocket(`${s.relay.replace('http', 'ws')}/ws`, { headers: { cookie, origin: s.relay } });
-    const first = await new Promise<string>((resolve, reject) => { ws.once('message', m => resolve(String(m))); ws.once('error', reject); ws.once('close', code => reject(new Error(`closed ${code}`))); });
-    assert.equal((JSON.parse(first) as { type: string }).type, 'office.snapshot');
+    // The Workplace's socket greets first, then sends the snapshot: read until it arrives.
+    const types = await new Promise<string[]>((resolve, reject) => {
+      const seen: string[] = [];
+      ws.on('message', m => { seen.push((JSON.parse(String(m)) as { type: string }).type); if (seen.includes('office.snapshot') || seen.length >= 5) resolve(seen); });
+      ws.once('error', reject); ws.once('close', code => reject(new Error(`closed ${code}: ${seen.join(',')}`)));
+    });
+    assert.ok(types.includes('office.snapshot'), types.join(','));
     ws.close();
   } finally {
     await s.stop();

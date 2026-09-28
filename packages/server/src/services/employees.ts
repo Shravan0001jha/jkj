@@ -83,10 +83,19 @@ export function openSession(employeeId: string): Session | undefined {
   return [...sessions.values()].find(s => s.employeeId === employeeId && isLive(s.agentId));
 }
 
-/** A run that can still take a message: running, or waiting between turns / for an approval. */
+/** A run that is live work: running, or waiting between turns / for an approval. */
 export function isLive(agentId: string): boolean {
   const a = runs.getRunAgent(agentId);
   return !!a && (a.status === 'running' || a.status === 'waiting');
+}
+
+/** A run the owner can still talk into: live, or interrupted and sitting idle (not errored, not gone). */
+export function continuableSession(employeeId: string): Session | undefined {
+  return [...sessions.values()].find(s => {
+    if (s.employeeId !== employeeId) return false;
+    const a = runs.getRunAgent(s.agentId);
+    return !!a && a.status !== 'error';
+  });
 }
 
 export const STALE_MS = 10 * 60_000;
@@ -297,7 +306,8 @@ export function readOauthToken(wp: Workplace): string | null {
 export function talk(wp: Workplace, employeeId: string, text: string, attachments: Attachment[] = [], opts: { probe?: boolean; autonomous?: boolean } = {}): Agent {
   const ownerTalk = !opts.autonomous;
   if (ownerTalk) maybeLiftPause(wp, employeeId, text);
-  const open = openSession(employeeId);
+  // The owner may carry on an interrupted session; autonomous work goes only to a live one (QA B4).
+  const open = ownerTalk ? continuableSession(employeeId) : openSession(employeeId);
   if (open) {
     const budget = spend.canSpend(wp, employeeId);
     if (!budget.ok && !ownerTalk) throw new BadRequest(`${employee(wp, employeeId).name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox.`);
@@ -363,12 +373,12 @@ const HANDOFF_PROMPT =
   '"nothing done". Then stop.';
 
 /** Ask for the handoff, wait a bounded time, close. */
-export async function endSession(wp: Workplace, agentId: string, waitMs = 150_000): Promise<void> {
+export async function endSession(wp: Workplace, agentId: string, waitMs = 150_000, evenIfIdle = false): Promise<void> {
   const session = sessions.get(agentId);
   if (!session) return;
   const agent = runs.getRunAgent(agentId);
   if (session.probe) { close(wp, agentId, 'probe ended'); return; }
-  if (agent && (agent.status === 'running' || agent.status === 'waiting') && waitMs > 0) {
+  if (agent && (agent.status === 'running' || agent.status === 'waiting' || (evenIfIdle && agent.status === 'idle')) && waitMs > 0) {
     // Subscribe before sending, so a turn that ends at once is not missed.
     const waiting = waitForHandoff(wp, session, waitMs);
     runs.sendMessage(agentId, HANDOFF_PROMPT);

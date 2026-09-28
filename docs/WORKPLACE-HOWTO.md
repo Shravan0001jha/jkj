@@ -24,6 +24,13 @@ Everything the owner reads is one line: an Inbox item's `summary`, a reply's fir
 Room thread's `headline`, a Telegram ping. The rest is behind "details". Employees are told so in
 the handbook; the server trims what still runs long. Ask "details?" or tap expand to see the rest.
 
+## Tests never touch the real repos
+
+Under `node --test` the server refuses any organisation, work directory or repository outside the OS
+temp directory (`services/test-guard.ts`); the test fakes rewrite the seed's repo roots to temp
+repos. For a trial server that boots a copy of the real organisation, set `WORKPLACE_TEST_GUARD=1`
+(and `IRIS_WORK_DIR` to a temp dir) so it cannot cut branches in the owner's checkouts either.
+
 ## One instance
 
 The Workplace takes `workplace.lock` (pid) next to the database. A second start against the same

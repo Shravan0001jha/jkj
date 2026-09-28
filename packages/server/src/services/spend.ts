@@ -55,6 +55,8 @@ export function recordRateLimit(wp: Workplace, info: { rateLimitType?: string; s
     seenAt: now(),
   };
   wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`ratelimit:${window.window}`, JSON.stringify(window));
+  // History too (QA B15): the settings row is only the latest report, which cannot explain last night.
+  wp.db.prepare('insert into events (at, kind, subject, json) values (?, ?, ?, ?)').run(window.seenAt, 'rate-limit', window.window, JSON.stringify(window));
   if (window.status !== 'allowed') log.warn('usage', `subscription ${window.window}: ${window.status}${window.utilization !== undefined ? ` at ${Math.round(window.utilization * 100)}%` : ''}`);
 }
 

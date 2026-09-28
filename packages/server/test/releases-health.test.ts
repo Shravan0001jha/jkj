@@ -71,9 +71,10 @@ test('a server deploy runs from the deploy worktree and is refused when rejected
   }
 });
 
-test('a session idle for ten minutes is stalled once: interrupted, blocked, one question filed', async () => {
+test('a session idle for ten minutes is stalled once: interrupted, ended, one question filed', async () => {
   const { wp, tmp } = testWorkplace();
   const fake = installFakeRuntime();
+  health.setHandoffWait(100);
   try {
     const agent = employees.talk(wp, 'dev', 'go');
     await tick();
@@ -83,12 +84,14 @@ test('a session idle for ten minutes is stalled once: interrupted, blocked, one 
     assert.equal(found.length, 1);
     assert.equal(found[0]!.reason, 'idle');
     assert.equal(fake.last().interrupted, 1);
-    // A question is filed, so the honest state on the Office is "needs you".
+    // The session is ended (QA B4), a question is filed, so the honest state on the Office is "needs you".
+    assert.equal(employees.allSessions().some(s => s.agentId === agent.id), false);
     assert.equal(employees.stateOf(wp, 'dev'), 'needs-owner');
     await health.handleStalls(wp, started + 12 * 60 * 1000);
     assert.equal(inbox.list(wp).filter(i => i.kind === 'question').length, 1);
     assert.equal(fake.last().interrupted, 1);
   } finally {
+    health.setHandoffWait(30_000);
     fake.restore();
     tmp.cleanup();
   }

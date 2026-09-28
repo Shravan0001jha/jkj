@@ -203,6 +203,35 @@ cookie is `__Host-wp_csrf`. `csrfTokenFrom` in `@jkj/shared` reads both; `csrf.t
 header → 403, with the header from the `__Host-` cookie → 200, the socket refused on a foreign
 Origin and accepted on the page's.
 
+**B13: no caching of the web bundle.** `serveStatic` sent only `content-type`. Now `/assets/*`
+(content-hashed by Vite) is `public, max-age=31536000, immutable`, everything else `no-cache`, and a
+missing `/assets/*` file is a JSON 404 instead of the page (a stale tab reloads instead of parsing
+HTML as a script). `static.test.ts` checks all three over HTTP.
+
+**B14/B15: silent sessions, a message into an idle session that never started a turn.** What the
+records keep could not tell the cause: the Workplace logged only `run is session` lines, kept only
+the *latest* rate-limit report (`settings ratelimit:<window>`), and the SDK's own jsonl holds no
+`rate_limit_event`. The one report that survived (five_hour, `allowed`, seen 20:59 UTC, resets 21:20)
+and QA's timing (Kabir answered at 19:26, Rohan 19:40 / Dev 19:56 / Mira 20:14 silent, a five_hour
+event two seconds after Mira's prompt) point at the subscription's five-hour window being exhausted
+from ~19:40 to 21:20 UTC, during which the CLI accepts the prompt and produces nothing. Not proven.
+Fixes so next time is diagnosable and bounded: every SDK stream message type is logged per run
+(`run_x sdk: system/init`, `assistant`, `result/success`, `rate_limit_event`…), every stderr line is
+kept, a non-`allowed` rate limit is written into the transcript with its reset time, rate-limit
+reports are appended to the events table (history, not just the latest), and a **silence watchdog**
+flags any run with no model output 60 s after a message ("Silent: … Last SDK message: …; Rate limit:
+…") in the transcript and the log; the ten-minute stall then ends the session (B4). `talk` still
+continues an interrupted run for the owner; `assign` never pushes into one.
+
+**Stray branches during the night.** Four more `emp/*` branches (`as_mulqa1k…`, dev/kabir/rohan/
+tara) appeared at 02:26:48 IST after the cleanup, checked out in the real `~/iris-work` worktrees,
+with no such work items in the live database. The guarded suite, run file by file while counting the
+repo's branches, cut none, so they did not come from these tests; the suspects are the leaked 27 Sep
+`api.test.ts` process (pids 87760/87764, alive until killed at 02:33, its org copy naming the real
+repos) or the resilience trial server that booted a copy of the organisation at 02:09. Either way a
+*trial* server should refuse real repos too: `WORKPLACE_TEST_GUARD=1` turns the guard on outside the
+test runner.
+
 **B11: the org-change card.** The item's one line now carries the diff's size ("+12 −3 lines in 2
 files"); the body names the files; the diff is on `GET /api/proposals/:id` and behind expand.
 
