@@ -7,6 +7,7 @@ import { attachSocket } from './ws/hub.js';
 import { findClaudeHome } from './runtime/claude-home.js';
 import { createWorkplace, type Workplace } from './services/workplace.js';
 import { Telegram } from './services/telegram.js';
+import { Push } from './services/push.js';
 import * as digestService from './services/digest.js';
 import * as features from './services/features.js';
 import * as cos from './services/cos.js';
@@ -74,12 +75,15 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   try { const made = room.seedThreads(wp); if (made.length) log.info('boot', `seeded ${made.length} Team Room threads from the 27 Sep plans`); } catch (err) { log.warn('boot', `room seed failed: ${err instanceof Error ? err.message : err}`); }
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
-  const tunnel = createTunnel(config, telegram);
-  const server = createHttpServer({ config, wp, auth, telegram, tunnel });
+  // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
+  const push = new Push(wp, { send: intent => tunnel?.push(intent) ?? false });
+  const tunnel = createTunnel(config, telegram, push);
+  const server = createHttpServer({ config, wp, auth, telegram, tunnel, push });
   const hub = attachSocket(server, wp, auth);
   await listen(server, config);
 
   telegram.attach();
+  if (config.push && tunnel) push.attach(); else log.info('push', config.push ? 'not published: no relay, so no push' : 'off (--no-push)');
   if (config.telegram) telegram.start();
   tunnel?.start();
 
@@ -100,6 +104,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   return {
     server, wp, telegram,
     stop: async () => {
+      push.stop();
       tunnel?.stop();
       clearInterval(stallTimer);
       clearInterval(cosTimer);
@@ -136,7 +141,7 @@ function statusLine(wp: Workplace): string {
  * The outbound tunnel to the relay, when ~/iris-ops/workplace/relay.env
  * names one (RELAY_URL and TUNNEL_SECRET). Without it nothing is published.
  */
-function createTunnel(config: Config, telegram: Telegram): Tunnel | null {
+function createTunnel(config: Config, telegram: Telegram, push: Push): Tunnel | null {
   const url = readRelayUrl(config.opsDir);
   const secret = readTunnelSecret(config.opsDir);
   if (!url || !secret) { log.info('tunnel', 'not published: no relay.env'); return null; }
@@ -145,6 +150,7 @@ function createTunnel(config: Config, telegram: Telegram): Tunnel | null {
     local: `http://127.0.0.1:${config.port}`,
     notify: text => telegram.notify(text),
     onStatus: status => log.info('tunnel', `published: ${status}`),
+    onPushResult: result => push.result(result),
   });
 }
 

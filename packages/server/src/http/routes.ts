@@ -21,6 +21,7 @@ import * as features from '../services/features.js';
 import * as digest from '../services/digest.js';
 import type { Telegram } from '../services/telegram.js';
 import type { Tunnel } from '../services/tunnel.js';
+import type { Push } from '../services/push.js';
 import { isLoopback } from './auth.js';
 import { log } from '../util/logger.js';
 import { route as routeThings } from '../services/ownership.js';
@@ -50,9 +51,10 @@ export interface RouterDeps {
   auth: Auth;
   telegram?: Telegram;
   tunnel?: Tunnel | null;
+  push?: Push;
 }
 
-export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps) {
+export function createRouter({ config, wp, auth, telegram, tunnel, push }: RouterDeps) {
   const startedAt = Date.now();
   const r = (method: string, pattern: string, handler: Handler): Route => ({
     method,
@@ -67,7 +69,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
         ok: true, name: 'jkj', version: config.version,
         uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
         claudeHome: home.present ? home.configDir : null,
-        workplace: { dataDir: config.workplaceDir, capInr: spend.capFor(wp), day: spend.dayOf(), telegram: config.telegram, published: tunnel ? tunnel.status : 'not-configured' },
+        workplace: { dataDir: config.workplaceDir, capInr: spend.capFor(wp), day: spend.dayOf(), telegram: config.telegram, published: tunnel ? tunnel.status : 'not-configured', push: push ? push.status() : { enabled: false, sentToday: 0, suppressedToday: 0 } },
       });
     }),
 

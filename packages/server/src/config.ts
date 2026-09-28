@@ -33,6 +33,12 @@ export interface Config {
   stallMinutes: number;
   /** Poll AWS Cost Explorer once a day for the previous day's actual (about ₹1 per call). */
   awsCost: boolean;
+  /** Push intents to the owner's phone through the relay (LLD-workplace-push). Off with --no-push or WORKPLACE_PUSH=0. */
+  push: boolean;
+  /** Handles that count as the owner in a Team Room @mention. */
+  ownerHandles: string[];
+  /** "23-07": IST hours during which needs-you pushes are held; cap and blocked still go. */
+  pushQuiet?: string;
 }
 
 export function loadConfig(argv: string[] = process.argv.slice(2), env = process.env): Config {
@@ -63,5 +69,8 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
     workDir: env['IRIS_WORK_DIR'] ?? join(homedir(), 'iris-work'),
     stallMinutes: num(env['WORKPLACE_STALL_MINUTES'], 30),
     awsCost: env['WORKPLACE_AWS_COST'] !== '0' && !argv.includes('--no-telegram'),
+    push: !argv.includes('--no-push') && env['WORKPLACE_PUSH'] !== '0',
+    ownerHandles: (env['WORKPLACE_OWNER_HANDLES'] ?? 'owner,shravan').split(',').map(s => s.trim()).filter(Boolean),
+    ...(env['WORKPLACE_PUSH_QUIET'] ? { pushQuiet: env['WORKPLACE_PUSH_QUIET'] } : {}),
   };
 }
