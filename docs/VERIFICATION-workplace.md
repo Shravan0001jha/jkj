@@ -135,7 +135,19 @@ Telegram cursor is shared and consistent with the file size; no item was ever an
 Telegram). The batch's `stop()` already calls `closeAllConnections()`; the lock, the listen
 error and the 20 s exit deadline (HLD D17) make the failure impossible to repeat silently.
 
-## The phone through the relay (item 3, 28 Sep, in progress)
+## The phone through the relay (item 3; green 29 Sep)
+
+`phone-e2e.test.ts` now runs in the suite: it boots the committed relay (`~/claude-dev-deploy/services/
+workplace-relay`, its venv) on a free port, publishes a temp Workplace to it over the real tunnel,
+mints a bearer session as the app's login does, and drives the Office, an Inbox answer (`via:
+'phone'`, never twice), talk to an idle and to a cap-paused employee, a Team Room thread and post as
+the owner, a release approved from the phone and run (202, `done` as a socket event), the socket
+snapshot and an answer sent back over it, and the two refusals (pairing 403, off switch 400). The
+"hang" of 28 Sep was the test itself: a failure before its try/finally left the relay child alive and
+the test runner waits for children. The failure it hid was real: with `--port 0` the tunnel forwarded
+to `http://127.0.0.1:0` (502), so the tunnel now takes the port actually bound (`Tunnel.setLocal`).
+
+### Earlier note (28 Sep)
 
 Code review of every phone path (relay `proxy` + `/ws`, tunnel `proxyHttp`/`openLocal`, routes):
 answering the Inbox, talk (also to a paused employee), Team Room posts and approvals all reach the

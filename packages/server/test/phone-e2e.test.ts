@@ -28,8 +28,8 @@ import { tmpWorkplace, type TmpWorkplace } from './fakes/tmp-workplace.js';
 
 const RELAY_DIR = process.env['WORKPLACE_RELAY_DIR'] ?? join(homedir(), 'claude-dev-deploy', 'services', 'workplace-relay');
 const UVICORN = process.env['WORKPLACE_RELAY_UVICORN'] ?? join(homedir(), 'iris-ops', 'workplace', 'relay-venv', 'bin', 'uvicorn');
-// Opt-in until it runs green: WORKPLACE_PHONE_E2E=1 (28 Sep: the first run hung before its first assertion; not yet diagnosed).
-const available = process.env['WORKPLACE_PHONE_E2E'] === '1' && existsSync(join(RELAY_DIR, 'app.py')) && existsSync(UVICORN);
+// Runs wherever the relay checkout and its venv exist (this Mac); WORKPLACE_PHONE_E2E=0 skips it.
+const available = process.env['WORKPLACE_PHONE_E2E'] !== '0' && existsSync(join(RELAY_DIR, 'app.py')) && existsSync(UVICORN);
 
 const UA = 'IrisWorkplace/1.0 CFNetwork/1500 Darwin/24.0.0';
 const tick = (ms = 20) => new Promise(r => setTimeout(r, ms));
@@ -41,7 +41,20 @@ async function freePort(): Promise<number> {
 interface Stack { relay: string; relayProc: ChildProcess; running: Running; tmp: TmpWorkplace; fake: FakeRuntime; token: string; stop(): Promise<void> }
 
 async function bootStack(): Promise<Stack> {
+  // The first run (28 Sep) "hung": a failure before the try/finally left the relay child alive, and the
+  // test runner waits for children. Everything spawned here is killed if the boot does not finish.
+  const spawned: ChildProcess[] = [];
   const tmp = tmpWorkplace();
+  try {
+    return await bootStackInner(tmp, spawned);
+  } catch (err) {
+    for (const p of spawned) p.kill('SIGKILL');
+    tmp.cleanup();
+    throw err;
+  }
+}
+
+async function bootStackInner(tmp: TmpWorkplace, spawned: ChildProcess[]): Promise<Stack> {
   tmp.db.close();
   const relayPort = await freePort();
   const relay = `http://127.0.0.1:${relayPort}`;
@@ -52,6 +65,7 @@ async function bootStack(): Promise<Stack> {
     env: { ...process.env, RELAY_DB: relayDb, TUNNEL_SECRET: secret, ORIGIN: relay, RP_ID: '127.0.0.1', OWNER_EMAIL: 'owner@example.test' },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
+  spawned.push(relayProc);
   let relayErr = '';
   relayProc.stderr?.on('data', d => { relayErr += String(d); });
   for (let i = 0; i < 200; i++) {
@@ -68,12 +82,12 @@ async function bootStack(): Promise<Stack> {
     IRIS_WORKPLACE_DIR: tmp.dir, IRIS_OPS_DIR: join(tmp.dir, 'ops'), WORKPLACE_CAP_INR: '1000', WORKPLACE_USD_INR: '100',
   });
   const running = await start(config);
-  for (let i = 0; i < 200; i++) {
-    const h = await (await fetch(`${relay}/relay/health`)).json() as { mac: string };
-    if (h.mac === 'online') break;
-    await tick(50);
+  let mac = 'offline';
+  for (let i = 0; i < 200 && mac !== 'online'; i++) {
+    mac = ((await (await fetch(`${relay}/relay/health`)).json()) as { mac: string }).mac;
+    if (mac !== 'online') await tick(50);
   }
-  assert.equal(((await (await fetch(`${relay}/relay/health`)).json()) as { mac: string }).mac, 'online', 'the tunnel is up');
+  if (mac !== 'online') { await running.stop(); fake.restore(); throw new Error(`the tunnel did not come up in 10 s; relay said: ${relayErr.slice(-800)}`); }
 
   // A bearer session as the app's passkey login mints it (store.create_session): sha256(token) is the row id.
   const token = randomBytes(32).toString('base64url');
@@ -142,7 +156,9 @@ test('every phone action works end to end through the relay: Office, Inbox, talk
 
     // Talk to a paused employee: the cap pauses autonomous work, never the owner's conversation.
     spend.record(wp, { employeeId: 'kabir', source: 'anthropic-api', basis: 'metered', what: 'tests', inr: 151 });
-    assert.equal(employees.stateOf(wp, 'kabir'), 'paused');
+    // A cap pauses autonomous work: the card reads "blocked" with the paused reason (fix batch, item 3).
+    assert.equal(employees.stateOf(wp, 'kabir'), 'blocked');
+    assert.match(employees.stateWithReason(wp, 'kabir').reason ?? '', /^Paused — daily budget reached/);
     const paused = await phone<Agent>(s, 'POST', '/api/employees/kabir/talk', { text: 'Status in one line?' });
     assert.equal(paused.status, 201, JSON.stringify(paused.body));
     await tick();

@@ -31,13 +31,23 @@ organisation exits with the running pid; a start on a taken port exits; a stop t
 after 20 s. If a start says "already running" and nothing is, the pid in the file is dead and the
 next start takes over.
 
-## Where things stand (end of 28 Sep, 01:00 IST)
+## Where things stand (29 Sep, night shift)
 
-Live: the D16/D17 build started 00:46 (pid in `workplace.lock`), tunnel connected, relay `mac: online`.
-Not yet live: the 202 release-run route and the off-switch fix (committed, restart pending); the web
-UI for `summary`/`details`/`headline` (not built). The phone end-to-end test
-(`test/phone-e2e.test.ts`, real relay + real tunnel + bearer session) is written but opt-in
-(`WORKPLACE_PHONE_E2E=1`): its first run hung before the first assertion and is not diagnosed.
+Live until the coordinated cutover: the D16/D17 build of 00:46 (pid in `workplace.lock`). On the
+branch, waiting for that cutover: the 202 release run and the off-switch fix; the phone contract
+(requests, proposal detail, release readiness, pivot evidence, `/api/talk`); the web for all of it
+and for summary/details/headline; push (`iris-workplace-push`) and Mac resilience
+(`iris-workplace-resilience`, launchd agent + watchdog) merged. The phone end-to-end test runs by
+default now (`test/phone-e2e.test.ts`: real relay from `~/claude-dev-deploy`, real tunnel, a bearer
+session; `WORKPLACE_PHONE_E2E=0` skips it).
+
+## The owner's requests
+
+"New request" (Features board, or POST `/api/requests` from the phone) takes free text. The first
+line becomes the feature's title, Asha is asked for the spec, and the feature carries a status the
+owner can read at every stage: with Asha → specced → routed → building / review / blocked → built →
+released, one line each ("2 of 3 building, 1 in review"). `POST /api/talk` talks to Asha without
+picking anyone.
 
 ## Who talks to the owner
 

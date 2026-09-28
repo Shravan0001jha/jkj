@@ -55,7 +55,9 @@ async function fakeRelay(secret: string, port = 0): Promise<Relay> {
 }
 
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-const until = async (pred: () => boolean, ms = 3000, what = 'condition'): Promise<void> => {
+// 10 s, not 3: alone the tunnel reconnects in well under a second, but inside the whole suite (the e2e
+// relay, several booted servers) a 3 s wait missed the second connect once (29 Sep integration run).
+const until = async (pred: () => boolean, ms = 10_000, what = 'condition'): Promise<void> => {
   const t0 = Date.now();
   while (!pred()) { if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}`); await wait(10); }
 };

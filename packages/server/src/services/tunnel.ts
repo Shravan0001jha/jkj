@@ -112,7 +112,7 @@ export class Tunnel {
   private downSince: number | null = null;
   private lastError: string | null = null;
 
-  constructor(private readonly options: TunnelOptions) {
+  constructor(private options: TunnelOptions) {
     this.backoff = options.minBackoffMs ?? DEFAULT_MIN_BACKOFF;
     this.log = options.logger ?? { info: m => defaultLog.info('tunnel', m), warn: m => defaultLog.warn('tunnel', m) };
   }
@@ -296,6 +296,11 @@ export class Tunnel {
       case 'push-result': this.options.onPushResult?.({ id: String(frame.id), sent: Number(frame.sent) || 0, dropped: Number(frame.dropped) || 0, failed: Number(frame.failed) || 0 }); break;
       default: break;
     }
+  }
+
+  /** The Workplace's real loopback origin once the listener is bound (`--port 0` in tests binds a random port). */
+  setLocal(origin: string): void {
+    this.options = { ...this.options, local: origin };
   }
 
   /** One relay request → one request to our own loopback port. */

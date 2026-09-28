@@ -102,6 +102,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   const server = createHttpServer({ config, wp, auth, telegram, tunnel, push, resilience });
   const hub = attachSocket(server, wp, auth);
   await listen(server, config);
+  // The tunnel forwards to the port actually bound (config.port may be 0 in tests).
+  tunnel?.setLocal(`http://127.0.0.1:${(server.address() as { port: number }).port}`);
 
   telegram.attach();
   if (config.push && tunnel) push.attach(); else log.info('push', config.push ? 'not published: no relay, so no push' : 'off (--no-push)');

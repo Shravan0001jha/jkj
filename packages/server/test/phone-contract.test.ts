@@ -52,7 +52,8 @@ test('(a) a free-text request becomes a stated feature with Asha asked for the s
     assert.equal(detail.body.status.stage, 'building');
     assert.match(detail.body.status.line, /(\d+) of \1 (assignments )?building/);
     assert.equal(detail.body.status.assignments.length, dec.body.assignments.length);
-    assert.ok(detail.body.status.assignments.every(a => a.employeeId && a.charterId && a.state === 'building'));
+    // A session has started for each; the plan (and the 'planned'/'building' state) arrives with its first reply.
+    assert.ok(detail.body.status.assignments.every(a => a.employeeId && a.charterId && ['proposed', 'planned', 'building'].includes(a.state)), JSON.stringify(detail.body.status));
     const board = await call<FeatureBoard>(b.base, 'GET', '/api/features');
     assert.equal(board.body.status[id]!.stage, 'building');
   } finally {
