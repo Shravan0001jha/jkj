@@ -777,6 +777,7 @@ struct OfficeCounts: Codable, Equatable, Hashable {
 }
 
 struct OfficeResponse: Codable, Equatable {
+    var chiefOfStaff: String
     var units: [OfficeUnit]
     var coverage: Coverage
     var needsYou: Int
@@ -820,6 +821,7 @@ struct RoomThreadDetail: Codable, Equatable {
 struct FeatureBoard: Codable, Equatable {
     var features: [WorkItem]
     var byState: [String: Int]
+    var status: [String: RequestStatus]
 }
 
 struct FeatureDetail: Codable, Equatable {
@@ -827,11 +829,74 @@ struct FeatureDetail: Codable, Equatable {
     var assignments: [WorkItem]
     var requirements: [Requirement]
     var route: RouteResult
+    var status: RequestStatus
+}
+
+enum RequestStage: String, Codable, CaseIterable {
+    case withAsha = "with-asha"
+    case specced, routed, building, review, blocked, built, released
+}
+
+struct RequestAssignment: Codable, Equatable, Hashable, Identifiable {
+    var id: String
+    var title: String
+    var employeeId: String?
+    var charterId: String?
+    var state: WorkState
+    var stalledSince: String?
+}
+
+struct RequestStatus: Codable, Equatable, Hashable {
+    var stage: RequestStage
+    var line: String
+    var assignments: [RequestAssignment]
+    var askedAgentId: String?
+}
+
+struct CreateRequest: Codable, Equatable {
+    var text: String
+    var platformIds: [String]?
+}
+
+struct RequestResponse: Codable, Equatable, Identifiable {
+    var feature: WorkItem
+    var status: RequestStatus
+    var id: String { feature.id }
+}
+
+struct ProposalDetail: Codable, Equatable {
+    var proposal: OrgProposal
+    var item: InboxItem
+}
+
+struct ReleaseReadiness: Codable, Equatable, Identifiable {
+    var shippable: Shippable
+    var unreleased: [String]
+    var open: Release?
+    var last: Release?
+    var id: String { shippable.rawValue }
+}
+
+struct PivotItemEvidence: Codable, Equatable, Hashable {
+    var tests: String
+    var commits: [String]
+    var liveVerified: Int
+    var notVerified: Int
+}
+
+struct PivotItem: Codable, Equatable, Hashable, Identifiable {
+    var id: String
+    var title: String
+    var employeeId: String?
+    var state: WorkState
+    var evidence: PivotItemEvidence?
+    var href: String
 }
 
 struct PivotCell: Codable, Equatable, Hashable {
     var total: Int
     var byState: [String: Int]
+    var items: [PivotItem]
 }
 
 struct Pivot: Codable, Equatable {

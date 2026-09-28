@@ -127,6 +127,13 @@ struct InboxItemView: View {
                             }
                         }
                     } header: { SectionHeader(text: "Who and what") }
+                    if item.kind == .orgChange, let pid = item.context["proposalId"]?.stringValue {
+                        Section {
+                            NavigationLink { ProposalDetailView(id: pid) } label: {
+                                Label("Read the change as a diff", systemImage: "doc.text.magnifyingglass")
+                            }
+                        } header: { SectionHeader(text: "Org change") }
+                    }
                     if let links = item.links, !links.isEmpty {
                         Section {
                             ForEach(Array(links.enumerated()), id: \.offset) { _, link in

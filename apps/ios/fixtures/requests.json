@@ -1,0 +1,155 @@
+[
+  {
+    "feature": {
+      "id": "f-errands",
+      "kind": "feature",
+      "title": "Phone→Mac errands: say it on the phone, it happens on the Mac",
+      "body": "The owner says \"open the deck on my Mac\" on the phone. The cloud agent turns it into an errand, the Mac runs it through the experts, and the phone shows an honest result: never \"Done\" before it happened.",
+      "state": "in-progress",
+      "requirementIds": [
+        "REQ-CROSS-01",
+        "REQ-CROSS-03",
+        "REQ-SYS-07"
+      ],
+      "platformIds": [
+        "ios",
+        "android",
+        "mac",
+        "server"
+      ],
+      "createdAt": "2026-09-27T07:00:00.000Z",
+      "updatedAt": "2026-09-27T08:55:00.000Z",
+      "history": [
+        {
+          "at": "2026-09-27T07:00:00.000Z",
+          "from": null,
+          "to": "stated",
+          "by": "owner"
+        },
+        {
+          "at": "2026-09-27T07:20:00.000Z",
+          "from": "stated",
+          "to": "specced",
+          "by": "asha"
+        },
+        {
+          "at": "2026-09-27T07:25:00.000Z",
+          "from": "specced",
+          "to": "decomposed",
+          "by": "workplace"
+        },
+        {
+          "at": "2026-09-27T08:00:00.000Z",
+          "from": "decomposed",
+          "to": "in-progress",
+          "by": "workplace"
+        }
+      ],
+      "spec": "## Spec\n1. Phone sends the instruction whole.\n2. Cloud agent asks the Mac (ask_mac); a busy Mac is online.\n3. No \"Done\" without a Mac result.\n\n## Acceptance\n- Round trip under 3 s on LAN.\n- False-done rate 0 over 20 errands."
+    },
+    "status": {
+      "stage": "blocked",
+      "line": "1 building, 1 in review, 1 done, 1 blocked",
+      "assignments": [
+        {
+          "id": "a-1",
+          "title": "Errand receiver on the Mac (experts)",
+          "employeeId": "mira",
+          "charterId": "experts",
+          "state": "building"
+        },
+        {
+          "id": "a-2",
+          "title": "Errand endpoint on iris-api",
+          "employeeId": "kabir",
+          "charterId": "server",
+          "state": "blocked",
+          "stalledSince": "2026-09-27T08:15:00.000Z"
+        },
+        {
+          "id": "a-3",
+          "title": "Desktop errand handler",
+          "employeeId": "rohan",
+          "charterId": "desktop-mac",
+          "state": "review"
+        },
+        {
+          "id": "a-4",
+          "title": "Errand sender in the iOS and Android apps",
+          "employeeId": "tara",
+          "charterId": "mobile",
+          "state": "planned"
+        },
+        {
+          "id": "a-5",
+          "title": "Errand spoken confirmations",
+          "employeeId": "dev",
+          "charterId": "conversation",
+          "state": "done"
+        }
+      ],
+      "askedAgentId": "s-asha-1"
+    }
+  },
+  {
+    "feature": {
+      "id": "f-push",
+      "kind": "feature",
+      "title": "Push alerts to the phone app (APNs)",
+      "body": "Push alerts to the phone app (APNs)",
+      "state": "stated",
+      "requirementIds": [
+        "REQ-CROSS-05"
+      ],
+      "platformIds": [
+        "ios"
+      ],
+      "createdAt": "2026-09-27T07:00:00.000Z",
+      "updatedAt": "2026-09-27T08:55:00.000Z",
+      "history": [
+        {
+          "at": "2026-09-27T07:00:00.000Z",
+          "from": null,
+          "to": "stated",
+          "by": "owner"
+        }
+      ]
+    },
+    "status": {
+      "stage": "with-asha",
+      "line": "Asha is writing the spec",
+      "assignments": []
+    }
+  },
+  {
+    "feature": {
+      "id": "f-share",
+      "kind": "feature",
+      "title": "Auto-hide on screen share",
+      "body": "Auto-hide on screen share",
+      "state": "specced",
+      "requirementIds": [
+        "REQ-PRIV-01"
+      ],
+      "platformIds": [
+        "mac",
+        "windows"
+      ],
+      "createdAt": "2026-09-27T07:00:00.000Z",
+      "updatedAt": "2026-09-27T08:55:00.000Z",
+      "history": [
+        {
+          "at": "2026-09-27T07:00:00.000Z",
+          "from": null,
+          "to": "stated",
+          "by": "owner"
+        }
+      ]
+    },
+    "status": {
+      "stage": "specced",
+      "line": "Spec written; routing through the map",
+      "assignments": []
+    }
+  }
+]

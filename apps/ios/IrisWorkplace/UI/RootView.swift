@@ -40,6 +40,8 @@ struct RootView: View {
                 .sheet(isPresented: $router.showSettings) { SettingsView() }
                 .sheet(isPresented: $router.showAlerts) { AlertsView() }
                 .sheet(isPresented: $router.showSpend) { SpendView() }
+                .sheet(isPresented: $router.showNewRequest) { NewRequestView() }
+                .sheet(isPresented: $router.showReleases) { ReleasesView() }
             }
         }
         .onOpenURL { url in model.handleOpenURL(url) }

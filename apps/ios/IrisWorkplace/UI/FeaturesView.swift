@@ -6,16 +6,18 @@ struct FeaturesView: View {
     @State private var pivotRows: PivotRows = .charter
     @State private var path: [String] = []
 
-    private enum Mode: String, CaseIterable { case board = "Board", pivot = "Pivot" }
+    private enum Mode: String, CaseIterable { case requests = "Requests", board = "Board", pivot = "Pivot" }
 
     var body: some View {
         NavigationStack(path: $path) {
             Group {
                 switch mode {
+                case .requests: RequestsList()
                 case .board: board
                 case .pivot: PivotView(rows: $pivotRows)
                 }
             }
+            .navigationDestination(for: String.self) { id in FeatureDetailView(id: id) }
             .navigationTitle("Features")
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -23,13 +25,20 @@ struct FeaturesView: View {
                         ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 220)
+                    .frame(maxWidth: 260)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
-            .navigationDestination(for: String.self) { id in FeatureDetailView(id: id) }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { model.router.showNewRequest = true } label: { Image(systemName: "plus.circle.fill") }.accessibilityLabel("New request")
+                }
+            }
             .task { if model.features.board == nil { await reload() } }
+            .onChange(of: model.router.featuresSegment, initial: true) { _, seg in
+                if seg == "requests" { mode = .requests; model.router.featuresSegment = nil }
+            }
             .onChange(of: model.router.featureId, initial: true) { _, id in
                 guard let id else { return }
                 mode = .board
@@ -78,6 +87,7 @@ struct FeaturesView: View {
     private func reload() async {
         guard let rest = model.rest else { return }
         await model.features.load(rest)
+        if let b = model.features.board { model.requests.absorb(b) }
     }
 }
 
@@ -106,6 +116,7 @@ struct FeatureRow: View {
 struct FeatureDetailView: View {
     @Environment(AppModel.self) private var model
     let id: String
+    @State private var showAssign = false
 
     private var detail: FeatureDetail? { model.features.details[id] }
     private var feature: WorkItem? { detail?.feature ?? model.features.board?.features.first { $0.id == id } }
@@ -123,6 +134,12 @@ struct FeatureDetailView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                }
+                if let st = detail?.status ?? model.requests.status(for: f.id) {
+                    Section {
+                        HStack { Image(systemName: st.stage.glyph.symbol).foregroundStyle(st.stage.glyph.tint); Text(st.stage.glyph.label).font(.subheadline.weight(.semibold)); Spacer(); Text(st.line).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.trailing) }
+                        if let a = st.askedAgentId { Button("Asha's session for this") { model.router.talk(to: model.office.data?.chiefOfStaff ?? "asha"); _ = a } .font(.subheadline) }
+                    } header: { SectionHeader(text: "Where it stands") }
                 }
                 if let spec = f.spec, !spec.isEmpty {
                     Section { Prose(text: spec) } header: { SectionHeader(text: "Spec") }
@@ -199,6 +216,12 @@ struct FeatureDetailView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Feature")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showAssign = true } label: { Label("Assign", systemImage: "tray.and.arrow.down") }
+            }
+        }
+        .sheet(isPresented: $showAssign) { AssignView(featureId: id) }
         .refreshable { await load() }
         .task { if detail == nil { await load() } }
     }
@@ -335,6 +358,7 @@ struct PivotGrid: View {
 
     private let cellWidth: CGFloat = 96
     private let rowWidth: CGFloat = 120
+    @State private var selected: PivotSelection?
 
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
@@ -352,7 +376,10 @@ struct PivotGrid: View {
                         Text(rowTitle(row)).font(.subheadline.weight(.medium)).lineLimit(2)
                             .frame(width: rowWidth, alignment: .leading).padding(6)
                         ForEach(pivot.cols, id: \.self) { col in
-                            PivotCellView(cell: pivot.cells[row]?[col]).frame(width: cellWidth).padding(6)
+                            Button { if let c = pivot.cells[row]?[col], !c.items.isEmpty { selected = PivotSelection(row: rowTitle(row), col: featureTitle(col), cell: c) } } label: {
+                                PivotCellView(cell: pivot.cells[row]?[col]).frame(width: cellWidth).padding(6)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     Divider()
@@ -360,6 +387,7 @@ struct PivotGrid: View {
             }
             .padding(.horizontal, 10)
         }
+        .sheet(item: $selected) { sel in PivotItemsView(selection: sel) }
     }
 
     private func featureTitle(_ id: String) -> String {
@@ -387,6 +415,61 @@ struct PivotCellView: View {
             .accessibilityElement(children: .combine)
         } else {
             Text("—").foregroundStyle(.quaternary).accessibilityLabel("none")
+        }
+    }
+}
+
+
+struct PivotSelection: Identifiable {
+    let row: String
+    let col: String
+    let cell: PivotCell
+    var id: String { row + "|" + col }
+}
+
+/// The assignments behind one pivot cell, with their evidence and a link to the assignee's page.
+struct PivotItemsView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let selection: PivotSelection
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(selection.cell.items) { it in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: it.state.glyph.symbol).foregroundStyle(it.state.glyph.tint)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(it.title).font(.subheadline)
+                                    Text("\(it.state.glyph.label) · \(model.employeeName(it.employeeId))").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            if let e = it.evidence {
+                                HStack(spacing: 8) {
+                                    Pill(text: e.tests, symbol: "checkmark.circle", tint: e.tests.contains(", 0 failed") ? .green : .red)
+                                    Pill(text: "\(e.commits.count) commits", symbol: "arrow.triangle.merge", tint: .secondary)
+                                    Pill(text: "\(e.liveVerified) live", symbol: "checkmark.seal", tint: .green)
+                                    if e.notVerified > 0 { Pill(text: "\(e.notVerified) not verified", symbol: "questionmark.circle", tint: .orange) }
+                                }
+                                .font(.caption2)
+                                ForEach(e.commits, id: \.self) { Text($0).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1) }
+                            } else {
+                                Text("No evidence yet").font(.caption).foregroundStyle(.secondary)
+                            }
+                            if let emp = it.employeeId {
+                                Button("Open \(model.employeeName(emp))'s page") { dismiss(); model.router.talk(to: emp) }.font(.caption)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                } header: { SectionHeader(text: "\(selection.row) × \(selection.col)") }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("\(selection.cell.total) item\(selection.cell.total == 1 ? "" : "s")")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }
 }

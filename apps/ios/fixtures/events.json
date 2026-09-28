@@ -200,6 +200,7 @@
   {
     "type": "office.snapshot",
     "office": {
+      "chiefOfStaff": "asha",
       "units": [
         {
           "unit": {

@@ -18,7 +18,16 @@
         "total": 1,
         "byState": {
           "building": 1
-        }
+        },
+        "items": [
+          {
+            "id": "a-1",
+            "title": "Errand receiver on the Mac (experts)",
+            "employeeId": "mira",
+            "state": "building",
+            "href": "#/employee/mira?item=a-1"
+          }
+        ]
       }
     },
     "server": {
@@ -26,7 +35,16 @@
         "total": 1,
         "byState": {
           "blocked": 1
-        }
+        },
+        "items": [
+          {
+            "id": "a-2",
+            "title": "Errand endpoint on iris-api",
+            "employeeId": "kabir",
+            "state": "blocked",
+            "href": "#/employee/kabir?item=a-2"
+          }
+        ]
       }
     },
     "desktop-mac": {
@@ -34,13 +52,32 @@
         "total": 1,
         "byState": {
           "review": 1
-        }
+        },
+        "items": [
+          {
+            "id": "a-3",
+            "title": "Desktop errand handler",
+            "employeeId": "rohan",
+            "state": "review",
+            "href": "#/employee/rohan?item=a-3",
+            "evidence": {
+              "tests": "212 passed, 0 failed",
+              "commits": [
+                "8034a09 Phone actions on the Mac: no false Done",
+                "ce943c7 Core round 9: errand lifecycle"
+              ],
+              "liveVerified": 2,
+              "notVerified": 2
+            }
+          }
+        ]
       },
       "f-share": {
         "total": 1,
         "byState": {
           "planned": 1
-        }
+        },
+        "items": []
       }
     },
     "mobile": {
@@ -48,7 +85,16 @@
         "total": 1,
         "byState": {
           "planned": 1
-        }
+        },
+        "items": [
+          {
+            "id": "a-4",
+            "title": "Errand sender in the iOS and Android apps",
+            "employeeId": "tara",
+            "state": "planned",
+            "href": "#/employee/tara?item=a-4"
+          }
+        ]
       }
     },
     "conversation": {
@@ -56,7 +102,24 @@
         "total": 1,
         "byState": {
           "done": 1
-        }
+        },
+        "items": [
+          {
+            "id": "a-5",
+            "title": "Errand spoken confirmations",
+            "employeeId": "dev",
+            "state": "done",
+            "href": "#/employee/dev?item=a-5",
+            "evidence": {
+              "tests": "48 passed, 0 failed",
+              "commits": [
+                "46e43c1 Merge core round 9"
+              ],
+              "liveVerified": 1,
+              "notVerified": 0
+            }
+          }
+        ]
       }
     },
     "character": {
@@ -64,7 +127,8 @@
         "total": 2,
         "byState": {
           "done": 2
-        }
+        },
+        "items": []
       }
     }
   }

@@ -73,6 +73,17 @@ final class RestClient {
     func feature(_ id: String) async throws -> FeatureDetail { try await get(API.feature(id)) }
     func pivot(_ rows: PivotRows) async throws -> Pivot { try await get(API.featurePivot(rows)) }
     func spend(day: String? = nil) async throws -> SpendSummary { try await get(API.spend(day: day)) }
+    /// Talk to the Chief of Staff without choosing anyone.
+    func talkAsha(text: String) async throws -> Agent { try await post(API.talk, TalkRequest(text: text, attachments: nil, probe: nil)) }
+    func createRequest(text: String, platformIds: [String]?) async throws -> RequestResponse {
+        try await post(API.requests, CreateRequest(text: text, platformIds: platformIds))
+    }
+    func requests() async throws -> [RequestResponse] { try await get(API.requests) }
+    func proposal(_ id: String) async throws -> ProposalDetail { try await get(API.proposal(id)) }
+    func releasesReady() async throws -> [ReleaseReadiness] { try await get(API.releasesReady) }
+    func runRelease(_ id: String) async throws { let _: OkResponse = try await post(API.releaseRun(id), Empty()) }
+    func createWork(_ req: CreateWorkRequest) async throws -> WorkItem { try await post(API.work(), req) }
+    func startWork(_ id: String) async throws -> Agent { try await post(API.workStart(id), Empty()) }
     func room() async throws -> RoomResponse { try await get(API.room) }
     func roomThread(_ id: String) async throws -> RoomThreadDetail { try await get(API.roomThread(id)) }
     func postMessage(_ id: String, text: String, mentions: [String]) async throws -> RoomMessage {

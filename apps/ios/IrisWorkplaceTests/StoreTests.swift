@@ -385,3 +385,45 @@ final class EmployeeNeedsYouTests: XCTestCase {
         XCTAssertEqual(s.detail?.needsYou.count, 1, "items about someone else stay away")
     }
 }
+
+@MainActor
+final class RequestsStoreTests: XCTestCase {
+    private var rest: RestClient!
+
+    override func setUp() {
+        StubURLProtocol.reset()
+        StubURLProtocol.handler = { req in
+            switch (req.httpMethod ?? "GET", req.url!.path) {
+            case ("GET", "/api/requests"): return (200, try! Fixtures.data("requests"))
+            case ("POST", "/api/requests"):
+                let f = try! Fixtures.decode("features", as: FeatureBoard.self).features[1]
+                let r = RequestResponse(feature: f, status: RequestStatus(stage: .withAsha, line: "Asha is writing the spec", assignments: [], askedAgentId: nil))
+                return (201, try! JSONEncoder().encode(r))
+            default: return (404, Data(#"{"error":"no"}"#.utf8))
+            }
+        }
+        rest = RestClient(config: ServerConfig(mode: .lan, baseURL: ServerConfig.parse("127.0.0.1:4317")!), tokens: MemoryTokenStore(token: "t"), session: StubURLProtocol.session())
+    }
+
+    func testLoadCreateAndLiveStatus() async throws {
+        let s = RequestsStore()
+        await s.load(rest)
+        XCTAssertEqual(s.items.count, 3)
+        XCTAssertEqual(s.status(for: "f-errands")?.stage, .blocked)
+        XCTAssertEqual(s.status(for: "f-errands")?.askedAgentId, "s-asha-1")
+        let r = try await s.create(rest, text: "Push alerts", platformIds: ["ios"])
+        XCTAssertEqual(s.items.first?.feature.id, r.feature.id)
+        XCTAssertEqual(s.status(for: r.feature.id)?.stage, .withAsha)
+        var f = r.feature; f.state = .specced
+        s.handle(.workUpdated(f))
+        XCTAssertEqual(s.status(for: r.feature.id)?.stage, .specced, "a feature update moves the stage until the server's status arrives")
+        XCTAssertEqual(s.latestFeature(r.feature).state, .specced)
+        var a = try Fixtures.decode("feature-detail", as: FeatureDetail.self).assignments[1]
+        a.state = .building
+        s.handle(.workUpdated(a))
+        XCTAssertEqual(s.status(for: "f-errands")?.assignments.first { $0.id == a.id }?.state, .building)
+        let board = try Fixtures.decode("features", as: FeatureBoard.self)
+        s.absorb(board)
+        XCTAssertEqual(s.status(for: "f-errands")?.stage, .blocked, "the board's status is authoritative")
+    }
+}

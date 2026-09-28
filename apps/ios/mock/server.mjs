@@ -75,6 +75,7 @@ const loginPage = (title, action) => `<!doctype html><html><head><meta name="vie
 const html = (res, body) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(body); };
 
 const office = () => ({
+  chiefOfStaff: 'asha',
   units: D.units.filter(u => u.kind === 'unit').map(unit => ({ unit, employees: state.cards.filter(c => c.employee.unitId === unit.id) })),
   coverage: D.coverage,
   needsYou: state.inbox.filter(i => i.state === 'open').length,
@@ -190,7 +191,57 @@ const server = createServer(async (req, res) => {
     broadcast({ type: 'agent.log', entry });
     return json(res, 200, { ok: true });
   }
-  if (m === 'GET' && p === '/api/features') return json(res, 200, { features: state.features, byState: state.features.reduce((acc, f) => (acc[f.state] = (acc[f.state] ?? 0) + 1, acc), {}) });
+  if (m === 'GET' && p === '/api/features') return json(res, 200, D.featureBoard(state.features, state.assignments));
+  if (m === 'POST' && p === '/api/talk') {
+    const body = await readJson(req);
+    if (!body || typeof body.text !== 'string' || !body.text.trim()) return json(res, 400, { error: 'text required' });
+    req.url = '/api/employees/asha/talk'; return server.emit('request', req, res);
+  }
+  if (m === 'GET' && p === '/api/requests') return json(res, 200, [...state.features].reverse().map(f => ({ feature: f, status: D.requestStatus(f, state.assignments) })));
+  if (m === 'POST' && p === '/api/requests') {
+    const body = await readJson(req);
+    if (!body || typeof body.text !== 'string' || !body.text.trim()) return json(res, 400, { error: 'text required' });
+    const now = new Date().toISOString();
+    const f = { id: `f-${Date.now().toString(36)}`, kind: 'feature', title: body.text.split('\n')[0].slice(0, 80), body: body.text, state: 'stated', requirementIds: [], platformIds: body.platformIds ?? [], createdAt: now, updatedAt: now, history: [{ at: now, from: null, to: 'stated', by: 'owner' }] };
+    state.features.push(f);
+    broadcast({ type: 'work.updated', item: f });
+    setTimeout(() => { f.state = 'specced'; f.spec = '## Spec\n1. ' + f.title + '\n\n## Acceptance\n- Works on the phone.'; f.updatedAt = new Date().toISOString(); broadcast({ type: 'work.updated', item: f }); }, 3000);
+    res.statusCode = 201;
+    return json(res, 201, { feature: f, status: D.requestStatus(f, state.assignments) });
+  }
+  if (m === 'GET' && seg[1] === 'proposals' && id) {
+    if (id !== D.proposal.id) return json(res, 404, { error: 'no such proposal' });
+    return json(res, 200, { proposal: D.proposal, item: state.inbox.find(i => i.id === D.proposal.inboxId) });
+  }
+  if (m === 'GET' && p === '/api/releases/ready') return json(res, 200, D.releasesReady());
+  if (m === 'POST' && seg[1] === 'releases' && seg[3] === 'run') {
+    const item = state.inbox.find(i => i.id === D.release.inboxId);
+    if (!item || item.state !== 'answered' || item.answer?.optionId !== 'approve') return json(res, 409, { error: 'Release needs your approval in the Inbox first' });
+    setTimeout(() => broadcast({ type: 'release.updated', release: { ...D.release, state: 'running' } }), 500);
+    setTimeout(() => broadcast({ type: 'release.log', id: D.release.id, line: 'notarizing Iris.app…' }), 1500);
+    setTimeout(() => broadcast({ type: 'release.updated', release: { ...D.release, state: 'done' } }), 4000);
+    return json(res, 202, { ok: true });
+  }
+  if (m === 'POST' && p === '/api/work') {
+    const body = await readJson(req);
+    if (!body || !body.title) return json(res, 400, { error: 'title required' });
+    const now = new Date().toISOString();
+    const emp = body.employeeId ?? (body.charterId ? D.charters.find(c => c.id === body.charterId)?.holderIds[0] : undefined);
+    const w = { id: `a-${Date.now().toString(36)}`, kind: body.kind ?? 'assignment', title: body.title, body: body.body ?? body.title, state: 'proposed', charterId: body.charterId ?? D.employees.find(e => e.id === emp)?.charterIds[0], employeeId: emp, featureId: body.featureId, requirementIds: body.requirementIds ?? [], platformIds: body.platformIds ?? [], createdAt: now, updatedAt: now, history: [{ at: now, from: null, to: 'proposed', by: 'owner' }] };
+    state.assignments.push(w);
+    broadcast({ type: 'work.updated', item: w });
+    return json(res, 201, w);
+  }
+  if (m === 'POST' && seg[1] === 'work' && seg[3] === 'start') {
+    const w = state.assignments.find(a => a.id === id);
+    if (!w) return json(res, 404, { error: 'no such work item' });
+    w.state = 'planned'; w.updatedAt = new Date().toISOString();
+    const agent = { ...D.agents.mira, id: `s-${w.employeeId}-${Date.now()}`, name: w.employeeId, task: w.title, status: 'running', startedAt: w.updatedAt, approval: undefined, usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, employeeId: w.employeeId, assignmentId: w.id };
+    state.agents[agent.id] = agent; state.logs[agent.id] = [];
+    w.sessionId = agent.id;
+    broadcast({ type: 'agent.updated', agent }); broadcast({ type: 'work.updated', item: w });
+    return json(res, 201, agent);
+  }
   if (m === 'GET' && p === '/api/features/pivot') {
     const rows = url.searchParams.get('rows');
     if (!D.pivots[rows]) return json(res, 400, { error: 'rows must be charter, platform or team' });

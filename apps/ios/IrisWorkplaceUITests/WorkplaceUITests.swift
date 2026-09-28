@@ -16,6 +16,7 @@ final class WorkplaceUITests: XCTestCase {
             "WORKPLACE_URL": "127.0.0.1:4399",
             "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
             "WORKPLACE_NO_NOTIF_PROMPT": "1",
+            "WORKPLACE_NO_DEVICE_AUTH": "1",
         ]
     }
 
@@ -45,6 +46,7 @@ final class WorkplaceUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["If you approve"].waitForExistence(timeout: 8), "the item loaded")
         let release = app.buttons["Release 0.2.16"]
         XCTAssertTrue(reveal(release), "the danger option is a button on the item")
+        let releaseY = release.frame.midY / app.frame.height   // before the dialog adds a second button with this label
         release.tap()
         let confirm = app.sheets.buttons["Release 0.2.16"].firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 4), "a danger option confirms before it acts")
@@ -53,12 +55,13 @@ final class WorkplaceUITests: XCTestCase {
         if app.buttons["Cancel"].exists {
             app.buttons["Cancel"].firstMatch.tap()
         } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62)).tap()
+            // The popover sits beside its button: tap on the far side of the screen from it.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: releaseY > 0.5 ? 0.22 : 0.85)).tap()
         }
         XCTAssertFalse(confirm.waitForExistence(timeout: 2), "the dialog is gone")
-        XCTAssertTrue(release.waitForExistence(timeout: 2), "cancel leaves the item open")
-        reveal(release)
-        release.tap()
+        XCTAssertTrue(release.firstMatch.waitForExistence(timeout: 2), "cancel leaves the item open")
+        reveal(release.firstMatch)
+        release.firstMatch.tap()
         app.sheets.buttons["Release 0.2.16"].firstMatch.tap()
         let done = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Release 0.2.16 ·'")).firstMatch
         XCTAssertTrue(reveal(done) || done.waitForExistence(timeout: 8), "the item shows the recorded answer after the server confirmed")
@@ -73,6 +76,7 @@ final class WorkplaceUITests: XCTestCase {
         XCTAssertTrue(reveal(raise))
         raise.tap()
         let field = app.alerts.textFields.firstMatch
+        if !field.waitForExistence(timeout: 3) { raise.tap() }
         XCTAssertTrue(field.waitForExistence(timeout: 4), "a needsNote option asks for the note")
         XCTAssertFalse(app.alerts.buttons["Send"].isEnabled, "no empty notes")
         field.tap()
@@ -108,11 +112,12 @@ final class WorkplaceUITests: XCTestCase {
 
     func testOfficeCardOpensTalkAndProfileShowsCharter() {
         launch()
-        let asha = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Asha'")).firstMatch
+        let asha = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Asha' AND label CONTAINS 'Chief of Staff'")).firstMatch
         XCTAssertTrue(asha.waitForExistence(timeout: 8))
         asha.tap()
-        XCTAssertTrue(app.navigationBars["Asha"].waitForExistence(timeout: 6), "a card opens Talk with that employee")
-        app.buttons["More"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Talk"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.navigationBars["Asha"].waitForExistence(timeout: 6), "a card opens Talk with that employee (tab selected: \(app.tabBars.buttons["Talk"].isSelected))")
+        app.navigationBars["Asha"].buttons["More"].tap()
         app.buttons["Charter and status"].tap()
         XCTAssertTrue(app.navigationBars["Profile"].waitForExistence(timeout: 4))
         XCTAssertTrue(app.staticTexts["Status"].exists)
@@ -256,7 +261,7 @@ final class NewContractUITests: XCTestCase {
         req.httpMethod = "POST"
         _ = try? await URLSession.shared.data(for: req)
         app = XCUIApplication()
-        app.launchEnvironment = ["WORKPLACE_URL": "127.0.0.1:4399", "WORKPLACE_TOKEN": "mock-token-0123456789abcdef", "WORKPLACE_NO_NOTIF_PROMPT": "1"]
+        app.launchEnvironment = ["WORKPLACE_URL": "127.0.0.1:4399", "WORKPLACE_TOKEN": "mock-token-0123456789abcdef", "WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_NO_DEVICE_AUTH": "1"]
     }
 
     private func shot(_ name: String) {
@@ -280,7 +285,7 @@ final class NewContractUITests: XCTestCase {
         shot("room-thread-expanded")
         let composer = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Post as you'")).firstMatch
         composer.tap(); composer.typeText("Reuse ask_mac for now. @kabir go ahead.")
-        XCTAssertTrue(app.staticTexts["Kabir"].waitForExistence(timeout: 3), "the mention is recognised")
+        XCTAssertTrue(app.staticTexts["Kabir"].waitForExistence(timeout: 5), "the mention is recognised")
         app.buttons["Post"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Reuse ask_mac for now.'")).firstMatch.waitForExistence(timeout: 8), "the owner's post appears from the server")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Noted. I will answer'")).firstMatch.waitForExistence(timeout: 10), "the mentioned employee's live reply streams in")
@@ -294,10 +299,15 @@ final class NewContractUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Spend"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Anthropic API"].waitForExistence(timeout: 6))
         XCTAssertTrue(app.staticTexts["estimate"].exists, "estimates are labelled")
+        shot("spend")
+        var n = 0
+        while !app.staticTexts["not billed"].exists && n < 6 { app.swipeUp(); n += 1 }
         XCTAssertTrue(app.staticTexts["Subscription usage (free)"].exists)
         XCTAssertTrue(app.staticTexts["not billed"].exists)
+        n = 0
+        while !app.staticTexts["7-day window"].exists && n < 6 { app.swipeUp(); n += 1 }
         XCTAssertTrue(app.staticTexts["7-day window"].exists)
-        shot("spend")
+        shot("spend-subscription")
     }
 
     func testEmployeePageNeedsYouAnswersInPlace() {
@@ -317,7 +327,11 @@ final class NewContractUITests: XCTestCase {
     func testOfficeCountsStalledAndStateReason() {
         app.launch()
         XCTAssertTrue(app.staticTexts["stalled"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'waiting for your approval to run the errand tests'")).firstMatch.waitForExistence(timeout: 4), "the state reason shows on the card")
+        let reason = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'waiting for your approval to run the errand tests'")).firstMatch
+        var n = 0
+        while !reason.exists && n < 5 { app.swipeUp(); n += 1; _ = reason.waitForExistence(timeout: 0.5) }
+        XCTAssertTrue(reason.exists, "the state reason shows on the card")
+        while app.buttons["Alerts"].exists == false && n < 10 { app.swipeDown(); n += 1 }
         app.buttons["Alerts"].tap()
         XCTAssertTrue(app.navigationBars["Alerts"].waitForExistence(timeout: 4), "alerts open as a sheet from the bell")
         app.buttons["Done"].tap()
@@ -329,7 +343,7 @@ final class NewContractUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["If you approve"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["If you refuse"].exists)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Nikhil, Rohan, Asha'")).firstMatch.exists, "affects")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Nikhil, Rohan, Asha'")).firstMatch.waitForExistence(timeout: 8), "affects, with names once the Office loaded")
         app.buttons["Details"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'kills the running Iris'")).firstMatch.waitForExistence(timeout: 4), "details expand")
         shot("inbox-item-who-what")

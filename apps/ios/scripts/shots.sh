@@ -18,7 +18,7 @@ shot() {  # name wait [ENV=VAL ...]
   sleep $wait
   xcrun simctl io "$SIM" screenshot "$OUT/$name.png" >/dev/null && echo "$OUT/$name.png"
 }
-MOCK="WORKPLACE_URL=127.0.0.1:4399 WORKPLACE_TOKEN=mock-token-0123456789abcdef WORKPLACE_NO_NOTIF_PROMPT=1"
+MOCK="WORKPLACE_URL=127.0.0.1:4399 WORKPLACE_TOKEN=mock-token-0123456789abcdef WORKPLACE_NO_NOTIF_PROMPT=1 WORKPLACE_NO_DEVICE_AUTH=1"
 xcrun simctl uninstall "$SIM" $BUNDLE; xcrun simctl install "$SIM" "$APP"   # fresh: no token → pairing screen
 shot 01-signin 3 WORKPLACE_RELAY_URL=127.0.0.1:4399 WORKPLACE_FORGET=1
 shot 02-office 4 ${=MOCK}
@@ -35,7 +35,12 @@ shot 12-alerts 30 ${=MOCK} WORKPLACE_ALERTS=1
 shot 18-room 5 ${=MOCK} WORKPLACE_ROOM=list
 shot 19-thread 5 ${=MOCK} WORKPLACE_ROOM=rt-socket
 shot 20-spend 5 ${=MOCK} WORKPLACE_SPEND=1
-shot 21-inbox-cap-needsyou 5 ${=MOCK} WORKPLACE_TALK=mira
+shot 21-employee-needsyou 5 ${=MOCK} WORKPLACE_TALK=kabir
+shot 27-requests 5 ${=MOCK} WORKPLACE_FEATURES=requests
+shot 28-new-request 4 ${=MOCK} WORKPLACE_NEW_REQUEST=1
+shot 29-releases 5 ${=MOCK} WORKPLACE_RELEASES=1
+shot 30-talk-asha-default 5 ${=MOCK} WORKPLACE_TAB=talk
+shot 31-inbox-orgchange 4 ${=MOCK} WORKPLACE_INBOX_ITEM=ib-4
 shot 13-settings 4 ${=MOCK} WORKPLACE_SETTINGS=1
 xcrun simctl ui "$SIM" appearance dark
 shot 14-office-dark 4 ${=MOCK}

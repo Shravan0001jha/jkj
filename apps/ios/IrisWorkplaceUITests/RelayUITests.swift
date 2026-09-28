@@ -58,7 +58,8 @@ final class RelayUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Spend today"].waitForExistence(timeout: 10))
         shot("relay-office")
 
-        app.buttons["Settings"].tap()
+        app.buttons["More"].firstMatch.tap()
+        app.buttons["Settings"].firstMatch.tap()
         let reached = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Relay'")).firstMatch
         XCTAssertTrue(reached.waitForExistence(timeout: 6))
         let online = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Online'")).firstMatch

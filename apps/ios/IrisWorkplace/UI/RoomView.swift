@@ -97,6 +97,10 @@ struct ThreadView: View {
 
     private var thread: RoomThread? { model.room.thread(id) }
     private var messages: [RoomMessage] { model.room.messages[id] ?? [] }
+    /// Who can be @mentioned: everyone in the Office, plus the thread's participants (the Office may not be loaded yet).
+    private var knownIds: [String] {
+        Array(Set(model.office.cards.map(\.employee.id) + (thread?.participants ?? []) + messages.map(\.by))).filter { $0 != "owner" && $0 != "workplace" }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -166,7 +170,7 @@ struct ThreadView: View {
 
     private var composer: some View {
         VStack(spacing: 4) {
-            let mentions = RoomStore.mentions(in: draft, known: model.office.cards.map(\.employee.id))
+            let mentions = RoomStore.mentions(in: draft, known: knownIds)
             if !mentions.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: "at").font(.caption).foregroundStyle(.secondary)
@@ -197,7 +201,7 @@ struct ThreadView: View {
         guard !text.isEmpty, let rest = model.rest else { return }
         error = nil
         do {
-            try await model.room.post(rest, threadId: id, text: text, mentions: RoomStore.mentions(in: text, known: model.office.cards.map(\.employee.id)))
+            try await model.room.post(rest, threadId: id, text: text, mentions: RoomStore.mentions(in: text, known: knownIds))
             draft = ""
         } catch { self.error = error.localizedDescription }
     }

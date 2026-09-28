@@ -569,3 +569,32 @@ final class ReliabilityAndPushTests: XCTestCase {
         XCTAssertEqual(m.router.tab, .office)
     }
 }
+
+@MainActor
+final class NetworkChangeTests: XCTestCase {
+    func testAPathChangeWhileConnectingDoesNotConnectTwice() async {
+        StubURLProtocol.reset()
+        StubURLProtocol.handler = { req in
+            switch req.url!.path {
+            case "/api/health": return (200, try! Fixtures.data("health"))
+            case "/api/office": return (200, try! Fixtures.data("office"))
+            case "/api/inbox": return (200, try! Fixtures.data("inbox"))
+            default: return (404, Data(#"{"error":"no"}"#.utf8))
+            }
+        }
+        let defaults = UserDefaults(suiteName: "NetworkChangeTests")!
+        defaults.removePersistentDomain(forName: "NetworkChangeTests")
+        var transports: [FakeSocketTransport] = []
+        let path = FakePathMonitor()
+        let m = AppModel(relayTokens: MemoryTokenStore(token: "s"), lanTokens: MemoryTokenStore(), defaults: defaults, notifier: FakeNotifier(),
+                         urlSession: StubURLProtocol.session(), makeTransport: { let t = FakeSocketTransport(); transports.append(t); return t },
+                         webAuth: FakeWebAuth(), env: [:], offlineProbeInterval: 0.05, pathMonitor: path, deviceAuth: FakeDeviceAuth())
+        m.start()
+        XCTAssertEqual(m.connection, .connecting)
+        path.onChange?(true)   // NWPathMonitor reports the current path right after start()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(transports.count, 1, "one socket, not two")
+        XCTAssertEqual(StubURLProtocol.recorded.filter { $0.request.url?.path == "/api/health" }.count, 1)
+    }
+}

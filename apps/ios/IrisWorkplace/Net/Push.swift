@@ -68,6 +68,10 @@ protocol DeviceAuth {
 
 struct LocalDeviceAuth: DeviceAuth {
     func verify(reason: String) async -> Bool {
+        #if DEBUG
+        // Simulators have no passcode; scripted runs skip the check. Never compiled into a release build.
+        if ProcessInfo.processInfo.environment["WORKPLACE_NO_DEVICE_AUTH"] == "1" { return true }
+        #endif
         let ctx = LAContext()
         var err: NSError?
         guard ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &err) else { return false }

@@ -34,6 +34,19 @@ final class ContractTests: XCTestCase {
     func testCoverage() throws { try roundTrip("coverage", Coverage.self) }
     func testSpend() throws { try roundTrip("spend", SpendSummary.self) }
     func testSpendEntries() throws { try roundTrip("spend-entries", [SpendEntry].self) }
+    func testRequestsProposalDetailAndReleasesReady() throws {
+        try roundTrip("requests", [RequestResponse].self)
+        try roundTrip("proposal-detail", ProposalDetail.self)
+        try roundTrip("releases-ready", [ReleaseReadiness].self)
+        let office = try Fixtures.decode("office", as: OfficeResponse.self)
+        XCTAssertEqual(office.chiefOfStaff, "asha")
+        let board = try Fixtures.decode("features", as: FeatureBoard.self)
+        XCTAssertEqual(board.status["f-errands"]?.stage, .blocked)
+        XCTAssertEqual(board.status["f-push"]?.stage, .withAsha)
+        let pivot = try Fixtures.decode("pivot-charter", as: Pivot.self)
+        XCTAssertEqual(pivot.cells["desktop-mac"]?["f-errands"]?.items.first?.evidence?.tests, "212 passed, 0 failed")
+    }
+
     func testRoom() throws {
         try roundTrip("room", RoomResponse.self)
         try roundTrip("room-thread", RoomThreadDetail.self)

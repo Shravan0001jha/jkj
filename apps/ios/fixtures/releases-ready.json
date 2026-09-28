@@ -1,0 +1,51 @@
+[
+  {
+    "shippable": "desktop-mac",
+    "unreleased": [
+      "8034a09 Phone actions on the Mac",
+      "ce943c7 Core round 9",
+      "46e43c1 Merge core round 9"
+    ],
+    "open": {
+      "id": "rel-1",
+      "shippable": "desktop-mac",
+      "version": "0.2.16",
+      "state": "proposed",
+      "unreleased": [
+        "8034a09",
+        "ce943c7",
+        "46e43c1"
+      ],
+      "inboxId": "ib-1",
+      "createdAt": "2026-09-27T08:48:00.000Z"
+    },
+    "last": {
+      "id": "rel-0",
+      "shippable": "desktop-mac",
+      "version": "0.2.15",
+      "state": "done",
+      "unreleased": [],
+      "inboxId": "ib-0",
+      "createdAt": "2026-09-25T07:00:00.000Z"
+    }
+  },
+  {
+    "shippable": "server-api",
+    "unreleased": [
+      "errand endpoint (a-2, blocked)"
+    ]
+  },
+  {
+    "shippable": "ios",
+    "unreleased": [],
+    "last": {
+      "id": "rel-ios-1",
+      "shippable": "ios",
+      "version": "0.3.0",
+      "state": "done",
+      "unreleased": [],
+      "inboxId": "ib-00",
+      "createdAt": "2026-09-23T05:00:00.000Z"
+    }
+  }
+]

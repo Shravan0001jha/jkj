@@ -61,7 +61,7 @@ final class RestClientTests: XCTestCase {
     }
 
     func testNonContractBodyIsADecodingErrorNamingTheField() async {
-        StubURLProtocol.handler = { _ in (200, Data(#"{"units":[],"coverage":{"total":1},"needsYou":0,"spend":{},"lintErrors":0}"#.utf8)) }
+        StubURLProtocol.handler = { _ in (200, Data(#"{"chiefOfStaff":"asha","units":[],"coverage":{"total":1},"needsYou":0,"spend":{},"lintErrors":0}"#.utf8)) }
         do {
             _ = try await client().office()
             XCTFail("expected an error")

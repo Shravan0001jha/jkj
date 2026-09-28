@@ -35,6 +35,10 @@ final class Router {
     var showSettings = false
     var showAlerts = false
     var showSpend = false
+    var showNewRequest = false
+    var showReleases = false
+    var proposalId: String?
+    var featuresSegment: String?
 
     func openInbox(_ id: String) { inboxItemId = id; tab = .inbox }
     func openThread(_ id: String) { roomThreadId = id; tab = .room }
@@ -56,7 +60,11 @@ final class AppModel {
     let talk = TalkStore()
     let features = FeaturesStore()
     let room = RoomStore()
+    let requests = RequestsStore()
     let alerts: AlertsStore
+    /// Releases updated over the socket, and their streamed log lines.
+    private(set) var releases: [String: Release] = [:]
+    private(set) var releaseLog: [String: [String]] = [:]
     let router = Router()
 
     private let relayTokens: TokenStore
@@ -114,7 +122,7 @@ final class AppModel {
         if satisfied {
             switch connection {
             case .online: socket?.reconnectNow()
-            case .unauthorized, .signedOut: break
+            case .connecting, .unauthorized, .signedOut: break   // a connect is in flight, or there is nothing to connect with
             default: connect()
             }
         } else {
@@ -155,6 +163,9 @@ final class AppModel {
         if let id = env["WORKPLACE_FEATURE"] { router.featureId = id; router.tab = .features }
         if let id = env["WORKPLACE_ROOM"] { if id == "list" { router.tab = .room } else { router.openThread(id) } }
         if env["WORKPLACE_SPEND"] == "1" { router.showSpend = true }
+        if env["WORKPLACE_NEW_REQUEST"] == "1" { router.showNewRequest = true }
+        if env["WORKPLACE_RELEASES"] == "1" { router.showReleases = true }
+        if env["WORKPLACE_FEATURES"] == "requests" { router.tab = .features; router.featuresSegment = "requests" }
         if env["WORKPLACE_ALERTS"] == "1" { router.showAlerts = true }
         if let p = env["WORKPLACE_PIVOT"], let rows = PivotRows(rawValue: p) { router.pivot = rows; router.tab = .features }
         if env["WORKPLACE_SETTINGS"] == "1" { router.showSettings = true }
@@ -465,6 +476,7 @@ final class AppModel {
         talk.handle(event)
         features.handle(event)
         room.handle(event)
+        requests.handle(event)
         alerts.handle(event)
         switch event {
         case .hello(let version, _):
@@ -475,10 +487,20 @@ final class AppModel {
             if inbox.loaded { housekeeping?(Set(inbox.open.map(\.id))) }
         case .error(let message):
             lastSocketError = message
+        case .releaseUpdated(let r):
+            releases[r.id] = r
+            if r.state == .done || r.state == .failed {
+                alerts.handle(.alert(AlertEvent(level: .info, title: "Release \(r.version) \(r.state.rawValue)", body: "\(r.shippable.rawValue) \(r.version)", inboxId: nil)))
+            }
+        case .releaseLog(let id, let line):
+            releaseLog[id, default: []].append(line)
         default:
             break
         }
     }
+
+    /// The Chief of Staff: the default Talk target.
+    var chiefOfStaff: String? { office.data?.chiefOfStaff }
 
     private func syncNeedsYou() {
         if inbox.loaded { office.setNeedsYou(inbox.open.count) }

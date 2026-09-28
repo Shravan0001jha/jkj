@@ -135,3 +135,68 @@ struct CompactText: Equatable {
 
     var hasDetails: Bool { details != nil }
 }
+
+
+/// Requests the owner stated: newest first, each with its status, updated live from `work.updated`
+/// and the board's `status` map.
+@MainActor @Observable
+final class RequestsStore {
+    private(set) var items: [RequestResponse] = []
+    private(set) var error: String?
+    private(set) var loaded = false
+    /// Features updated over the socket since the list loaded.
+    private(set) var features: [String: WorkItem] = [:]
+    private(set) var statuses: [String: RequestStatus] = [:]
+
+    func load(_ rest: RestClient) async {
+        do {
+            items = try await rest.requests()
+            for r in items { statuses[r.feature.id] = r.status }
+            error = nil
+            loaded = true
+        } catch { self.error = error.localizedDescription }
+    }
+
+    func create(_ rest: RestClient, text: String, platformIds: [String]?) async throws -> RequestResponse {
+        let r = try await rest.createRequest(text: text, platformIds: platformIds)
+        items.insert(r, at: 0)
+        statuses[r.feature.id] = r.status
+        return r
+    }
+
+    /// The board carries `status` per feature: keep the freshest.
+    func absorb(_ board: FeatureBoard) {
+        for (id, st) in board.status { statuses[id] = st }
+    }
+
+    func status(for featureId: String) -> RequestStatus? { statuses[featureId] }
+    func latestFeature(_ f: WorkItem) -> WorkItem { features[f.id] ?? f }
+
+    func handle(_ event: ServerEvent) {
+        guard case .workUpdated(let item) = event else { return }
+        if item.kind == .feature {
+            features[item.id] = item
+            if let i = items.firstIndex(where: { $0.feature.id == item.id }) { items[i].feature = item }
+            // Until the server sends a fresh status, derive the stage from the feature state.
+            if var st = statuses[item.id] {
+                switch item.state {
+                case .stated: st.stage = .withAsha; st.line = "Asha is writing the spec"
+                case .specced: st.stage = .specced; st.line = "Spec written; routing through the map"
+                case .decomposed: st.stage = .routed
+                case .built: st.stage = .built; st.line = "Built; waiting for a release"
+                case .released: st.stage = .released; st.line = "Released"
+                default: break
+                }
+                statuses[item.id] = st
+            }
+        } else if let fid = item.featureId, var st = statuses[fid] {
+            if let i = st.assignments.firstIndex(where: { $0.id == item.id }) {
+                st.assignments[i].state = item.state
+                st.assignments[i].stalledSince = item.stalledSince
+            } else {
+                st.assignments.append(RequestAssignment(id: item.id, title: item.title, employeeId: item.employeeId, charterId: item.charterId, state: item.state, stalledSince: item.stalledSince))
+            }
+            statuses[fid] = st
+        }
+    }
+}

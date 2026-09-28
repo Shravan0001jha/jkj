@@ -8,6 +8,8 @@ enum API {
     static func charter(_ id: String) -> String { "/api/charters/\(enc(id))" }
     static let inbox = "/api/inbox"
     static func inboxAnswer(_ id: String) -> String { "/api/inbox/\(enc(id))/answer" }
+    static let talk = "/api/talk"
+    static let requests = "/api/requests"
     static let employees = "/api/employees"
     static func employee(_ id: String) -> String { "/api/employees/\(enc(id))" }
     static func employeeTalk(_ id: String) -> String { "/api/employees/\(enc(id))/talk" }
@@ -28,6 +30,7 @@ enum API {
     }
     static func workItem(_ id: String) -> String { "/api/work/\(enc(id))" }
     static func workTransition(_ id: String) -> String { "/api/work/\(enc(id))/transition" }
+    static func workStart(_ id: String) -> String { "/api/work/\(enc(id))/start" }
     static let features = "/api/features"
     static func feature(_ id: String) -> String { "/api/features/\(enc(id))" }
     static func featureDecompose(_ id: String) -> String { "/api/features/\(enc(id))/decompose" }
@@ -42,8 +45,10 @@ enum API {
         ])
     }
     static let proposals = "/api/proposals"
+    static func proposal(_ id: String) -> String { "/api/proposals/\(enc(id))" }
     static func proposalApply(_ id: String) -> String { "/api/proposals/\(enc(id))/apply" }
     static let releases = "/api/releases"
+    static let releasesReady = "/api/releases/ready"
     static func releaseRun(_ id: String) -> String { "/api/releases/\(enc(id))/run" }
     static func spend(day: String? = nil) -> String { withQuery("/api/spend", [("day", day)]) }
     static let signals = "/api/health/signals"

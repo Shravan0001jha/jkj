@@ -48,8 +48,16 @@ struct OfficeView: View {
                     .accessibilityLabel(model.alerts.unread > 0 ? "\(model.alerts.unread) new alerts" : "Alerts")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { model.router.showSettings = true } label: { Image(systemName: "gearshape") }
-                        .accessibilityLabel("Settings")
+                    Button { model.router.showNewRequest = true } label: { Image(systemName: "plus.circle.fill") }
+                        .accessibilityLabel("New request")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { model.router.showReleases = true } label: { Label("Releases", systemImage: "shippingbox") }
+                        Button { model.router.showSpend = true } label: { Label("Spend", systemImage: "indianrupeesign.circle") }
+                        Button { model.router.showSettings = true } label: { Label("Settings", systemImage: "gearshape") }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("More")
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }

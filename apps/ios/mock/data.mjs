@@ -315,7 +315,16 @@ export const counts = (cardList = cards, items = inbox) => ({
   total: cardList.length,
 });
 
+export const requestStatus = (f, assignmentsList = assignments) => {
+  const as = assignmentsList.filter(a => a.featureId === f.id).map(a => ({ id: a.id, title: a.title, employeeId: a.employeeId, charterId: a.charterId, state: a.state, ...(a.stalledSince ? { stalledSince: a.stalledSince } : {}) }));
+  const n = (st) => as.filter(a => a.state === st).length;
+  const stage = f.state === 'stated' ? 'with-asha' : f.state === 'specced' ? 'specced' : f.state === 'decomposed' ? 'routed' : f.state === 'built' ? 'built' : f.state === 'released' ? 'released' : n('blocked') ? 'blocked' : n('review') && !n('building') ? 'review' : 'building';
+  const line = stage === 'with-asha' ? 'Asha is writing the spec' : stage === 'specced' ? 'Spec written; routing through the map' : stage === 'routed' ? `${as.length} assignments waiting to start` : stage === 'built' ? 'Built; waiting for a release' : stage === 'released' ? 'Released' : `${n('building')} building, ${n('review')} in review, ${n('done')} done${n('blocked') ? `, ${n('blocked')} blocked` : ''}`;
+  return { stage, line, assignments: as, ...(f.id === 'f-errands' ? { askedAgentId: 's-asha-1' } : {}) };
+};
+
 export const office = () => ({
+  chiefOfStaff: 'asha',
   units: units.filter(u => u.kind === 'unit').map(unit => ({ unit, employees: cards.filter(c => c.employee.unitId === unit.id) })),
   coverage,
   needsYou: inbox.filter(i => i.state === 'open').length,
@@ -383,9 +392,10 @@ export const logs = {
   ],
 };
 
-export const featureBoard = () => ({
-  features,
-  byState: features.reduce((m, f) => (m[f.state] = (m[f.state] ?? 0) + 1, m), {}),
+export const featureBoard = (fs = features, as = assignments) => ({
+  features: fs,
+  byState: fs.reduce((m, f) => (m[f.state] = (m[f.state] ?? 0) + 1, m), {}),
+  status: Object.fromEntries(fs.map(f => [f.id, requestStatus(f, as)])),
 });
 
 export const route = {
@@ -403,20 +413,21 @@ export const route = {
 export const featureDetail = (id) => {
   const f = features.find(f => f.id === id);
   if (!f) return null;
-  return { feature: f, assignments: assignments.filter(a => a.featureId === id), requirements: requirements.filter(r => f.requirementIds.includes(r.id)), route: id === 'f-errands' ? route : { primaries: [], consulted: [], unresolved: [] } };
+  return { feature: f, assignments: assignments.filter(a => a.featureId === id), requirements: requirements.filter(r => f.requirementIds.includes(r.id)), route: id === 'f-errands' ? route : { primaries: [], consulted: [], unresolved: [] }, status: requestStatus(f) };
 };
 
-const cell = (byState) => ({ total: Object.values(byState).reduce((a, b) => a + b, 0), byState });
+const pivotItem = (a) => ({ id: a.id, title: a.title, employeeId: a.employeeId, state: a.state, href: `#/employee/${a.employeeId}?item=${a.id}`, ...(a.evidence ? { evidence: { tests: `${a.evidence.tests.passed} passed, ${a.evidence.tests.failed} failed`, commits: a.evidence.commits, liveVerified: a.evidence.liveVerified.length, notVerified: a.evidence.notVerified.length } } : {}) });
+const cell = (byState, items = []) => ({ total: Object.values(byState).reduce((a, b) => a + b, 0), byState, items: items.map(pivotItem) });
 export const pivots = {
   charter: {
     rows: ['experts', 'server', 'desktop-mac', 'mobile', 'conversation', 'character'],
     cols: ['f-errands', 'f-share', 'f-lipsync'],
     cells: {
-      experts: { 'f-errands': cell({ building: 1 }) },
-      server: { 'f-errands': cell({ blocked: 1 }) },
-      'desktop-mac': { 'f-errands': cell({ review: 1 }), 'f-share': cell({ planned: 1 }) },
-      mobile: { 'f-errands': cell({ planned: 1 }) },
-      conversation: { 'f-errands': cell({ done: 1 }) },
+      experts: { 'f-errands': cell({ building: 1 }, [assignments[0]]) },
+      server: { 'f-errands': cell({ blocked: 1 }, [assignments[1]]) },
+      'desktop-mac': { 'f-errands': cell({ review: 1 }, [assignments[2]]), 'f-share': cell({ planned: 1 }) },
+      mobile: { 'f-errands': cell({ planned: 1 }, [assignments[3]]) },
+      conversation: { 'f-errands': cell({ done: 1 }, [assignments[4]]) },
       character: { 'f-lipsync': cell({ done: 2 }) },
     },
   },
@@ -424,7 +435,7 @@ export const pivots = {
     rows: ['mac', 'windows', 'ios', 'android', 'server'],
     cols: ['f-errands', 'f-share', 'f-lipsync'],
     cells: {
-      mac: { 'f-errands': cell({ building: 1, review: 1, done: 1 }), 'f-share': cell({ planned: 1 }), 'f-lipsync': cell({ done: 2 }) },
+      mac: { 'f-errands': cell({ building: 1, review: 1, done: 1 }, [assignments[0], assignments[2], assignments[4]]), 'f-share': cell({ planned: 1 }), 'f-lipsync': cell({ done: 2 }) },
       windows: { 'f-share': cell({ proposed: 1 }) },
       ios: { 'f-errands': cell({ planned: 1 }) },
       android: { 'f-errands': cell({ planned: 1 }) },
@@ -435,8 +446,8 @@ export const pivots = {
     rows: ['capabilities', 'platforms', 'product', 'quality'],
     cols: ['f-errands', 'f-share', 'f-lipsync'],
     cells: {
-      capabilities: { 'f-errands': cell({ building: 1, blocked: 1, done: 1 }), 'f-lipsync': cell({ done: 2 }) },
-      platforms: { 'f-errands': cell({ review: 1, planned: 1 }), 'f-share': cell({ planned: 1, proposed: 1 }) },
+      capabilities: { 'f-errands': cell({ building: 1, blocked: 1, done: 1 }, [assignments[0], assignments[1], assignments[4]]), 'f-lipsync': cell({ done: 2 }) },
+      platforms: { 'f-errands': cell({ review: 1, planned: 1 }, [assignments[2], assignments[3]]), 'f-share': cell({ planned: 1, proposed: 1 }) },
       product: {},
       quality: {},
     },
@@ -469,6 +480,12 @@ export const org = () => ({
   units, roles, employees, charters, map: mapEntries, lint, proposals: [proposal],
   history: [{ commit: 'a1b2c3d', at: iso(-3000), message: 'Seed the first organisation' }, { commit: 'd4e5f6a', at: iso(-1400), message: 'Charter experts v2: add the errand rules' }],
 });
+
+export const releasesReady = () => [
+  { shippable: 'desktop-mac', unreleased: ['8034a09 Phone actions on the Mac', 'ce943c7 Core round 9', '46e43c1 Merge core round 9'], open: release, last: { id: 'rel-0', shippable: 'desktop-mac', version: '0.2.15', state: 'done', unreleased: [], inboxId: 'ib-0', createdAt: iso(-3000) } },
+  { shippable: 'server-api', unreleased: ['errand endpoint (a-2, blocked)'] },
+  { shippable: 'ios', unreleased: [] , last: { id: 'rel-ios-1', shippable: 'ios', version: '0.3.0', state: 'done', unreleased: [], inboxId: 'ib-00', createdAt: iso(-6000) } },
+];
 
 export const release = {
   id: 'rel-1', shippable: 'desktop-mac', version: '0.2.16', state: 'proposed',
@@ -560,6 +577,9 @@ export const fixtures = () => ({
   'room-thread.json': { thread: roomThreads[0], messages: roomMessages['rt-socket'] },
   'signals.json': signals,
   'release.json': release,
+  'releases-ready.json': releasesReady(),
+  'requests.json': features.slice(0, 3).map(f => ({ feature: f, status: requestStatus(f) })),
+  'proposal-detail.json': { proposal, item: inbox.find(i => i.id === 'ib-4') },
   'proposal.json': proposal,
   'route.json': route,
   'events.json': sampleEvents,

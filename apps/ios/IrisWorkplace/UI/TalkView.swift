@@ -20,6 +20,11 @@ struct TalkView: View {
                 model.router.talkEmployeeId = nil
                 Task { await model.talk.select(rest, employeeId: id) }
             }
+            .onChange(of: model.office.data?.chiefOfStaff, initial: true) { _, cos in
+                // Asha by default: the first thing Talk shows is the Chief of Staff, one tap from anything.
+                guard model.talk.employeeId == nil, model.router.talkEmployeeId == nil, let cos, let rest = model.rest else { return }
+                Task { await model.talk.select(rest, employeeId: cos) }
+            }
         }
     }
 }
@@ -59,7 +64,7 @@ struct EmployeePicker: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Talk")
+        .navigationTitle("Talk to…")
         .task { if model.office.data == nil, let r = model.rest { await model.office.load(r) } }
     }
 }
@@ -69,6 +74,7 @@ struct ConversationView: View {
     @State private var draft = ""
     @State private var error: String?
     @State private var showProfile = false
+    @State private var showAssign = false
     @State private var confirmEnd = false
     @FocusState private var composing: Bool
 
@@ -119,11 +125,13 @@ struct ConversationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button { model.talk.deselect() } label: { Label("Employees", systemImage: "person.2") }
+                Button { model.talk.deselect() } label: { Label("Someone else", systemImage: "person.2") }
+                    .accessibilityLabel("Talk to someone else")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button { showProfile = true } label: { Label("Charter and status", systemImage: "doc.text") }
+                    Button { showAssign = true } label: { Label("Assign work to \(name)", systemImage: "tray.and.arrow.down") }
                     if let s = talk.session {
                         Menu {
                             ForEach(PermissionMode.allCases, id: \.self) { m in
@@ -142,6 +150,7 @@ struct ConversationView: View {
             }
         }
         .sheet(isPresented: $showProfile) { EmployeeProfileView() }
+        .sheet(isPresented: $showAssign) { AssignView(employeeId: talk.employeeId) }
         .confirmationDialog("End \(name)'s session?", isPresented: $confirmEnd, titleVisibility: .visible) {
             Button("End and write handoff", role: .destructive) {
                 Task { do { if let r = model.rest { try await model.talk.endSession(r) } } catch { self.error = error.localizedDescription } }

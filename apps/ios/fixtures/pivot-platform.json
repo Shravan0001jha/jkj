@@ -19,19 +19,61 @@
           "building": 1,
           "review": 1,
           "done": 1
-        }
+        },
+        "items": [
+          {
+            "id": "a-1",
+            "title": "Errand receiver on the Mac (experts)",
+            "employeeId": "mira",
+            "state": "building",
+            "href": "#/employee/mira?item=a-1"
+          },
+          {
+            "id": "a-3",
+            "title": "Desktop errand handler",
+            "employeeId": "rohan",
+            "state": "review",
+            "href": "#/employee/rohan?item=a-3",
+            "evidence": {
+              "tests": "212 passed, 0 failed",
+              "commits": [
+                "8034a09 Phone actions on the Mac: no false Done",
+                "ce943c7 Core round 9: errand lifecycle"
+              ],
+              "liveVerified": 2,
+              "notVerified": 2
+            }
+          },
+          {
+            "id": "a-5",
+            "title": "Errand spoken confirmations",
+            "employeeId": "dev",
+            "state": "done",
+            "href": "#/employee/dev?item=a-5",
+            "evidence": {
+              "tests": "48 passed, 0 failed",
+              "commits": [
+                "46e43c1 Merge core round 9"
+              ],
+              "liveVerified": 1,
+              "notVerified": 0
+            }
+          }
+        ]
       },
       "f-share": {
         "total": 1,
         "byState": {
           "planned": 1
-        }
+        },
+        "items": []
       },
       "f-lipsync": {
         "total": 2,
         "byState": {
           "done": 2
-        }
+        },
+        "items": []
       }
     },
     "windows": {
@@ -39,7 +81,8 @@
         "total": 1,
         "byState": {
           "proposed": 1
-        }
+        },
+        "items": []
       }
     },
     "ios": {
@@ -47,7 +90,8 @@
         "total": 1,
         "byState": {
           "planned": 1
-        }
+        },
+        "items": []
       }
     },
     "android": {
@@ -55,7 +99,8 @@
         "total": 1,
         "byState": {
           "planned": 1
-        }
+        },
+        "items": []
       }
     },
     "server": {
@@ -63,7 +108,8 @@
         "total": 1,
         "byState": {
           "blocked": 1
-        }
+        },
+        "items": []
       }
     }
   }
