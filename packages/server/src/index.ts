@@ -13,6 +13,8 @@ import * as cos from './services/cos.js';
 import * as lock from './services/lock.js';
 import * as boots from './services/boots.js';
 import { Watchdog } from './services/watchdog.js';
+import { SuspendDetector } from './services/suspend.js';
+import { PowerMonitor } from './services/power.js';
 import * as room from './services/room.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
@@ -89,12 +91,19 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
     boots: boots.marks(wp.db),
     bootedAt: startedAt,
   });
+  // The Mac sleeping is the one cause of tunnel flaps seen so far (B2): notice a resume, reconnect at
+  // once, and show sleeps and the power source on the health check.
+  const suspend = new SuspendDetector();
+  suspend.onResume(gap => { log.warn('power', `the process was frozen for ${Math.round(gap / 1000)} s (the Mac slept)`); tunnel?.wake(gap); });
+  const power = new PowerMonitor();
   const resilience = () => ({
     startedAt: new Date(startedAt).toISOString(),
     uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
     boots: { total: history.total, last24h: boots.bootsWithin(history, Date.now(), 24 * 60 * 60_000), recent: history.recent.slice(-5) },
     tunnel: tunnel ? tunnel.stats : null,
     watchdog: watchdog.state,
+    sleeps: suspend.state,
+    power: power.state,
   });
   const server = createHttpServer({ config, wp, auth, telegram, tunnel, resilience });
   const hub = attachSocket(server, wp, auth);
@@ -104,6 +113,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   if (config.telegram) telegram.start();
   tunnel?.start();
   watchdog.start();
+  suspend.start();
+  power.start();
 
   const stallTimer = setInterval(() => {
     health.handleParkedApprovals(wp);
@@ -122,6 +133,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   return {
     server, wp, telegram,
     stop: async () => {
+      suspend.stop();
+      power.stop();
       watchdog.stop();
       tunnel?.stop();
       clearInterval(stallTimer);

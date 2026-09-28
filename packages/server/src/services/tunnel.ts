@@ -78,7 +78,7 @@ export interface TunnelStats {
   downForSeconds: number;
   /** The wait before the next attempt. */
   backoffMs: number;
-  reconnects: { halfOpen: number };
+  reconnects: { halfOpen: number; afterSleep: number };
 }
 
 const DEFAULT_MIN_BACKOFF = 1000;
@@ -102,6 +102,7 @@ export class Tunnel {
   private attempts = 0;
   private connects = 0;
   private halfOpen = 0;
+  private afterSleep = 0;
   private lastConnectedAt: number | null = null;
   private lastDisconnectedAt: number | null = null;
   private downSince: number | null = null;
@@ -127,8 +128,38 @@ export class Tunnel {
       lastError: this.lastError,
       downForSeconds: this._status === 'connected' || this.downSince === null ? 0 : Math.max(0, Math.round((Date.now() - this.downSince) / 1000)),
       backoffMs: this.backoff,
-      reconnects: { halfOpen: this.halfOpen },
+      reconnects: { halfOpen: this.halfOpen, afterSleep: this.afterSleep },
     };
+  }
+
+  /**
+   * The process was frozen for gapMs (the Mac slept; services/suspend.ts). The relay drops a Mac
+   * that is silent for 45 s, so after a sleep longer than that the open socket is already dead on
+   * the far side: drop it now and reconnect at once, instead of waiting up to 15 s for the liveness
+   * check to say "no pong". A pending retry runs immediately; the backoff starts over because the
+   * network just came back. (B2, 29 Sep: every flap was a wake.)
+   */
+  wake(gapMs: number): void {
+    if (this.stopped) return;
+    const seconds = Math.round(gapMs / 1000);
+    this.backoff = this.options.minBackoffMs ?? DEFAULT_MIN_BACKOFF;
+    const ws = this.ws;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      if (gapMs > (this.options.pongTimeoutMs ?? DEFAULT_PONG_TIMEOUT)) {
+        this.afterSleep += 1;
+        this.log.warn(`the Mac was asleep ${seconds} s; the relay will have dropped this socket; reconnecting now`);
+        ws.terminate();
+      } else {
+        this.log.info(`the Mac was asleep ${seconds} s; the socket may still be good, the liveness check decides`);
+      }
+      return;
+    }
+    if (this.timer) {
+      this.log.info(`the Mac was asleep ${seconds} s; retrying the relay now`);
+      clearTimeout(this.timer);
+      this.timer = null;
+      this.connect();
+    }
   }
 
   start(): void {
@@ -198,10 +229,24 @@ export class Tunnel {
       // connects is publishing on purpose; the off switch stops it from connecting at all.
       this.send({ type: 'on' });
       const timeout = this.options.pongTimeoutMs ?? DEFAULT_PONG_TIMEOUT;
+      const interval = this.options.livenessIntervalMs ?? DEFAULT_LIVENESS_INTERVAL;
+      let lastTick = Date.now();
       this.liveness = setInterval(() => {
+        // This timer was frozen with the process: a tick that is late by more than the relay's limit
+        // means the Mac slept, and the relay has dropped the socket meanwhile (B2). Name that cause;
+        // do not call it a half-open socket.
+        const now = Date.now();
+        const late = now - lastTick - interval;
+        lastTick = now;
+        if (late > timeout) {
+          this.afterSleep += 1;
+          this.log.warn(`the Mac was asleep ${Math.round(late / 1000)} s; the relay will have dropped this socket; reconnecting now`);
+          ws.terminate();
+          return;
+        }
         // The relay pings every 15 s; this long without a frame is a half-open socket (review M3),
-        // the usual state after the Mac wakes from sleep or moves between networks.
-        if (Date.now() - this.lastPong > timeout) {
+        // the state after a Wi-Fi change or a relay that went away without a FIN.
+        if (now - this.lastPong > timeout) {
           this.halfOpen += 1;
           this.log.warn(`no frame from the relay for ${Math.round(timeout / 1000)} s; dropping the socket and reconnecting`);
           ws.terminate();

@@ -178,3 +178,6 @@ one Telegram ping arrives and one more when it is back. `/api/health` → `resil
 last tunnel connect, uptime and the restart count. Settings the owner must keep (we change none):
 `docs/RESILIENCE-workplace.md` §6 — lid open, plugged in, "Prevent automatic sleeping on power
 adapter" on, automatic macOS updates off; after a reboot someone must log in (FileVault).
+**Morning check from the phone:** `/api/health` → `resilience.power.source` must be `ac` and
+`resilience.sleeps.count` should be 0 — a Mac on battery dozes every 16 min and the phone sees
+"Mac offline" (B2, 29 Sep).
