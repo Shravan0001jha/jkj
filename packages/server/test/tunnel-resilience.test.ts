@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer, type Server } from 'node:http';
+import { createServer } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { Tunnel, type Frame, type TunnelLookup } from '../src/services/tunnel.js';
@@ -178,7 +178,8 @@ test('long outage: attempts keep coming at the capped interval, never faster aft
 
 test('a connect that hangs (the network is up but nothing answers) is abandoned after the handshake timeout and retried', async () => {
   // A TCP listener that accepts and then says nothing: the WebSocket handshake never completes.
-  const blackhole = createTcpServer(socket => { socket.on('error', () => {}); });
+  const held = new Set<import('node:net').Socket>();
+  const blackhole = createTcpServer(socket => { held.add(socket); socket.on('error', () => {}); socket.on('close', () => held.delete(socket)); });
   await new Promise<void>(r => blackhole.listen(0, '127.0.0.1', () => r()));
   const port = (blackhole.address() as { port: number }).port;
   const tunnel = new Tunnel({ url: `ws://127.0.0.1:${port}/tunnel`, secret: 's', local, minBackoffMs: 10, maxBackoffMs: 20, handshakeTimeoutMs: 80 });
@@ -190,6 +191,8 @@ test('a connect that hangs (the network is up but nothing answers) is abandoned 
     assert.notEqual(tunnel.status, 'connected');
   } finally {
     tunnel.stop();
+    // The blackhole never answered, so it still holds every accepted socket; a server.close() would wait forever.
+    for (const s of held) s.destroy();
     await new Promise<void>(r => blackhole.close(() => r()));
   }
 });
@@ -215,5 +218,3 @@ test('stop() during an outage cancels the pending retry so nothing lingers', asy
   assert.equal(tunnel.status, 'offline');
 });
 
-// keep the type import used when the server-side helper is not referenced elsewhere
-void (null as unknown as Server);

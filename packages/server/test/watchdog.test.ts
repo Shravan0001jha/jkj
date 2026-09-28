@@ -72,7 +72,8 @@ test('down for more than five minutes: one "down" ping, silence while it stays d
   assert.match(h.sent[1]!, /tunnel back/);
   assert.match(h.sent[1]!, /66 min/);
   assert.equal(h.dog.state.incident, null, 'closed');
-  assert.equal(h.dog.state.last?.recoveredAt, new Date(h.state.now).toISOString());
+  // Recovery is stamped at the first connected tick, not at the end of the minute.
+  assert.equal(h.dog.state.last?.recoveredAt, new Date(h.state.now - 30_000).toISOString());
   assert.equal(h.dog.state.incidents, 1);
 
   // A second outage later is a second incident with its own two pings.

@@ -158,3 +158,23 @@ Put each App's `<slug>.json` (`appId`, `installationId`, `org`, `repos`) and `<s
 under `~/iris-ops/workplace/apps/`. The Workplace mints installation tokens and does PR plumbing;
 it never shows a key or a token. The list of Apps, repos and permissions is `docs/LLD-workplace.md`
 §12.
+
+## Keeping it up when nobody is at the Mac
+
+The Workplace runs as a launchd user agent (`~/Library/LaunchAgents/com.irisforu.workplace.plist`):
+it starts at login, restarts if it dies, keeps the Mac awake for as long as it runs
+(`caffeinate -i -s`, the display may sleep), and logs to `~/Library/Logs/IrisWorkplace/` (rotated).
+Only one copy runs (`workplace.lock`); a manual `npm start` and the agent cannot coexist.
+
+```bash
+scripts/workplace-service.sh status      # launchd, process, lock, caffeinate, /api/health, log tail
+scripts/workplace-service.sh logs -f
+scripts/workplace-service.sh restart     # launchd starts it again at once
+scripts/workplace-service.sh install     # (re)render and load;  uninstall = unload and remove
+```
+
+If the tunnel to the relay is down for more than five minutes, or the process keeps restarting,
+one Telegram ping arrives and one more when it is back. `/api/health` → `resilience` shows the
+last tunnel connect, uptime and the restart count. Settings the owner must keep (we change none):
+`docs/RESILIENCE-workplace.md` §6 — lid open, plugged in, "Prevent automatic sleeping on power
+adapter" on, automatic macOS updates off; after a reboot someone must log in (FileVault).
