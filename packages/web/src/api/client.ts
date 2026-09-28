@@ -1,4 +1,4 @@
-import { WORKPLACE_API as W } from '@jkj/shared';
+import { WORKPLACE_API as W, csrfTokenFrom } from '@jkj/shared';
 import type {
   Agent, Attachment, ContextLayer, ContextResponse, LogEntry,
   OfficeResponse, OrgResponse, Charter, InboxItem, Employee, EmployeeDetail, WorkItem, FeatureBoard,
@@ -20,8 +20,8 @@ import type {
  * cookie and the header is simply absent.
  */
 function csrfHeader(): Record<string, string> {
-  const m = /(?:^|;\s*)wp_csrf=([^;]+)/.exec(document.cookie);
-  return m ? { 'x-csrf-token': decodeURIComponent(m[1]!) } : {};
+  const token = csrfTokenFrom(document.cookie);
+  return token ? { 'x-csrf-token': token } : {};
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

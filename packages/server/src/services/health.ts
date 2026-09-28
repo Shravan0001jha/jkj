@@ -69,15 +69,18 @@ export async function handleStalls(wp: Workplace, nowMs = Date.now()): Promise<S
     if (stalledOnce.has(s.agentId)) continue;
     stalledOnce.add(s.agentId);
     const emp = wp.org.employees.find(e => e.id === s.employeeId);
-    runs.note(s.agentId, 'Stalled', s.reason === 'idle' ? 'No activity for 10 minutes; interrupted.' : 'The same tool call repeated 5 times; interrupted.');
-    await runs.interruptRun(s.agentId).catch(() => {});
+    runs.note(s.agentId, 'Stalled', s.reason === 'idle' ? 'No activity for 10 minutes; the session is ended.' : 'The same tool call repeated 5 times; interrupted and ended.');
+    // The session is ended, not left open (QA B4): a looping run is interrupted first; an idle one is
+    // asked for its handoff (it is between turns and can answer), then closed either way.
+    if (s.reason === 'loop') await runs.interruptRun(s.agentId).catch(() => {});
+    await employees.endSession(wp, s.agentId, s.reason === 'idle' ? 60_000 : 0).catch(() => {});
     employees.setState(wp, s.employeeId, 'blocked');
     inbox.raise(wp, {
       kind: 'question',
       title: `${emp?.name ?? s.employeeId} is ${s.reason === 'idle' ? 'stalled' : 'looping'}`,
       body: s.reason === 'idle'
-        ? 'The session did nothing for 10 minutes and was interrupted. Tell it how to proceed, or end the session and let the next one start from the handoff.'
-        : 'The session repeated the same tool call five times and was interrupted. Tell it what to try instead.',
+        ? 'The session did nothing for 10 minutes and was ended; the next one starts from the handoff. Tell it how to proceed, or leave it to the Chief of Staff\'s routine.'
+        : 'The session repeated the same tool call five times and was ended. Tell it what to try instead, or leave it to the Chief of Staff\'s routine.',
       raisedBy: s.employeeId,
       context: { agentId: s.agentId, reason: s.reason },
       dedupeKey: `stall:${s.agentId}`,

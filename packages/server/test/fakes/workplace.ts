@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
  */
 export function testWorkplace(overrides: Partial<Record<string, string>> = {}): { wp: Workplace; tmp: TmpWorkplace } {
   const tmp = tmpWorkplace();
-  const workDir = mkdtempSync(join(tmpdir(), 'iris-work-'));
+  const workDir = tmp.workDir;
   const argv = ['--no-open', '--no-seed', ...(overrides['WORKPLACE_TELEGRAM'] === '1' ? [] : ['--no-telegram'])];
   const config = loadConfig(argv, {
     IRIS_WORKPLACE_DIR: tmp.dir,
@@ -31,12 +31,8 @@ export function testWorkplace(overrides: Partial<Record<string, string>> = {}): 
   const extract = readFileSync(fileURLToPath(new URL('../../../../docs/product-definition-extract.md', import.meta.url)), 'utf8');
   const wp = createWorkplace(config, { db: tmp.db, extractMarkdown: extract });
 
-  const repos = new Map<string, string>();
-  for (const repo of wp.org.repos) {
-    const root = tempRepo(repo.branch ?? 'main');
-    repos.set(repo.root, root);
-    repo.root = root;
-  }
+  // tmpWorkplace already rewrote org.yaml to temp repos; nothing real is reachable from here.
+  const repos = tmp.repos;
   for (const e of wp.org.employees) {
     const root = repos.get(e.workspace.repo);
     if (root) e.workspace = { ...e.workspace, repo: root };
@@ -47,22 +43,7 @@ export function testWorkplace(overrides: Partial<Record<string, string>> = {}): 
     try { closeAll(wp, 'test cleanup'); } catch { /* db already closed */ }
     cleanup();
     rmSync(workDir, { recursive: true, force: true });
-    for (const root of repos.values()) rmSync(root, { recursive: true, force: true });
   };
   return { wp, tmp };
 }
 
-function tempRepo(base: string): string {
-  const root = mkdtempSync(join(tmpdir(), 'iris-repo-'));
-  const g = (args: string[]) => execFileSync('git', ['-C', root, ...args], { stdio: 'ignore' });
-  g(['init', '-q', '-b', 'main']);
-  g(['config', 'user.email', 'test@iris.local']); g(['config', 'user.name', 'test']);
-  mkdirSync(join(root, 'services', 'agent-svc'), { recursive: true });
-  mkdirSync(join(root, 'mobile', 'ios'), { recursive: true });
-  writeFileSync(join(root, 'README.md'), '# temp\n');
-  writeFileSync(join(root, 'services', 'agent-svc', 'phone.py'), '# phone\n');
-  writeFileSync(join(root, 'mobile', 'ios', 'App.swift'), '// app\n');
-  g(['add', '-A']); g(['commit', '-q', '-m', 'base']);
-  if (base !== 'main') g(['checkout', '-q', '-b', base]);
-  return root;
-}

@@ -196,7 +196,11 @@ test('an interrupt leaves the session idle with nothing pending, not "waiting fo
     const after = runs.getRunAgent(agent.id)!;
     assert.equal(after.status, 'idle');
     assert.equal(after.approval, undefined);
-    assert.equal(employees.stateOf(wp, 'mira'), 'working', 'a session is open; nothing needs the owner');
+    // An interrupted run is not live work (QA B4): the session is kept for the owner to continue, but the
+    // card says idle, and the next assignment gets a fresh session rather than this dead one.
+    assert.equal(employees.stateOf(wp, 'mira'), 'idle', 'nothing needs the owner, and nothing is running');
+    assert.equal(employees.openSession('mira'), undefined);
+    assert.equal(employees.allSessions().some(s => s.agentId === agent.id), true, 'still held until it goes stale');
     assert.throws(() => runs.resolveApproval(agent.id, 'once'), /already been answered/);
     employees.talk(wp, 'mira', 'carry on');
     assert.equal(runs.getRunAgent(agent.id)!.status, 'running');

@@ -163,6 +163,49 @@ group allows port 22 from an earlier address), so the check was written as `phon
 against a locally booted relay and the real tunnel. Its first run hung before the first assertion;
 it is opt-in until diagnosed. Not verified live: anything on the phone.
 
+## QA's night bugs (29 Sep, `~/jkj-qa/BUGS.md`): RCA and fixes
+
+**B5 (P0): tests cut branches in the real repos.** `testWorkplace()` remapped the seed's repos to
+temp git repos, but every *booted* test (`start(config)` in api, lock, phone-contract, phone-e2e)
+loaded the copied seed as-is: `org.yaml` names the owner's checkouts, and `IRIS_WORK_DIR` defaulted
+to `~/iris-work`, so each fake session cut `emp/<employee>/<id>` in `~/claude-dev` (02:02–02:13 was
+the new phone-contract suite). Fixes: (1) `services/test-guard.ts` — under Node's test runner
+(`NODE_TEST_CONTEXT`) `createWorkplace` and `ensureWorktree` refuse any organisation dir, work dir,
+repo root or workspace outside the OS temp dir, before anything is opened; (2) `tmpWorkplace()`
+rewrites every repo root in the copied `org.yaml` to a temp repo on the same base branch and owns a
+temp `workDir`; every boot helper passes it. `qa-night.test.ts` asserts the refusals and that the
+temp organisation is entirely under temp. **Cleanup:** `~/claude-dev-mobile` is a linked worktree of
+`~/claude-dev` (one repository, one branch namespace), so the "187 in each" were the same 187.
+Deleted 175 `emp/*` branches (dev 38, kabir 39, mira 7, rohan 42, tara 49) that had no worktree, no commit beyond a real
+branch (tips were `05c8985` = feat/iris-character or `7a26ca8` = feat/mobile) and no work item in
+the live database. Kept 12: the 6 checked out in `~/iris-work` and the 6 named by live work items
+(`rohan/as_muk0srsaw3n4j` has one real commit). The list is in the commit message of this fix.
+
+**B3: the routine's self-deadlock.** `whyWaiting` counted the routine's own "Waiting:" note
+(`context.assignmentId`) and the stall detector's "X is stalled" item (`context.agentId`) as
+questions the work waits on, so nothing was ever resumed again and a fresh note per item was filed
+each day (27 open notes for 12 items). Fixes: both kinds are excluded (`isRoutineNote`,
+`isStallDetectorItem`); one note per item (`noted:<id>:<day>` mark, and a new note withdraws the
+older open ones with `inbox.expire`); "Let it wait" is the answer for the day; a resume answers the
+detector's item as the Workplace; `cos.dedupeNotes` at boot withdraws the duplicates (the newest
+per item stays; the owner's decisions are untouched).
+
+**B4: dead sessions stayed open.** `interruptRun` set the run to `idle` but the session stayed in
+`employees.sessions`, so `stateOf` read "working" (Kabir, 30 h), the one-session budget refused a
+fresh spawn, and `assign` pushed new work into the dead run. Fixes: `openSession` returns only a
+live run (`running`/`waiting`); `assign` and `spawn` close a dead session first; `closeStale` (every
+30 s) closes runs dead for ten minutes; the stall detector ends the session (handoff prompt for an
+idle one, interrupt for a loop) instead of leaving it open.
+
+**B10 (P0): browser POSTs 403 through the relay.** The page matched `wp_csrf=` but the relay's
+cookie is `__Host-wp_csrf`. `csrfTokenFrom` in `@jkj/shared` reads both; `csrf.test.ts` pins it;
+`phone-e2e.test.ts` now also drives a cookie session through the real relay: POST without the
+header → 403, with the header from the `__Host-` cookie → 200, the socket refused on a foreign
+Origin and accepted on the page's.
+
+**B11: the org-change card.** The item's one line now carries the diff's size ("+12 −3 lines in 2
+files"); the body names the files; the diff is on `GET /api/proposals/:id` and behind expand.
+
 ## Spend
 
 Own verification spend on the owner's subscription (equivalent API cost): about ₹300 across the live checks above,

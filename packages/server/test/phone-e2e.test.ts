@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { csrfTokenFrom } from '@jkj/shared';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -79,7 +80,7 @@ async function bootStackInner(tmp: TmpWorkplace, spawned: ChildProcess[]): Promi
   writeFileSync(join(tmp.dir, 'ops', 'workplace', 'relay.env'), `RELAY_URL=ws://127.0.0.1:${relayPort}/tunnel\nTUNNEL_SECRET=${secret}\n`);
   const fake = installFakeRuntime();
   const config = loadConfig(['--no-open', '--no-telegram', '--no-seed', '--port', '0'], {
-    IRIS_WORKPLACE_DIR: tmp.dir, IRIS_OPS_DIR: join(tmp.dir, 'ops'), WORKPLACE_CAP_INR: '1000', WORKPLACE_USD_INR: '100',
+    IRIS_WORKPLACE_DIR: tmp.dir, IRIS_OPS_DIR: join(tmp.dir, 'ops'), IRIS_WORK_DIR: tmp.workDir, WORKPLACE_CAP_INR: '1000', WORKPLACE_USD_INR: '100',
   });
   const running = await start(config);
   let mac = 'offline';
@@ -206,6 +207,52 @@ test('every phone action works end to end through the relay: Office, Inbox, talk
     assert.equal((await phone<{ error: string }>(s, 'POST', '/api/relay/off')).status, 400);
   } finally {
     releases.useSpawner(null);
+    await s.stop();
+  }
+});
+
+/** The browser's path (QA B10): a cookie session must send the CSRF token from the `__Host-wp_csrf` cookie, or every POST is refused. */
+test('a cookie session through the relay: GET works, a POST without the CSRF header is 403, with the header from the __Host- cookie it works; the socket needs the page\'s Origin', { skip: !available && 'set WORKPLACE_PHONE_E2E=1 with the relay checkout and its venv on this machine' }, async () => {
+  const s = await bootStack();
+  try {
+    const token = randomBytes(32).toString('base64url');
+    const csrf = randomBytes(24).toString('base64url');
+    const db = new DatabaseSync(join(s.tmp.dir, 'relay.db'));
+    const now = Math.floor(Date.now() / 1000);
+    db.prepare('insert into sessions (id, created, last_seen, rotated, kind, device, ua, ip, csrf) values (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(createHash('sha256').update(token).digest('hex'), now, now, now, 'cookie', 'browser-e2e', 'Mozilla/5.0 Chrome', '127.0.0.1', csrf);
+    db.close();
+    // What document.cookie holds on the page, and what the web client derives from it.
+    const cookie = `__Host-wp_session=${token}; __Host-wp_csrf=${csrf}; __Host-wp_device=d`;
+    const header = csrfTokenFrom(cookie);
+    assert.equal(header, csrf);
+    const browser = async (method: string, path: string, body?: unknown, withCsrf = true) => fetch(`${s.relay}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', accept: 'application/json', cookie, ...(withCsrf && header ? { 'x-csrf-token': header } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+
+    assert.equal((await browser('GET', '/api/office')).status, 200);
+    const q = inbox.raise(s.running.wp, { kind: 'question', title: 'From the browser?', body: 'x', raisedBy: 'asha' });
+    const refused = await browser('POST', `/api/inbox/${q.id}/answer`, { optionId: 'answered', note: 'no header' }, false);
+    assert.equal(refused.status, 403, 'no CSRF header, no mutation');
+    assert.match(((await refused.json()) as { error: string }).error, /CSRF/);
+    assert.equal(inbox.get(s.running.wp, q.id)!.state, 'open');
+    const ok = await browser('POST', `/api/inbox/${q.id}/answer`, { optionId: 'answered', note: 'with the header' });
+    assert.equal(ok.status, 200, await ok.text());
+    assert.equal(((await ok.json()) as InboxItem).answer?.via, 'web');
+    assert.equal((await browser('POST', '/api/talk', { text: 'One line, Asha?' })).status, 201);
+    assert.equal((await browser('POST', '/api/room', { title: 'From the browser', text: 'A thread.' })).status, 201);
+
+    // The page's socket: cookie + the page's own Origin; a foreign origin is refused.
+    const foreign = new WebSocket(`${s.relay.replace('http', 'ws')}/ws`, { headers: { cookie, origin: 'https://evil.example' } });
+    const foreignClose = await new Promise<number>(resolve => { foreign.on('close', code => resolve(code)); foreign.on('error', () => {}); });
+    assert.equal(foreignClose, 4403);
+    const ws = new WebSocket(`${s.relay.replace('http', 'ws')}/ws`, { headers: { cookie, origin: s.relay } });
+    const first = await new Promise<string>((resolve, reject) => { ws.once('message', m => resolve(String(m))); ws.once('error', reject); ws.once('close', code => reject(new Error(`closed ${code}`))); });
+    assert.equal((JSON.parse(first) as { type: string }).type, 'office.snapshot');
+    ws.close();
+  } finally {
     await s.stop();
   }
 });

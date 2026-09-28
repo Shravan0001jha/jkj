@@ -111,7 +111,11 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   tunnel?.start();
   watchdog.start();
 
+  // Duplicate stall notes an earlier build left (QA B3) are withdrawn once; the owner's decisions are untouched.
+  try { const d = cos.dedupeNotes(wp); if (d.expired.length) log.info('boot', `withdrew ${d.expired.length} duplicate stall notes`); } catch (err) { log.warn('boot', `dedupe notes: ${err instanceof Error ? err.message : err}`); }
+
   const stallTimer = setInterval(() => {
+    for (const id of employees.closeStale(wp)) log.info('sessions', `closed stale session ${id}`);
     health.handleParkedApprovals(wp);
     void health.handleStalls(wp).catch(err => log.warn('health', String(err)));
   }, 30_000);

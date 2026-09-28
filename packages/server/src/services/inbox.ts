@@ -160,6 +160,17 @@ export function answer(wp: Workplace, id: string, optionId: string, note: string
   return answered;
 }
 
+/** The Workplace withdraws an item it raised itself (a superseded stall note). Never the owner's decisions. */
+export function expire(wp: Workplace, id: string, why: string): InboxItem {
+  const item = get(wp, id);
+  if (!item) throw new BadRequest(`No inbox item ${id}`);
+  if (item.state !== 'open') return item;
+  const expired: InboxItem = { ...item, state: 'expired', answer: { optionId: 'expired', note: why, at: now(), via: 'workplace' } };
+  wp.db.prepare('update inbox set state = ?, json = ? where id = ?').run('expired', JSON.stringify(expired), id);
+  wp.emit({ type: 'inbox.updated', item: expired });
+  return expired;
+}
+
 /** Services that need to act on an answer (gates, proposals, caps) subscribe here. */
 type AnswerListener = (wp: Workplace, item: InboxItem) => void;
 const answerListeners = new Set<AnswerListener>();

@@ -6,6 +6,7 @@ import type { Workplace } from './workplace.js';
 import { commitOrg, loadOrg, parseCharter, renderCharter, saveOrgFiles, summarise, writeCharter, type Org } from './org.js';
 import { lint, realFs } from './ownership.js';
 import * as inbox from './inbox.js';
+import { oneLine } from './one-line.js';
 import * as employees from './employees.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { BadRequest, Conflict } from '../util/errors.js';
@@ -60,10 +61,13 @@ export function propose(wp: Workplace, opts: ProposeOptions): OrgProposal {
       lint: findings,
     };
     const errors = findings.filter(f => f.severity === 'error');
+    const stats = diffStats(diff);
     const item = inbox.raise(wp, {
       kind: 'org-change',
       title: `${titleOf(opts.kind)}: ${describe(opts.kind, opts.params)}`,
-      body: `${opts.reason}\n\n${errors.length ? `Cannot be approved: ${errors.map(e => e.message).join('; ')}\n\n` : ''}${diff.split('\n').slice(0, 40).join('\n')}`,
+      // One line for the owner (QA B11): the reason and the diff's size; the diff itself is on the proposal (GET /api/proposals/:id) and behind expand.
+      summary: `${oneLine(opts.reason).summary.replace(/[.…]$/, '')} — +${stats.added} −${stats.removed} lines in ${stats.files} file${stats.files === 1 ? '' : 's'}${errors.length ? ' (lint errors: cannot be approved)' : ''}`,
+      body: `${opts.reason}\n\n${errors.length ? `Cannot be approved: ${errors.map(e => e.message).join('; ')}\n\n` : ''}Diff: +${stats.added} −${stats.removed} lines in ${stats.files} file(s): ${stats.names.join(', ')}. The full diff is on the proposal.`,
       context: { proposalId: proposal.id, kind: opts.kind, lintErrors: errors.length, params: opts.params },
       onApprove: 'the org files are written and committed; routing and every affected context change on the next session',
       onDeny: 'nothing changes; the proposal is kept with your reason',
@@ -342,6 +346,19 @@ function scratchCopy(dir: string): string {
   const scratch = join(dir, '..', `.${dir.split('/').pop()}-proposal-${process.pid}-${Date.now()}`);
   execFileSync('rsync', ['-a', '--exclude', '.git', '--exclude', 'workplace.db*', `${dir}/`, `${scratch}/`]);
   return scratch;
+}
+
+/** Lines added and removed, and the files touched, in a unified diff (`diff -ruN`). */
+export function diffStats(diff: string): { added: number; removed: number; files: number; names: string[] } {
+  let added = 0, removed = 0;
+  const names: string[] = [];
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+++ ')) { const p = line.slice(4).split('\t')[0] ?? ''; names.push(p.split('/').slice(-2).join('/')); continue; }
+    if (line.startsWith('--- ')) continue;
+    if (line.startsWith('+')) added += 1;
+    else if (line.startsWith('-')) removed += 1;
+  }
+  return { added, removed, files: names.length, names };
 }
 
 /** A unified diff of the org files between the live dir and the scratch copy. */

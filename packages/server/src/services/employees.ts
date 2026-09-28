@@ -80,7 +80,33 @@ const stateOverride = new Map<string, EmployeeState>();
 const lastReport = new Map<string, string>();
 
 export function openSession(employeeId: string): Session | undefined {
-  return [...sessions.values()].find(s => s.employeeId === employeeId);
+  return [...sessions.values()].find(s => s.employeeId === employeeId && isLive(s.agentId));
+}
+
+/** A run that can still take a message: running, or waiting between turns / for an approval. */
+export function isLive(agentId: string): boolean {
+  const a = runs.getRunAgent(agentId);
+  return !!a && (a.status === 'running' || a.status === 'waiting');
+}
+
+export const STALE_MS = 10 * 60_000;
+
+/**
+ * Sessions whose run is dead (interrupted and never resumed, errored, or gone) are closed once
+ * they have been dead for ten minutes, so the employee's state is true and the next assignment
+ * gets a fresh session instead of being pushed into a dead one (QA B4: Kabir "working" 30 h on).
+ */
+export function closeStale(wp: Workplace, nowMs = Date.now()): string[] {
+  const closed: string[] = [];
+  for (const s of allSessions()) {
+    const a = runs.getRunAgent(s.agentId);
+    if (a && (a.status === 'running' || a.status === 'waiting')) continue;
+    const idle = runs.idleMs(s.agentId, nowMs);
+    if (a && idle !== null && idle < STALE_MS) continue;
+    close(wp, s.agentId, a ? `stale (${a.status} for ${Math.round((idle ?? 0) / 60_000)} min)` : 'stale (no run)');
+    closed.push(s.agentId);
+  }
+  return closed;
 }
 
 export function sessionsOf(employeeId: string): Session[] {
@@ -117,6 +143,7 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
   const emp = employee(wp, employeeId);
   const budget = spend.canSpend(wp, employeeId);
   if (!budget.ok && !options.ownerTalk) throw new BadRequest(`${emp.name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox, or talk to ${emp.name} and say "continue".`);
+  for (const s of sessionsOf(employeeId)) if (!isLive(s.agentId)) close(wp, s.agentId, 'replaced: the run was dead');
   if (sessionsOf(employeeId).length >= emp.budget.concurrentSessions) {
     throw new BadRequest(`${emp.name} already has ${emp.budget.concurrentSessions} session(s) open. End one first, or talk to the open one.`);
   }
@@ -307,6 +334,8 @@ function maybeLiftPause(wp: Workplace, employeeId: string, text: string): void {
 export function assign(wp: Workplace, assignmentId: string): Agent {
   const item = work.require$(wp, assignmentId);
   if (!item.employeeId) throw new BadRequest(`${assignmentId} has no assignee`);
+  // A dead session (interrupted, errored) is closed first, whatever its age: work goes to a live one.
+  for (const s of sessionsOf(item.employeeId)) if (!isLive(s.agentId)) close(wp, s.agentId, 'replaced: the run was dead');
   const open = openSession(item.employeeId);
   if (open) {
     runs.sendMessage(open.agentId, `New assignment ${item.id}: ${item.title}\n\n${item.body}\n\nReply with "## Plan" first.`);

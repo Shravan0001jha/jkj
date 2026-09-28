@@ -72,6 +72,8 @@ test('(b) a proposal reads back with its diff and Inbox item; approving it in th
     assert.match(detail.body.proposal.diff, /^\+.*mobile-ios/m, 'a unified diff of the org files');
     assert.match(detail.body.proposal.diff, /^-.*mobile/m);
     assert.equal(detail.body.item.kind, 'org-change');
+    assert.match(detail.body.item.summary, /^iOS and Android need separate leads — \+\d+ −\d+ lines in \d+ files?$/, 'B11: one line with the diff size');
+    assert.ok(!detail.body.item.body.includes('@@'), 'the diff itself is not in the body');
     assert.deepEqual(detail.body.item.options.map(o => o.id), ['approve', 'reject']);
     assert.ok(detail.body.item.affects.includes('tara'));
     assert.equal((await call<{ error: string }>(b.base, 'GET', '/api/proposals/nope')).status, 404);
