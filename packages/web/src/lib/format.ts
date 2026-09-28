@@ -1,4 +1,4 @@
-import type { AgentStatus, EmployeeState, Usage, WorkState } from '@jkj/shared';
+import type { RequestStage, AgentStatus, EmployeeState, Usage, WorkState } from '@jkj/shared';
 
 /** Formatting helpers. Pure functions only — no React, no state. */
 
@@ -56,3 +56,8 @@ export const firstLines = (text: string, n = 2): string =>
   text.split('\n').map(l => l.trim()).filter(Boolean).slice(0, n).join(' · ');
 
 export const uid = (prefix: string): string => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+
+/** A request stage's tone (D16 status lines): blocked is an error, waiting stages wait, building runs. */
+export const stageTone = (stage: RequestStage): string => ({
+  'with-asha': 'waiting', specced: 'waiting', routed: 'idle', building: 'running', review: 'waiting', blocked: 'error', built: 'done', released: 'done',
+}[stage]);

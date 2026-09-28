@@ -48,7 +48,8 @@ export function status(wp: Workplace, feature: WorkItem, nowMs = Date.now()): Re
   const count = (s: AssignmentState) => parts.filter(a => a.state === s).length;
   const n = parts.length;
   const blocked = count('blocked');
-  const building = count('building') + count('planned');
+  // A session that has started but not yet replied with its plan is building, in the owner's terms.
+  const building = count('building') + count('planned') + parts.filter(a => a.state === 'proposed' && a.sessionId).length;
   const review = count('review');
   const done = count('done');
   const bits: string[] = [];

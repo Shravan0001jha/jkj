@@ -1,6 +1,6 @@
 import type { WorkItem } from '@jkj/shared';
 import { decompose, hrefFor, useStore } from '../../state/store.js';
-import { ago, workTone } from '../../lib/format.js';
+import { ago, stageTone, workTone } from '../../lib/format.js';
 import { Pill } from '../../components/Pill.js';
 import { Markdown } from '../../components/Markdown.js';
 
@@ -8,7 +8,7 @@ import { Markdown } from '../../components/Markdown.js';
 export function FeatureDetail({ id }: { id: string }) {
   const detail = useStore(s => s.featureDetails[id]);
   if (!detail) return <p className="lede">Reading the feature…</p>;
-  const { feature, assignments, requirements, route } = detail;
+  const { feature, assignments, requirements, route, status } = detail;
 
   return (
     <>
@@ -18,6 +18,7 @@ export function FeatureDetail({ id }: { id: string }) {
           <h2>{feature.title}</h2>
           <Pill tone={workTone(feature.state)}>{feature.state}</Pill>
         </div>
+        {status && <p className="oneline"><Pill tone={stageTone(status.stage)}>{status.stage}</Pill> {status.line}</p>}
         <p className="task">{feature.body}</p>
         <dl className="kv">
           <div><dt>Platforms</dt><dd>{feature.platformIds.join(', ') || '—'}</dd></div>
@@ -50,6 +51,22 @@ export function FeatureDetail({ id }: { id: string }) {
         </section>
 
         <section>
+          {status && status.assignments.length > 0 && (
+            <>
+              <h3 className="group">Status</h3>
+              <div className="stack tight">
+                {status.assignments.map(a => (
+                  <div key={a.id} className="reqrow">
+                    <Pill tone={workTone(a.state)}>{a.state}</Pill>
+                    <span className="rowtitle">{a.title}</span>
+                    {a.employeeId && <a className="chip" href={hrefFor('employee', a.employeeId)}>{a.employeeId}</a>}
+                    {a.charterId && <span className="chip faint">{a.charterId}</span>}
+                    {a.stalledSince && <Pill tone="waiting">stalled since {ago(a.stalledSince)} ago</Pill>}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           <h3 className="group">Route</h3>
           {route.primaries.length === 0 ? <p className="muted">The map routes this nowhere yet: add the things it touches.</p> : (
             <ul className="routelist">

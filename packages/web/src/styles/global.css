@@ -1048,3 +1048,29 @@ details.plan { margin-top: 6px; }
 .newthread { display: grid; gap: 10px; margin: 0 0 14px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
 .newthread .chips button.chip { cursor: pointer; border: 1px solid transparent; font: inherit; font-family: var(--mono); font-size: 10.5px; }
 .thread .dhead .task b { font-weight: 600; color: var(--ink); }
+
+/* ---------- one line to the owner (D16) and the phone-contract screens ---------- */
+.oneline { margin: 6px 0 0; font-size: 13.5px; color: var(--ink); line-height: 1.4; }
+.oneline .pill { vertical-align: middle; margin-right: 6px; }
+details.more { margin-top: 6px; }
+details.more > summary { cursor: pointer; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); list-style: none; }
+details.more > summary::before { content: '▸ '; }
+details[open].more > summary::before { content: '▾ '; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more .ibody, details.more .md { margin-top: 6px; }
+.turn details.more { max-width: 100%; }
+.threadrow .subtitle { margin-top: 2px; font-size: 11.5px; color: var(--ink-3); }
+.talkchief { margin: 0 0 14px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius); }
+.talkchief input.wide { flex: 1 1 240px; padding: 7px 10px; font: inherit; font-size: 13px; color: var(--ink); background: var(--bg); border: 1px solid var(--line-strong); border-radius: var(--radius); }
+.talkchief input.wide:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.talkchief a.muted { font-size: 12px; text-decoration: none; }
+.fcard .status { display: flex; align-items: flex-start; gap: 6px; margin: 4px 0; font-size: 11.5px; color: var(--ink-2); line-height: 1.35; }
+.fcard .status .pill { flex: none; }
+.pivot td .pitem { display: grid; gap: 2px; margin-top: 5px; padding-top: 5px; border-top: 1px dashed var(--line); font-size: 11px; }
+.pivot td .pitem a { color: var(--accent-ink); text-decoration: none; }
+.pivot td .pitem .pill { justify-self: start; }
+.pivot td .pitem .pev { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+.pivot td .pitem .pev code { padding: 0 4px; background: var(--surface-3); border-radius: 4px; font-size: 9.5px; }
+.ready { margin-bottom: 16px; }
+.readyrow.hot { border-color: var(--wait); }
+.readyrow .rowtitle { font-family: var(--mono); font-size: 12px; }

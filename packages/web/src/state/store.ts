@@ -2,7 +2,7 @@ import { useRef, useSyncExternalStore } from 'react';
 import type {
   Agent, ApprovalDecision, Attachment, ContextResponse, Coverage, EmployeeCard, EmployeeDetail,
   FeatureBoard, FeatureDetail, HealthSignals, InboxItem, LogEntry, OfficeResponse, OrgResponse,
-  PermissionMode, Pivot, PivotRows, Release, Requirement, RoomThread, RoomThreadDetail, ServerEvent, SpendSummary,
+  PermissionMode, Pivot, PivotRows, Release, ReleaseReadiness, Requirement, RoomThread, RoomThreadDetail, ServerEvent, SpendSummary,
   WorkplaceHealthResponse, WorkplaceServerEvent,
 } from '@jkj/shared';
 import * as api from '../api/client.js';
@@ -43,6 +43,8 @@ export interface AppState {
   employeeContext: Record<string, ContextResponse>;
   releases: Release[];
   releaseLogs: Record<string, string[]>;
+  /** Per shippable: done and unreleased, the release in flight, the last one done. */
+  readiness: ReleaseReadiness[];
   spend: SpendSummary | null;
   signals: HealthSignals | null;
   /* the Team Room: every thread, and the messages of the ones opened */
@@ -79,6 +81,7 @@ let state: AppState = {
   employeeContext: {},
   releases: [],
   releaseLogs: {},
+  readiness: [],
   spend: null,
   signals: null,
   room: [],
@@ -179,7 +182,7 @@ export async function loadRoute(route: Route): Promise<void> {
         break;
       case 'employee': if (route.id) await loadEmployee(route.id); break;
       case 'assign': await Promise.all([loadOrg(), loadRequirements()]); break;
-      case 'releases': await loadReleases(); break;
+      case 'releases': await Promise.all([loadReleases(), loadReadiness()]); break;
       case 'spend': await Promise.all([loadSpend(), loadSignals()]); break;
     }
   } catch (err) {
@@ -244,6 +247,10 @@ export async function loadEmployee(id: string): Promise<void> {
 
 export async function loadReleases(): Promise<void> {
   set({ releases: await api.getReleases() });
+}
+
+export async function loadReadiness(): Promise<void> {
+  set({ readiness: await api.getReleaseReadiness() });
 }
 
 export async function loadRoom(): Promise<void> {
@@ -357,7 +364,12 @@ export function applyServerEvent(event: ServerEvent | WorkplaceServerEvent): voi
       if (event.item.kind === 'feature' && state.features) {
         const known = state.features.features.some(f => f.id === event.item.id);
         const features = known ? state.features.features.map(f => (f.id === event.item.id ? event.item : f)) : [event.item, ...state.features.features];
-        set({ features: { features, byState: countBy(features.map(f => f.state)) } });
+        set({ features: { ...state.features, features, byState: countBy(features.map(f => f.state)) } });
+      }
+      // The status lines are derived on the server; re-read the board (and the open feature) rather than guess.
+      if (state.route.name === 'features') {
+        void loadFeatures();
+        if (event.item.featureId && state.featureDetails[event.item.featureId]) void loadFeature(event.item.featureId);
       }
       if (event.item.featureId && state.featureDetails[event.item.featureId]) {
         const detail = state.featureDetails[event.item.featureId]!;
@@ -386,6 +398,7 @@ export function applyServerEvent(event: ServerEvent | WorkplaceServerEvent): voi
     case 'release.updated': {
       const known = state.releases.some(r => r.id === event.release.id);
       set({ releases: known ? state.releases.map(r => (r.id === event.release.id ? event.release : r)) : [event.release, ...state.releases] });
+      if (state.route.name === 'releases') void loadReadiness().catch(() => undefined);
       break;
     }
 
@@ -523,6 +536,30 @@ export async function talkTo(employeeId: string, text: string, attachments: Atta
     await loadEmployee(employeeId);
   } catch (err) {
     showToast(message(err));
+  }
+}
+
+/** The default Talk: the Chief of Staff. Opens her page with the session. */
+export async function talkToChiefOfStaff(text: string): Promise<void> {
+  try {
+    const agent = await api.talkToChiefOfStaff(text);
+    set({ agents: mergeAgents(state.agents, [agent]), openAgentId: agent.id });
+    if (agent.employeeId) navigate('employee', agent.employeeId);
+  } catch (err) {
+    showToast(message(err));
+  }
+}
+
+/** A request in the owner's words: Asha turns it into a feature with a spec. */
+export async function sendRequest(text: string, platformIds: string[] = []): Promise<string | null> {
+  try {
+    const made = await api.createRequest({ text, platformIds });
+    await loadFeatures();
+    showToast(made.status.line);
+    return made.feature.id;
+  } catch (err) {
+    showToast(message(err));
+    return null;
   }
 }
 

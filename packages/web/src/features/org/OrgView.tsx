@@ -150,6 +150,17 @@ function MapTable({ filter }: { filter: string }) {
 function ProposalCard({ proposal }: { proposal: OrgProposal }) {
   const tone = proposal.state === 'applied' ? 'done' : proposal.state === 'rejected' ? 'error' : proposal.state === 'approved' ? 'running' : 'waiting';
   const errors = proposal.lint.filter(f => f.severity === 'error');
+  const [rejecting, setRejecting] = useState(false);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const answer = async (optionId: 'approve' | 'reject'): Promise<void> => {
+    if (optionId === 'reject' && !rejecting) { setRejecting(true); return; }
+    setBusy(true);
+    await answerInbox(proposal.inboxId, optionId, optionId === 'reject' && note.trim() ? note.trim() : undefined);
+    setBusy(false);
+    setRejecting(false);
+    setNote('');
+  };
   return (
     <article className="inboxcard">
       <div className="ih">
@@ -161,10 +172,19 @@ function ProposalCard({ proposal }: { proposal: OrgProposal }) {
       {errors.length > 0 && <p className="muted">Cannot be approved: {errors.map(e => e.message).join('; ')}</p>}
       <details className="diff"><summary>Diff of the org files</summary><pre>{proposal.diff || '(no file changes)'}</pre></details>
       {proposal.state === 'pending' && (
-        <div className="row">
-          <button className="btn sm primary" disabled={errors.length > 0} onClick={() => void answerInbox(proposal.inboxId, 'approve')}>Approve</button>
-          <button className="btn sm danger" onClick={() => void answerInbox(proposal.inboxId, 'reject')}>Reject</button>
-        </div>
+        <>
+          {rejecting && (
+            <div className="f notefield">
+              <label>Reject: why (goes back to {proposal.proposedBy})</label>
+              <input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Dev keeps character for now" autoFocus />
+            </div>
+          )}
+          <div className="row">
+            <button className="btn sm primary" disabled={busy || errors.length > 0 || rejecting} onClick={() => void answer('approve')}>Approve</button>
+            <button className="btn sm danger" disabled={busy} onClick={() => void answer('reject')}>{rejecting ? 'Confirm reject' : 'Reject'}</button>
+            {rejecting && <button className="btn sm ghost" onClick={() => { setRejecting(false); setNote(''); }}>Cancel</button>}
+          </div>
+        </>
       )}
     </article>
   );

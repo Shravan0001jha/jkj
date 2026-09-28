@@ -27,6 +27,16 @@ export function TranscriptEntry({ entry, agentId }: { entry: LogEntry; agentId: 
   }
 
   if (entry.kind === 'assistant') {
+    // One line to the owner (D16): the summary is the reply; the rest waits behind "Details".
+    if (entry.summary) {
+      return (
+        <div className="turn them">
+          <div className="stamp">{hhmm(entry.at)}</div>
+          <div className="bubble">{entry.summary}</div>
+          {entry.details && <details className="more"><summary>Details</summary><Markdown text={entry.details} /></details>}
+        </div>
+      );
+    }
     return (
       <div className="turn them">
         <div className="stamp">{hhmm(entry.at)}</div>
