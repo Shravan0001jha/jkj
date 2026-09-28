@@ -1,9 +1,22 @@
 import type {
-  EmployeeDetail, FeatureBoard, FeatureDetail, OfficeResponse, OrgResponse, Pivot, PivotCell, PivotRows,
+  EmployeeDetail,
+  FeatureBoard,
+  FeatureDetail,
+  OfficeResponse,
+  OrgResponse,
+  Pivot,
+  PivotCell,
+  PivotRows,
+  RequestStatus,
+  WorkItem,
+  PivotItem,
+  AssignmentState,
 } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as employees from './employees.js';
 import * as work from './work.js';
+import * as requests from './requests.js';
+import { chiefOfStaff } from './features.js';
 import * as inbox from './inbox.js';
 import * as spend from './spend.js';
 import * as proposals from './proposals.js';
@@ -26,6 +39,7 @@ export function office(wp: Workplace): OfficeResponse {
     .map(unit => ({ unit, employees: wp.org.employees.filter(e => e.unitId === unit.id).map(e => employees.card(wp, e.id)) }));
   const cards = units.flatMap(u => u.employees);
   return {
+    chiefOfStaff: chiefOfStaff(wp) ?? '',
     units,
     coverage: coverage(reqs),
     needsYou: inbox.openCount(wp),
@@ -74,8 +88,9 @@ export function employeeDetail(wp: Workplace, id: string): EmployeeDetail {
 export function featureBoard(wp: Workplace): FeatureBoard {
   const features = work.list(wp, { kind: 'feature' });
   const byState: Record<string, number> = {};
-  for (const f of features) byState[f.state] = (byState[f.state] ?? 0) + 1;
-  return { features, byState };
+  const status: Record<string, RequestStatus> = {};
+  for (const f of features) { byState[f.state] = (byState[f.state] ?? 0) + 1; status[f.id] = requests.status(wp, f); }
+  return { features, byState, status };
 }
 
 export function featureDetail(wp: Workplace, id: string): FeatureDetail {
@@ -86,6 +101,18 @@ export function featureDetail(wp: Workplace, id: string): FeatureDetail {
     assignments: stall.annotate(wp, work.list(wp, { kind: 'assignment', featureId: id })),
     requirements: reqs.filter(r => feature.requirementIds.includes(r.id)),
     route: work.routeFeature(wp, feature),
+    status: requests.status(wp, feature),
+  };
+}
+
+/** One assignment in a pivot cell: its state, the evidence it reported, and where to see it. */
+function pivotItem(a: WorkItem): PivotItem {
+  const e = a.evidence;
+  return {
+    id: a.id, title: a.title, state: a.state as AssignmentState,
+    ...(a.employeeId ? { employeeId: a.employeeId } : {}),
+    ...(e ? { evidence: { tests: `${e.tests.passed} passed, ${e.tests.failed} failed`, commits: e.commits, liveVerified: e.liveVerified.length, notVerified: e.notVerified.length } } : {}),
+    href: a.employeeId ? `#/employee/${a.employeeId}?item=${a.id}` : `#/assign?item=${a.id}`,
   };
 }
 
@@ -105,9 +132,10 @@ export function pivot(wp: Workplace, rows: PivotRows): Pivot {
     for (const r of rowsOf(a)) {
       rowSet.add(r);
       const row = (cells[r] ??= {});
-      const cell = (row[a.featureId!] ??= { total: 0, byState: {} });
+      const cell = (row[a.featureId!] ??= { total: 0, byState: {}, items: [] });
       cell.total += 1;
       cell.byState[a.state] = (cell.byState[a.state] ?? 0) + 1;
+      cell.items.push(pivotItem(a));
     }
   }
   return { rows: [...rowSet].sort(), cols: features.map(f => f.id), cells };

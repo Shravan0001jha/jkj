@@ -336,6 +336,19 @@ strings. The contract is `packages/shared/src/workplace-api.ts` (`WORKPLACE_API`
 | GET `/api/releases`; POST `/api/releases` `{ shippable, version }` → `Release` (proposed, Inbox item); POST `/api/releases/:id/run` (needs approved) → `Release` | Releases |
 | GET `/api/spend?day=` → `SpendSummary`; GET `/api/health/signals` → `HealthSignals` | Spend |
 | POST `/api/pair` (loopback) → `{ code, expiresAt }`; POST `/api/pair/exchange` `{ code }` → `{ token }` | phone setup |
+| POST `/api/talk` `{ text, attachments? }` → `Agent` (the Chief of Staff's session; `OfficeResponse.chiefOfStaff` names her) | Office / phone |
+| POST `/api/requests` `{ text, platformIds? }` → 201 `RequestResponse { feature, status }` (a stated feature titled by its first line; Asha asked for the spec); GET `/api/requests` → `RequestResponse[]` newest first | Features / phone |
+| GET `/api/features` adds `status: Record<featureId, RequestStatus>`; GET `/api/features/:id` adds `status` | Features |
+| GET `/api/features/pivot` cells add `items: PivotItem[]` (id, title, employeeId, state, evidence summary, href) | Features |
+| GET `/api/proposals/:id` → `ProposalDetail { proposal (with diff, lint), item }`; approving the item applies it, so `/apply` after that is 409 | Org / phone |
+| GET `/api/releases/ready` → `ReleaseReadiness[]` per shippable `{ unreleased, open?, last? }`; POST `/api/releases/:id/run` → 202 `running` | Releases / phone |
+| POST `/api/work/:id/start` → 201 `Agent` (the session that took the assignment) | Assign |
+
+`RequestStatus { stage: with-asha | specced | routed | building | review | blocked | built | released; line; assignments[]; askedAgentId? }`
+is derived (`services/requests.ts`): `stated` → with-asha (whether Asha's session was started is in the
+settings table as `spec-asked:<id>`); `specced` or no assignments → specced; otherwise counts by state,
+where a started session without a plan yet counts as building; any blocked → blocked; review only →
+review; `built`/`released` from the feature.
 
 ### One line to the owner (D16) — contract additions of 28 Sep
 

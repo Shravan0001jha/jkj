@@ -6,7 +6,7 @@ import type {
   SpendSummary, HealthSignals, WorkplaceHealthResponse, DecomposeResponse, WorkQuery,
   CreateWorkRequest, CreateFeatureRequest, CreateProposalRequest, CreateReleaseRequest,
   TransitionRequest, RoomResponse, RoomThreadDetail, RoomThread, RoomMessage, CreateThreadRequest, PostMessageRequest,
-  ResolveThreadRequest,
+  ResolveThreadRequest, RequestResponse, CreateRequest, ReleaseReadiness, ProposalDetail,
 } from '@jkj/shared';
 
 /**
@@ -64,6 +64,9 @@ export const getEmployees = () => request<Employee[]>(W.employees);
 export const getEmployee = (id: string) => request<EmployeeDetail>(W.employee(id));
 export const talkTo = (id: string, text: string, attachments: Attachment[] = []) =>
   post<Agent>(W.employeeTalk(id), { text, attachments });
+/** The default Talk: the Chief of Staff (D16 / phone). */
+export const talkToChiefOfStaff = (text: string, attachments: Attachment[] = []) =>
+  post<Agent>(W.talk, { text, attachments });
 export const endSession = (id: string) => post<{ ok: true }>(W.employeeEndSession(id));
 export const getEmployeeContext = (id: string) => request<ContextResponse>(W.employeeContext(id));
 export const putEmployeeContext = (employeeId: string, id: string, body: string) =>
@@ -73,6 +76,8 @@ export const getWork = (q?: WorkQuery) => request<WorkItem[]>(W.work(q));
 export const createWork = (body: CreateWorkRequest) => post<WorkItem>(W.work(), body);
 export const transitionWork = (id: string, body: TransitionRequest) => post<WorkItem>(W.workTransition(id), body);
 
+export const getRequests = () => request<RequestResponse[]>(W.requests);
+export const createRequest = (body: CreateRequest) => post<RequestResponse>(W.requests, body);
 export const getFeatures = () => request<FeatureBoard>(W.features);
 export const createFeature = (body: CreateFeatureRequest) => post<WorkItem>(W.features, body);
 export const getFeature = (id: string) => request<FeatureDetail>(W.feature(id));
@@ -86,8 +91,10 @@ export const previewRoute = (q: { text?: string; paths?: string[]; platforms?: s
 
 export const getProposals = () => request<OrgProposal[]>(W.proposals);
 export const createProposal = (body: CreateProposalRequest) => post<OrgProposal>(W.proposals, body);
+export const getProposal = (id: string) => request<ProposalDetail>(W.proposal(id));
 
 export const getReleases = () => request<Release[]>(W.releases);
+export const getReleaseReadiness = () => request<ReleaseReadiness[]>(W.releasesReady);
 export const createRelease = (body: CreateReleaseRequest) => post<Release>(W.releases, body);
 export const runRelease = (id: string) => post<Release>(W.releaseRun(id));
 

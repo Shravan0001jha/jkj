@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Release, Shippable } from '@jkj/shared';
+import type { Release, ReleaseReadiness, Shippable } from '@jkj/shared';
 import * as api from '../../api/client.js';
 import { loadReleases, showToast, message, startRelease, useStore } from '../../state/store.js';
 import { ago } from '../../lib/format.js';
@@ -18,9 +18,11 @@ const TONE: Record<Release['state'], string> = {
 export function ReleasesView() {
   const releases = useStore(s => s.releases);
   const logs = useStore(s => s.releaseLogs);
+  const readiness = useStore(s => s.readiness);
   const [shippable, setShippable] = useState<Shippable>('desktop-mac');
   const [version, setVersion] = useState('');
   const [busy, setBusy] = useState(false);
+  const last = readiness.find(r => r.shippable === shippable)?.last;
 
   const propose = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
@@ -45,10 +47,20 @@ export function ReleasesView() {
         <select value={shippable} onChange={e => setShippable(e.target.value as Shippable)} aria-label="Shippable">
           {SHIPPABLES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <input value={version} onChange={e => setVersion(e.target.value)} placeholder="version, e.g. 0.2.16" aria-label="Version" />
+        <input value={version} onChange={e => setVersion(e.target.value)} placeholder={last ? `version; last was ${last.version}` : 'version, e.g. 0.2.16'} aria-label="Version" />
         <button className="btn primary" type="submit" disabled={busy || !version.trim()}>Propose</button>
       </form>
 
+      {readiness.length > 0 && (
+        <section className="ready">
+          <h3 className="group">Ready to release</h3>
+          <div className="stack tight">
+            {readiness.map(r => <ReadyRow key={r.shippable} r={r} onPropose={() => setShippable(r.shippable)} />)}
+          </div>
+        </section>
+      )}
+
+      <h3 className="group">Proposed and past</h3>
       <div className="stack">
         {releases.map(r => (
           <article key={r.id} className="inboxcard">
@@ -72,6 +84,27 @@ export function ReleasesView() {
         ))}
         {releases.length === 0 && <p className="muted">No releases proposed yet.</p>}
       </div>
+    </div>
+  );
+}
+
+/** One shippable: what is done and unreleased, what is in flight, what shipped last. */
+function ReadyRow({ r, onPropose }: { r: ReleaseReadiness; onPropose: () => void }) {
+  const n = r.unreleased.length;
+  return (
+    <div className={`assignrow readyrow${n > 0 && !r.open ? ' hot' : ''}`}>
+      <div className="ar1">
+        <span className="rowtitle">{r.shippable}</span>
+        <Pill tone={r.open ? TONE[r.open.state] : n > 0 ? 'waiting' : 'idle'}>{r.open ? `${r.open.version} ${r.open.state}` : n > 0 ? `${n} unreleased` : 'nothing pending'}</Pill>
+        <span className="muted">{r.last ? `last ${r.last.version} · ${ago(r.last.createdAt)} ago` : 'never released'}</span>
+        {n > 0 && !r.open && <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={onPropose}>Propose…</button>}
+      </div>
+      {n > 0 && (
+        <details className="diff">
+          <summary>Done and unreleased ({n})</summary>
+          <ul>{r.unreleased.map(u => <li key={u}>{u}</li>)}</ul>
+        </details>
+      )}
     </div>
   );
 }

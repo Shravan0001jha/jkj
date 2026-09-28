@@ -1,6 +1,6 @@
 import { spawn as spawnProcess } from 'node:child_process';
 import { join } from 'node:path';
-import type { Release, Shippable } from '@jkj/shared';
+import type { Release, ReleaseReadiness, Shippable } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import { gate, requestApproval } from './approvals.js';
 import * as inbox from './inbox.js';
@@ -112,7 +112,18 @@ function liveState(wp: Workplace, r: Release): Release['state'] {
 }
 
 /** The gate, then the real script. Never without an approved item. */
+/** Run an approved release to the end. Tests and the CLI wait; the HTTP route uses `start`. */
 export async function run(wp: Workplace, id: string): Promise<Release> {
+  return start(wp, id).done;
+}
+
+/**
+ * Validate and start an approved release, returning at once with the `running` row; `done`
+ * settles when the script ends. A release takes minutes and the phone reaches us through a relay
+ * with a request timeout, so the route answers 202 and progress arrives as `release.log` /
+ * `release.updated` events (28 Sep, phone end to end).
+ */
+export function start(wp: Workplace, id: string): { release: Release; done: Promise<Release> } {
   const release = get(wp, id);
   if (!release) throw new BadRequest(`No release ${id}`);
   if (release.state === 'running') throw new Conflict(`${id} is already running`);
@@ -121,12 +132,17 @@ export async function run(wp: Workplace, id: string): Promise<Release> {
   const g = gate(wp, spec.action, id);
   if (!g.allowed) throw new BadRequest(`Refused: ${g.reason}`);
 
-  const lines: string[] = [];
-  save(wp, { ...release, state: 'running', log: '' });
+  const running: Release = { ...release, state: 'running', log: '' };
+  save(wp, running);
   log.info('releases', `running ${spec.command} ${spec.args.join(' ')} in ${spec.cwd} (approved in ${g.inboxId})`);
+  return { release: running, done: finish(wp, release, spec) };
+}
+
+async function finish(wp: Workplace, release: Release, spec: ReturnType<typeof scriptFor>): Promise<Release> {
+  const lines: string[] = [];
   const { code } = await spawner(spec, line => {
     lines.push(line);
-    wp.emit({ type: 'release.log', id, line });
+    wp.emit({ type: 'release.log', id: release.id, line });
   });
   const finished: Release = { ...release, state: code === 0 ? 'done' : 'failed', log: lines.join('\n') };
   save(wp, finished);
@@ -143,6 +159,19 @@ function save(wp: Workplace, r: Release): void {
 }
 
 /** Assignments done for this shippable's platforms and not yet in a done release. */
+const SHIPPABLES: Shippable[] = ['desktop-mac', 'desktop-intel', 'windows', 'ios', 'android', 'server-api', 'server-agent', 'website'];
+
+/** Per shippable: what is done and unreleased, the release in flight, the last one done (29 Sep, phone). */
+export function readiness(wp: Workplace): ReleaseReadiness[] {
+  const all = list(wp);
+  return SHIPPABLES.map(shippable => {
+    const mine = all.filter(r => r.shippable === shippable);
+    const open = mine.find(r => r.state === 'proposed' || r.state === 'approved' || r.state === 'running');
+    const last = mine.find(r => r.state === 'done');
+    return { shippable, unreleased: unreleasedFor(wp, shippable), ...(open ? { open } : {}), ...(last ? { last } : {}) };
+  });
+}
+
 export function unreleasedFor(wp: Workplace, shippable: Shippable): string[] {
   const platforms: Record<Shippable, string[]> = {
     'desktop-mac': ['mac'], 'desktop-intel': ['intel', 'mac'], windows: ['windows'], ios: ['ios', 'ipad'], android: ['android'],

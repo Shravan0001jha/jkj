@@ -38,8 +38,9 @@ export function InboxCard({ item, compact = false }: { item: InboxItem; compact?
         <span className="muted">{item.raisedBy} · {ago(item.createdAt)} ago</span>
       </div>
 
-      {open || !compact ? (
-        <div className="ibody"><Markdown text={item.body} /></div>
+      <p className="oneline">{item.summary || item.title}</p>
+      {(open || !compact) && (item.details || item.body) && (item.details ?? item.body).trim() !== (item.summary ?? '').trim() ? (
+        <details className="more"><summary>Details</summary><div className="ibody"><Markdown text={item.details ?? item.body} /></div></details>
       ) : null}
 
       {typeof item.context['diff'] === 'string' && item.context['diff'] && (

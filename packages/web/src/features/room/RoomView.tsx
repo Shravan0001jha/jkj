@@ -50,9 +50,10 @@ function ThreadRow({ thread }: { thread: RoomThread }) {
     <a className="threadrow" href={hrefFor('room', thread.id)}>
       <div className="ar1">
         <Pill tone={thread.state === 'open' ? 'running' : 'done'}>{thread.state}</Pill>
-        <span className="rowtitle">{thread.title}</span>
+        <span className="rowtitle">{thread.headline || thread.title}</span>
         {thread.escalations.length > 0 && <span className="subchip">{thread.escalations.length} escalated</span>}
       </div>
+      {thread.headline && thread.headline !== thread.title && <div className="subtitle">{thread.title}</div>}
       <div className="threadmeta">
         <span>{thread.messageCount} message{thread.messageCount === 1 ? '' : 's'}</span>
         <span>last {ago(thread.lastAt)} ago</span>
@@ -60,7 +61,7 @@ function ThreadRow({ thread }: { thread: RoomThread }) {
         {thread.charterIds.map(c => <span key={c} className="chip">{c}</span>)}
         {thread.participants.map(p => <span key={p} className="chip faint">@{p}</span>)}
       </div>
-      {thread.summary && <div className="muted" style={{ marginTop: 4 }}>{thread.summary}</div>}
+      {thread.summary && thread.summary !== thread.headline && <div className="muted" style={{ marginTop: 4 }}>{thread.summary}</div>}
     </a>
   );
 }
@@ -102,6 +103,7 @@ function ThreadView({ thread, messages }: { thread: RoomThread; messages: RoomMe
           <Pill tone={thread.state === 'open' ? 'running' : 'done'}>{thread.state}</Pill>
           <span className="muted">opened by {thread.createdBy} · {ago(thread.createdAt)} ago</span>
         </div>
+        {thread.headline && thread.headline !== thread.title && <p className="oneline">{thread.headline}</p>}
         <div className="chips" style={{ marginTop: 6 }}>
           {thread.charterIds.map(c => <span key={c} className="chip">{c}</span>)}
           {thread.participants.map(p => <a key={p} className="chip faint" href={hrefFor('employee', p)}>@{p}</a>)}

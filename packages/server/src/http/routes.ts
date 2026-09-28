@@ -11,6 +11,7 @@ import * as work from '../services/work.js';
 import * as inbox from '../services/inbox.js';
 import * as proposals from '../services/proposals.js';
 import * as releases from '../services/releases.js';
+import * as requests from '../services/requests.js';
 import * as spend from '../services/spend.js';
 import * as health from '../services/health.js';
 import * as views from '../services/views.js';
@@ -20,7 +21,9 @@ import * as features from '../services/features.js';
 import * as digest from '../services/digest.js';
 import type { Telegram } from '../services/telegram.js';
 import type { Tunnel } from '../services/tunnel.js';
+import type { Push } from '../services/push.js';
 import { isLoopback } from './auth.js';
+import { log } from '../util/logger.js';
 import { route as routeThings } from '../services/ownership.js';
 import { coverage } from '../services/requirements.js';
 import { commitOrg, parseCharter, renderCharter, writeCharter } from '../services/org.js';
@@ -48,9 +51,12 @@ export interface RouterDeps {
   auth: Auth;
   telegram?: Telegram;
   tunnel?: Tunnel | null;
+  push?: Push;
+  /** Boots, uptime, the tunnel's stats and the watchdog's state for /api/health (docs/RESILIENCE-workplace.md §5). */
+  resilience?: () => unknown;
 }
 
-export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps) {
+export function createRouter({ config, wp, auth, telegram, tunnel, push, resilience }: RouterDeps) {
   const startedAt = Date.now();
   const r = (method: string, pattern: string, handler: Handler): Route => ({
     method,
@@ -65,7 +71,8 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
         ok: true, name: 'jkj', version: config.version,
         uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
         claudeHome: home.present ? home.configDir : null,
-        workplace: { dataDir: config.workplaceDir, capInr: spend.capFor(wp), day: spend.dayOf(), telegram: config.telegram, published: tunnel ? tunnel.status : 'not-configured' },
+        workplace: { dataDir: config.workplaceDir, capInr: spend.capFor(wp), day: spend.dayOf(), telegram: config.telegram, published: tunnel ? tunnel.status : 'not-configured', push: push ? push.status() : { enabled: false, sentToday: 0, suppressedToday: 0 } },
+        ...(resilience ? { resilience: resilience() } : {}),
       });
     }),
 
@@ -115,6 +122,14 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
     /* ---------- employees ---------- */
     r('GET', '/api/employees', (_req, res) => json(res, 200, wp.org.employees.map(e => ({ ...e, state: employees.stateOf(wp, e.id) })))),
     r('GET', '/api/employees/:id', (_req, res, _url, [id]) => json(res, 200, views.employeeDetail(wp, dec(id)))),
+    // The default Talk: the Chief of Staff (29 Sep, phone).
+    r('POST', '/api/talk', async (req, res) => {
+      const body = await readJson(req);
+      const { text, attachments } = validateMessage(body);
+      const cos = features.chiefOfStaff(wp);
+      if (!cos) throw new BadRequest('No Chief of Staff in the organisation.');
+      json(res, 201, employees.talk(wp, cos, text, attachments, { probe: body['probe'] === true }));
+    }),
     r('POST', '/api/employees/:id/talk', async (req, res, _url, [id]) => {
       const body = await readJson(req);
       const { text, attachments } = validateMessage(body);
@@ -206,6 +221,13 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
     }),
     r('POST', '/api/work/:id/start', (_req, res, _url, [id]) => json(res, 201, employees.assign(wp, dec(id)))),
 
+    /* ---------- the owner's requests ---------- */
+    r('GET', '/api/requests', (_req, res) => json(res, 200, requests.list(wp))),
+    r('POST', '/api/requests', async (req, res) => {
+      const body = await readJson(req);
+      json(res, 201, requests.create(wp, { text: str(body['text'], ''), platformIds: strs(body['platformIds']) }));
+    }),
+
     /* ---------- features ---------- */
     r('GET', '/api/features', (_req, res) => json(res, 200, views.featureBoard(wp))),
     r('GET', '/api/features/pivot', (_req, res, url) => {
@@ -267,20 +289,30 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
         proposedBy: typeof body['proposedBy'] === 'string' ? body['proposedBy'] : 'owner',
       }));
     }),
+    r('GET', '/api/proposals/:id', (_req, res, _url, [id]) => {
+      const proposal = proposals.get(wp, dec(id));
+      if (!proposal) throw new NotFound(`No proposal ${dec(id)}`);
+      const item = inbox.get(wp, proposal.inboxId);
+      if (!item) throw new NotFound(`No Inbox item for ${proposal.id}`);
+      json(res, 200, { proposal, item });
+    }),
     r('POST', '/api/proposals/:id/apply', (_req, res, _url, [id]) => json(res, 200, proposals.apply(wp, dec(id)))),
 
     /* ---------- releases ---------- */
+    r('GET', '/api/releases/ready', (_req, res) => json(res, 200, releases.readiness(wp))),
     r('GET', '/api/releases', (_req, res) => json(res, 200, releases.list(wp))),
     r('POST', '/api/releases', async (req, res) => {
       const body = await readJson(req);
       const shippable = str(body['shippable']) as Shippable;
       json(res, 201, releases.propose(wp, shippable, str(body['version']), typeof body['by'] === 'string' ? body['by'] : 'owner'));
     }),
-    r('POST', '/api/releases/:id/run', async (_req, res, _url, [id]) => json(res, 200, await releases.run(wp, dec(id)))),
+    // 202: the script runs on; a release takes minutes and the relay's request timeout would drop a 200.
+    r('POST', '/api/releases/:id/run', async (_req, res, _url, [id]) => { const { release, done } = releases.start(wp, dec(id)); done.catch(err => log.warn('releases', String(err))); json(res, 202, release); }),
 
     /* ---------- published access: the emergency off switch ---------- */
     r('POST', '/api/relay/off', (req, res) => {
-      if (!isLoopback(req.socket.remoteAddress)) throw new BadRequest('The off switch is pressed from this Mac (or Telegram: "off").');
+      // A relay request arrives on loopback too (the tunnel forwards it); the header the tunnel sets keeps the phone out (as for pairing).
+      if (!isLoopback(req.socket.remoteAddress) || req.headers['x-via-tunnel']) throw new BadRequest('The off switch is pressed from this Mac (or Telegram: "off").');
       if (!tunnel) return json(res, 200, { published: 'not-configured' });
       tunnel.off();
       json(res, 200, { published: tunnel.status });

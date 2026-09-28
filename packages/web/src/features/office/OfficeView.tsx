@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import type { EmployeeCard as Card } from '@jkj/shared';
-import { hrefFor, useStore } from '../../state/store.js';
+import { hrefFor, talkToChiefOfStaff, useStore } from '../../state/store.js';
 import { ago, firstLines, inr, pct, stateLabel, stateTone, workTone } from '../../lib/format.js';
 import { Pill } from '../../components/Pill.js';
 import { CoverageBar } from '../../components/CoverageBar.js';
@@ -14,9 +15,11 @@ export function OfficeView() {
   if (!office) return <div className="pane"><p className="lede">Reading the office…</p></div>;
 
   const { coverage, spend, counts } = office;
+  const cos = office.units.flatMap(u => u.employees).find(c => c.employee.id === office.chiefOfStaff)?.employee;
 
   return (
     <div className="pane">
+      {office.chiefOfStaff && <TalkToChief id={office.chiefOfStaff} name={cos?.name ?? office.chiefOfStaff} />}
       <div className="stats">
         <a className={`stat${office.needsYou > 0 ? ' hot' : ''}`} href={hrefFor('inbox')}>
           <b>{office.needsYou}</b><span>need{office.needsYou === 1 ? 's' : ''} you</span>
@@ -53,6 +56,28 @@ export function OfficeView() {
         </section>
       ))}
     </div>
+  );
+}
+
+/** The default Talk: one line to the Chief of Staff, then her page opens with the session. */
+function TalkToChief({ id, name }: { id: string; name: string }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    const value = text.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    await talkToChiefOfStaff(value);
+    setBusy(false);
+    setText('');
+  };
+  return (
+    <form className="row talkchief" onSubmit={e => void submit(e)}>
+      <input className="wide" value={text} onChange={e => setText(e.target.value)} placeholder={`Talk to ${name}…`} aria-label={`Talk to ${name}`} disabled={busy} />
+      <button className="btn sm primary" type="submit" disabled={busy || !text.trim()}>{busy ? 'Starting…' : 'Talk'}</button>
+      <a className="muted" href={hrefFor('employee', id)}>her page →</a>
+    </form>
   );
 }
 

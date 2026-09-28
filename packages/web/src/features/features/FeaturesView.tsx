@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import type { FeatureState, PivotRows, WorkItem } from '@jkj/shared';
-import { hrefFor, loadPivot, loadRequirements, useStore } from '../../state/store.js';
-import { ago, workTone } from '../../lib/format.js';
+import type { FeatureState, PivotItem, PivotRows, RequestStatus, WorkItem } from '@jkj/shared';
+import { hrefFor, loadPivot, loadRequirements, navigate, sendRequest, useStore } from '../../state/store.js';
+import { GrowTextarea } from '../../components/GrowTextarea.js';
+import { ago, stageTone, workTone } from '../../lib/format.js';
 import { Pill } from '../../components/Pill.js';
 import { CoverageBar } from '../../components/CoverageBar.js';
 import { FeatureDetail } from './FeatureDetail.js';
 
 const COLUMNS: FeatureState[] = ['stated', 'specced', 'decomposed', 'in-progress', 'built', 'released'];
+const PLATFORMS = ['mac', 'intel', 'windows', 'ios', 'ipad', 'android', 'server', 'web'];
 
 /**
  * The board, the pivot (features × charter / platform / team), and the
@@ -16,6 +18,7 @@ export function FeaturesView() {
   const route = useStore(s => s.route);
   const board = useStore(s => s.features);
   const [tab, setTab] = useState<'board' | 'pivot' | 'requirements'>('board');
+  const [requesting, setRequesting] = useState(false);
 
   if (route.id) return <div className="pane"><FeatureDetail id={route.id} /></div>;
 
@@ -29,15 +32,18 @@ export function FeaturesView() {
             <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>{t}</button>
           ))}
         </div>
-        <a className="btn sm primary" href={hrefFor('assign')}>State a feature</a>
+        <button className="btn sm primary" onClick={() => setRequesting(v => !v)}>{requesting ? 'Cancel' : 'New request'}</button>
+        <a className="btn sm ghost" href={hrefFor('assign')}>State a feature</a>
       </div>
+
+      {tab === 'board' && requesting && <NewRequest onDone={() => setRequesting(false)} />}
 
       {tab === 'board' && board && (
         <div className="board">
           {COLUMNS.map(col => (
             <div key={col} className="column">
               <h4><Pill tone={workTone(col)}>{col}</Pill><span className="n">{board.byState[col] ?? 0}</span></h4>
-              {board.features.filter(f => f.state === col).map(f => <FeatureCard key={f.id} feature={f} />)}
+              {board.features.filter(f => f.state === col).map(f => <FeatureCard key={f.id} feature={f} status={board.status?.[f.id]} />)}
             </div>
           ))}
         </div>
@@ -48,12 +54,45 @@ export function FeaturesView() {
   );
 }
 
-function FeatureCard({ feature }: { feature: WorkItem }) {
+function FeatureCard({ feature, status }: { feature: WorkItem; status?: RequestStatus }) {
   return (
     <a className="fcard" href={hrefFor('features', feature.id)}>
       <b>{feature.title}</b>
+      {status && <span className="status"><Pill tone={stageTone(status.stage)}>{status.stage}</Pill><span>{status.line}</span></span>}
       <span className="muted">{feature.platformIds.join(', ') || 'no platform'} · {feature.requirementIds.length} req · {ago(feature.updatedAt)} ago</span>
     </a>
+  );
+}
+
+/** The owner's request in his own words: Asha writes the spec and routes it. */
+function NewRequest({ onDone }: { onDone: () => void }) {
+  const [text, setText] = useState('');
+  const [platforms, setPlatforms] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const toggle = (p: string): void => setPlatforms(l => (l.includes(p) ? l.filter(x => x !== p) : [...l, p]));
+  const submit = async (): Promise<void> => {
+    if (!text.trim() || busy) return;
+    setBusy(true);
+    const id = await sendRequest(text.trim(), platforms);
+    setBusy(false);
+    if (id) { onDone(); navigate('features', id); }
+  };
+  return (
+    <form className="newthread" onSubmit={e => { e.preventDefault(); void submit(); }}>
+      <div className="f"><label>What you want, in your words</label>
+        <GrowTextarea value={text} onChange={setText} placeholder="e.g. Iris should greet me each morning with the weather. One sentence, no bubble reopening." rows={3} minHeight={70} maxHeight={280} autoFocus />
+      </div>
+      <div className="f"><label>Platforms (optional)</label>
+        <div className="chips">
+          {PLATFORMS.map(p => <button type="button" key={p} className={`chip toggle${platforms.includes(p) ? ' on' : ''}`} onClick={() => toggle(p)}>{p}</button>)}
+        </div>
+      </div>
+      <div className="row">
+        <button className="btn sm primary" type="submit" disabled={busy || !text.trim()}>{busy ? 'Sending…' : 'Send to Asha'}</button>
+        <button className="btn sm ghost" type="button" onClick={onDone}>Cancel</button>
+        <span className="muted">Asha writes the spec, routes it through the ownership map, and the status shows here.</span>
+      </div>
+    </form>
   );
 }
 
@@ -86,6 +125,7 @@ function PivotPanel() {
                           <span title={Object.entries(cell.byState).map(([s, n]) => `${s}: ${n}`).join(', ')}>
                             <b>{cell.total}</b>
                             <small>{Object.entries(cell.byState).map(([s, n]) => `${n} ${s}`).join(' · ')}</small>
+                            {(cell.items ?? []).map(item => <PivotItemRow key={item.id} item={item} />)}
                           </span>
                         ) : '·'}
                       </td>
@@ -98,6 +138,22 @@ function PivotPanel() {
         </div>
       )}
     </>
+  );
+}
+
+/** One assignment in a pivot cell: where it is, what it showed, where to see it. */
+function PivotItemRow({ item }: { item: PivotItem }) {
+  const e = item.evidence;
+  return (
+    <span className="pitem">
+      <a href={item.href}>{item.title}</a>
+      <Pill tone={workTone(item.state)}>{item.state}</Pill>
+      {e && (
+        <small className="pev">
+          tests: {e.tests} · commits: {e.commits.length}{e.commits.slice(0, 3).map(c => <code key={c}>{c.slice(0, 7)}</code>)} · live: {e.liveVerified} · not verified: {e.notVerified}
+        </small>
+      )}
+    </span>
   );
 }
 

@@ -31,6 +31,24 @@ organisation exits with the running pid; a start on a taken port exits; a stop t
 after 20 s. If a start says "already running" and nothing is, the pid in the file is dead and the
 next start takes over.
 
+## Where things stand (29 Sep, night shift)
+
+Live until the coordinated cutover: the D16/D17 build of 00:46 (pid in `workplace.lock`). On the
+branch, waiting for that cutover: the 202 release run and the off-switch fix; the phone contract
+(requests, proposal detail, release readiness, pivot evidence, `/api/talk`); the web for all of it
+and for summary/details/headline; push (`iris-workplace-push`) and Mac resilience
+(`iris-workplace-resilience`, launchd agent + watchdog) merged. The phone end-to-end test runs by
+default now (`test/phone-e2e.test.ts`: real relay from `~/claude-dev-deploy`, real tunnel, a bearer
+session; `WORKPLACE_PHONE_E2E=0` skips it).
+
+## The owner's requests
+
+"New request" (Features board, or POST `/api/requests` from the phone) takes free text. The first
+line becomes the feature's title, Asha is asked for the spec, and the feature carries a status the
+owner can read at every stage: with Asha → specced → routed → building / review / blocked → built →
+released, one line each ("2 of 3 building, 1 in review"). `POST /api/talk` talks to Asha without
+picking anyone.
+
 ## Who talks to the owner
 
 The Workplace sends only its own automatic pings: Inbox items, enrolment and sign-in codes, new-device and
@@ -158,3 +176,23 @@ Put each App's `<slug>.json` (`appId`, `installationId`, `org`, `repos`) and `<s
 under `~/iris-ops/workplace/apps/`. The Workplace mints installation tokens and does PR plumbing;
 it never shows a key or a token. The list of Apps, repos and permissions is `docs/LLD-workplace.md`
 §12.
+
+## Keeping it up when nobody is at the Mac
+
+The Workplace runs as a launchd user agent (`~/Library/LaunchAgents/com.irisforu.workplace.plist`):
+it starts at login, restarts if it dies, keeps the Mac awake for as long as it runs
+(`caffeinate -i -s`, the display may sleep), and logs to `~/Library/Logs/IrisWorkplace/` (rotated).
+Only one copy runs (`workplace.lock`); a manual `npm start` and the agent cannot coexist.
+
+```bash
+scripts/workplace-service.sh status      # launchd, process, lock, caffeinate, /api/health, log tail
+scripts/workplace-service.sh logs -f
+scripts/workplace-service.sh restart     # launchd starts it again at once
+scripts/workplace-service.sh install     # (re)render and load;  uninstall = unload and remove
+```
+
+If the tunnel to the relay is down for more than five minutes, or the process keeps restarting,
+one Telegram ping arrives and one more when it is back. `/api/health` → `resilience` shows the
+last tunnel connect, uptime and the restart count. Settings the owner must keep (we change none):
+`docs/RESILIENCE-workplace.md` §6 — lid open, plugged in, "Prevent automatic sleeping on power
+adapter" on, automatic macOS updates off; after a reboot someone must log in (FileVault).

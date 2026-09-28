@@ -13,8 +13,9 @@ import { testWorkplace } from './fakes/workplace.js';
 /** Budget is real money only (HLD D9b). */
 
 const tick = () => new Promise(r => setTimeout(r, 5));
-const day = '2026-09-28';
-const at = `${day}T05:00:00.000Z`;
+// Today, whatever today is: the employee's state reads today's ledger, so a fixed date fails after midnight.
+const day = spend.dayOf();
+const at = new Date().toISOString();
 
 test('subscription usage is free: tracked, shown, never paused, never against the cap', async () => {
   const { wp, tmp } = testWorkplace({ WORKPLACE_USD_INR: '100', WORKPLACE_CAP_INR: '100' });

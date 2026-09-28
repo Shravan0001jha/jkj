@@ -133,15 +133,20 @@ test('a release waits in the Inbox, runs only after approval, and streams its lo
 
     const logs: string[] = [];
     const ws = new WebSocket(`${b.base.replace('http', 'ws')}/ws`);
-    ws.on('message', raw => { const e = JSON.parse(String(raw)) as { type: string; line?: string }; if (e.type === 'release.log') logs.push(e.line!); });
+    const states: string[] = [];
+    ws.on('message', raw => { const e = JSON.parse(String(raw)) as { type: string; line?: string; release?: Release }; if (e.type === 'release.log') logs.push(e.line!); if (e.type === 'release.updated') states.push(e.release!.state); });
     await new Promise(r => ws.once('open', r));
 
     const answered = await call<InboxItem>(b.base, 'POST', `/api/inbox/${rel.body.inboxId}/answer`, { optionId: 'approve' });
     assert.equal(answered.body.state, 'answered');
+    // 202 and `running` at once (a release outlives the relay's request timeout); `done` arrives as an event.
     const ran = await call<Release>(b.base, 'POST', `/api/releases/${rel.body.id}/run`);
-    assert.equal(ran.body.state, 'done');
+    assert.equal(ran.status, 202);
+    assert.equal(ran.body.state, 'running');
+    for (let i = 0; i < 50 && !states.includes('done'); i++) await tick();
+    assert.ok(states.includes('done'), JSON.stringify(states));
+    assert.equal((await call<Release[]>(b.base, 'GET', '/api/releases')).body.find(r => r.id === rel.body.id)!.state, 'done');
     assert.ok(spawned[0]!.endsWith('/scripts/release-iris.sh') && spawned.length === 1);
-    await tick();
     assert.deepEqual(logs, ['line one']);
     ws.close();
   } finally {

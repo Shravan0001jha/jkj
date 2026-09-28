@@ -7,10 +7,13 @@ import { attachSocket } from './ws/hub.js';
 import { findClaudeHome } from './runtime/claude-home.js';
 import { createWorkplace, type Workplace } from './services/workplace.js';
 import { Telegram } from './services/telegram.js';
+import { Push } from './services/push.js';
 import * as digestService from './services/digest.js';
 import * as features from './services/features.js';
 import * as cos from './services/cos.js';
 import * as lock from './services/lock.js';
+import * as boots from './services/boots.js';
+import { Watchdog } from './services/watchdog.js';
 import * as room from './services/room.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
@@ -49,6 +52,10 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
 
   const wp = createWorkplace(config);
   log.info('boot', `${wp.org.employees.length} employees, ${wp.org.charters.size} charters, ${wp.requirements().length} requirements in ${config.workplaceDir}`);
+  // Every start is counted: the phone's health check shows restarts; the watchdog reports a crash loop.
+  const startedAt = Date.now();
+  const history = boots.recordBoot(wp.db, new Date(startedAt));
+  log.info('boot', `boot #${history.total} (${boots.bootsWithin(history, startedAt, 24 * 60 * 60_000)} in the last 24 h)`);
 
   // The decisions the definition leaves open go to the owner, once.
   seedDecisions(wp);
@@ -74,14 +81,35 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   try { const made = room.seedThreads(wp); if (made.length) log.info('boot', `seeded ${made.length} Team Room threads from the 27 Sep plans`); } catch (err) { log.warn('boot', `room seed failed: ${err instanceof Error ? err.message : err}`); }
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
-  const tunnel = createTunnel(config, telegram);
-  const server = createHttpServer({ config, wp, auth, telegram, tunnel });
+  // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
+  const push = new Push(wp, { send: intent => tunnel?.push(intent) ?? false });
+  const tunnel = createTunnel(config, telegram, push);
+  // The watchdog: the tunnel down for more than five minutes, or a crash loop, is one Telegram ping
+  // and one "back" ping, through the Workplace's own alert path (docs/RESILIENCE-workplace.md §4).
+  const watchdog = new Watchdog({
+    link: () => (tunnel ? tunnel.status : 'not-configured'),
+    notify: text => telegram.notify(text),
+    boots: boots.marks(wp.db),
+    bootedAt: startedAt,
+  });
+  const resilience = () => ({
+    startedAt: new Date(startedAt).toISOString(),
+    uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+    boots: { total: history.total, last24h: boots.bootsWithin(history, Date.now(), 24 * 60 * 60_000), recent: history.recent.slice(-5) },
+    tunnel: tunnel ? tunnel.stats : null,
+    watchdog: watchdog.state,
+  });
+  const server = createHttpServer({ config, wp, auth, telegram, tunnel, push, resilience });
   const hub = attachSocket(server, wp, auth);
   await listen(server, config);
+  // The tunnel forwards to the port actually bound (config.port may be 0 in tests).
+  tunnel?.setLocal(`http://127.0.0.1:${(server.address() as { port: number }).port}`);
 
   telegram.attach();
+  if (config.push && tunnel) push.attach(); else log.info('push', config.push ? 'not published: no relay, so no push' : 'off (--no-push)');
   if (config.telegram) telegram.start();
   tunnel?.start();
+  watchdog.start();
 
   const stallTimer = setInterval(() => {
     health.handleParkedApprovals(wp);
@@ -100,6 +128,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   return {
     server, wp, telegram,
     stop: async () => {
+      push.stop();
+      watchdog.stop();
       tunnel?.stop();
       clearInterval(stallTimer);
       clearInterval(cosTimer);
@@ -136,7 +166,7 @@ function statusLine(wp: Workplace): string {
  * The outbound tunnel to the relay, when ~/iris-ops/workplace/relay.env
  * names one (RELAY_URL and TUNNEL_SECRET). Without it nothing is published.
  */
-function createTunnel(config: Config, telegram: Telegram): Tunnel | null {
+function createTunnel(config: Config, telegram: Telegram, push: Push): Tunnel | null {
   const url = readRelayUrl(config.opsDir);
   const secret = readTunnelSecret(config.opsDir);
   if (!url || !secret) { log.info('tunnel', 'not published: no relay.env'); return null; }
@@ -145,6 +175,7 @@ function createTunnel(config: Config, telegram: Telegram): Tunnel | null {
     local: `http://127.0.0.1:${config.port}`,
     notify: text => telegram.notify(text),
     onStatus: status => log.info('tunnel', `published: ${status}`),
+    onPushResult: result => push.result(result),
   });
 }
 
