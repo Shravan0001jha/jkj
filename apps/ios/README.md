@@ -71,13 +71,15 @@ mode against a mock), `WORKPLACE_URL` (LAN mode), `WORKPLACE_TOKEN` (skip sign-i
   with `TEST_RUNNER_REAL_URL` + `TEST_RUNNER_REAL_PAIR_CODE` (pair with the real server) and
   `TEST_RUNNER_REAL_TALK=<employee>` (one real talk).
 
+## Verified (29 Sep)
+
+132 unit tests, 15 UI tests against the mock, every screen screenshotted in light/dark/XXXL, the
+live relay's sign-in pages in the real sheet, and a lossy-network run (see `HANDOFF.md`).
+
 ## Not built yet
 
-- The relay itself is not deployed; the sign-in flow is verified against `mock/server.mjs`
-  (`/login?app=1`, `/login/enrol?app=1`, `--mac-offline`). The live relay test follows deployment.
-- APNs push: alerts reach the phone only while the app is open or was just backgrounded
-  (local notifications while iOS keeps the socket alive). Real push needs a server-side APNs
-  sender and a device-token registration route in the contract.
+- A real push end to end (the app side is complete; needs the App ID capability and a TestFlight build).
+- Health `resilience` / `workplace.push` in Settings.
 - Tailscale: the app parses tailnet addresses, but ATS only allows plain HTTP to local
   addresses; use `tailscale serve` (HTTPS) or add an `NSExceptionDomains` entry when the tailnet
   exists.

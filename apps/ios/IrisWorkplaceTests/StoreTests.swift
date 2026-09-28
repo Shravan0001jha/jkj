@@ -348,6 +348,14 @@ final class CompactTextTests: XCTestCase {
         XCTAssertTrue(long.hasDetails)
     }
 
+    func testAHeadingAloneCarriesTheNextLine() {
+        let c = CompactText(text: "## Plan\n1. Add an `errand` expert that validates the instruction.\n2. Run it through the act-then-ack path.")
+        XCTAssertEqual(c.line, "Plan — 1. Add an `errand` expert that validates the instruction.")
+        XCTAssertEqual(c.details, "2. Run it through the act-then-ack path.")
+        XCTAssertEqual(CompactText.plain("### Done"), "Done")
+        XCTAssertEqual(CompactText.plain("- bullet"), "bullet")
+    }
+
     func testServerSummaryWinsWhenPresent() {
         let c = CompactText(text: "Long body\nwith lines", summary: "Short summary", details: "Long body\nwith lines")
         XCTAssertEqual(c.line, "Short summary")

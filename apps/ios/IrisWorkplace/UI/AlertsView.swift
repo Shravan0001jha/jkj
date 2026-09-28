@@ -10,7 +10,7 @@ struct AlertsView: View {
             List {
                 if model.alerts.alerts.isEmpty {
                     EmptyState(symbol: "bell", title: "No alerts yet",
-                               text: "When an employee needs you, is blocked, or the spend cap is reached, it shows here and as a banner. With the app closed, alerts need push (not built yet).")
+                               text: "When an employee needs you, is blocked, or the spend cap is reached, it shows here and as a banner. With the app closed, Inbox items that need you arrive as notifications.")
                 }
                 ForEach(model.alerts.alerts) { a in
                     let g = a.event.level.glyph

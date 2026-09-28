@@ -302,7 +302,12 @@ struct NeedsYouSection: View {
     @Environment(AppModel.self) private var model
     let items: [InboxItem]
     let name: String
-    @State private var collapsed = false
+    /// Collapsed by default when the list would push the conversation off the screen.
+    @State private var collapsed: Bool
+    init(items: [InboxItem], name: String) {
+        self.items = items; self.name = name
+        _collapsed = State(initialValue: items.count > 2)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

@@ -75,12 +75,14 @@ struct RequestStatusRow: View {
             }
             Text(status.line).font(.subheadline).foregroundStyle(.secondary)
             if !status.assignments.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(status.assignments.prefix(4)) { a in
-                        Pill(text: (a.employeeId.map { model.employeeName($0) } ?? model.charterTitle(a.charterId)) + " · " + a.state.glyph.label, symbol: a.state.glyph.symbol, tint: a.state.glyph.tint)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(status.assignments) { a in
+                            Pill(text: (a.employeeId.map { model.employeeName($0) } ?? model.charterTitle(a.charterId)) + " · " + a.state.glyph.label, symbol: a.state.glyph.symbol, tint: a.state.glyph.tint)
+                                .lineLimit(1).fixedSize()
+                        }
                     }
                 }
-                .font(.caption2)
             }
             Text(Format.ago(feature.updatedAt)).font(.caption2).foregroundStyle(.tertiary)
         }

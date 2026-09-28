@@ -63,7 +63,7 @@ struct ConnectionStrip: View {
         case .accessOff:
             strip("Access is switched off — turn it on from your Mac or Telegram", symbol: "lock.slash", tint: .red)
         case .offline(let reason, let retryAt):
-            let when = retryAt.map { " · retrying \($0.formatted(.relative(presentation: .numeric)))" } ?? ""
+            let when = retryAt.map { $0.timeIntervalSinceNow > 1 ? " · retrying \($0.formatted(.relative(presentation: .numeric)))" : " · retrying now" } ?? ""
             strip("\(reason)\(when)", symbol: "wifi.exclamationmark", tint: .orange)
         }
     }

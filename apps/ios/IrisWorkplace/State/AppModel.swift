@@ -452,14 +452,15 @@ final class AppModel {
             // Was it the network, the Mac, or the session? One health call tells.
             Task { [weak self] in
                 guard let self else { return }
-                switch await self.probe(rest) {
+                let result = await self.probe(rest)
+                // The probe can outlast the socket's own reconnect: never overwrite a live socket's state.
+                guard self.socket === socket, socket.state != .open else { return }
+                switch result {
                 case .macOffline, .accessOff:
                     socket.stop()
                     self.waitForMac(rest, socket: socket)
                 case .unauthorized:
                     socket.stop()
-                case .online:
-                    self.connection = .offline(reason: "Connection lost", retryAt: retryAt)
                 default:
                     self.connection = .offline(reason: "Connection lost", retryAt: retryAt)
                 }

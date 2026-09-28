@@ -72,7 +72,7 @@ struct SettingsView: View {
                 }
                 Section {
                     LabeledContent("App", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
-                    Text("Alerts reach this phone while the app is open or was just backgrounded. Notifications with the app closed need push (APNs), which is not built yet.")
+                    Text("Alerts reach this phone while the app is open or was just backgrounded. With the app closed, Inbox items that need you arrive as notifications through the relay.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } header: { SectionHeader(text: "About") }
             }

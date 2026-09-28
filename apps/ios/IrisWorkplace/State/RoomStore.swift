@@ -122,8 +122,14 @@ struct CompactText: Equatable {
         }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { String($0) }
         let firstIndex = lines.firstIndex { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? 0
-        let first = lines.indices.contains(firstIndex) ? lines[firstIndex] : text
-        let rest = lines.dropFirst(firstIndex + 1).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        var first = Self.plain(lines.indices.contains(firstIndex) ? lines[firstIndex] : text)
+        var restLines = Array(lines.dropFirst(firstIndex + 1))
+        // A heading alone ("## Plan") says nothing: carry the first content line with it.
+        if first.count < 24, let next = restLines.firstIndex(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) {
+            first += " — " + Self.plain(restLines[next])
+            restLines.removeSubrange(0...next)
+        }
+        let rest = restLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         if first.count > 160 {
             line = String(first.prefix(157)).trimmingCharacters(in: .whitespaces) + "…"
             self.details = text
@@ -134,6 +140,14 @@ struct CompactText: Equatable {
     }
 
     var hasDetails: Bool { details != nil }
+
+    /// Markdown heading and list markers off a line, for the one-line form.
+    static func plain(_ line: String) -> String {
+        var s = line.trimmingCharacters(in: .whitespaces)
+        while s.hasPrefix("#") { s.removeFirst() }
+        if s.hasPrefix("- ") || s.hasPrefix("* ") { s.removeFirst(2) }
+        return s.trimmingCharacters(in: .whitespaces)
+    }
 }
 
 

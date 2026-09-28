@@ -143,3 +143,43 @@ only how the app gets a credential and what "offline" means.
   `WORKPLACE_TOKEN` still select LAN mode for scripted runs. `mock/server.mjs` serves `/login?app=1`
   and `/login/enrol?app=1` as a page whose button redirects to the callback, and `--mac-offline`
   makes it answer like a relay whose Mac is down.
+
+## The 28–29 Sep screens (for the Android agent: same shapes, same words)
+
+Tabs: **Office · Inbox · Talk · Room · Features**. Alerts, Spend, Releases, Settings and New request
+are sheets reached from the Office toolbar (bell, `+`, `…`).
+
+- **Office** header: four counts (need you / working / blocked / stalled, each glyph + colour), the
+  spend meter (real money against the cap; "Subscription: N turns, free" beside it), coverage.
+  Cards show the state reason under the state ("Paused — daily budget reached …") and a
+  "Stalled since …" line on the current work.
+- **Talk** opens on the Chief of Staff by default; "Someone else" (top-left) shows the picker. The
+  employee page starts with a collapsible **Needs you** box: each open item that concerns this
+  employee, what approve and deny do, and its option buttons (same `AnswerOptions` as the Inbox,
+  same confirm/note/device-owner rules). Assistant lines are one line; tap or chevron expands.
+- **Inbox item**: summary line + Details expander (D16), then *Who and what* (raised by, affects,
+  if you approve / if you refuse), Links (a `#/room/<id>` link opens the thread), Context, then the
+  options. Org-change items add "Read the change as a diff" → proposal view (reason, unified diff
+  coloured by line, lint of the result, before→after delta, the same options).
+- **Room**: thread rows = title, `headline` (one line), then "who · N msg · when · N for you ·
+  charters". Thread view: header with escalation pills, one-line messages (owner's tinted and
+  marked "You"; `@name` in accent), tap expands, composer with live mention pills.
+- **Features**: segments Requests / Board / Pivot. Requests = newest first, each with the
+  `RequestStatus` stage glyph, `line`, and one pill per assignment. Board groups by state. Pivot
+  cells are tappable → the items behind the cell with evidence pills (tests, commits, live, not
+  verified) and a link to the assignee's page. Feature detail has "Where it stands" and Assign.
+- **New request** (`+`): one text box, optional platforms, "Send to Asha"; the sheet then shows the
+  status line, which keeps updating.
+- **Releases** sheet: per shippable, unreleased commits, the open release (Proposed → "Approve or
+  reject" opens the Inbox item; Approved → Run, device-owner gated), the last release.
+- **Spend** sheet: real money by source and basis (estimates labelled), by employee; then
+  "Subscription usage (free)" with turns, tokens, list-price equivalent marked "not billed", and
+  the rate-limit windows as bars.
+- **Connection states**, in order of precedence: no credential → Sign in; 401 → "Your session has
+  ended / Sign in again"; 503 "switched off" → "Access is switched off"; 503 "Mac offline" / WS
+  1013 → "Your Mac is offline"; network → orange strip "Connection lost · retrying …"; DNS →
+  "Can't reach work.irisforu.com — check your connection". Data on screen stays; nothing spins
+  forever.
+- **Push** (app side): register on token/sign-in/foreground; categories WP_INBOX (OPEN, DECIDE),
+  WP_ROOM, WP_ALERT; `link` routes like `irisworkplace://…`; DECIDE lands on the options; dangerous
+  options and approval/release/org-change/cap answers need device-owner auth first.

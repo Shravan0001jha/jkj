@@ -438,6 +438,34 @@ final class ReliabilityAndPushTests: XCTestCase {
         await expectEventually { self.transports.count == 2 }
     }
 
+    func testASlowProbeNeverOverwritesAReconnectedSocket() async {
+        // Health answers late (a lossy link); the socket reconnects first. The app must stay Online.
+        let gate = AsyncGate()
+        StubURLProtocol.handler = { req in
+            switch req.url!.path {
+            case "/api/health":
+                if gate.armed { gate.wait() }
+                return (200, try! Fixtures.data("health"))
+            case "/api/office": return (200, try! Fixtures.data("office"))
+            case "/api/inbox": return (200, try! Fixtures.data("inbox"))
+            default: return (404, Data(#"{"error":"no"}"#.utf8))
+            }
+        }
+        let m = model()
+        m.start()
+        await expectEventually { self.transports.count == 1 }
+        transports[0].open()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        gate.armed = true
+        transports[0].drop(WorkplaceError.transport("reset"))
+        await expectEventually { self.transports.count == 2 }
+        transports[1].open()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        gate.release()
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(m.connection, .online(version: "0.3.0-mock"), "the late probe must not flip a live socket back to offline")
+    }
+
     func testCloseCode4401IsSessionGoneAnd1013IsMacOffline() async {
         serve()
         let m = model()
@@ -597,4 +625,13 @@ final class NetworkChangeTests: XCTestCase {
         XCTAssertEqual(transports.count, 1, "one socket, not two")
         XCTAssertEqual(StubURLProtocol.recorded.filter { $0.request.url?.path == "/api/health" }.count, 1)
     }
+}
+
+
+/// Holds a URLProtocol handler until released (simulates a slow answer).
+final class AsyncGate: @unchecked Sendable {
+    var armed = false
+    private let sem = DispatchSemaphore(value: 0)
+    func wait() { _ = sem.wait(timeout: .now() + 5) }
+    func release() { sem.signal() }
 }

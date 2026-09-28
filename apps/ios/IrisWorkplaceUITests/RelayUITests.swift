@@ -97,3 +97,29 @@ final class RelayUITests: XCTestCase {
         shot("relay-session-ended")
     }
 }
+
+/// The live relay's sign-in and enrolment pages inside the real ASWebAuthenticationSession sheet.
+/// Looks only: cancels without signing in. Runs with TEST_RUNNER_LIVE_RELAY=1.
+final class LiveRelayPagesUITests: XCTestCase {
+    func testLoginAndEnrolPagesRenderInTheSheet() throws {
+        guard ProcessInfo.processInfo.environment["LIVE_RELAY"] == "1" else { throw XCTSkip("LIVE_RELAY not set") }
+        let app = XCUIApplication()
+        app.launchEnvironment = ["WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_FORGET": "1"]
+        app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for (button, name) in [("Sign in", "live-login-page"), ("First time here? Set up a passkey", "live-enrol-page")] {
+            XCTAssertTrue(app.buttons[button].waitForExistence(timeout: 8))
+            app.buttons[button].tap()
+            let consent = springboard.buttons["Continue"]
+            if consent.waitForExistence(timeout: 6) { consent.tap() }
+            let page = app.webViews.firstMatch
+            XCTAssertTrue(page.waitForExistence(timeout: 20), "the sheet opened for \(button)")
+            let heading = app.webViews.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'Iris Workplace' OR label CONTAINS[c] 'passkey' OR label CONTAINS[c] 'sign in'")).firstMatch
+            XCTAssertTrue(heading.waitForExistence(timeout: 20), "the live page rendered text in the sheet (\(button))")
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
+            let cancel = app.buttons["Cancel"].firstMatch
+            if cancel.waitForExistence(timeout: 3) { cancel.tap() } else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.1)).tap() }
+            XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 8), "back at the sign-in screen, nothing signed in")
+        }
+    }
+}
