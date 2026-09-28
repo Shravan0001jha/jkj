@@ -9,10 +9,32 @@
 import type { Agent } from './types.js';
 import type { Attachment, HealthResponse } from './protocol.js';
 import type {
-  CharterSummary, Coverage, Employee, EmployeeCard, EmployeeSignals, HealthSignals,
-  InboxItem, LintFinding, MapEntry, OrgHistoryEntry, OrgProposal, ProposalKind, Release,
-  Requirement, Role, RouteResult, Shippable, SpendSummary, Unit, WorkItem, WorkKind, WorkState,
-  Evidence, RoomThread, RoomMessage,
+  CharterSummary,
+  Coverage,
+  Employee,
+  EmployeeCard,
+  EmployeeSignals,
+  HealthSignals,
+  InboxItem,
+  LintFinding,
+  MapEntry,
+  OrgHistoryEntry,
+  OrgProposal,
+  ProposalKind,
+  Release,
+  Requirement,
+  Role,
+  RouteResult,
+  Shippable,
+  SpendSummary,
+  Unit,
+  WorkItem,
+  WorkKind,
+  WorkState,
+  Evidence,
+  RoomThread,
+  RoomMessage,
+  AssignmentState,
 } from './workplace.js';
 
 export const WORKPLACE_API = {
@@ -34,9 +56,13 @@ export const WORKPLACE_API = {
   agentMode: (id: string) => `/api/agents/${encodeURIComponent(id)}/mode`,
   agentImage: (id: string, ref: string) =>
     `/api/agents/${encodeURIComponent(id)}/image?ref=${encodeURIComponent(ref)}`,
+  /** The default Talk: the Chief of Staff. */
+  talk: '/api/talk',
+  requests: '/api/requests',
   work: (q?: WorkQuery) => withQuery('/api/work', q ? { ...q } : undefined),
   workItem: (id: string) => `/api/work/${encodeURIComponent(id)}`,
   workTransition: (id: string) => `/api/work/${encodeURIComponent(id)}/transition`,
+  workStart: (id: string) => `/api/work/${encodeURIComponent(id)}/start`,
   features: '/api/features',
   feature: (id: string) => `/api/features/${encodeURIComponent(id)}`,
   featureDecompose: (id: string) => `/api/features/${encodeURIComponent(id)}/decompose`,
@@ -51,8 +77,10 @@ export const WORKPLACE_API = {
       requirementIds: q.requirementIds?.join(','),
     }),
   proposals: '/api/proposals',
+  proposal: (id: string) => `/api/proposals/${encodeURIComponent(id)}`,
   proposalApply: (id: string) => `/api/proposals/${encodeURIComponent(id)}/apply`,
   releases: '/api/releases',
+  releasesReady: '/api/releases/ready',
   releaseRun: (id: string) => `/api/releases/${encodeURIComponent(id)}/run`,
   spend: (day?: string) => withQuery('/api/spend', day ? { day } : undefined),
   room: '/api/room',
@@ -90,6 +118,8 @@ export interface WorkplaceHealthResponse extends HealthResponse {
 }
 
 export interface OfficeResponse {
+  /** The Chief of Staff's id: the default Talk target (POST /api/talk goes to her). */
+  chiefOfStaff: string;
   units: { unit: Unit; employees: EmployeeCard[] }[];
   coverage: Coverage;
   needsYou: number;
@@ -135,6 +165,8 @@ export interface EmployeeDetail {
 export interface FeatureBoard {
   features: WorkItem[];
   byState: Record<string, number>;
+  /** Per feature id: where it stands, in the owner's terms. */
+  status: Record<string, RequestStatus>;
 }
 
 export interface FeatureDetail {
@@ -142,11 +174,55 @@ export interface FeatureDetail {
   assignments: WorkItem[];
   requirements: Requirement[];
   route: RouteResult;
+  status: RequestStatus;
+}
+
+/**
+ * A request's status, derived from the feature and its assignments (29 Sep, phone): one stage,
+ * one line, and the assignments behind it. Never stored.
+ */
+export type RequestStage = 'with-asha' | 'specced' | 'routed' | 'building' | 'review' | 'blocked' | 'built' | 'released';
+
+export interface RequestStatus {
+  stage: RequestStage;
+  /** One line for the owner, e.g. "Asha is writing the spec" or "2 of 3 building, 1 in review". */
+  line: string;
+  assignments: { id: string; title: string; employeeId?: string; charterId?: string; state: AssignmentState; stalledSince?: string }[];
+  /** The Chief of Staff's session asked for the spec, when one was started. */
+  askedAgentId?: string;
+}
+
+/** POST /api/requests `{ text, platformIds? }` → 201; GET /api/requests → the list, newest first. */
+export interface CreateRequest { text: string; platformIds?: string[] }
+export interface RequestResponse { feature: WorkItem; status: RequestStatus }
+
+/** GET /api/proposals/:id: the proposal with its unified diff, and the Inbox item that decides it. */
+export interface ProposalDetail { proposal: OrgProposal; item: InboxItem }
+
+/** GET /api/releases/ready: per shippable, what is done and unreleased, the release in flight, the last done one. */
+export interface ReleaseReadiness {
+  shippable: Shippable;
+  unreleased: string[];
+  /** proposed, approved or running. */
+  open?: Release;
+  last?: Release;
+}
+
+export interface PivotItem {
+  id: string;
+  title: string;
+  employeeId?: string;
+  state: AssignmentState;
+  /** From the assignment's evidence, once reported. */
+  evidence?: { tests: string; commits: string[]; liveVerified: number; notVerified: number };
+  /** Where to see it: the assignee's page, with the item selected. */
+  href: string;
 }
 
 export interface PivotCell {
   total: number;
   byState: Record<string, number>;
+  items: PivotItem[];
 }
 
 export interface Pivot {

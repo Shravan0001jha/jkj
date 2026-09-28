@@ -11,6 +11,7 @@ import * as work from '../services/work.js';
 import * as inbox from '../services/inbox.js';
 import * as proposals from '../services/proposals.js';
 import * as releases from '../services/releases.js';
+import * as requests from '../services/requests.js';
 import * as spend from '../services/spend.js';
 import * as health from '../services/health.js';
 import * as views from '../services/views.js';
@@ -116,6 +117,14 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
     /* ---------- employees ---------- */
     r('GET', '/api/employees', (_req, res) => json(res, 200, wp.org.employees.map(e => ({ ...e, state: employees.stateOf(wp, e.id) })))),
     r('GET', '/api/employees/:id', (_req, res, _url, [id]) => json(res, 200, views.employeeDetail(wp, dec(id)))),
+    // The default Talk: the Chief of Staff (29 Sep, phone).
+    r('POST', '/api/talk', async (req, res) => {
+      const body = await readJson(req);
+      const { text, attachments } = validateMessage(body);
+      const cos = features.chiefOfStaff(wp);
+      if (!cos) throw new BadRequest('No Chief of Staff in the organisation.');
+      json(res, 201, employees.talk(wp, cos, text, attachments, { probe: body['probe'] === true }));
+    }),
     r('POST', '/api/employees/:id/talk', async (req, res, _url, [id]) => {
       const body = await readJson(req);
       const { text, attachments } = validateMessage(body);
@@ -207,6 +216,13 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
     }),
     r('POST', '/api/work/:id/start', (_req, res, _url, [id]) => json(res, 201, employees.assign(wp, dec(id)))),
 
+    /* ---------- the owner's requests ---------- */
+    r('GET', '/api/requests', (_req, res) => json(res, 200, requests.list(wp))),
+    r('POST', '/api/requests', async (req, res) => {
+      const body = await readJson(req);
+      json(res, 201, requests.create(wp, { text: str(body['text'], ''), platformIds: strs(body['platformIds']) }));
+    }),
+
     /* ---------- features ---------- */
     r('GET', '/api/features', (_req, res) => json(res, 200, views.featureBoard(wp))),
     r('GET', '/api/features/pivot', (_req, res, url) => {
@@ -268,9 +284,17 @@ export function createRouter({ config, wp, auth, telegram, tunnel }: RouterDeps)
         proposedBy: typeof body['proposedBy'] === 'string' ? body['proposedBy'] : 'owner',
       }));
     }),
+    r('GET', '/api/proposals/:id', (_req, res, _url, [id]) => {
+      const proposal = proposals.get(wp, dec(id));
+      if (!proposal) throw new NotFound(`No proposal ${dec(id)}`);
+      const item = inbox.get(wp, proposal.inboxId);
+      if (!item) throw new NotFound(`No Inbox item for ${proposal.id}`);
+      json(res, 200, { proposal, item });
+    }),
     r('POST', '/api/proposals/:id/apply', (_req, res, _url, [id]) => json(res, 200, proposals.apply(wp, dec(id)))),
 
     /* ---------- releases ---------- */
+    r('GET', '/api/releases/ready', (_req, res) => json(res, 200, releases.readiness(wp))),
     r('GET', '/api/releases', (_req, res) => json(res, 200, releases.list(wp))),
     r('POST', '/api/releases', async (req, res) => {
       const body = await readJson(req);

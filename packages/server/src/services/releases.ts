@@ -1,6 +1,6 @@
 import { spawn as spawnProcess } from 'node:child_process';
 import { join } from 'node:path';
-import type { Release, Shippable } from '@jkj/shared';
+import type { Release, ReleaseReadiness, Shippable } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import { gate, requestApproval } from './approvals.js';
 import * as inbox from './inbox.js';
@@ -159,6 +159,19 @@ function save(wp: Workplace, r: Release): void {
 }
 
 /** Assignments done for this shippable's platforms and not yet in a done release. */
+const SHIPPABLES: Shippable[] = ['desktop-mac', 'desktop-intel', 'windows', 'ios', 'android', 'server-api', 'server-agent', 'website'];
+
+/** Per shippable: what is done and unreleased, the release in flight, the last one done (29 Sep, phone). */
+export function readiness(wp: Workplace): ReleaseReadiness[] {
+  const all = list(wp);
+  return SHIPPABLES.map(shippable => {
+    const mine = all.filter(r => r.shippable === shippable);
+    const open = mine.find(r => r.state === 'proposed' || r.state === 'approved' || r.state === 'running');
+    const last = mine.find(r => r.state === 'done');
+    return { shippable, unreleased: unreleasedFor(wp, shippable), ...(open ? { open } : {}), ...(last ? { last } : {}) };
+  });
+}
+
 export function unreleasedFor(wp: Workplace, shippable: Shippable): string[] {
   const platforms: Record<Shippable, string[]> = {
     'desktop-mac': ['mac'], 'desktop-intel': ['intel', 'mac'], windows: ['windows'], ios: ['ios', 'ipad'], android: ['android'],
