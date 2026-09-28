@@ -110,7 +110,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     }),
 
     /* ---------- inbox ---------- */
-    r('GET', '/api/inbox', (_req, res) => json(res, 200, inbox.list(wp))),
+    r('GET', '/api/inbox', (_req, res) => json(res, 200, inbox.ownerList(wp))),
     r('POST', '/api/inbox/:id/answer', async (req, res, _url, [id]) => {
       const body = await readJson(req);
       const optionId = typeof body['optionId'] === 'string' ? body['optionId'] : '';

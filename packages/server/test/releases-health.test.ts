@@ -84,9 +84,10 @@ test('a session idle for ten minutes is stalled once: interrupted, ended, one qu
     assert.equal(found.length, 1);
     assert.equal(found[0]!.reason, 'idle');
     assert.equal(fake.last().interrupted, 1);
-    // The session is ended (QA B4), a question is filed, so the honest state on the Office is "needs you".
+    // The session is ended (QA B4), a routine note is filed for Asha (never the owner's Inbox, per
+    // the owner's rule), so the honest state on the Office is "blocked", not "needs you".
     assert.equal(employees.allSessions().some(s => s.agentId === agent.id), false);
-    assert.equal(employees.stateOf(wp, 'dev'), 'needs-owner');
+    assert.equal(employees.stateOf(wp, 'dev'), 'blocked');
     await health.handleStalls(wp, started + 12 * 60 * 1000);
     assert.equal(inbox.list(wp).filter(i => i.kind === 'question').length, 1);
     assert.equal(fake.last().interrupted, 1);

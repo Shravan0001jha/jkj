@@ -290,6 +290,13 @@ export interface InboxItem {
   onApprove?: string;
   onDeny?: string;
   links?: { label: string; href: string }[];
+  /**
+   * False for routine housekeeping (a stall notice, a session that did nothing, a review request
+   * for a non-owner reviewer): it never reaches the owner's Inbox or its counts, only the pages of
+   * the employees it affects (always including the Chief of Staff). Absent or true means the owner
+   * decides it (the §0 approvals table). Never touched by clients; the server decides it on raise.
+   */
+  ownerFacing?: boolean;
 }
 
 /* ---------- org changes ---------- */

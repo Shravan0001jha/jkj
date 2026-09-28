@@ -267,4 +267,26 @@ export function migrateToRealMoney(wp: Workplace): { relabelled: number; lifted:
   return { relabelled: Number(relabelled), lifted };
 }
 
+/**
+ * Any open `cap` item dated before the real-money migration ran is stale under the old
+ * equivalent-cost model (decision A): resolve it every boot, not just once, since a cap item for a
+ * past day can outlive the one-time `migrateToRealMoney` sweep (it only resolved what was open at
+ * that moment). Idempotent: resolved items are no longer open, so there is nothing left next boot.
+ */
+export function resolveStalePreMigrationCapItems(wp: Workplace): { resolved: string[] } {
+  const migrated = wp.db.prepare('select value from settings where key = ?').get('migrated:real-money') as { value: string } | undefined;
+  if (!migrated) return { resolved: [] };
+  const cutoverDay = dayOf(migrated.value);
+  const resolved: string[] = [];
+  for (const item of inbox.list(wp, 'open').filter(i => i.kind === 'cap')) {
+    const day = String(item.context['day'] ?? '');
+    if (day && day < cutoverDay) {
+      inbox.answer(wp, item.id, 'keep', 'Resolved by the Workplace: this pause is from the old equivalent-cost model, before caps counted real money only (decision A). No action needed.', 'workplace');
+      resolved.push(item.id);
+    }
+  }
+  if (resolved.length) log.info('spend', `resolved ${resolved.length} stale pre-migration cap item(s)`);
+  return { resolved };
+}
+
 const round = (n: number): number => Math.round(n * 100) / 100;

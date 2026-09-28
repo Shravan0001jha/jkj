@@ -138,6 +138,34 @@ export function dedupeNotes(wp: Workplace): { expired: string[] } {
   return { expired };
 }
 
+/**
+ * One-time cleanup of the pre-fix flood (29 Sep QA): stall notices and "did nothing" items raised
+ * before `ownerFacing` existed are withdrawn from the owner's Inbox (not answered — the underlying
+ * work, if still stalled, raises a fresh routine note next tick); QA's `[TEST]` fixtures are
+ * withdrawn too; an open review request is moved onto the reviewer's/Asha's page instead of being
+ * withdrawn, since it is real, open work. Idempotent: nothing is left to touch on the next boot.
+ */
+export function cleanupLegacyInbox(wp: Workplace): { withdrawn: string[]; reclassified: string[] } {
+  const withdrawn: string[] = [];
+  const reclassified: string[] = [];
+  const isTestFixture = (i: InboxItem): boolean => /^\[TEST\]/.test(i.summary) || /^\[TEST\]/.test(i.title) || /^\[TEST\]/.test(i.body);
+  for (const i of inbox.list(wp, 'open')) {
+    if (i.ownerFacing === false) continue; // already under the new rule
+    if (isRoutineNote(i) || isStallDetectorItem(i)) {
+      inbox.expire(wp, i.id, 'Moved to Asha\'s queue: routine stall/idle notices never reach the owner\'s Inbox.');
+      withdrawn.push(i.id);
+    } else if (isTestFixture(i)) {
+      inbox.expire(wp, i.id, 'Withdrawn: a QA test fixture, not a real proposal.');
+      withdrawn.push(i.id);
+    } else if (i.kind === 'question' && i.title.startsWith('Review requested:')) {
+      inbox.setOwnerFacing(wp, i.id, false);
+      reclassified.push(i.id);
+    }
+  }
+  if (withdrawn.length || reclassified.length) log.info('cos', `legacy inbox cleanup: withdrew ${withdrawn.length}, moved ${reclassified.length} off the owner's Inbox`);
+  return { withdrawn, reclassified };
+}
+
 function note(wp: Workplace, item: WorkItem, reason: string, by: string, day: string, result: TickResult): void {
   const emp = wp.org.employees.find(e => e.id === item.employeeId);
   const key = `noted:${item.id}:${day}`;
@@ -147,6 +175,10 @@ function note(wp: Workplace, item: WorkItem, reason: string, by: string, day: st
   }
   wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(key, new Date().toISOString());
   const before = inbox.list(wp, 'open').length;
+  // Stalled work is Asha's to resume, reassign or let wait (the owner's rule: only decisions reach
+  // him). Nothing in whyWaiting() is a §0 owner decision on its own — a real cap, org-change or
+  // lost-approval question is already its own owner item elsewhere — so this note stays off his
+  // Inbox and on Asha's own page (`ownerFacing: false`).
   inbox.raise(wp, {
     kind: 'question',
     title: `Waiting: ${item.title}`,
@@ -155,6 +187,7 @@ function note(wp: Workplace, item: WorkItem, reason: string, by: string, day: st
     context: { assignmentId: item.id, employeeId: item.employeeId ?? null, stalledSince: item.stalledSince ?? null, reason },
     options: [{ id: 'resume', label: 'Resume it now' }, { id: 'wait', label: 'Let it wait' }, { id: 'answered', label: 'Instruction', needsNote: true }],
     dedupeKey: `stall:${item.id}:${day}`,
+    ownerFacing: false,
   });
   if (inbox.list(wp, 'open').length > before) result.noted.push({ id: item.id, reason });
 }

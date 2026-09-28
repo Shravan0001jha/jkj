@@ -65,6 +65,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   employees.recoverAfterRestart(wp);
   // Budget is real money only (28 Sep): relabel the old ledger, lift pauses that were on free usage.
   spend.migrateToRealMoney(wp);
+  try { const c = spend.resolveStalePreMigrationCapItems(wp); if (c.resolved.length) log.info('boot', `resolved ${c.resolved.length} stale pre-migration cap item(s)`); } catch (err) { log.warn('boot', `stale cap items: ${err instanceof Error ? err.message : err}`); }
 
   // Caps pause sessions; the owner's answer unpauses.
   spend.onPause((w, scope) => employees.pauseScope(w, scope));
@@ -124,6 +125,9 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
 
   // Duplicate stall notes an earlier build left (QA B3) are withdrawn once; the owner's decisions are untouched.
   try { const d = cos.dedupeNotes(wp); if (d.expired.length) log.info('boot', `withdrew ${d.expired.length} duplicate stall notes`); } catch (err) { log.warn('boot', `dedupe notes: ${err instanceof Error ? err.message : err}`); }
+  // The pre-fix flood of owner-facing stall/"did nothing"/[TEST] items (29 Sep): withdrawn once; a
+  // real open review request moves onto the reviewer's/Asha's page instead.
+  try { cos.cleanupLegacyInbox(wp); } catch (err) { log.warn('boot', `legacy inbox cleanup: ${err instanceof Error ? err.message : err}`); }
 
   const stallTimer = setInterval(() => {
     for (const id of employees.closeStale(wp)) log.info('sessions', `closed stale session ${id}`);

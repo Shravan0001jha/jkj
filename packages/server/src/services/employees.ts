@@ -568,7 +568,10 @@ export function stateWithReason(wp: Workplace, employeeId: string): { state: Emp
   const open = openSession(employeeId);
   const agent = open ? runs.getRunAgent(open.agentId) : undefined;
   if (agent?.status === 'waiting' && agent.approval) return { state: 'needs-owner', reason: `waiting for approval of ${agent.approval.tool}` };
-  const raised = inbox.list(wp, 'open').find(i => i.raisedBy === employeeId);
+  // Routine housekeeping (a stall notice, a "did nothing" item) never overrides a live session's
+  // true status (QA B16: a stale item raised by the employee showed a live, working session as
+  // "needs-owner"/stalled). Only a real open item that needs the owner does that.
+  const raised = inbox.ownerList(wp, 'open').find(i => i.raisedBy === employeeId);
   if (raised) return { state: 'needs-owner', reason: raised.title };
   if (agent?.status === 'error') return { state: 'blocked', reason: 'the session hit an error' };
   if (open) return { state: 'working' };
@@ -703,7 +706,10 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         async ({ assignmentId, note }) => {
           const item = work.get(wp, assignmentId);
           if (!item) return ok(`No assignment ${assignmentId}.`);
-          inbox.raise(wp, { kind: 'question', title: `Review requested: ${item.title}`, body: note ?? 'Please verify.', raisedBy: employeeId, context: { assignmentId }, dedupeKey: `review:${assignmentId}` });
+          // The reviewer is a different identity (lead, or QA for a lead), never the owner (HOWTO
+          // "State a feature once"; the §0 table has no owner row for a review): this is routine,
+          // not an owner decision, so it never reaches his Inbox — only the reviewer's/Asha's page.
+          inbox.raise(wp, { kind: 'question', title: `Review requested: ${item.title}`, body: note ?? 'Please verify.', raisedBy: employeeId, context: { assignmentId }, dedupeKey: `review:${assignmentId}`, ownerFacing: false });
           return ok('Review requested.');
         }),
       tool('write_spec', 'Chief of Staff only: attach the spec (acceptance criteria) to a stated feature. It becomes "specced" and can be decomposed.',

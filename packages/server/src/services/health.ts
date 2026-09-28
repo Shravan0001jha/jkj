@@ -20,6 +20,7 @@ export const LOOP_REPEATS = 5;
 export interface StallCheck {
   agentId: string;
   employeeId: string;
+  assignmentId?: string;
   reason: 'idle' | 'loop';
 }
 
@@ -30,10 +31,10 @@ export function detectStalls(nowMs = Date.now()): StallCheck[] {
     const agent = runs.getRunAgent(s.agentId);
     if (!agent || agent.status !== 'running') continue;
     const idle = runs.idleMs(s.agentId, nowMs) ?? 0;
-    if (idle > STALL_MS) { out.push({ agentId: s.agentId, employeeId: s.employeeId, reason: 'idle' }); continue; }
+    if (idle > STALL_MS) { out.push({ agentId: s.agentId, employeeId: s.employeeId, assignmentId: s.assignmentId, reason: 'idle' }); continue; }
     const last = runs.lastTools(s.agentId, LOOP_REPEATS);
     if (last.length === LOOP_REPEATS && new Set(last.map(t => hash(`${t.label}\n${t.text}`))).size === 1) {
-      out.push({ agentId: s.agentId, employeeId: s.employeeId, reason: 'loop' });
+      out.push({ agentId: s.agentId, employeeId: s.employeeId, assignmentId: s.assignmentId, reason: 'loop' });
     }
   }
   return out;
@@ -65,7 +66,7 @@ export function handleParkedApprovals(wp: Workplace, nowMs = Date.now()): string
   return alerted;
 }
 
-/** Interrupt each stalled session once, mark the employee blocked, and ask the owner. */
+/** Interrupt each stalled session once, mark the employee blocked, and note it for Asha (never the owner directly). */
 export async function handleStalls(wp: Workplace, nowMs = Date.now()): Promise<StallCheck[]> {
   const found = detectStalls(nowMs);
   for (const s of found) {
@@ -78,6 +79,10 @@ export async function handleStalls(wp: Workplace, nowMs = Date.now()): Promise<S
     await runs.interruptRun(s.agentId).catch(() => {});
     await employees.endSession(wp, s.agentId, handoffWaitMs, true).catch(() => {});
     employees.setState(wp, s.employeeId, 'blocked');
+    // A stall/loop is never an owner decision by itself (the owner's rule: only real decisions
+    // reach him; Asha resumes, reassigns or lets it wait). The key is the employee + assignment,
+    // not the ephemeral run id, so a restart's fresh session for the same work reuses the same open
+    // item instead of raising a duplicate (QA: 2-3 raised per item across restarts).
     inbox.raise(wp, {
       kind: 'question',
       title: `${emp?.name ?? s.employeeId} is ${s.reason === 'idle' ? 'stalled' : 'looping'}`,
@@ -86,9 +91,9 @@ export async function handleStalls(wp: Workplace, nowMs = Date.now()): Promise<S
         : 'The session repeated the same tool call five times and was ended. Tell it what to try instead, or leave it to the Chief of Staff\'s routine.',
       raisedBy: s.employeeId,
       context: { agentId: s.agentId, reason: s.reason },
-      dedupeKey: `stall:${s.agentId}`,
+      dedupeKey: `stall:${s.employeeId}:${s.assignmentId ?? 'session'}`,
+      ownerFacing: false,
     });
-    wp.emit({ type: 'alert', level: 'blocked', title: `${emp?.name ?? s.employeeId} ${s.reason === 'idle' ? 'stalled' : 'looping'}`, body: 'Interrupted; a question is in the Inbox.' });
   }
   return found;
 }

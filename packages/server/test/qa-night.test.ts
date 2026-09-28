@@ -146,7 +146,8 @@ test('B4: a dead run is closed, the state reads true, and the next assignment ge
     assert.equal(employees.allSessions().length, 0);
     assert.equal(employees.stateOf(wp, 'kabir'), 'idle');
 
-    // The stall detector ends a silent session rather than leaving it open, and asks the owner once.
+    // The stall detector ends a silent session rather than leaving it open, and notes it for Asha
+    // (never the owner's Inbox: a stall is never a §0 decision by itself).
     health.setHandoffWait(100);
     const s = employees.talk(wp, 'mira', 'go');
     await tick();
@@ -155,10 +156,11 @@ test('B4: a dead run is closed, the state reads true, and the next assignment ge
     assert.equal(fake.sessions.at(-1)!.interrupted, 1, 'the silent turn is interrupted');
     assert.ok(fake.sessions.at(-1)!.sent.some(m => /handoff/i.test(m.text)), 'then asked for its handoff');
     assert.equal(employees.allSessions().some(x => x.agentId === s.id), false, 'ended');
-    assert.equal(employees.stateOf(wp, 'mira'), 'needs-owner');
+    assert.equal(employees.stateOf(wp, 'mira'), 'blocked');
     const item = inbox.list(wp, 'open').find(i => i.raisedBy === 'mira')!;
     assert.match(item.body, /was ended/);
     assert.ok(cos.isStallDetectorItem(item));
+    assert.equal(item.ownerFacing, false, 'never the owner\'s Inbox');
   } finally {
     health.setHandoffWait(30_000);
     fake.restore();
