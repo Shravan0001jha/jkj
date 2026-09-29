@@ -27,9 +27,11 @@ export interface SocketHub {
 export function attachSocket(server: Server, wp: Workplace, auth: Auth): SocketHub {
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Set<WebSocket>();
-  // The COO bridge is loopback-only (same rule as /api/coo/*, /api/pair): a socket that arrived
-  // through the tunnel (x-via-tunnel) or off loopback never gets a coo.* event, whatever it is
-  // authorised for otherwise — a paired phone still must not see or mirror the COO's Talk.
+  // The lead-only COO items (an escalation, an answer, a forward — /api/coo/{items,answer,forward,
+  // reply}) are loopback-only, same as those routes: a socket that arrived through the tunnel
+  // (x-via-tunnel) or off loopback never gets a coo.item event. coo.message is different — that is
+  // the owner's own Talk with the COO, and he reaches the Workplace only through the tunnel from
+  // his phone, so it goes out to every authorised socket like any other event.
   const localOnly = new WeakSet<WebSocket>();
 
   server.on('upgrade', (req, socket, head) => {
@@ -48,10 +50,10 @@ export function attachSocket(server: Server, wp: Workplace, auth: Auth): SocketH
   });
 
   const broadcast = (event: unknown): void => {
-    const isCooEvent = typeof event === 'object' && event !== null && String((event as { type?: unknown }).type ?? '').startsWith('coo.');
+    const isCooItemEvent = typeof event === 'object' && event !== null && (event as { type?: unknown }).type === 'coo.item';
     const payload = JSON.stringify(event);
     for (const ws of clients) {
-      if (isCooEvent && !localOnly.has(ws)) continue;
+      if (isCooItemEvent && !localOnly.has(ws)) continue;
       if (ws.readyState === ws.OPEN) ws.send(payload);
     }
   };

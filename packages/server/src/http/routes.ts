@@ -324,13 +324,19 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     // 202: the script runs on; a release takes minutes and the relay's request timeout would drop a 200.
     r('POST', '/api/releases/:id/run', async (_req, res, _url, [id]) => { const { release, done } = releases.start(wp, dec(id)); done.catch(err => log.warn('releases', String(err))); json(res, 202, release); }),
 
-    /* ---------- the COO bridge: loopback only, whatever the bearer token allows ---------- */
+    /* ---------- the COO bridge ---------- */
     // "Claude — COO" is the lead's own terminal session, not an Agent SDK employee (no mirroring:
-    // only what the owner sent and what the lead replied ever appears here). The relay must never
-    // reach it, so every route here refuses a request that arrived through the tunnel, exactly as
-    // /api/pair and /api/relay/off already do; it needs no bearer token check beyond that.
-    r('GET', '/api/coo/log', (req, res) => { requireLocal(req); json(res, 200, coo.transcript(wp)); }),
-    r('POST', '/api/coo/message', async (req, res) => { requireLocal(req); json(res, 201, coo.sendOwnerMessage(wp, str((await readJson(req))['text']))); }),
+    // only what the owner sent and what the lead replied ever appears here).
+    //
+    // Owner-facing (log, message, presence): the owner reaches the Workplace only through the
+    // tunnel from his phone, so these need the ordinary bearer/cookie session the router already
+    // requires off loopback — no extra guard, same as any other /api/* route.
+    r('GET', '/api/coo/log', (_req, res) => json(res, 200, coo.transcript(wp))),
+    r('POST', '/api/coo/message', async (req, res) => json(res, 201, coo.sendOwnerMessage(wp, str((await readJson(req))['text'])))),
+    r('GET', '/api/coo/presence', (_req, res) => json(res, 200, coo.presence(wp))),
+    // Lead-only (reply, items, answer, forward): only the lead's own process ever writes as the
+    // COO, so these stay loopback and refuse a request that arrived through the tunnel, exactly as
+    // /api/pair and /api/relay/off already do — a valid owner bearer token is not enough here.
     r('POST', '/api/coo/reply', async (req, res) => {
       requireLocal(req);
       const body = await readJson(req);
@@ -347,7 +353,6 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const body = await readJson(req);
       json(res, 200, coo.forwardItem(wp, { itemId: str(body['itemId']), recommendation: str(body['recommendation']) }));
     }),
-    r('GET', '/api/coo/presence', (req, res) => { requireLocal(req); json(res, 200, coo.presence(wp)); }),
 
     /* ---------- published access: the emergency off switch ---------- */
     r('POST', '/api/relay/off', (req, res) => {
