@@ -410,6 +410,8 @@ final class AppModel {
 
     func loadAll() async {
         guard let rest else { return }
+        // `health` is already fresh here: both callers run this right after `probe(_:)`, which
+        // just fetched and assigned it. Fetching it again here doubled every /api/health call.
         async let o: Void = office.load(rest)
         async let i: Void = inbox.load(rest)
         _ = await (o, i)

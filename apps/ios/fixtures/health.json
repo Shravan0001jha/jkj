@@ -9,6 +9,58 @@
     "capInr": 1000,
     "day": "2026-09-27",
     "telegram": true,
-    "published": "connected"
+    "published": "connected",
+    "push": {
+      "enabled": true,
+      "sentToday": 3,
+      "suppressedToday": 1
+    }
+  },
+  "resilience": {
+    "startedAt": "2026-09-27T02:20:00.000Z",
+    "uptimeSeconds": 24000,
+    "boots": {
+      "total": 3,
+      "last24h": 2,
+      "recent": [
+        "2026-09-26T08:00:00.000Z",
+        "2026-09-27T02:20:00.000Z"
+      ]
+    },
+    "tunnel": {
+      "status": "connected",
+      "attempts": 4,
+      "connects": 3,
+      "lastConnectedAt": "2026-09-27T08:41:00.000Z",
+      "lastDisconnectedAt": "2026-09-27T08:39:00.000Z",
+      "lastError": null,
+      "downForSeconds": 0,
+      "backoffMs": 1000,
+      "reconnects": {
+        "halfOpen": 1,
+        "afterSleep": 1
+      }
+    },
+    "watchdog": {
+      "link": "up",
+      "downSince": null,
+      "incidents": 1,
+      "crashLoop": {
+        "alertedAt": null,
+        "stableAt": null
+      }
+    },
+    "sleeps": {
+      "count": 1,
+      "lastAt": "2026-09-27T08:40:00.000Z",
+      "lastSeconds": 95,
+      "totalSeconds": 95
+    },
+    "power": {
+      "source": "battery",
+      "percent": 62,
+      "charging": false,
+      "readAt": "2026-09-27T08:59:00.000Z"
+    }
   }
 }

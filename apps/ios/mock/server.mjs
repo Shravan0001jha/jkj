@@ -25,6 +25,7 @@ const TOKEN = 'mock-token-0123456789abcdef';
 const PAIR_CODE = '482913';
 const SESSION_PREFIX = 'mock-session-';
 let macOffline = args.includes('--mac-offline');
+let powerSource = args.includes('--on-ac') ? 'ac' : 'battery';
 
 // Mutable state: a fresh copy of the data on every start, and on POST /api/_reset (tests).
 const fresh = () => ({
@@ -119,7 +120,8 @@ const server = createServer(async (req, res) => {
   const seg = p.split('/').filter(Boolean); // ['api', ...]
   const id = seg[2] ? decodeURIComponent(seg[2]) : undefined;
 
-  if (m === 'GET' && p === '/api/health') return json(res, 200, { ...D.health, uptimeSeconds: Math.round(process.uptime()) });
+  if (m === 'GET' && p === '/api/health') return json(res, 200, { ...D.health, uptimeSeconds: Math.round(process.uptime()), resilience: { ...D.health.resilience, power: { ...D.health.resilience.power, source: powerSource } } });
+  if (m === 'POST' && p === '/api/_power') { const body = await readJson(req); powerSource = body?.source ?? 'ac'; return json(res, 200, { ok: true, powerSource }); }
   if (m === 'GET' && p === '/api/office') return json(res, 200, office());
   if (m === 'GET' && p === '/api/org') return json(res, 200, D.org());
   if (m === 'GET' && seg[1] === 'charters' && id) {

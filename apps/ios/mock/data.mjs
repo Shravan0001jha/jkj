@@ -335,7 +335,15 @@ export const office = () => ({
 
 export const health = {
   ok: true, name: 'jkj', version: '0.3.0-mock', uptimeSeconds: 4210, claudeHome: '/Users/shravan0001jha/.claude',
-  workplace: { dataDir: '/Users/shravan0001jha/iris-workplace', capInr: 1000, day: '2026-09-27', telegram: true, published: 'connected' },
+  workplace: { dataDir: '/Users/shravan0001jha/iris-workplace', capInr: 1000, day: '2026-09-27', telegram: true, published: 'connected', push: { enabled: true, sentToday: 3, suppressedToday: 1 } },
+  resilience: {
+    startedAt: iso(-400), uptimeSeconds: 24_000,
+    boots: { total: 3, last24h: 2, recent: [iso(-1500), iso(-400)] },
+    tunnel: { status: 'connected', attempts: 4, connects: 3, lastConnectedAt: iso(-19), lastDisconnectedAt: iso(-21), lastError: null, downForSeconds: 0, backoffMs: 1000, reconnects: { halfOpen: 1, afterSleep: 1 } },
+    watchdog: { link: 'up', downSince: null, incidents: 1, crashLoop: { alertedAt: null, stableAt: null } },
+    sleeps: { count: 1, lastAt: iso(-20), lastSeconds: 95, totalSeconds: 95 },
+    power: { source: 'battery', percent: 62, charging: false, readAt: iso(-1) },
+  },
 };
 
 export const signals = {

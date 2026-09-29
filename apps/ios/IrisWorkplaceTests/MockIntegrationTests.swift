@@ -17,6 +17,12 @@ final class MockIntegrationTests: XCTestCase {
     func testPairAnswerTalkAndApproveOverRealSockets() async throws {
         guard await mockIsUp() else { throw XCTSkip("mock server not running on 127.0.0.1:4399") }
 
+        // Every test starts from the mock's seed state — a prior run (or another suite) may have
+        // left the inbox item already answered.
+        var reset = URLRequest(url: config.url("/api/_reset"))
+        reset.httpMethod = "POST"
+        _ = try? await URLSession.shared.data(for: reset)
+
         // Pair: the one unauthenticated call.
         let token = try await RestClient.exchange(config: config, code: "482913")
         XCTAssertFalse(token.isEmpty)

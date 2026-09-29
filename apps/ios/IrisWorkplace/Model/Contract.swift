@@ -744,12 +744,101 @@ enum PublishedState: String, Codable, CaseIterable {
     case connecting, connected, offline, off
 }
 
+/// Emitted by the server on /api/health (routes.ts), not yet declared in packages/shared.
+struct PushHealth: Codable, Equatable {
+    var enabled: Bool
+    var sentToday: Int
+    var suppressedToday: Int
+}
+
 struct WorkplaceInfo: Codable, Equatable {
     var dataDir: String
     var capInr: Double
     var day: String
     var telegram: Bool
     var published: PublishedState
+    var push: PushHealth?
+}
+
+/// The Mac's own health (RESILIENCE-workplace.md §5), emitted on /api/health; every part optional
+/// so an older server still decodes.
+struct Resilience: Codable, Equatable {
+    struct Boots: Codable, Equatable { var total: Int; var last24h: Int; var recent: [String]? }
+    struct Reconnects: Codable, Equatable { var halfOpen: Int; var afterSleep: Int }
+    struct Tunnel: Codable, Equatable {
+        var status: String
+        var attempts: Int?
+        var connects: Int?
+        var lastConnectedAt: String?
+        var lastDisconnectedAt: String?
+        var lastError: String?
+        var downForSeconds: Int?
+        var backoffMs: Int?
+        var reconnects: Reconnects?
+    }
+    struct Watchdog: Codable, Equatable {
+        struct CrashLoop: Codable, Equatable { var alertedAt: String?; var stableAt: String? }
+        var link: String
+        var downSince: String?
+        var incidents: Int?
+        var crashLoop: CrashLoop?
+    }
+    struct Sleeps: Codable, Equatable {
+        var count: Int
+        var lastAt: String?
+        var lastSeconds: Int?
+        var totalSeconds: Int?
+    }
+    struct Power: Codable, Equatable {
+        /// "ac" or "battery".
+        var source: String
+        var percent: Int?
+        var charging: Bool?
+        var readAt: String?
+    }
+    var startedAt: String?
+    var uptimeSeconds: Int?
+    var boots: Boots?
+    var tunnel: Tunnel?
+    var watchdog: Watchdog?
+    var sleeps: Sleeps?
+    var power: Power?
+
+    var onBattery: Bool { power?.source.lowercased() == "battery" }
+
+    /// A sleep within the window, from `sleeps.lastAt`.
+    func sleptRecently(within seconds: TimeInterval = 3600, now: Date = Date()) -> Bool {
+        guard let last = sleeps?.lastAt, let d = Format.date(last) else { return false }
+        return now.timeIntervalSince(d) <= seconds
+    }
+
+    /// One line for Settings: "on charger · awake", "on battery 62% · slept 2×, last 12 min ago".
+    func macLine(now: Date = Date()) -> String {
+        var parts: [String] = []
+        if let p = power {
+            if onBattery {
+                parts.append("on battery" + (p.percent.map { " \($0)%" } ?? ""))
+            } else {
+                parts.append(p.charging == false ? "on power" : "on charger")
+            }
+        }
+        if let s = sleeps, s.count > 0 {
+            var t = "slept \(s.count)×"
+            if let last = s.lastAt { t += ", last " + Format.ago(last, now: now) }
+            parts.append(t)
+        } else {
+            parts.append("awake")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The Office warning, or nil when there is nothing to say.
+    func officeWarning(now: Date = Date()) -> String? {
+        if onBattery { return "Mac is on battery — Workplace may drop when it sleeps" }
+        if sleptRecently(now: now) { return "Mac slept \(sleeps?.count ?? 1)× recently — sessions may have paused" }
+        if let t = tunnel, t.status != "connected" { return "Mac's tunnel is \(t.status) — the relay may not reach it" }
+        return nil
+    }
 }
 
 struct WorkplaceHealthResponse: Codable, Equatable {
@@ -759,6 +848,7 @@ struct WorkplaceHealthResponse: Codable, Equatable {
     var uptimeSeconds: Int
     var claudeHome: String?
     var workplace: WorkplaceInfo
+    var resilience: Resilience?
 }
 
 struct OfficeUnit: Codable, Equatable, Hashable, Identifiable {

@@ -97,6 +97,14 @@ struct OfficeHeader: View {
             .buttonStyle(.plain)
             .accessibilityHint("Opens spend and subscription usage")
             CoverageRow(coverage: data.coverage)
+            if let warning = model.health?.resilience?.officeWarning() {
+                Button { model.router.showSettings = true } label: {
+                    Label(warning, systemImage: model.health?.resilience?.onBattery == true ? "battery.25percent" : "moon.zzz")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens Settings with the Mac's health")
+            }
             if data.lintErrors > 0 {
                 Label("\(data.lintErrors) ownership-map error\(data.lintErrors == 1 ? "" : "s") block routing", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.red)

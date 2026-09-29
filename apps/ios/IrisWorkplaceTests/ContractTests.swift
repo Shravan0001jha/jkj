@@ -15,6 +15,33 @@ final class ContractTests: XCTestCase {
     }
 
     func testHealth() throws { try roundTrip("health", WorkplaceHealthResponse.self) }
+
+    func testMacHealthLinesFromResilience() throws {
+        let h = try Fixtures.decode("health", as: WorkplaceHealthResponse.self)
+        let r = try XCTUnwrap(h.resilience)
+        let now = Format.date("2026-09-27T09:00:00.000Z")!
+        XCTAssertTrue(r.onBattery)
+        XCTAssertTrue(r.sleptRecently(now: now))
+        XCTAssertEqual(r.macLine(now: now), "on battery 62% · slept 1×, last 20 min ago")
+        XCTAssertEqual(r.officeWarning(now: now), "Mac is on battery — Workplace may drop when it sleeps")
+        XCTAssertEqual(h.workplace.push?.sentToday, 3)
+
+        var ac = r
+        ac.power = Resilience.Power(source: "ac", percent: 100, charging: true, readAt: nil)
+        XCTAssertEqual(ac.officeWarning(now: now), "Mac slept 1× recently — sessions may have paused", "a recent sleep still warns on charger")
+        XCTAssertNil(ac.officeWarning(now: now.addingTimeInterval(2 * 3600)), "an old sleep does not")
+        ac.sleeps = Resilience.Sleeps(count: 0, lastAt: nil, lastSeconds: 0, totalSeconds: 0)
+        XCTAssertEqual(ac.macLine(now: now), "on charger · awake")
+        XCTAssertNil(ac.officeWarning(now: now))
+        ac.tunnel?.status = "reconnecting"
+        XCTAssertEqual(ac.officeWarning(now: now), "Mac's tunnel is reconnecting — the relay may not reach it")
+
+        // An older server without the block still decodes.
+        let old = Data(#"{"ok":true,"name":"jkj","version":"0.1.0","uptimeSeconds":1,"claudeHome":null,"workplace":{"dataDir":"/x","capInr":1000,"day":"2026-09-29","telegram":true,"published":"connected"}}"#.utf8)
+        let decoded = try JSONDecoder().decode(WorkplaceHealthResponse.self, from: old)
+        XCTAssertNil(decoded.resilience); XCTAssertNil(decoded.workplace.push)
+        XCTAssertEqual(Format.duration(24_000), "6 h 40 min")
+    }
     func testOffice() throws { try roundTrip("office", OfficeResponse.self) }
     func testOrg() throws { try roundTrip("org", OrgResponse.self) }
     func testCharter() throws { try roundTrip("charter", Charter.self) }

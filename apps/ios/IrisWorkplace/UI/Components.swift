@@ -180,6 +180,13 @@ enum Format {
         return d.formatted(.dateTime.day().month(.abbreviated))
     }
 
+    static func duration(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds) s" }
+        if seconds < 3600 { return "\(seconds / 60) min" }
+        if seconds < 86_400 { return "\(seconds / 3600) h \((seconds % 3600) / 60) min" }
+        return "\(seconds / 86_400) d \((seconds % 86_400) / 3600) h"
+    }
+
     static func time(_ s: String) -> String {
         guard let d = date(s) else { return s }
         return d.formatted(date: .omitted, time: .shortened)

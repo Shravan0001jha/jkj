@@ -30,6 +30,35 @@ struct SettingsView: View {
                         Text("Sessions end after 12 hours idle or 7 days; the app then asks you to sign in again.")
                     }
                 }
+                if let h = model.health {
+                    Section {
+                        if let r = h.resilience {
+                            LabeledContent("Mac", value: r.macLine())
+                            if let t = r.tunnel {
+                                LabeledContent("Tunnel to the relay") {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: t.status == "connected" ? "checkmark.circle.fill" : "exclamationmark.triangle").foregroundStyle(t.status == "connected" ? .green : .orange)
+                                        Text(t.status)
+                                    }
+                                }
+                                if let rc = t.reconnects, rc.halfOpen + rc.afterSleep > 0 {
+                                    LabeledContent("Reconnects", value: "\(rc.afterSleep) after sleep · \(rc.halfOpen) half-open")
+                                }
+                                if let e = t.lastError, !e.isEmpty { Text(e).font(.caption).foregroundStyle(.secondary) }
+                            }
+                            if let b = r.boots { LabeledContent("Workplace restarts", value: "\(b.last24h) in 24 h") }
+                            if let w = r.watchdog { LabeledContent("Watchdog", value: w.link + ((w.incidents ?? 0) > 0 ? " · \(w.incidents!) incidents" : "")) }
+                            if let u = r.uptimeSeconds { LabeledContent("Up for", value: Format.duration(u)) }
+                        } else {
+                            Text("This server does not report the Mac's health yet.").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        if let p = h.workplace.push {
+                            LabeledContent("Push from the Mac", value: p.enabled ? "on · \(p.sentToday) sent today" + (p.suppressedToday > 0 ? " · \(p.suppressedToday) suppressed" : "") : "off")
+                        }
+                    } header: { SectionHeader(text: "The Mac") } footer: {
+                        Text("On battery the Mac may sleep and the tunnel drops; the Workplace notices the wake and reconnects on its own.")
+                    }
+                }
                 if let e = model.lastSocketError {
                     Section {
                         Label(e, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)

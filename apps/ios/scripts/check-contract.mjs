@@ -123,7 +123,9 @@ for (const [name, def] of Object.entries(tsInterfaces)) {
     if (!(f in sw)) { problems.push(`interface ${name}.${f}: missing from Swift`); continue; }
     if (optional && !sw[f]) problems.push(`interface ${name}.${f}: optional in TS, required in Swift`);
   }
-  for (const f of Object.keys(sw)) if (!(f in def.fields)) problems.push(`interface ${name}.${f}: Swift has a field the contract lacks`);
+  // Emitted by the server (routes.ts /api/health) but not declared in packages/shared yet; reported to the lead.
+  const undeclared = { WorkplaceHealthResponse: ['resilience'] };
+  for (const f of Object.keys(sw)) if (!(f in def.fields) && !(undeclared[name] ?? []).includes(f)) problems.push(`interface ${name}.${f}: Swift has a field the contract lacks`);
 }
 
 // ---- WORKPLACE_API keys ----
