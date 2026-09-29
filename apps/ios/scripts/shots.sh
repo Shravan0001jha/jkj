@@ -34,6 +34,8 @@ shot 11-pivot-platform 5 ${=MOCK} WORKPLACE_PIVOT=platform
 shot 12-alerts 30 ${=MOCK} WORKPLACE_ALERTS=1
 shot 18-room 5 ${=MOCK} WORKPLACE_ROOM=list
 shot 19-thread 5 ${=MOCK} WORKPLACE_ROOM=rt-socket
+shot 32-general 5 ${=MOCK} WORKPLACE_ROOM=general
+shot 33-talk-coo 5 ${=MOCK} WORKPLACE_TALK=coo
 shot 20-spend 5 ${=MOCK} WORKPLACE_SPEND=1
 shot 21-employee-needsyou 5 ${=MOCK} WORKPLACE_TALK=kabir
 shot 27-requests 5 ${=MOCK} WORKPLACE_FEATURES=requests
@@ -46,6 +48,8 @@ xcrun simctl ui "$SIM" appearance dark
 shot 14-office-dark 4 ${=MOCK}
 shot 15-talk-dark 5 ${=MOCK} WORKPLACE_TALK=mira
 shot 22-room-dark 5 ${=MOCK} WORKPLACE_ROOM=rt-socket
+shot 34-general-dark 5 ${=MOCK} WORKPLACE_ROOM=general
+shot 35-talk-coo-dark 5 ${=MOCK} WORKPLACE_TALK=coo
 shot 23-spend-dark 5 ${=MOCK} WORKPLACE_SPEND=1
 shot 24-inbox-item-dark 4 ${=MOCK} WORKPLACE_INBOX_ITEM=ib-1
 xcrun simctl ui "$SIM" appearance light

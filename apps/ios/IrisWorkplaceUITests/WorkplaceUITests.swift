@@ -277,7 +277,8 @@ final class NewContractUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Blocked on the socket shape; escalated to you as ib-5."].exists, "the headline is the one-line status")
         shot("room-list")
         thread.tap()
-        XCTAssertTrue(app.navigationBars["Thread"].waitForExistence(timeout: 6))
+        // The thread's own title is the nav title now, not a generic "Thread" (Room D2).
+        XCTAssertTrue(app.navigationBars["Mac socket contract for errands"].waitForExistence(timeout: 6))
         let long = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Not published yet.'")).firstMatch
         XCTAssertTrue(long.waitForExistence(timeout: 8), "messages are one line")
         long.tap()
@@ -291,6 +292,48 @@ final class NewContractUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Noted. I will answer'")).firstMatch.waitForExistence(timeout: 10), "the mentioned employee's live reply streams in")
         app.swipeDown()
         shot("room-thread-posted")
+    }
+
+    func testGeneralChannelIsPinnedAboveTopicsAndShowsTheWholeTeam() {
+        app.launchEnvironment["WORKPLACE_ROOM"] = "list"
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Team Room"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Channel"].waitForExistence(timeout: 6), "General sits in its own section, above the topic threads")
+        let general = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'General'")).firstMatch
+        XCTAssertTrue(general.waitForExistence(timeout: 4))
+        shot("room-list-general")
+        general.tap()
+        XCTAssertTrue(app.navigationBars["General"].waitForExistence(timeout: 6))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Morning. Errand flow'")).firstMatch.waitForExistence(timeout: 6), "the seeded channel history is there")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'One thing: Kabir is blocked'")).firstMatch.waitForExistence(timeout: 6), "Claude posts in the channel like anyone else")
+        shot("general-channel")
+        let composer = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Post as you'")).firstMatch
+        composer.tap(); composer.typeText("@")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Kabir'")).firstMatch.waitForExistence(timeout: 4), "the @ picker suggests everyone once the @ is typed")
+        app.buttons.matching(NSPredicate(format: "label CONTAINS 'Kabir'")).firstMatch.tap()
+        XCTAssertTrue(app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Post as you'")).firstMatch.value as? String != "@", "picking a name from the picker fills it in")
+    }
+
+    func testCooCardShowsPresenceAndOpensTalk() {
+        app.launch()
+        let coo = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude' AND label CONTAINS 'Chief Operating Officer' AND label CONTAINS 'online'")).firstMatch
+        XCTAssertTrue(coo.waitForExistence(timeout: 8), "the COO card shows above the units with her presence")
+        shot("office-coo-card")
+        coo.tap()
+        XCTAssertTrue(app.navigationBars["Claude"].waitForExistence(timeout: 6), "the card opens the same Talk chat UI as any employee")
+        shot("talk-coo")
+    }
+
+    func testMentionedEmployeeShowsReplyingThenTheAnswerInAThread() {
+        app.launchEnvironment["WORKPLACE_ROOM"] = "rt-socket"
+        app.launch()
+        let composer = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Post as you'")).firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        composer.tap(); composer.typeText("Reuse ask_mac. @kabir go ahead.")
+        app.buttons["Post"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'is replying'")).firstMatch.waitForExistence(timeout: 3), "replying shows as soon as the post lands, before the answer")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Noted. I will answer'")).firstMatch.waitForExistence(timeout: 10), "then the real reply arrives")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'is replying'")).firstMatch.exists, "replying clears once the message lands")
     }
 
     func testSpendShowsRealMoneyAndFreeSubscriptionUsage() {
@@ -349,6 +392,6 @@ final class NewContractUITests: XCTestCase {
         shot("inbox-item-who-what")
         app.swipeUp()
         app.buttons["Team Room: release readiness"].tap()
-        XCTAssertTrue(app.navigationBars["Thread"].waitForExistence(timeout: 6), "the #/room link opens the thread in the Room tab")
+        XCTAssertTrue(app.navigationBars["Release readiness 0.2.16"].waitForExistence(timeout: 6), "the #/room link opens the thread in the Room tab")
     }
 }
