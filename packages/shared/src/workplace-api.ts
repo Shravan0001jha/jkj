@@ -37,6 +37,7 @@ import type {
   AssignmentState,
   CooMessage,
   CooItem,
+  CooPresence,
 } from './workplace.js';
 
 export const WORKPLACE_API = {
@@ -321,9 +322,17 @@ export type WorkplaceServerEvent =
   | { type: 'room.thread'; thread: RoomThread }
   | { type: 'room.message'; message: RoomMessage; thread: RoomThread }
   | { type: 'alert'; level: 'info' | 'needs-you' | 'blocked' | 'cap'; title: string; body: string; inboxId?: string }
-  /** The COO bridge (loopback only; see `/api/coo/*`). */
+  /**
+   * The COO bridge. `coo.message` (the owner's own conversation) and `coo.presence` (online ↔
+   * offline, from the lead's heartbeat) reach every authenticated owner socket, relay included —
+   * see `/api/coo/*`'s owner-facing routes. `coo.item` (escalations raised *to* the COO) is
+   * lead-only bookkeeping and stays local (`ws/hub.ts`), like `/api/coo/{items,answer,forward,reply}`.
+   */
   | { type: 'coo.message'; message: CooMessage }
-  | { type: 'coo.item'; item: CooItem };
+  | { type: 'coo.presence'; presence: CooPresence }
+  | { type: 'coo.item'; item: CooItem }
+  /** A mention-woken Room turn (services/mentions.ts), for a "Mira is replying…" indicator. */
+  | { type: 'room.replying'; threadId: string; employeeId: string; state: 'started' | 'done' | 'skipped' };
 
 export type WorkplaceClientCommand =
   | { type: 'inbox.answer'; id: string; optionId: string; note?: string };

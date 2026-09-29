@@ -17,6 +17,7 @@ import { Watchdog } from './services/watchdog.js';
 import { SuspendDetector } from './services/suspend.js';
 import { PowerMonitor } from './services/power.js';
 import * as room from './services/room.js';
+import * as coo from './services/coo.js';
 import { wireMentionReplies } from './services/mentions.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
@@ -137,6 +138,9 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
     for (const id of employees.closeStale(wp)) log.info('sessions', `closed stale session ${id}`);
     health.handleParkedApprovals(wp);
     void health.handleStalls(wp).catch(err => log.warn('health', String(err)));
+    // The lead's heartbeat is a file, not an event: polled here, a coo.presence event goes out
+    // only when online ↔ offline actually flips (coo.pollPresence).
+    try { coo.pollPresence(wp); } catch (err) { log.warn('coo', `presence poll: ${err instanceof Error ? err.message : err}`); }
   }, 30_000);
   // The Chief of Staff's routine: stalled work is resumed within budget or explained in the Inbox.
   const cosTimer = setInterval(() => { try { cos.tick(wp); } catch (err) { log.warn('cos', String(err)); } }, 5 * 60_000);

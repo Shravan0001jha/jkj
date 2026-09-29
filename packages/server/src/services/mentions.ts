@@ -2,6 +2,7 @@ import type { RoomMessage, RoomThread } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as employees from './employees.js';
 import * as coo from './coo.js';
+import { onRunEvent } from './runs.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -54,11 +55,20 @@ function notifyCoo(wp: Workplace, thread: RoomThread, message: RoomMessage): voi
  * a rate limit per (employee, thread), and `probe: true` so this never overwrites the employee's
  * real status/handoff — it is a Room reply, not an assignment. Subscription use only (free, D9b);
  * `employees.talk` still refuses at a real-money cap, which is caught and logged, not thrown.
+ *
+ * `room.replying` (owner, 29 Sep — a "Mira is replying…" indicator on the phone): `skipped` when
+ * the rate limit or a cap holds the turn back entirely — nothing ever starts, so there is nothing
+ * to show as finished. Otherwise `started` the moment the turn is handed to the employee, and
+ * `done` when that run next leaves `running` (the SDK's own turn boundary) — whether it replied,
+ * did nothing, or errored; the indicator does not distinguish those, only "still going" from "not".
  */
 function wake(wp: Workplace, thread: RoomThread, message: RoomMessage, employeeId: string): void {
   const key = `${employeeId}:${thread.id}`;
   const last = lastTurnAt.get(key) ?? 0;
-  if (Date.now() - last < MENTION_COOLDOWN_MS) return;
+  if (Date.now() - last < MENTION_COOLDOWN_MS) {
+    wp.emit({ type: 'room.replying', threadId: thread.id, employeeId, state: 'skipped' });
+    return;
+  }
   lastTurnAt.set(key, Date.now());
 
   const who = message.owner ? 'the owner' : (wp.org.employees.find(e => e.id === message.by)?.name ?? message.by);
@@ -71,11 +81,21 @@ function wake(wp: Workplace, thread: RoomThread, message: RoomMessage, employeeI
       'reply with room_post only if you have something to say; otherwise do nothing. Keep it short.',
   ].join('\n');
 
+  let agentId: string;
   try {
-    employees.talk(wp, employeeId, prompt, [], { autonomous: true, probe: true });
+    agentId = employees.talk(wp, employeeId, prompt, [], { autonomous: true, probe: true }).id;
   } catch (err) {
     log.warn('mentions', `${employeeId} in ${thread.id}: ${err instanceof Error ? err.message : err}`);
+    wp.emit({ type: 'room.replying', threadId: thread.id, employeeId, state: 'skipped' });
+    return;
   }
+
+  wp.emit({ type: 'room.replying', threadId: thread.id, employeeId, state: 'started' });
+  const unsubscribe = onRunEvent(({ agent }) => {
+    if (agent?.id !== agentId || agent.status === 'running') return;
+    unsubscribe();
+    wp.emit({ type: 'room.replying', threadId: thread.id, employeeId, state: 'done' });
+  });
 }
 
 /** Test-only: let a test move past the cooldown without waiting for it. */

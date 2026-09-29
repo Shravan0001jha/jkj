@@ -55,6 +55,27 @@ export function presence(wp: Workplace, thresholdMs = ONLINE_MS): CooPresence {
 
 const isOffline = (wp: Workplace, thresholdMs: number): boolean => !presence(wp, thresholdMs).online;
 
+const PRESENCE_KEY = 'coo-presence-online';
+
+/**
+ * Called on a timer (index.ts, every 30 s, next to the stall check): the server never learns of a
+ * heartbeat write directly (the lead's own process touches the file; nothing here watches it), so
+ * presence is polled. Emits `coo.presence` only when online ↔ offline actually flips — not on every
+ * tick — to every authenticated owner socket (`ws/hub.ts`; unlike `coo.item` this is not local-only,
+ * the owner reaches the Workplace only through the tunnel). State lives in `settings`, not a module
+ * variable, so it is per-workplace and never leaks between tests.
+ */
+export function pollPresence(wp: Workplace): CooPresence {
+  const p = presence(wp);
+  const prev = (wp.db.prepare('select value from settings where key = ?').get(PRESENCE_KEY) as { value: string } | undefined)?.value;
+  const onlineFlag = p.online ? '1' : '0';
+  if (prev !== onlineFlag) {
+    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(PRESENCE_KEY, onlineFlag);
+    if (prev !== undefined) wp.emit({ type: 'coo.presence', presence: p }); // the first poll only seeds; nothing "flipped" yet
+  }
+  return p;
+}
+
 /* ---------- the owner's Talk with the COO ---------- */
 
 export function transcript(wp: Workplace): CooMessage[] {

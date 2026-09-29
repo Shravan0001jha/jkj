@@ -593,13 +593,44 @@ burst of replies in one thread wakes each mentioned employee at most once per wi
 turn per mention" without a duplicate-message index, because a single `RoomMessage`'s `mentions` is
 already a `Set` (an employee cannot be mentioned twice in one message).
 
+**`room.replying` (iOS agent's finding, 29 Sep): "Mira is replying…".** `{ threadId, employeeId,
+state: 'started' | 'done' | 'skipped' }`, emitted by `mentions.ts`'s `wake`. `skipped` is the
+cooldown or a cap turning the wake away before anything begins — there is no `started` to pair it
+with. Otherwise `started` fires the moment the turn is handed to `employees.talk`, and `done` on the
+next `onRunEvent` for that agent id whose status has left `'running'` — the SDK's own turn boundary,
+whether the employee replied, did nothing, or errored; the event does not distinguish those, only
+"still going" from "not". No new subscription machinery: `runs.onRunEvent` already exists for the
+stall detector and the socket hub.
+
+### 18f. Two corrections from live testing against the app (29 Sep)
+
+**The COO bridge's owner-facing routes are not loopback-only.** The first cut guarded the whole
+`/api/coo/*` surface with the `/api/pair`-style check. Wrong for the owner's own side: he reaches
+the Workplace only through the tunnel (D11b), so `GET /api/coo/log`, `POST /api/coo/message` and
+`GET /api/coo/presence` need only the ordinary bearer/cookie session every other `/api/*` route
+already requires off loopback — ie. no extra guard at all. `POST /api/coo/reply`, `GET
+/api/coo/items`, `POST /api/coo/answer` and `POST /api/coo/forward` stay loopback-and-not-tunnelled:
+only the lead's own process may write as the COO. The socket hub gets the matching split: `coo.item`
+(lead-only bookkeeping) is held to loopback sockets; `coo.message` — and now `coo.presence` — reach
+every authenticated socket, relay included, because both are the owner's own view of the bridge.
+
+**`coo.presence` (iOS agent's finding, 29 Sep): online/offline as an event, not only a poll.** The
+server never observes a heartbeat write directly — the lead's own process touches the file; nothing
+here watches it — so presence is polled on the existing 30 s timer (next to the stall check) and
+`coo.pollPresence` emits `{ type: 'coo.presence', presence }` only when online ↔ offline actually
+flips (state kept in `settings`, not a module variable, so a test's poll never leaks into another
+test's). The first poll of a boot only seeds that state; nothing has "flipped" yet, so it emits
+nothing.
+
 ### 18e. What changed in the existing contract, for the record
 
 `Employee.virtual?`, `EmployeeState` gains `online`/`offline`, `LogEntry.kind` gains `'activity'`
 with a new `LogEntry.activity` field, new types `CooMessage`/`CooItem`/`CooPresence`, new
-`WorkplaceServerEvent` cases `coo.message`/`coo.item` (loopback-delivered only, §18b), new REST
-`/api/coo/{log,message,reply,items,answer,forward,presence}`, `GET /api/agents/:id/log` gains
-`?view=chat`. Nothing existing was removed or renamed. `packages/server/seed/org.yaml`/`roles.yaml`
+`WorkplaceServerEvent` cases `coo.message`/`coo.presence` (every authenticated socket, relay
+included), `coo.item` (loopback-delivered only, §18f) and `room.replying` (§18d), new REST
+`/api/coo/{log,message,presence}` (ordinary auth, relay/tunnel allowed) and
+`/api/coo/{reply,items,answer,forward}` (loopback-and-not-tunnelled), `GET /api/agents/:id/log`
+gains `?view=chat`. Nothing existing was removed or renamed. `packages/server/seed/org.yaml`/`roles.yaml`
 gain the `coo` employee/role and change Asha's `reportsTo`; `proposals.ts`'s hire-with-no-`reportsTo`
 default now explicitly prefers the chief-of-staff charter holder over "whoever is level 0" (the COO
 is level 0 too, but virtual, and must never become a new hire's default lead);

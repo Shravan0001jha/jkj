@@ -124,3 +124,30 @@ test('a Team Room escalation routes through the COO first; falls back to the own
     tmp.cleanup();
   }
 });
+
+test('pollPresence emits coo.presence only when online ↔ offline actually flips, to every socket (not just loopback)', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const events: { presence: { online: boolean } }[] = [];
+    wp.on(e => { if (e.type === 'coo.presence') events.push(e); });
+
+    coo.pollPresence(wp); // first poll (still offline): seeds, no event
+    assert.equal(events.length, 0);
+    coo.pollPresence(wp); // unchanged: no event
+    assert.equal(events.length, 0);
+
+    coo.touchHeartbeatForTest(wp);
+    coo.pollPresence(wp); // offline -> online: one event
+    assert.equal(events.length, 1);
+    assert.equal(events[0]!.presence.online, true);
+    coo.pollPresence(wp); // still online: no event
+    assert.equal(events.length, 1);
+
+    coo.touchHeartbeatForTest(wp, new Date(Date.now() - 10 * 60_000));
+    coo.pollPresence(wp); // online -> offline: one event
+    assert.equal(events.length, 2);
+    assert.equal(events[1]!.presence.online, false);
+  } finally {
+    tmp.cleanup();
+  }
+});
