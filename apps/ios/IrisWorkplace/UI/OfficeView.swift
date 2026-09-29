@@ -11,6 +11,15 @@ struct OfficeView: View {
                 }
                 if let d = model.office.data {
                     Section { OfficeHeader(data: d) }
+                    if let coo = d.coo {
+                        Section {
+                            Button { model.router.talk(to: coo.employee.id) } label: {
+                                CooCardView(card: coo)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Opens Talk with Claude")
+                        }
+                    }
                     ForEach(d.units) { u in
                         Section {
                             ForEach(u.employees) { card in
@@ -211,6 +220,42 @@ struct CoverageRow: View {
         }
         .frame(maxWidth: .infinity)
         .accessibilityLabel("\(label) \(n) of \(coverage.total)")
+    }
+}
+
+/// "Claude — COO": the owner's own AI colleague, shown once above the org units, with a presence
+/// dot (online/offline). Tapping opens Talk with the same chat UI as any employee.
+struct CooCardView: View {
+    let card: EmployeeCard
+
+    private var online: Bool? { card.employee.isOnline }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack(alignment: .bottomTrailing) {
+                InitialsAvatar(name: card.employee.name, size: 40, tint: .indigo)
+                PresenceDot(online: online).offset(x: 2, y: 2)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(card.employee.name).font(.headline)
+                    Pill(text: "COO", tint: .indigo)
+                }
+                if online == false {
+                    Text("Messages will wait; Asha handles routine").font(.caption).foregroundStyle(.secondary)
+                } else if let r = card.lastReport, !r.isEmpty {
+                    Text(r).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                } else {
+                    Text("Talk anytime — the whole picture, one conversation.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Claude, Chief Operating Officer, \(online == true ? "online" : online == false ? "offline" : "")")
     }
 }
 

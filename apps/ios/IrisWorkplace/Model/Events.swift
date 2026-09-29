@@ -41,12 +41,14 @@ enum ServerEvent: Equatable {
     case alert(AlertEvent)
     case roomThread(RoomThread)
     case roomMessage(RoomMessage, thread: RoomThread)
+    /// A mentioned employee is composing a reply; not yet in packages/shared, reported to the lead.
+    case roomReplying(threadId: String, employeeId: String)
     case unknown(type: String)
 
     static let knownTypes: [String] = [
         "hello", "snapshot", "agent.updated", "agent.removed", "agent.log", "mcp.updated", "activity", "error",
         "office.snapshot", "office.updated", "inbox.updated", "work.updated", "proposal.updated", "release.updated", "release.log",
-        "spend.updated", "signals.updated", "alert", "room.thread", "room.message",
+        "spend.updated", "signals.updated", "alert", "room.thread", "room.message", "room.typing",
     ]
 }
 
@@ -54,7 +56,7 @@ extension ServerEvent: Decodable {
     private enum Keys: String, CodingKey {
         case type, version, startedAt, agents, agent, agentId, entry, server, event, message
         case office, card, item, proposal, release, id, line, summary, signals, level, title, body, inboxId
-        case thread
+        case thread, threadId, employeeId
     }
 
     init(from decoder: Decoder) throws {
@@ -105,6 +107,8 @@ extension ServerEvent: Decodable {
             self = .roomThread(try c.decode(RoomThread.self, forKey: .thread))
         case "room.message":
             self = .roomMessage(try c.decode(RoomMessage.self, forKey: .message), thread: try c.decode(RoomThread.self, forKey: .thread))
+        case "room.typing":
+            self = .roomReplying(threadId: try c.decode(String.self, forKey: .threadId), employeeId: try c.decode(String.self, forKey: .employeeId))
         default:
             self = .unknown(type: type)
         }

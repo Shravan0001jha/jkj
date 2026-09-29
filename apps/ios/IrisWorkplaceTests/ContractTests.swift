@@ -81,7 +81,7 @@ final class ContractTests: XCTestCase {
 
     func testNewContractFieldsAreCarried() throws {
         let office = try Fixtures.decode("office", as: OfficeResponse.self)
-        XCTAssertEqual(office.counts, OfficeCounts(working: 2, blocked: 1, stalled: 1, needsYou: 5, total: 7))
+        XCTAssertEqual(office.counts, OfficeCounts(working: 2, blocked: 1, stalled: 1, needsYou: 5, total: 8), "seven office employees plus the COO")
         XCTAssertEqual(office.cards().first { $0.employee.id == "tara" }?.employee.stateReason, "Paused — daily budget reached (₹150). You can still talk to Tara.")
         XCTAssertEqual(office.spend.bySource["anthropic-api"], 318.0)
         XCTAssertEqual(office.spend.subscription.windows.map(\.window), [.fiveHour, .sevenDay, .sevenDayOpus])

@@ -10,6 +10,51 @@ struct Glyph {
     let label: String
 }
 
+extension Employee {
+    /// `presence` is ahead of the contract and only the COO sets it today; anyone else reads nil
+    /// (unknown), never a false "offline".
+    var isOnline: Bool? { presence.map { $0 == "online" } }
+}
+
+/// A small filled circle with the person's initials — the group chat's stand-in for a photo.
+struct InitialsAvatar: View {
+    let name: String
+    var size: CGFloat = 26
+    var tint: Color = .accentColor
+
+    private var initials: String {
+        let parts = name.split(separator: " ")
+        let letters = parts.prefix(2).compactMap { $0.first }
+        return letters.isEmpty ? "?" : String(letters).uppercased()
+    }
+
+    var body: some View {
+        Circle()
+            .fill(tint.opacity(0.18))
+            .overlay(Text(initials).font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(tint))
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Online (filled) / offline (hollow) — shape as well as colour, like every other state in this app.
+struct PresenceDot: View {
+    let online: Bool?
+    var body: some View {
+        Group {
+            if online == true {
+                Circle().fill(Color.green)
+            } else if online == false {
+                Circle().strokeBorder(Color.secondary, lineWidth: 1.5)
+            } else {
+                EmptyView()
+            }
+        }
+        .frame(width: 9, height: 9)
+        .accessibilityLabel(online == true ? "Online" : online == false ? "Offline" : "")
+    }
+}
+
 extension EmployeeState {
     var glyph: Glyph {
         switch self {
@@ -185,6 +230,16 @@ enum Format {
         if seconds < 3600 { return "\(seconds / 60) min" }
         if seconds < 86_400 { return "\(seconds / 3600) h \((seconds % 3600) / 60) min" }
         return "\(seconds / 86_400) d \((seconds % 86_400) / 3600) h"
+    }
+
+    /// A date/time separator for a chat, iMessage-style: nil while the conversation keeps
+    /// flowing (< 5 min since the previous item), otherwise a label for the gap.
+    static func chatSeparator(since previous: String?, at: String) -> String? {
+        guard let d = date(at) else { return nil }
+        if let previous, let p = date(previous), d.timeIntervalSince(p) < 300 { return nil }
+        if Calendar.current.isDateInToday(d) { return d.formatted(date: .omitted, time: .shortened) }
+        if Calendar.current.isDateInYesterday(d) { return "Yesterday " + d.formatted(date: .omitted, time: .shortened) }
+        return d.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 
     static func time(_ s: String) -> String {

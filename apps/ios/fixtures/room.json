@@ -1,6 +1,29 @@
 {
   "threads": [
     {
+      "id": "general",
+      "title": "General",
+      "charterIds": [],
+      "createdBy": "workplace",
+      "createdAt": "2026-09-24T14:20:00.000Z",
+      "state": "open",
+      "lastAt": "2026-09-27T08:57:00.000Z",
+      "messageCount": 6,
+      "participants": [
+        "owner",
+        "coo",
+        "asha",
+        "dev",
+        "mira",
+        "kabir",
+        "rohan",
+        "tara",
+        "nikhil"
+      ],
+      "escalations": [],
+      "headline": "Where the whole team and you talk."
+    },
+    {
       "id": "rt-socket",
       "title": "Mac socket contract for errands",
       "charterIds": [

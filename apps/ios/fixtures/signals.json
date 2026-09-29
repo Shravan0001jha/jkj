@@ -1,5 +1,11 @@
 {
   "employees": {
+    "coo": {
+      "throughput7d": 3,
+      "rework7d": 1,
+      "falseDoneRate7d": 0.1,
+      "costPerDoneInr": 62.5
+    },
     "asha": {
       "throughput7d": 3,
       "rework7d": 1,

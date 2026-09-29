@@ -13,9 +13,14 @@ final class RoomStore {
     private(set) var posting: Set<String> = []
     /// Threads with messages the owner has not opened since they arrived.
     private(set) var unread: Set<String> = []
+    /// Thread id → employee id composing a reply, from `room.typing`; cleared once any message
+    /// lands in that thread (the reply, or anything else that makes it stale).
+    private(set) var replying: [String: String] = [:]
 
-    var open: [RoomThread] { threads.filter { $0.state == .open } }
-    var resolved: [RoomThread] { threads.filter { $0.state == .resolved } }
+    /// The `general` channel, always first regardless of activity (Room D2).
+    var general: RoomThread? { threads.first { $0.id == "general" } }
+    var open: [RoomThread] { threads.filter { $0.state == .open && $0.id != "general" } }
+    var resolved: [RoomThread] { threads.filter { $0.state == .resolved && $0.id != "general" } }
 
     func load(_ rest: RestClient) async {
         loading = true
@@ -66,7 +71,10 @@ final class RoomStore {
             upsert(t)
         case .roomMessage(let m, let t):
             upsert(t)
+            replying.removeValue(forKey: m.threadId)
             if append(m), !m.owner { unread.insert(m.threadId) }
+        case .roomReplying(let threadId, let employeeId):
+            replying[threadId] = employeeId
         default:
             break
         }

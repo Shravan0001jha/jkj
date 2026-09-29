@@ -37,6 +37,11 @@ final class OfficeStore {
         guard var d = data else { return }
         switch event {
         case .officeUpdated(let card):
+            if card.employee.id == d.coo?.employee.id {
+                d.coo = card
+                data = d
+                return
+            }
             var placed = false
             for u in d.units.indices {
                 if let i = d.units[u].employees.firstIndex(where: { $0.employee.id == card.employee.id }) {
@@ -65,7 +70,9 @@ final class OfficeStore {
         data?.needsYou = n
     }
 
-    var cards: [EmployeeCard] { data?.units.flatMap(\.employees) ?? [] }
+    /// Every card, including the COO's — she isn't in any unit's list but still needs a name,
+    /// charters and a look-up like anyone else.
+    var cards: [EmployeeCard] { (data.map { [$0.coo].compactMap { $0 } } ?? []) + (data?.units.flatMap(\.employees) ?? []) }
     func card(_ employeeId: String) -> EmployeeCard? { cards.first { $0.employee.id == employeeId } }
 }
 
@@ -218,6 +225,53 @@ final class TalkStore {
 
     var isRunning: Bool { session?.status == .running }
     var pendingApproval: PendingApproval? { session?.status == .waiting ? session?.approval : nil }
+
+    /// `log` grouped for the chat: tool activity (read/edit/bash/search/task/tool) collapses into
+    /// one row per consecutive run, so the transcript reads like a conversation, not a build log.
+    var chatItems: [ChatItem] { Self.chatItems(from: log) }
+
+    static func chatItems(from log: [LogEntry]) -> [ChatItem] {
+        let stepKinds: Set<LogKind> = [.read, .edit, .bash, .search, .task, .tool]
+        var items: [ChatItem] = []
+        var run: [LogEntry] = []
+        func flushRun() {
+            guard !run.isEmpty else { return }
+            items.append(.steps(run))
+            run = []
+        }
+        for entry in log {
+            if stepKinds.contains(entry.kind) {
+                run.append(entry)
+            } else {
+                flushRun()
+                items.append(.message(entry))
+            }
+        }
+        flushRun()
+        return items
+    }
+}
+
+/// One row of the Talk chat: a single log entry, or a run of tool/file/bash/search/task steps
+/// collapsed behind "worked · N steps".
+enum ChatItem: Identifiable, Equatable {
+    case message(LogEntry)
+    case steps([LogEntry])
+
+    var id: String {
+        switch self {
+        case .message(let e): return e.id
+        case .steps(let es): return "steps-" + (es.first?.id ?? "")
+        }
+    }
+
+    /// The timestamp a date/time separator compares against: the last entry's, for a run of steps.
+    var at: String {
+        switch self {
+        case .message(let e): return e.at
+        case .steps(let es): return es.last?.at ?? ""
+        }
+    }
 }
 
 // MARK: - Features

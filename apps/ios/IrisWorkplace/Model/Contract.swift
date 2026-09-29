@@ -274,6 +274,8 @@ struct Employee: Codable, Equatable, Hashable, Identifiable {
     var githubApp: String?
     var state: EmployeeState
     var stateReason: String?
+    /// "online" | "offline"; not yet in packages/shared. Only the COO sets it today.
+    var presence: String?
 }
 
 enum UnitKind: String, Codable, CaseIterable {
@@ -868,6 +870,8 @@ struct OfficeCounts: Codable, Equatable, Hashable {
 
 struct OfficeResponse: Codable, Equatable {
     var chiefOfStaff: String
+    /// The owner's own AI colleague, shown once above the units; not yet in packages/shared.
+    var coo: EmployeeCard?
     var units: [OfficeUnit]
     var coverage: Coverage
     var needsYou: Int

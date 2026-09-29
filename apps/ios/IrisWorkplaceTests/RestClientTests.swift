@@ -127,6 +127,6 @@ final class RestClientTests: XCTestCase {
         let inbox = try await c.inbox()
         XCTAssertEqual(inbox.count, 8)
         let employees = try await c.employees()
-        XCTAssertEqual(employees.count, 7)
+        XCTAssertEqual(employees.count, 8, "seven office employees plus the COO")
     }
 }

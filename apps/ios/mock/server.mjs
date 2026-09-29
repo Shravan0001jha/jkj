@@ -77,6 +77,7 @@ const html = (res, body) => { res.writeHead(200, { 'content-type': 'text/html; c
 
 const office = () => ({
   chiefOfStaff: 'asha',
+  coo: state.cards.find(c => c.employee.id === 'coo'),
   units: D.units.filter(u => u.kind === 'unit').map(unit => ({ unit, employees: state.cards.filter(c => c.employee.unitId === unit.id) })),
   coverage: D.coverage,
   needsYou: state.inbox.filter(i => i.state === 'open').length,
@@ -122,6 +123,14 @@ const server = createServer(async (req, res) => {
 
   if (m === 'GET' && p === '/api/health') return json(res, 200, { ...D.health, uptimeSeconds: Math.round(process.uptime()), resilience: { ...D.health.resilience, power: { ...D.health.resilience.power, source: powerSource } } });
   if (m === 'POST' && p === '/api/_power') { const body = await readJson(req); powerSource = body?.source ?? 'ac'; return json(res, 200, { ok: true, powerSource }); }
+  if (m === 'POST' && p === '/api/_presence') {
+    const body = await readJson(req);
+    const c = state.cards.find(c => c.employee.id === (body?.id ?? 'coo'));
+    if (!c) return json(res, 404, { error: 'no such employee' });
+    c.employee.presence = body?.presence ?? 'online';
+    broadcast({ type: 'office.updated', card: c });
+    return json(res, 200, { ok: true, presence: c.employee.presence });
+  }
   if (m === 'GET' && p === '/api/office') return json(res, 200, office());
   if (m === 'GET' && p === '/api/org') return json(res, 200, D.org());
   if (m === 'GET' && seg[1] === 'charters' && id) {
@@ -286,8 +295,9 @@ const server = createServer(async (req, res) => {
     (state.messages[id] ??= []).push(message);
     thread.lastAt = now; thread.messageCount += 1; if (!thread.participants.includes('owner')) thread.participants.push('owner');
     broadcast({ type: 'room.message', message, thread }); broadcast({ type: 'room.thread', thread });
-    // A mentioned employee answers in a moment.
+    // A mentioned employee answers in a moment; "replying…" shows from now until that reply lands.
     const who = (body.mentions ?? [])[0] ?? thread.participants.find(x => x !== 'owner' && x !== 'workplace');
+    if (who) broadcast({ type: 'room.typing', threadId: id, employeeId: who });
     if (who) setTimeout(() => {
       const reply = { id: `m-${msgSeq++}`, threadId: id, at: new Date().toISOString(), by: who, owner: false, text: `Noted. I will answer in the thread with evidence.\n\nDetails: reading the latest messages and my charter first; back within the hour.`, mentions: ['owner'] };
       state.messages[id].push(reply); thread.lastAt = reply.at; thread.messageCount += 1; thread.headline = `${who} replied; will answer with evidence within the hour.`;

@@ -1,5 +1,36 @@
 {
   "chiefOfStaff": "asha",
+  "coo": {
+    "employee": {
+      "id": "coo",
+      "name": "Claude",
+      "roleId": "coo",
+      "level": 0,
+      "permanent": true,
+      "charterIds": [],
+      "unitId": "leadership",
+      "chapterIds": [],
+      "reportsTo": null,
+      "workspace": {
+        "repo": "/Users/shravan0001jha/claude-dev",
+        "worktree": "/Users/shravan0001jha/claude-dev-coo",
+        "branch": "wp/coo"
+      },
+      "budget": {
+        "inrPerDay": 150,
+        "concurrentSessions": 2
+      },
+      "githubApp": "iris-coo",
+      "state": "idle",
+      "presence": "online"
+    },
+    "charters": [],
+    "currentWork": null,
+    "lastReport": "Here for the whole picture — ask anything, any time.",
+    "session": null,
+    "spendTodayInr": 0,
+    "needsYou": 0
+  },
   "units": [
     {
       "unit": {
@@ -897,6 +928,6 @@
     "blocked": 1,
     "stalled": 1,
     "needsYou": 5,
-    "total": 7
+    "total": 8
   }
 }

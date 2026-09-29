@@ -101,8 +101,16 @@ struct ConversationView: View {
                             }
                             .padding(24)
                         }
-                        ForEach(talk.log) { entry in
-                            LogRow(entry: entry).id(entry.id)
+                        let items = talk.chatItems
+                        ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
+                            let previousAt = i > 0 ? items[i - 1].at : nil
+                            if let label = Format.chatSeparator(since: previousAt, at: item.at) {
+                                DateSeparator(text: label)
+                            }
+                            ChatItemRow(item: item).id(item.id)
+                        }
+                        if talk.isRunning {
+                            WorkingBubble(name: name).id("working")
                         }
                         if let a = talk.pendingApproval, let s = talk.session {
                             ApprovalCard(approval: a, agentId: s.id) { self.error = $0 }.id("approval")
@@ -116,6 +124,7 @@ struct ConversationView: View {
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: talk.log.count) { _, _ in withAnimation { proxy.scrollTo("bottom") } }
+                .onChange(of: talk.isRunning) { _, running in if running { withAnimation { proxy.scrollTo("working") } } }
                 .onChange(of: talk.pendingApproval) { _, a in if a != nil { withAnimation { proxy.scrollTo("approval") } } }
                 .onAppear { proxy.scrollTo("bottom") }
             }
@@ -220,39 +229,69 @@ extension TalkStore {
     func deselect() { clear() }
 }
 
-struct LogRow: View {
+/// One row of the chat, by `ChatItem`: a message bubble, or a collapsed run of tool steps.
+struct ChatItemRow: View {
+    let item: ChatItem
+
+    var body: some View {
+        switch item {
+        case .message(let entry): LogRow(entry: entry)
+        case .steps(let entries): StepsRow(entries: entries)
+        }
+    }
+}
+
+/// A quiet date/time break in the chat, like iMessage's — only when the gap is worth marking.
+struct DateSeparator: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.caption2).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity).padding(.top, 6)
+    }
+}
+
+/// A run of tool/read/edit/bash/search/task steps, collapsed to one row: "worked · N steps".
+/// No tool noise in the chat unless the owner asks for it.
+struct StepsRow: View {
+    let entries: [LogEntry]
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { withAnimation(.snappy) { expanded.toggle() } } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "wrench.and.screwdriver").font(.caption).foregroundStyle(.secondary)
+                    Text("worked · \(entries.count) step\(entries.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+            .buttonStyle(.plain)
+            if expanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(entries) { e in StepRow(entry: e) }
+                }
+                .padding(.leading, 4)
+            }
+        }
+        .padding(.horizontal, 16)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Worked, \(entries.count) steps")
+        .accessibilityHint(expanded ? "Collapses the steps" : "Expands the steps")
+    }
+}
+
+private struct StepRow: View {
     let entry: LogEntry
 
     var body: some View {
-        switch entry.kind {
-        case .user:
-            HStack {
-                Spacer(minLength: 48)
-                Text(entry.text)
-                    .padding(10)
-                    .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
-                    .textSelection(.enabled)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.label.isEmpty ? entry.kind.rawValue : entry.label).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(entry.text).font(.caption.monospaced()).lineLimit(4).textSelection(.enabled)
             }
-            .padding(.horizontal, 12)
-        case .assistant:
-            CompactRow(text: entry.text, summary: entry.summary, details: entry.details).padding(.horizontal, 16)
-        case .error:
-            Label(entry.text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline).padding(.horizontal, 16)
-        case .system:
-            Text(entry.text).font(.caption).italic().foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.horizontal, 16)
-        case .image:
-            Label("Image", systemImage: "photo").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16)
-        case .read, .edit, .bash, .search, .task, .tool:
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 18)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.label.isEmpty ? entry.kind.rawValue : entry.label).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    Text(entry.text).font(.caption.monospaced()).lineLimit(4).textSelection(.enabled)
-                }
-                Spacer()
-                Text(Format.time(entry.at)).font(.caption2).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16)
+            Spacer()
+            Text(Format.time(entry.at)).font(.caption2).foregroundStyle(.tertiary)
         }
     }
 
@@ -264,6 +303,66 @@ struct LogRow: View {
         case .search: return "magnifyingglass"
         case .task: return "person.2"
         default: return "wrench"
+        }
+    }
+}
+
+/// The employee is running: an iMessage-style "…is working" bubble until the next reply or idle.
+struct WorkingBubble: View {
+    let name: String
+    var body: some View {
+        HStack {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("\(name) is working…").font(.subheadline).foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+            Spacer(minLength: 48)
+        }
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct LogRow: View {
+    let entry: LogEntry
+
+    var body: some View {
+        switch entry.kind {
+        case .user:
+            HStack {
+                Spacer(minLength: 48)
+                Text(entry.text)
+                    .padding(10)
+                    .background(Color.accentColor.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
+                    .foregroundStyle(.white)
+                    .textSelection(.enabled)
+            }
+            .padding(.horizontal, 12)
+        case .assistant:
+            HStack(alignment: .bottom) {
+                CompactRow(text: entry.text, summary: entry.summary, details: entry.details)
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                Spacer(minLength: 48)
+            }
+            .padding(.horizontal, 12)
+        case .error:
+            Label(entry.text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline).padding(.horizontal, 16)
+        case .system:
+            Text(entry.text).font(.caption).italic().foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.horizontal, 16)
+        case .image:
+            HStack {
+                Label("Image", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
+                    .padding(10).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                Spacer(minLength: 48)
+            }
+            .padding(.horizontal, 12)
+        case .read, .edit, .bash, .search, .task, .tool:
+            // Reached only if a lone step arrives with no run around it (e.g. the first entry);
+            // `chatItems` normally folds these into a `StepsRow`.
+            StepsRow(entries: [entry])
         }
     }
 }

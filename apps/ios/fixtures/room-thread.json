@@ -1,25 +1,26 @@
 {
   "thread": {
-    "id": "rt-socket",
-    "title": "Mac socket contract for errands",
-    "charterIds": [
-      "experts",
-      "server"
-    ],
-    "createdBy": "kabir",
-    "createdAt": "2026-09-27T07:00:00.000Z",
+    "id": "general",
+    "title": "General",
+    "charterIds": [],
+    "createdBy": "workplace",
+    "createdAt": "2026-09-24T14:20:00.000Z",
     "state": "open",
-    "lastAt": "2026-09-27T08:52:00.000Z",
-    "messageCount": 4,
+    "lastAt": "2026-09-27T08:57:00.000Z",
+    "messageCount": 6,
     "participants": [
-      "kabir",
+      "owner",
+      "coo",
+      "asha",
+      "dev",
       "mira",
-      "asha"
+      "kabir",
+      "rohan",
+      "tara",
+      "nikhil"
     ],
-    "escalations": [
-      "ib-5"
-    ],
-    "headline": "Blocked on the socket shape; escalated to you as ib-5."
+    "escalations": [],
+    "headline": "Where the whole team and you talk."
   },
   "messages": [
     {

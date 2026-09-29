@@ -201,6 +201,37 @@
     "type": "office.snapshot",
     "office": {
       "chiefOfStaff": "asha",
+      "coo": {
+        "employee": {
+          "id": "coo",
+          "name": "Claude",
+          "roleId": "coo",
+          "level": 0,
+          "permanent": true,
+          "charterIds": [],
+          "unitId": "leadership",
+          "chapterIds": [],
+          "reportsTo": null,
+          "workspace": {
+            "repo": "/Users/shravan0001jha/claude-dev",
+            "worktree": "/Users/shravan0001jha/claude-dev-coo",
+            "branch": "wp/coo"
+          },
+          "budget": {
+            "inrPerDay": 150,
+            "concurrentSessions": 2
+          },
+          "githubApp": "iris-coo",
+          "state": "idle",
+          "presence": "online"
+        },
+        "charters": [],
+        "currentWork": null,
+        "lastReport": "Here for the whole picture — ask anything, any time.",
+        "session": null,
+        "spendTodayInr": 0,
+        "needsYou": 0
+      },
       "units": [
         {
           "unit": {
@@ -1098,7 +1129,7 @@
         "blocked": 1,
         "stalled": 1,
         "needsYou": 5,
-        "total": 7
+        "total": 8
       }
     }
   },
@@ -1106,101 +1137,59 @@
     "type": "office.updated",
     "card": {
       "employee": {
-        "id": "mira",
-        "name": "Mira",
+        "id": "dev",
+        "name": "Dev",
         "roleId": "lead",
         "level": 1,
         "permanent": true,
         "charterIds": [
-          "experts"
+          "conversation",
+          "character"
         ],
         "unitId": "capabilities",
         "chapterIds": [],
         "reportsTo": "asha",
         "workspace": {
           "repo": "/Users/shravan0001jha/claude-dev",
-          "worktree": "/Users/shravan0001jha/claude-dev-mira",
-          "branch": "wp/mira"
+          "worktree": "/Users/shravan0001jha/claude-dev-dev",
+          "branch": "wp/dev"
         },
         "budget": {
           "inrPerDay": 150,
           "concurrentSessions": 2
         },
-        "githubApp": "iris-experts-lead",
-        "state": "needs-owner",
-        "stateReason": "waiting for your approval to run the errand tests"
+        "githubApp": "iris-conversation-lead",
+        "state": "idle"
       },
       "charters": [
         {
-          "id": "experts",
-          "title": "Experts",
+          "id": "conversation",
+          "title": "Conversation",
           "axis": "capability",
-          "version": 2,
-          "mission": "Device actions with the no-lie guard: act first, then acknowledge.",
+          "version": 3,
+          "mission": "Voice, STT/TTS, personality and the responsiveness ladder: something visible within 500 ms.",
           "holderIds": [
-            "mira"
+            "dev"
           ],
-          "tokens": 1380
+          "tokens": 1140
+        },
+        {
+          "id": "character",
+          "title": "Character",
+          "axis": "capability",
+          "version": 1,
+          "mission": "The on-screen character: expressions, movement, moods, lip-sync, quiet by default.",
+          "holderIds": [
+            "dev"
+          ],
+          "tokens": 1260
         }
       ],
-      "currentWork": {
-        "id": "a-1",
-        "kind": "assignment",
-        "title": "Errand receiver on the Mac (experts)",
-        "body": "Errand receiver on the Mac (experts)",
-        "state": "building",
-        "requirementIds": [],
-        "platformIds": [
-          "mac"
-        ],
-        "createdAt": "2026-09-27T07:00:00.000Z",
-        "updatedAt": "2026-09-27T08:55:00.000Z",
-        "history": [
-          {
-            "at": "2026-09-27T07:00:00.000Z",
-            "from": null,
-            "to": "proposed",
-            "by": "owner"
-          }
-        ],
-        "featureId": "f-errands",
-        "charterId": "experts",
-        "employeeId": "mira",
-        "sessionId": "s-mira-1",
-        "plan": "## Plan\n1. Add an `errand` expert that validates the instruction.\n2. Run it through the existing act-then-ack path.\n3. Tests for a busy Mac."
-      },
-      "lastReport": "Errand expert validates instructions; running the test suite needs your approval.",
-      "session": {
-        "id": "s-mira-1",
-        "projectId": "claude-dev",
-        "name": "mira",
-        "task": "Errand receiver on the Mac",
-        "model": "sonnet",
-        "status": "waiting",
-        "workspace": "worktree",
-        "cwd": "/Users/shravan0001jha/claude-dev-mira",
-        "startedAt": "2026-09-27T08:35:00.000Z",
-        "usage": {
-          "inputTokens": 18400,
-          "outputTokens": 6200,
-          "costUsd": 0.41
-        },
-        "messageCount": 14,
-        "permissionMode": "acceptEdits",
-        "alwaysAllowed": [
-          "Read"
-        ],
-        "driven": true,
-        "approval": {
-          "id": "ap-1",
-          "tool": "Bash",
-          "input": "cd services/agent-svc && ../../.venv/bin/python -m pytest -q tests/test_errands.py",
-          "reason": "Runs a command",
-          "requestedAt": "2026-09-27T08:59:00.000Z"
-        }
-      },
-      "spendTodayInr": 131.8,
-      "needsYou": 0
+      "currentWork": null,
+      "lastReport": "Spoken confirmations done, verified by Nikhil (48 tests, 3 live).",
+      "session": null,
+      "spendTodayInr": 21.5,
+      "needsYou": 1
     }
   },
   {
@@ -1339,6 +1328,29 @@
           }
         ],
         "employees": [
+          {
+            "id": "coo",
+            "name": "Claude",
+            "roleId": "coo",
+            "level": 0,
+            "permanent": true,
+            "charterIds": [],
+            "unitId": "leadership",
+            "chapterIds": [],
+            "reportsTo": null,
+            "workspace": {
+              "repo": "/Users/shravan0001jha/claude-dev",
+              "worktree": "/Users/shravan0001jha/claude-dev-coo",
+              "branch": "wp/coo"
+            },
+            "budget": {
+              "inrPerDay": 150,
+              "concurrentSessions": 2
+            },
+            "githubApp": "iris-coo",
+            "state": "idle",
+            "presence": "online"
+          },
           {
             "id": "asha",
             "name": "Asha",
@@ -1733,6 +1745,29 @@
           }
         ],
         "employees": [
+          {
+            "id": "coo",
+            "name": "Claude",
+            "roleId": "coo",
+            "level": 0,
+            "permanent": true,
+            "charterIds": [],
+            "unitId": "leadership",
+            "chapterIds": [],
+            "reportsTo": null,
+            "workspace": {
+              "repo": "/Users/shravan0001jha/claude-dev",
+              "worktree": "/Users/shravan0001jha/claude-dev-coo",
+              "branch": "wp/coo"
+            },
+            "budget": {
+              "inrPerDay": 150,
+              "concurrentSessions": 2
+            },
+            "githubApp": "iris-coo",
+            "state": "idle",
+            "presence": "online"
+          },
           {
             "id": "asha",
             "name": "Asha",
@@ -2214,6 +2249,12 @@
     "type": "signals.updated",
     "signals": {
       "employees": {
+        "coo": {
+          "throughput7d": 3,
+          "rework7d": 1,
+          "falseDoneRate7d": 0.1,
+          "costPerDoneInr": 62.5
+        },
         "asha": {
           "throughput7d": 3,
           "rework7d": 1,
@@ -2355,6 +2396,11 @@
       ],
       "headline": "Blocked on the socket shape; escalated to you as ib-5."
     }
+  },
+  {
+    "type": "room.typing",
+    "threadId": "general",
+    "employeeId": "coo"
   },
   {
     "type": "future.event",
