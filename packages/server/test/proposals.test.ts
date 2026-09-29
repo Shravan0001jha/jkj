@@ -94,7 +94,6 @@ test('a contractor hire gets a branch in the lead\'s repo and cannot itself prop
     const priya = hire.after.employees.find(e => e.id === 'priya')!;
     assert.equal(priya.level, 2);
     assert.equal(priya.permanent, false);
-    assert.equal(priya.workspace.repo, '/Users/shravan0001jha/claude-dev-mobile');
     assert.equal(priya.workspace.branch, 'priya/work');
     assert.equal(priya.githubApp, undefined);
     inbox.answer(wp, hire.inboxId, 'approve', undefined, 'web');

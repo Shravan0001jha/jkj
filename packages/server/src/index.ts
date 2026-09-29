@@ -14,7 +14,10 @@ import * as cos from './services/cos.js';
 import * as lock from './services/lock.js';
 import * as boots from './services/boots.js';
 import { Watchdog } from './services/watchdog.js';
+import { SuspendDetector } from './services/suspend.js';
+import { PowerMonitor } from './services/power.js';
 import * as room from './services/room.js';
+import { wireMentionReplies } from './services/mentions.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
 import * as employees from './services/employees.js';
@@ -63,6 +66,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   employees.recoverAfterRestart(wp);
   // Budget is real money only (28 Sep): relabel the old ledger, lift pauses that were on free usage.
   spend.migrateToRealMoney(wp);
+  try { const c = spend.resolveStalePreMigrationCapItems(wp); if (c.resolved.length) log.info('boot', `resolved ${c.resolved.length} stale pre-migration cap item(s)`); } catch (err) { log.warn('boot', `stale cap items: ${err instanceof Error ? err.message : err}`); }
 
   // Caps pause sessions; the owner's answer unpauses.
   spend.onPause((w, scope) => employees.pauseScope(w, scope));
@@ -78,7 +82,10 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
 
   // The first real feature, with Iris's real statuses, once; then the Team Room's real threads.
   try { features.seedFeature(wp); } catch (err) { log.warn('boot', `feature seed failed: ${err instanceof Error ? err.message : err}`); }
+  try { room.ensureGeneral(wp); } catch (err) { log.warn('boot', `General channel: ${err instanceof Error ? err.message : err}`); }
   try { const made = room.seedThreads(wp); if (made.length) log.info('boot', `seeded ${made.length} Team Room threads from the 27 Sep plans`); } catch (err) { log.warn('boot', `room seed failed: ${err instanceof Error ? err.message : err}`); }
+  // @mentions wake a short, rate-limited reply turn (RCA, 29 Sep: nothing did this before); @coo goes to the COO bridge.
+  wireMentionReplies(wp);
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
@@ -92,12 +99,19 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
     boots: boots.marks(wp.db),
     bootedAt: startedAt,
   });
+  // The Mac sleeping is the one cause of tunnel flaps seen so far (B2): notice a resume, reconnect at
+  // once, and show sleeps and the power source on the health check.
+  const suspend = new SuspendDetector();
+  suspend.onResume(gap => { log.warn('power', `the process was frozen for ${Math.round(gap / 1000)} s (the Mac slept)`); tunnel?.wake(gap); });
+  const power = new PowerMonitor();
   const resilience = () => ({
     startedAt: new Date(startedAt).toISOString(),
     uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
     boots: { total: history.total, last24h: boots.bootsWithin(history, Date.now(), 24 * 60 * 60_000), recent: history.recent.slice(-5) },
     tunnel: tunnel ? tunnel.stats : null,
     watchdog: watchdog.state,
+    sleeps: suspend.state,
+    power: power.state,
   });
   const server = createHttpServer({ config, wp, auth, telegram, tunnel, push, resilience });
   const hub = attachSocket(server, wp, auth);
@@ -110,8 +124,17 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   if (config.telegram) telegram.start();
   tunnel?.start();
   watchdog.start();
+  suspend.start();
+  power.start();
+
+  // Duplicate stall notes an earlier build left (QA B3) are withdrawn once; the owner's decisions are untouched.
+  try { const d = cos.dedupeNotes(wp); if (d.expired.length) log.info('boot', `withdrew ${d.expired.length} duplicate stall notes`); } catch (err) { log.warn('boot', `dedupe notes: ${err instanceof Error ? err.message : err}`); }
+  // The pre-fix flood of owner-facing stall/"did nothing"/[TEST] items (29 Sep): withdrawn once; a
+  // real open review request moves onto the reviewer's/Asha's page instead.
+  try { cos.cleanupLegacyInbox(wp); } catch (err) { log.warn('boot', `legacy inbox cleanup: ${err instanceof Error ? err.message : err}`); }
 
   const stallTimer = setInterval(() => {
+    for (const id of employees.closeStale(wp)) log.info('sessions', `closed stale session ${id}`);
     health.handleParkedApprovals(wp);
     void health.handleStalls(wp).catch(err => log.warn('health', String(err)));
   }, 30_000);
@@ -129,6 +152,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
     server, wp, telegram,
     stop: async () => {
       push.stop();
+      suspend.stop();
+      power.stop();
       watchdog.stop();
       tunnel?.stop();
       clearInterval(stallTimer);

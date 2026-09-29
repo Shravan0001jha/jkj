@@ -7,6 +7,7 @@ import { ensureWorkplace, loadOrg, type Org } from './org.js';
 import { openStore, type Db } from './store.js';
 import { importRequirements, readRequirements, withOwners } from './requirements.js';
 import { log } from '../util/logger.js';
+import { assertNotRealPath } from './test-guard.js';
 
 /**
  * The one object every Workplace service works on: the config, the live
@@ -34,6 +35,9 @@ export const SEED_DIR = fileURLToPath(new URL('../../seed/', import.meta.url));
 const EXTRACT_PATH = fileURLToPath(new URL('../../../../docs/product-definition-extract.md', import.meta.url));
 
 export function createWorkplace(config: Config, options: { db?: Db; extractMarkdown?: string } = {}): Workplace {
+  // Under a test, only temp directories (test-guard.ts): the organisation, the worktrees, the repos.
+  assertNotRealPath('organisation directory', config.workplaceDir);
+  assertNotRealPath('work directory', config.workDir);
   const { seeded } = config.seed
     ? ensureWorkplace(config.workplaceDir, SEED_DIR)
     : { seeded: false };
@@ -42,6 +46,8 @@ export function createWorkplace(config: Config, options: { db?: Db; extractMarkd
   const db = options.db ?? openStore(join(config.workplaceDir, 'workplace.db'));
   const listeners = new Set<Listener>();
   const state = { org: loadOrg(config.workplaceDir) };
+  for (const repo of state.org.repos) assertNotRealPath(`repository ${repo.id}`, repo.root);
+  for (const e of state.org.employees) assertNotRealPath(`workspace of ${e.id}`, e.workspace.repo);
 
   // Requirements are imported once; a later re-import is an explicit action.
   if (readRequirements(config.workplaceDir).length === 0) {

@@ -3,7 +3,7 @@ import type {
   Agent, ApprovalDecision, Attachment, ContextResponse, Coverage, EmployeeCard, EmployeeDetail,
   FeatureBoard, FeatureDetail, HealthSignals, InboxItem, LogEntry, OfficeResponse, OrgResponse,
   PermissionMode, Pivot, PivotRows, Release, ReleaseReadiness, Requirement, RoomThread, RoomThreadDetail, ServerEvent, SpendSummary,
-  WorkplaceHealthResponse, WorkplaceServerEvent,
+  WorkplaceHealthResponse, WorkplaceServerEvent, CooMessage,
 } from '@jkj/shared';
 import * as api from '../api/client.js';
 import { sendCommand, type SocketStatus } from '../api/socket.js';
@@ -50,6 +50,8 @@ export interface AppState {
   /* the Team Room: every thread, and the messages of the ones opened */
   room: RoomThread[];
   roomThreads: Record<string, RoomThreadDetail>;
+  /** The owner's Talk with "Claude — COO" (loopback only; empty when opened through the relay). */
+  cooLog: CooMessage[];
 
   /* sessions */
   agents: Agent[];
@@ -86,6 +88,7 @@ let state: AppState = {
   signals: null,
   room: [],
   roomThreads: {},
+  cooLog: [],
 
   agents: [],
   transcripts: {},
@@ -262,6 +265,20 @@ export async function loadThread(id: string): Promise<void> {
   set({ roomThreads: { ...state.roomThreads, [id]: detail } });
 }
 
+/** The COO bridge. Silently empty off loopback (through the relay) rather than a red error banner. */
+export async function loadCooLog(): Promise<void> {
+  try { set({ cooLog: await api.getCooLog() }); } catch { /* loopback only; the relay 400s this on purpose */ }
+}
+
+export async function sendToCoo(text: string): Promise<void> {
+  try {
+    const sent = await api.sendCooMessage(text);
+    if (!state.cooLog.some(m => m.id === sent.id)) set({ cooLog: [...state.cooLog, sent] });
+  } catch (err) {
+    showToast(message(err));
+  }
+}
+
 export async function loadSpend(): Promise<void> {
   set({ spend: await api.getSpend() });
 }
@@ -357,6 +374,11 @@ export function applyServerEvent(event: ServerEvent | WorkplaceServerEvent): voi
       const detail = state.roomThreads[event.thread.id];
       const messages = detail && !detail.messages.some(m => m.id === event.message.id) ? [...detail.messages, event.message] : detail?.messages;
       set({ room, ...(detail ? { roomThreads: { ...state.roomThreads, [event.thread.id]: { thread: event.thread, messages: messages ?? [] } } } : {}) });
+      break;
+    }
+
+    case 'coo.message': {
+      if (!state.cooLog.some(m => m.id === event.message.id)) set({ cooLog: [...state.cooLog, event.message] });
       break;
     }
 

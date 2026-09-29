@@ -15,7 +15,7 @@ export async function boot(env: Record<string, string> = {}): Promise<Booted> {
   writeFileSync(join(tmp.dir, 'ops', 'workplace', 'claude-oauth.env'), 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-test\n');
   const fake = installFakeRuntime();
   const config = loadConfig(['--no-open', '--no-telegram', '--no-seed', '--port', '0'], {
-    IRIS_WORKPLACE_DIR: tmp.dir, IRIS_OPS_DIR: join(tmp.dir, 'ops'), WORKPLACE_CAP_INR: '1000', WORKPLACE_USD_INR: '88', ...env,
+    IRIS_WORKPLACE_DIR: tmp.dir, IRIS_OPS_DIR: join(tmp.dir, 'ops'), IRIS_WORK_DIR: tmp.workDir, WORKPLACE_CAP_INR: '1000', WORKPLACE_USD_INR: '88', ...env,
   });
   const running = await start(config);
   const port = (running.server.address() as { port: number }).port;

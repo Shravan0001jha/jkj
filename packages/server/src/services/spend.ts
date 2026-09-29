@@ -55,6 +55,8 @@ export function recordRateLimit(wp: Workplace, info: { rateLimitType?: string; s
     seenAt: now(),
   };
   wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`ratelimit:${window.window}`, JSON.stringify(window));
+  // History too (QA B15): the settings row is only the latest report, which cannot explain last night.
+  wp.db.prepare('insert into events (at, kind, subject, json) values (?, ?, ?, ?)').run(window.seenAt, 'rate-limit', window.window, JSON.stringify(window));
   if (window.status !== 'allowed') log.warn('usage', `subscription ${window.window}: ${window.status}${window.utilization !== undefined ? ` at ${Math.round(window.utilization * 100)}%` : ''}`);
 }
 
@@ -161,6 +163,9 @@ export function check(wp: Workplace, day = dayOf()): SpendSummary {
     if (u.budget && (s.byUnit[u.id] ?? 0) >= u.budget.inrPerDay) overs.push({ scope: `unit:${u.id}`, spent: s.byUnit[u.id] ?? 0, cap: u.budget.inrPerDay });
   }
   for (const e of wp.org.employees) {
+    // A virtual employee (the COO) is never spawned and never spends: its ₹0/day budget is not a
+    // cap to reach, so it never joins a paused scope, a cap Inbox item, or a pause listener's list.
+    if (e.virtual) continue;
     if ((s.byEmployee[e.id] ?? 0) >= e.budget.inrPerDay) overs.push({ scope: `employee:${e.id}`, spent: s.byEmployee[e.id] ?? 0, cap: e.budget.inrPerDay });
   }
   for (const over of overs) {
@@ -263,6 +268,28 @@ export function migrateToRealMoney(wp: Workplace): { relabelled: number; lifted:
   wp.db.prepare('insert into settings (key, value) values (?, ?)').run('migrated:real-money', now());
   if (relabelled || lifted.length) log.info('spend', `migrated to real money: ${Number(relabelled)} rows relabelled as subscription, pauses lifted: ${lifted.join(', ') || 'none'}`);
   return { relabelled: Number(relabelled), lifted };
+}
+
+/**
+ * Any open `cap` item dated before the real-money migration ran is stale under the old
+ * equivalent-cost model (decision A): resolve it every boot, not just once, since a cap item for a
+ * past day can outlive the one-time `migrateToRealMoney` sweep (it only resolved what was open at
+ * that moment). Idempotent: resolved items are no longer open, so there is nothing left next boot.
+ */
+export function resolveStalePreMigrationCapItems(wp: Workplace): { resolved: string[] } {
+  const migrated = wp.db.prepare('select value from settings where key = ?').get('migrated:real-money') as { value: string } | undefined;
+  if (!migrated) return { resolved: [] };
+  const cutoverDay = dayOf(migrated.value);
+  const resolved: string[] = [];
+  for (const item of inbox.list(wp, 'open').filter(i => i.kind === 'cap')) {
+    const day = String(item.context['day'] ?? '');
+    if (day && day < cutoverDay) {
+      inbox.answer(wp, item.id, 'keep', 'Resolved by the Workplace: this pause is from the old equivalent-cost model, before caps counted real money only (decision A). No action needed.', 'workplace');
+      resolved.push(item.id);
+    }
+  }
+  if (resolved.length) log.info('spend', `resolved ${resolved.length} stale pre-migration cap item(s)`);
+  return { resolved };
 }
 
 const round = (n: number): number => Math.round(n * 100) / 100;

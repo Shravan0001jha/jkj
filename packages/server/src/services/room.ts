@@ -2,6 +2,7 @@ import type { RoomMessage, RoomThread } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as work from './work.js';
 import * as inbox from './inbox.js';
+import * as coo from './coo.js';
 import { readEmployeeFile } from './org.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { oneLine } from './one-line.js';
@@ -92,19 +93,47 @@ export function resolve(wp: Workplace, threadId: string, spec: { summary: string
   return { thread: updated, followUps: created };
 }
 
-/** Escalate a thread to the owner: an Inbox item linked to it. Only for decisions above the Chief of Staff's authority. */
+/**
+ * Escalate a thread: only for decisions above the Chief of Staff's own authority. Owner request of
+ * 29 Sep: this goes to the COO first, as a `coo` inbox item (HLD "the COO bridge"), and only
+ * reaches the owner's Inbox directly if the COO has been offline for more than 30 minutes — the
+ * fallback `routeEscalation` itself applies. The COO then answers it or forwards it to the owner
+ * with a recommendation.
+ */
 export function escalate(wp: Workplace, threadId: string, spec: { title: string; body: string; by: string; options?: string[] }) {
   const thread = getThread(wp, threadId);
   if (!thread) throw new BadRequest(`No thread ${threadId}`);
-  const item = inbox.raise(wp, {
-    kind: 'decision', title: spec.title, body: `${spec.body}\n\nFrom the Team Room thread "${thread.title}".`, raisedBy: spec.by,
-    context: { threadId, charterIds: thread.charterIds },
-    ...(spec.options?.length ? { options: spec.options.map(o => ({ id: o.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label: o })) } : {}),
+  const options = spec.options?.length ? spec.options.map(o => ({ id: o.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label: o })) : undefined;
+  const routed = coo.routeEscalation(wp, {
+    title: spec.title, body: `${spec.body}\n\nFrom the Team Room thread "${thread.title}".`, by: spec.by, threadId,
+    ...(options ? { options } : {}), context: { threadId, charterIds: thread.charterIds },
     links: [{ label: 'Team Room thread', href: `#/room/${threadId}` }],
   });
-  saveThread(wp, { ...thread, escalations: [...thread.escalations, item.id] });
-  post(wp, threadId, { text: `Escalated to the owner: "${spec.title}" (${item.id}).`, by: 'workplace' });
-  return item;
+  const escalationId = routed.ownerInboxId ?? routed.item.id;
+  saveThread(wp, { ...thread, escalations: [...thread.escalations, escalationId] });
+  post(wp, threadId, {
+    text: routed.ownerInboxId
+      ? `Escalated to the owner (the COO is offline): "${spec.title}" (${routed.ownerInboxId}).`
+      : `Escalated to the COO: "${spec.title}" (${routed.item.id}).`,
+    by: 'workplace',
+  });
+  return routed.ownerInboxId ? inbox.get(wp, routed.ownerInboxId)! : routed.item;
+}
+
+/** The default channel every employee and the owner share (owner request, 29 Sep), beside the topic threads. */
+export const GENERAL_THREAD_ID = 'th_general';
+
+export function ensureGeneral(wp: Workplace): RoomThread {
+  const existing = getThread(wp, GENERAL_THREAD_ID);
+  if (existing) return existing;
+  const at = now();
+  const thread: RoomThread = {
+    id: GENERAL_THREAD_ID, title: 'General', charterIds: [], createdBy: 'workplace', createdAt: at,
+    state: 'open', headline: 'Where everyone talks.', lastAt: at, messageCount: 0, participants: [], escalations: [],
+  };
+  wp.db.prepare('insert into threads (id, title, charter_ids, created_by, created_at, state, last_at, json) values (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(thread.id, thread.title, JSON.stringify(thread.charterIds), thread.createdBy, at, 'open', at, JSON.stringify(thread));
+  return thread;
 }
 
 /** Open threads that concern an employee: it posted, was mentioned, or holds a charter the thread touches. */

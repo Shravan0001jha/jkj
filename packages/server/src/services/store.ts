@@ -134,6 +134,20 @@ create table if not exists proposals (
   created_at text not null,
   json text not null
 );
+
+create table if not exists coo_items (
+  id text primary key,
+  kind text not null,
+  state text not null,
+  created_at text not null,
+  json text not null
+);
+create table if not exists coo_messages (
+  id text primary key,
+  at text not null,
+  from_who text not null,
+  json text not null
+);
 `;
 
 export function openStore(path: string): Db {

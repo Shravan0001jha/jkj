@@ -28,7 +28,12 @@ export interface RaiseOptions {
   /** One line for the owner (D16). Derived from the body when absent. */
   summary?: string;
   details?: string;
+  /** False for routine housekeeping that must never reach the owner's Inbox (see InboxItem). */
+  ownerFacing?: boolean;
 }
+
+/** True unless the raiser explicitly marked the item routine (a stall notice, a dead-session note). */
+export const isOwnerFacing = (i: Pick<InboxItem, 'ownerFacing'>): boolean => i.ownerFacing !== false;
 
 /**
  * Who an item concerns (HLD D7b): the raiser, the assignee of the work it is about, the holders
@@ -100,11 +105,13 @@ export function raise(wp: Workplace, spec: RaiseOptions): InboxItem {
     onApprove: spec.onApprove ?? DEFAULT_EFFECT[spec.kind].onApprove,
     onDeny: spec.onDeny ?? DEFAULT_EFFECT[spec.kind].onDeny,
     ...(spec.links ? { links: spec.links } : {}),
+    ...(spec.ownerFacing === false ? { ownerFacing: false } : {}),
   };
   wp.db.prepare('insert into inbox (id, kind, state, raised_by, created_at, json) values (?, ?, ?, ?, ?, ?)')
     .run(item.id, item.kind, item.state, item.raisedBy, item.createdAt, JSON.stringify(item));
   wp.emit({ type: 'inbox.updated', item });
-  wp.emit({ type: 'alert', level: 'needs-you', title: item.title, body: item.summary, inboxId: item.id });
+  // Routine housekeeping never pings or counts against the owner (it is not in his Inbox at all).
+  if (isOwnerFacing(item)) wp.emit({ type: 'alert', level: 'needs-you', title: item.title, body: item.summary, inboxId: item.id });
   return item;
 }
 
@@ -114,6 +121,15 @@ export function list(wp: Workplace, state?: InboxItem['state']): InboxItem[] {
     : wp.db.prepare("select json from inbox order by case state when 'open' then 0 else 1 end, created_at desc, rowid desc").all();
   // Items raised before `affects` existed get it computed on read.
   return rowsJson<InboxItem>(rows).map(i => backfill(wp, i));
+}
+
+/**
+ * The owner's Inbox (HLD, the owner's rule "nothing but decisions"): every item minus routine
+ * housekeeping (`ownerFacing: false`). This is what `GET /api/inbox`, the "needs you" counts and
+ * the digest show; a routine item still shows on the pages of the employees it affects.
+ */
+export function ownerList(wp: Workplace, state?: InboxItem['state']): InboxItem[] {
+  return list(wp, state).filter(isOwnerFacing);
 }
 
 /** Items raised before `affects` (D7b) or `summary` (D16) existed get them computed on read. */
@@ -160,6 +176,27 @@ export function answer(wp: Workplace, id: string, optionId: string, note: string
   return answered;
 }
 
+/** Move an open item on or off the owner's Inbox without answering it (a legacy item under a new rule). */
+export function setOwnerFacing(wp: Workplace, id: string, ownerFacing: boolean): InboxItem {
+  const item = get(wp, id);
+  if (!item) throw new BadRequest(`No inbox item ${id}`);
+  const next: InboxItem = { ...item, ownerFacing };
+  wp.db.prepare('update inbox set json = ? where id = ?').run(JSON.stringify(next), id);
+  wp.emit({ type: 'inbox.updated', item: next });
+  return next;
+}
+
+/** The Workplace withdraws an item it raised itself (a superseded stall note). Never the owner's decisions. */
+export function expire(wp: Workplace, id: string, why: string): InboxItem {
+  const item = get(wp, id);
+  if (!item) throw new BadRequest(`No inbox item ${id}`);
+  if (item.state !== 'open') return item;
+  const expired: InboxItem = { ...item, state: 'expired', answer: { optionId: 'expired', note: why, at: now(), via: 'workplace' } };
+  wp.db.prepare('update inbox set state = ?, json = ? where id = ?').run('expired', JSON.stringify(expired), id);
+  wp.emit({ type: 'inbox.updated', item: expired });
+  return expired;
+}
+
 /** Services that need to act on an answer (gates, proposals, caps) subscribe here. */
 type AnswerListener = (wp: Workplace, item: InboxItem) => void;
 const answerListeners = new Set<AnswerListener>();
@@ -168,6 +205,5 @@ export function onAnswer(fn: AnswerListener): () => void {
   return () => void answerListeners.delete(fn);
 }
 
-export const openCount = (wp: Workplace): number =>
-  Number((wp.db.prepare("select count(*) as n from inbox where state = 'open'").get() as { n: number }).n);
+export const openCount = (wp: Workplace): number => ownerList(wp, 'open').length;
 

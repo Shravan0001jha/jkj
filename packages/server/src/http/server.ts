@@ -41,12 +41,22 @@ function serveStatic(rawUrl: string, res: import('node:http').ServerResponse): v
   const path = new URL(rawUrl, 'http://localhost').pathname;
   // Resolve inside WEB_DIST only — never let a request walk out of it.
   const candidate = join(WEB_DIST, normalize(path));
-  const file = candidate.startsWith(WEB_DIST) && existsSync(candidate) && statSync(candidate).isFile()
-    ? candidate
-    : join(WEB_DIST, 'index.html');   // SPA fallback
-
-  res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' });
+  const exists = candidate.startsWith(WEB_DIST) && existsSync(candidate) && statSync(candidate).isFile();
+  // A missing hashed asset is a 404, not the page (QA B13): a stale tab then reloads instead of parsing HTML as a script.
+  if (!exists && path.startsWith('/assets/')) {
+    res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
+    res.end(JSON.stringify({ error: `No such asset: ${path}. The page was rebuilt; reload.` }));
+    return;
+  }
+  const file = exists ? candidate : join(WEB_DIST, 'index.html');   // SPA fallback
+  res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream', 'cache-control': cacheControlFor(path, exists) });
   createReadStream(file).pipe(res);
+}
+
+/** Vite names assets by content hash, so they are immutable; the page itself is always revalidated (QA B13). */
+export function cacheControlFor(path: string, isFile: boolean): string {
+  if (isFile && path.startsWith('/assets/')) return 'public, max-age=31536000, immutable';
+  return 'no-cache';
 }
 
 /**

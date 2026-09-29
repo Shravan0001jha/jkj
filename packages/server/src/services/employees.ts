@@ -15,6 +15,7 @@ import { guardTool, type GuardContext } from './guards.js';
 import { resolve as resolveOwner } from './ownership.js';
 import * as stall from './stall.js';
 import * as room from './room.js';
+import * as coo from './coo.js';
 import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
 import { now } from './store.js';
 import { BadRequest } from '../util/errors.js';
@@ -80,7 +81,42 @@ const stateOverride = new Map<string, EmployeeState>();
 const lastReport = new Map<string, string>();
 
 export function openSession(employeeId: string): Session | undefined {
-  return [...sessions.values()].find(s => s.employeeId === employeeId);
+  return [...sessions.values()].find(s => s.employeeId === employeeId && isLive(s.agentId));
+}
+
+/** A run that is live work: running, or waiting between turns / for an approval. */
+export function isLive(agentId: string): boolean {
+  const a = runs.getRunAgent(agentId);
+  return !!a && (a.status === 'running' || a.status === 'waiting');
+}
+
+/** A run the owner can still talk into: live, or interrupted and sitting idle (not errored, not gone). */
+export function continuableSession(employeeId: string): Session | undefined {
+  return [...sessions.values()].find(s => {
+    if (s.employeeId !== employeeId) return false;
+    const a = runs.getRunAgent(s.agentId);
+    return !!a && a.status !== 'error';
+  });
+}
+
+export const STALE_MS = 10 * 60_000;
+
+/**
+ * Sessions whose run is dead (interrupted and never resumed, errored, or gone) are closed once
+ * they have been dead for ten minutes, so the employee's state is true and the next assignment
+ * gets a fresh session instead of being pushed into a dead one (QA B4: Kabir "working" 30 h on).
+ */
+export function closeStale(wp: Workplace, nowMs = Date.now()): string[] {
+  const closed: string[] = [];
+  for (const s of allSessions()) {
+    const a = runs.getRunAgent(s.agentId);
+    if (a && (a.status === 'running' || a.status === 'waiting')) continue;
+    const idle = runs.idleMs(s.agentId, nowMs);
+    if (a && idle !== null && idle < STALE_MS) continue;
+    close(wp, s.agentId, a ? `stale (${a.status} for ${Math.round((idle ?? 0) / 60_000)} min)` : 'stale (no run)');
+    closed.push(s.agentId);
+  }
+  return closed;
 }
 
 export function sessionsOf(employeeId: string): Session[] {
@@ -115,8 +151,10 @@ export interface SpawnOptions {
 
 export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions): Agent {
   const emp = employee(wp, employeeId);
+  if (emp.virtual) throw new BadRequest(`${emp.name} is not spawned by the Workplace; reach it through the COO bridge (POST /api/coo/message).`);
   const budget = spend.canSpend(wp, employeeId);
   if (!budget.ok && !options.ownerTalk) throw new BadRequest(`${emp.name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox, or talk to ${emp.name} and say "continue".`);
+  for (const s of sessionsOf(employeeId)) if (!isLive(s.agentId)) close(wp, s.agentId, 'replaced: the run was dead');
   if (sessionsOf(employeeId).length >= emp.budget.concurrentSessions) {
     throw new BadRequest(`${emp.name} already has ${emp.budget.concurrentSessions} session(s) open. End one first, or talk to the open one.`);
   }
@@ -268,9 +306,11 @@ export function readOauthToken(wp: Workplace): string | null {
  * stays under the cap.
  */
 export function talk(wp: Workplace, employeeId: string, text: string, attachments: Attachment[] = [], opts: { probe?: boolean; autonomous?: boolean } = {}): Agent {
+  if (employee(wp, employeeId).virtual) throw new BadRequest(`${employee(wp, employeeId).name} is reached through POST /api/coo/message, not Talk.`);
   const ownerTalk = !opts.autonomous;
   if (ownerTalk) maybeLiftPause(wp, employeeId, text);
-  const open = openSession(employeeId);
+  // The owner may carry on an interrupted session; autonomous work goes only to a live one (QA B4).
+  const open = ownerTalk ? continuableSession(employeeId) : openSession(employeeId);
   if (open) {
     const budget = spend.canSpend(wp, employeeId);
     if (!budget.ok && !ownerTalk) throw new BadRequest(`${employee(wp, employeeId).name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox.`);
@@ -307,6 +347,8 @@ function maybeLiftPause(wp: Workplace, employeeId: string, text: string): void {
 export function assign(wp: Workplace, assignmentId: string): Agent {
   const item = work.require$(wp, assignmentId);
   if (!item.employeeId) throw new BadRequest(`${assignmentId} has no assignee`);
+  // A dead session (interrupted, errored) is closed first, whatever its age: work goes to a live one.
+  for (const s of sessionsOf(item.employeeId)) if (!isLive(s.agentId)) close(wp, s.agentId, 'replaced: the run was dead');
   const open = openSession(item.employeeId);
   if (open) {
     runs.sendMessage(open.agentId, `New assignment ${item.id}: ${item.title}\n\n${item.body}\n\nReply with "## Plan" first.`);
@@ -334,12 +376,12 @@ const HANDOFF_PROMPT =
   '"nothing done". Then stop.';
 
 /** Ask for the handoff, wait a bounded time, close. */
-export async function endSession(wp: Workplace, agentId: string, waitMs = 150_000): Promise<void> {
+export async function endSession(wp: Workplace, agentId: string, waitMs = 150_000, evenIfIdle = false): Promise<void> {
   const session = sessions.get(agentId);
   if (!session) return;
   const agent = runs.getRunAgent(agentId);
   if (session.probe) { close(wp, agentId, 'probe ended'); return; }
-  if (agent && (agent.status === 'running' || agent.status === 'waiting') && waitMs > 0) {
+  if (agent && (agent.status === 'running' || agent.status === 'waiting' || (evenIfIdle && agent.status === 'idle')) && waitMs > 0) {
     // Subscribe before sending, so a turn that ends at once is not missed.
     const waiting = waitForHandoff(wp, session, waitMs);
     runs.sendMessage(agentId, HANDOFF_PROMPT);
@@ -524,12 +566,20 @@ export function stateOf(wp: Workplace, employeeId: string): EmployeeState {
  */
 export function stateWithReason(wp: Workplace, employeeId: string): { state: EmployeeState; reason?: string } {
   const e = employee(wp, employeeId);
+  // The COO is never spawned; its card shows presence (the lead's heartbeat), not session state.
+  if (e.virtual) {
+    const p = coo.presence(wp);
+    return p.online ? { state: 'online' } : { state: 'offline', reason: 'messages wait; Asha handles routine' };
+  }
   // Order: what needs the owner first (a parked tool call, an open question), then live work,
   // then what stops autonomous work (a cap, a blocked assignment), then idle.
   const open = openSession(employeeId);
   const agent = open ? runs.getRunAgent(open.agentId) : undefined;
   if (agent?.status === 'waiting' && agent.approval) return { state: 'needs-owner', reason: `waiting for approval of ${agent.approval.tool}` };
-  const raised = inbox.list(wp, 'open').find(i => i.raisedBy === employeeId);
+  // Routine housekeeping (a stall notice, a "did nothing" item) never overrides a live session's
+  // true status (QA B16: a stale item raised by the employee showed a live, working session as
+  // "needs-owner"/stalled). Only a real open item that needs the owner does that.
+  const raised = inbox.ownerList(wp, 'open').find(i => i.raisedBy === employeeId);
   if (raised) return { state: 'needs-owner', reason: raised.title };
   if (agent?.status === 'error') return { state: 'blocked', reason: 'the session hit an error' };
   if (open) return { state: 'working' };
@@ -664,7 +714,10 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         async ({ assignmentId, note }) => {
           const item = work.get(wp, assignmentId);
           if (!item) return ok(`No assignment ${assignmentId}.`);
-          inbox.raise(wp, { kind: 'question', title: `Review requested: ${item.title}`, body: note ?? 'Please verify.', raisedBy: employeeId, context: { assignmentId }, dedupeKey: `review:${assignmentId}` });
+          // The reviewer is a different identity (lead, or QA for a lead), never the owner (HOWTO
+          // "State a feature once"; the §0 table has no owner row for a review): this is routine,
+          // not an owner decision, so it never reaches his Inbox — only the reviewer's/Asha's page.
+          inbox.raise(wp, { kind: 'question', title: `Review requested: ${item.title}`, body: note ?? 'Please verify.', raisedBy: employeeId, context: { assignmentId }, dedupeKey: `review:${assignmentId}`, ownerFacing: false });
           return ok('Review requested.');
         }),
       tool('write_spec', 'Chief of Staff only: attach the spec (acceptance criteria) to a stated feature. It becomes "specced" and can be decomposed.',

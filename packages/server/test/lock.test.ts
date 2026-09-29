@@ -43,7 +43,7 @@ test('a second start against the same organisation is refused; a taken port fail
   writeFileSync(join(tmp.dir, 'ops', 'workplace', 'claude-oauth.env'), 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-test\n');
   const fake = installFakeRuntime();
   const config = (port: string) => loadConfig(['--no-open', '--no-telegram', '--no-seed', '--port', port], {
-    IRIS_WORKPLACE_DIR: tmp.dir, IRIS_OPS_DIR: join(tmp.dir, 'ops'), WORKPLACE_CAP_INR: '1000', WORKPLACE_USD_INR: '88',
+    IRIS_WORKPLACE_DIR: tmp.dir, IRIS_OPS_DIR: join(tmp.dir, 'ops'), IRIS_WORK_DIR: tmp.workDir, WORKPLACE_CAP_INR: '1000', WORKPLACE_USD_INR: '88',
   });
   const running = await start(config('0'));
   try {

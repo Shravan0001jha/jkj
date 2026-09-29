@@ -1,13 +1,19 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { toChatView } from '@jkj/shared';
 import { useStore, transcriptOf, openAgent, loadTranscript } from '../../state/store.js';
 import { TranscriptEntry } from './TranscriptEntry.js';
 
 /**
- * The scrolling transcript. Tool calls read as a log, prose reads as chat,
- * and a Task line links into the subagent's own transcript.
+ * The scrolling transcript. In `chat` view (the default: "Talk must read like a chat", owner 29
+ * Sep) tool calls collapse into one expandable "worked · N steps · Xs" line and only the owner's
+ * and the employee's messages stand out; `full` shows everything, dense and monospaced. The same
+ * `toChatView` transform the server uses for `?view=chat` runs here too, live, over whatever is
+ * already in the store — a raw tool-call entry that just arrived over the socket collapses the
+ * moment it lands, not only on the next full reload.
  */
-export function Transcript({ agentId }: { agentId: string }) {
-  const entries = useStore(s => transcriptOf(s, agentId));
+export function Transcript({ agentId, view = 'chat' }: { agentId: string; view?: 'chat' | 'full' }) {
+  const raw = useStore(s => transcriptOf(s, agentId));
+  const entries = useMemo(() => (view === 'chat' ? toChatView(raw) : raw), [raw, view]);
   const subagents = useStore(s => s.agents.filter(a => a.parentAgentId === agentId));
   const loaded = useStore(s => agentId in s.transcripts);
   const boxRef = useRef<HTMLDivElement>(null);

@@ -226,6 +226,7 @@ function normaliseEmployee(e: EmployeeFile, roles: Role[]): Employee {
     workspace: e.workspace,
     budget: e.budget ?? { inrPerDay: 150, concurrentSessions: 1 },
     ...(e.githubApp ? { githubApp: e.githubApp } : {}),
+    ...(e.virtual ? { virtual: true } : {}),
     state: e.state ?? 'idle',
   };
 }

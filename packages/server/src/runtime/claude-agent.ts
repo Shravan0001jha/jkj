@@ -46,6 +46,8 @@ export interface RunEvents {
   onInit?(init: { mcpServers: string[]; workplaceTools: number; tools: number }): void;
   /** Lines the CLI process writes to stderr; the only place MCP start-up errors appear. */
   onStderr?(line: string): void;
+  /** Every message on the SDK stream, by type (and subtype), content not included: the run's diagnostics. */
+  onSdkMessage?(type: string, subtype?: string): void;
   /** The subscription's own limit windows, as the CLI reports them. */
   onRateLimit?(info: { rateLimitType?: string; status: string; utilization?: number; resetsAt?: number }): void;
   /**
@@ -199,6 +201,7 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
 async function consume(stream: Query, events: RunEvents): Promise<void> {
   try {
     for await (const message of stream) {
+      events.onSdkMessage?.(String(message.type), 'subtype' in message && typeof message.subtype === 'string' ? message.subtype : undefined);
       switch (message.type) {
         case 'system':
           if ('session_id' in message && message.session_id) events.onSessionId(message.session_id);

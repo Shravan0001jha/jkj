@@ -147,3 +147,44 @@ old `caffeinate -dimsu &`.
 - The scripts are exercised live: an isolated trial agent (`WORKPLACE_LABEL=…trial`, port 4318,
   temp data and ops dirs) proves lock-wait, takeover, kill → restart, caffeinate, and clean
   uninstall without touching the live server. Recorded in `RESILIENCE-status.md`.
+
+## 9. B2 — the tunnel flapped every 15–18 min (RCA, 29 Sep)
+
+**What QA saw** (`/private/tmp/workplace-server.log`, 28–29 Sep): `no pong for 45 s; reconnecting`
+at 21:17, 21:35, 21:53, 22:10, 22:30, 22:45, 23:04, 23:13, 23:30 …; back in 1–2 s, except
+22:10:05 → 22:18:08 and 00:52:46 → 00:59:51 fully offline.
+
+**What the relay does:** `app.py keepalive()` pings every 15 s; `tunnel.py drop_stale()` closes a Mac
+that has not answered for 45 s. The Mac (7a3b916, in the live build) counts any relay frame as
+life and drops the socket after 45 s of silence. The two rules match; the relay is not the cause.
+
+**What actually happened:** `pmset -g log` shows the Mac on **battery** from 28 Sep 01:00 until
+"USB-C_plug … Using AC" at 01:45 on 29 Sep, in a sleep cycle: a DarkWake every ~16 min
+(`dasd SleepService`, 2–150 s each), otherwise asleep with TCP keepalive offloaded. Every flap is a
+wake: 21:35:11, 21:53:32, 22:10:01, 22:30:39, 22:45:54, 23:04:34, 23:13:50 … On each wake node's
+liveness interval fires, sees > 45 s since the last frame (the relay had already dropped the socket),
+logs "no pong" and reconnects in 1–2 s; then the Mac sleeps again. The two long outages are sleep
+stretches with no wake at all: the reconnect timer scheduled at 22:10:05 ("in 1 s") fired at
+22:18:08, because the process was frozen. `caffeinate -s` is inert on battery, and `-i` cannot stop
+a Mac that is already in its sleep cycle, so no software could have held it up.
+
+**Fix (this branch):**
+- `services/suspend.ts` — a tick every 5 s; a tick 15 s or more late is a resume. Count, last time,
+  last and total seconds on `/api/health.resilience.sleeps`.
+- `tunnel.wake(gapMs)` — after a sleep longer than the relay's limit the socket is dropped and
+  reconnected **at once** (instead of up to 15 s later, when the liveness interval would notice), the
+  backoff starts over, and the log says the true cause: "the Mac was asleep 485 s". A pending retry
+  runs immediately. Shorter dozes keep the socket. Counted in `tunnel.stats.reconnects.afterSleep`.
+- `services/power.ts` — `pmset -g batt` once a minute → `/api/health.resilience.power`
+  (`ac | battery | unknown`, percent, charging). The phone can now tell "unplugged" from "down".
+- Tests: `suspend.test.ts` (freeze the thread with `Atomics.wait`; a fake clock replays the
+  485 s sleep); `tunnel-resilience.test.ts` "B2" (the relay in a worker thread keeps pinging and
+  drops the frozen Mac; three sleep/wake cycles → three immediate reconnects, cause logged, backoff
+  at the minimum; a short doze keeps the socket; a retry pending across a sleep runs on wake).
+
+**No relay change needed.** Optional nicety for the relay owner: log the drop reason with the
+stale age, so its journal shows "stale 493 s" next to the Mac's "asleep 485 s".
+
+**What only the owner can fix:** the Mac must be on the adapter with "Prevent automatic sleeping on
+power adapter when the display is off" on (§6). On battery the night repeats, now with the health
+check saying so.

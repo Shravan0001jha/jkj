@@ -33,7 +33,7 @@ test('/api/health reports boots, start time, tunnel and watchdog; a restart of t
   writeFileSync(join(tmp.dir, 'ops', 'workplace', 'claude-oauth.env'), 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-test\n');
   const fake = installFakeRuntime();
   const config = loadConfig(['--no-open', '--no-telegram', '--no-seed', '--port', '0'], {
-    IRIS_WORKPLACE_DIR: tmp.dir, IRIS_OPS_DIR: join(tmp.dir, 'ops'), WORKPLACE_CAP_INR: '1000', WORKPLACE_USD_INR: '88',
+    IRIS_WORKPLACE_DIR: tmp.dir, IRIS_OPS_DIR: join(tmp.dir, 'ops'), IRIS_WORK_DIR: tmp.workDir, WORKPLACE_CAP_INR: '1000', WORKPLACE_USD_INR: '88',
   });
   const fetchHealth = async (port: number): Promise<Health> => (await fetch(`http://127.0.0.1:${port}/api/health`)).json() as Promise<Health>;
   try {

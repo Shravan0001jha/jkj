@@ -96,7 +96,7 @@ test('3. a cap-paused employee shows blocked with the plain reason, and the Offi
     assert.equal(reason, 'Paused — daily budget reached (₹151/₹150). You can still talk to Mira.');
     const office = views.office(wp);
     assert.equal(office.counts.blocked, 1);
-    assert.equal(office.counts.total, 7);
+    assert.equal(office.counts.total, 8, 'the seven employees plus the virtual COO');
     const card = office.units.flatMap(u => u.employees).find(c => c.employee.id === 'mira')!;
     assert.equal(card.employee.stateReason, reason);
     assert.equal(views.employeeDetail(wp, 'mira').employee.stateReason, reason);

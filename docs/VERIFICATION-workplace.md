@@ -163,6 +163,78 @@ group allows port 22 from an earlier address), so the check was written as `phon
 against a locally booted relay and the real tunnel. Its first run hung before the first assertion;
 it is opt-in until diagnosed. Not verified live: anything on the phone.
 
+## QA's night bugs (29 Sep, `~/jkj-qa/BUGS.md`): RCA and fixes
+
+**B5 (P0): tests cut branches in the real repos.** `testWorkplace()` remapped the seed's repos to
+temp git repos, but every *booted* test (`start(config)` in api, lock, phone-contract, phone-e2e)
+loaded the copied seed as-is: `org.yaml` names the owner's checkouts, and `IRIS_WORK_DIR` defaulted
+to `~/iris-work`, so each fake session cut `emp/<employee>/<id>` in `~/claude-dev` (02:02–02:13 was
+the new phone-contract suite). Fixes: (1) `services/test-guard.ts` — under Node's test runner
+(`NODE_TEST_CONTEXT`) `createWorkplace` and `ensureWorktree` refuse any organisation dir, work dir,
+repo root or workspace outside the OS temp dir, before anything is opened; (2) `tmpWorkplace()`
+rewrites every repo root in the copied `org.yaml` to a temp repo on the same base branch and owns a
+temp `workDir`; every boot helper passes it. `qa-night.test.ts` asserts the refusals and that the
+temp organisation is entirely under temp. **Cleanup:** `~/claude-dev-mobile` is a linked worktree of
+`~/claude-dev` (one repository, one branch namespace), so the "187 in each" were the same 187.
+Deleted 175 `emp/*` branches (dev 38, kabir 39, mira 7, rohan 42, tara 49) that had no worktree, no commit beyond a real
+branch (tips were `05c8985` = feat/iris-character or `7a26ca8` = feat/mobile) and no work item in
+the live database. Kept 12: the 6 checked out in `~/iris-work` and the 6 named by live work items
+(`rohan/as_muk0srsaw3n4j` has one real commit). The list is in the commit message of this fix.
+
+**B3: the routine's self-deadlock.** `whyWaiting` counted the routine's own "Waiting:" note
+(`context.assignmentId`) and the stall detector's "X is stalled" item (`context.agentId`) as
+questions the work waits on, so nothing was ever resumed again and a fresh note per item was filed
+each day (27 open notes for 12 items). Fixes: both kinds are excluded (`isRoutineNote`,
+`isStallDetectorItem`); one note per item (`noted:<id>:<day>` mark, and a new note withdraws the
+older open ones with `inbox.expire`); "Let it wait" is the answer for the day; a resume answers the
+detector's item as the Workplace; `cos.dedupeNotes` at boot withdraws the duplicates (the newest
+per item stays; the owner's decisions are untouched).
+
+**B4: dead sessions stayed open.** `interruptRun` set the run to `idle` but the session stayed in
+`employees.sessions`, so `stateOf` read "working" (Kabir, 30 h), the one-session budget refused a
+fresh spawn, and `assign` pushed new work into the dead run. Fixes: `openSession` returns only a
+live run (`running`/`waiting`); `assign` and `spawn` close a dead session first; `closeStale` (every
+30 s) closes runs dead for ten minutes; the stall detector ends the session (handoff prompt for an
+idle one, interrupt for a loop) instead of leaving it open.
+
+**B10 (P0): browser POSTs 403 through the relay.** The page matched `wp_csrf=` but the relay's
+cookie is `__Host-wp_csrf`. `csrfTokenFrom` in `@jkj/shared` reads both; `csrf.test.ts` pins it;
+`phone-e2e.test.ts` now also drives a cookie session through the real relay: POST without the
+header → 403, with the header from the `__Host-` cookie → 200, the socket refused on a foreign
+Origin and accepted on the page's.
+
+**B13: no caching of the web bundle.** `serveStatic` sent only `content-type`. Now `/assets/*`
+(content-hashed by Vite) is `public, max-age=31536000, immutable`, everything else `no-cache`, and a
+missing `/assets/*` file is a JSON 404 instead of the page (a stale tab reloads instead of parsing
+HTML as a script). `static.test.ts` checks all three over HTTP.
+
+**B14/B15: silent sessions, a message into an idle session that never started a turn.** What the
+records keep could not tell the cause: the Workplace logged only `run is session` lines, kept only
+the *latest* rate-limit report (`settings ratelimit:<window>`), and the SDK's own jsonl holds no
+`rate_limit_event`. The one report that survived (five_hour, `allowed`, seen 20:59 UTC, resets 21:20)
+and QA's timing (Kabir answered at 19:26, Rohan 19:40 / Dev 19:56 / Mira 20:14 silent, a five_hour
+event two seconds after Mira's prompt) point at the subscription's five-hour window being exhausted
+from ~19:40 to 21:20 UTC, during which the CLI accepts the prompt and produces nothing. Not proven.
+Fixes so next time is diagnosable and bounded: every SDK stream message type is logged per run
+(`run_x sdk: system/init`, `assistant`, `result/success`, `rate_limit_event`…), every stderr line is
+kept, a non-`allowed` rate limit is written into the transcript with its reset time, rate-limit
+reports are appended to the events table (history, not just the latest), and a **silence watchdog**
+flags any run with no model output 60 s after a message ("Silent: … Last SDK message: …; Rate limit:
+…") in the transcript and the log; the ten-minute stall then ends the session (B4). `talk` still
+continues an interrupted run for the owner; `assign` never pushes into one.
+
+**Stray branches during the night.** Four more `emp/*` branches (`as_mulqa1k…`, dev/kabir/rohan/
+tara) appeared at 02:26:48 IST after the cleanup, checked out in the real `~/iris-work` worktrees,
+with no such work items in the live database. The guarded suite, run file by file while counting the
+repo's branches, cut none, so they did not come from these tests; the suspects are the leaked 27 Sep
+`api.test.ts` process (pids 87760/87764, alive until killed at 02:33, its org copy naming the real
+repos) or the resilience trial server that booted a copy of the organisation at 02:09. Either way a
+*trial* server should refuse real repos too: `WORKPLACE_TEST_GUARD=1` turns the guard on outside the
+test runner.
+
+**B11: the org-change card.** The item's one line now carries the diff's size ("+12 −3 lines in 2
+files"); the body names the files; the diff is on `GET /api/proposals/:id` and behind expand.
+
 ## Spend
 
 Own verification spend on the owner's subscription (equivalent API cost): about ₹300 across the live checks above,

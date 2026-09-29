@@ -72,6 +72,8 @@ test('(b) a proposal reads back with its diff and Inbox item; approving it in th
     assert.match(detail.body.proposal.diff, /^\+.*mobile-ios/m, 'a unified diff of the org files');
     assert.match(detail.body.proposal.diff, /^-.*mobile/m);
     assert.equal(detail.body.item.kind, 'org-change');
+    assert.match(detail.body.item.summary, /^iOS and Android need separate leads — \+\d+ −\d+ lines in \d+ files?$/, 'B11: one line with the diff size');
+    assert.ok(!detail.body.item.body.includes('@@'), 'the diff itself is not in the body');
     assert.deepEqual(detail.body.item.options.map(o => o.id), ['approve', 'reject']);
     assert.ok(detail.body.item.affects.includes('tara'));
     assert.equal((await call<{ error: string }>(b.base, 'GET', '/api/proposals/nope')).status, 404);
@@ -150,6 +152,19 @@ test('(d) assign to an employee or to a charter (least-loaded holder), starting 
     await tick();
     assert.equal(b.fake.sessions.length, 2);
     assert.equal((await call<{ error: string }>(b.base, 'POST', '/api/work', { kind: 'assignment', title: 'x', body: 'x', charterId: 'nope' })).status, 400);
+
+    // Under a feature (29 Sep, iOS): the assignment attaches to it, counts in its status and shows in the pivot.
+    const f = work.create(b.running.wp, { kind: 'feature', title: 'Greeting', body: 'x', platformIds: ['ios'] });
+    const under = await call<WorkItem>(b.base, 'POST', '/api/work', { kind: 'assignment', title: 'Greeting — mobile', body: 'x', employeeId: 'tara', featureId: f.id, platformIds: ['ios'], start: false });
+    assert.equal(under.status, 201, JSON.stringify(under.body));
+    assert.equal(under.body.featureId, f.id);
+    const detail = await call<FeatureDetail>(b.base, 'GET', `/api/features/${f.id}`);
+    assert.deepEqual(detail.body.status.assignments.map(a => a.id), [under.body.id]);
+    assert.equal(detail.body.status.stage, 'routed');
+    const p = await call<Pivot>(b.base, 'GET', '/api/features/pivot?rows=charter');
+    assert.equal(p.body.cells['mobile']![f.id]!.items[0]!.id, under.body.id);
+    assert.equal((await call<{ error: string }>(b.base, 'POST', '/api/work', { kind: 'assignment', title: 'x', body: 'x', employeeId: 'tara', featureId: 'ft_nope' })).status, 400);
+    assert.equal((await call<{ error: string }>(b.base, 'POST', '/api/work', { kind: 'assignment', title: 'x', body: 'x', employeeId: 'tara', featureId: under.body.id })).status, 400, 'an assignment is not a feature');
   } finally {
     await b.stop();
   }

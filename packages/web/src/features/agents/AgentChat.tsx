@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Agent } from '@jkj/shared';
 import { useStore, closeAgent, openAgent, interruptAgent, agentById } from '../../state/store.js';
 import { ago, fmtTokens, statusTone } from '../../lib/format.js';
@@ -10,12 +11,14 @@ import { WorkingIndicator } from './WorkingIndicator.js';
 
 /**
  * One session's transcript, with the controls the Workplace keeps from JKJ:
- * steer, interrupt, approve each tool call, change how much it asks.
+ * steer, interrupt, approve each tool call, change how much it asks. Defaults to the chat view
+ * (owner 29 Sep); "Full log" switches to every tool call and search, still one tap away.
  */
 export function AgentChat({ agent }: { agent: Agent; back?: () => void }) {
   const parent = useStore(s => agentById(s, agent.parentAgentId ?? null));
   const isSubagent = Boolean(parent);
   const live = agent.status === 'running' || agent.status === 'waiting';
+  const [view, setView] = useState<'chat' | 'full'>('chat');
 
   return (
     <div className="chat">
@@ -41,11 +44,15 @@ export function AgentChat({ agent }: { agent: Agent; back?: () => void }) {
           </button>
         )}
         {isSubagent && <button className="btn sm ghost" onClick={closeAgent}>Back to the session</button>}
+        <div className="seg small" style={{ marginLeft: isSubagent ? 0 : 'auto' }}>
+          <button aria-pressed={view === 'chat'} onClick={() => setView('chat')}>Chat</button>
+          <button aria-pressed={view === 'full'} onClick={() => setView('full')}>Full log</button>
+        </div>
       </div>
 
       {agent.approval && <ApprovalPrompt agent={agent} approval={agent.approval} />}
 
-      <Transcript agentId={agent.id} />
+      <Transcript agentId={agent.id} view={view} />
       {agent.status === 'running' && !agent.approval && <WorkingIndicator agent={agent} />}
       <Composer agent={agent} />
     </div>

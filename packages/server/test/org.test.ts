@@ -9,7 +9,7 @@ test('the seed loads with every reference resolving', () => {
   const wp = tmpWorkplace();
   try {
     const org = wp.org;
-    assert.equal(org.employees.length, 7);
+    assert.equal(org.employees.length, 8, 'the seven employees of HLD §3 plus the virtual COO');
     assert.equal(org.charters.size, 12);
     assert.equal(org.units.length, 4);
     for (const e of org.employees) {
@@ -17,9 +17,10 @@ test('the seed loads with every reference resolving', () => {
       assert.ok(org.units.some(u => u.id === e.unitId), `${e.id} unit`);
       for (const c of e.charterIds) assert.ok(org.charters.has(c), `${e.id} holds ${c}`);
     }
-    // Levels: chief of staff 0, leads 1; nobody is a hire in the seed.
+    // Levels: chief of staff and the virtual COO are 0, leads 1; nobody is a hire in the seed.
     assert.equal(org.employees.find(e => e.id === 'asha')!.level, 0);
-    assert.ok(org.employees.filter(e => e.id !== 'asha').every(e => e.level === 1));
+    assert.equal(org.employees.find(e => e.id === 'coo')!.level, 0);
+    assert.ok(org.employees.filter(e => e.id !== 'asha' && e.id !== 'coo').every(e => e.level === 1));
     assert.ok(org.employees.every(e => e.permanent));
     // Holders are derived from employees.
     assert.deepEqual(org.charters.get('mobile')!.holderIds, ['tara']);

@@ -1,4 +1,4 @@
-import { WORKPLACE_API as W } from '@jkj/shared';
+import { WORKPLACE_API as W, csrfTokenFrom } from '@jkj/shared';
 import type {
   Agent, Attachment, ContextLayer, ContextResponse, LogEntry,
   OfficeResponse, OrgResponse, Charter, InboxItem, Employee, EmployeeDetail, WorkItem, FeatureBoard,
@@ -6,7 +6,7 @@ import type {
   SpendSummary, HealthSignals, WorkplaceHealthResponse, DecomposeResponse, WorkQuery,
   CreateWorkRequest, CreateFeatureRequest, CreateProposalRequest, CreateReleaseRequest,
   TransitionRequest, RoomResponse, RoomThreadDetail, RoomThread, RoomMessage, CreateThreadRequest, PostMessageRequest,
-  ResolveThreadRequest, RequestResponse, CreateRequest, ReleaseReadiness, ProposalDetail,
+  ResolveThreadRequest, RequestResponse, CreateRequest, ReleaseReadiness, ProposalDetail, CooMessage, CooPresence,
 } from '@jkj/shared';
 
 /**
@@ -20,8 +20,8 @@ import type {
  * cookie and the header is simply absent.
  */
 function csrfHeader(): Record<string, string> {
-  const m = /(?:^|;\s*)wp_csrf=([^;]+)/.exec(document.cookie);
-  return m ? { 'x-csrf-token': decodeURIComponent(m[1]!) } : {};
+  const token = csrfTokenFrom(document.cookie);
+  return token ? { 'x-csrf-token': token } : {};
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -71,6 +71,14 @@ export const endSession = (id: string) => post<{ ok: true }>(W.employeeEndSessio
 export const getEmployeeContext = (id: string) => request<ContextResponse>(W.employeeContext(id));
 export const putEmployeeContext = (employeeId: string, id: string, body: string) =>
   put<ContextLayer>(W.employeeContext(employeeId), { id, body });
+
+/**
+ * The COO bridge: loopback only (the web app running on the Mac itself is loopback; opened through
+ * the published relay these calls 401/400 the same way /api/pair does, on purpose).
+ */
+export const getCooLog = () => request<CooMessage[]>(W.cooLog);
+export const sendCooMessage = (text: string) => post<CooMessage>(W.cooMessage, { text });
+export const getCooPresence = () => request<CooPresence>(W.cooPresence);
 
 export const getWork = (q?: WorkQuery) => request<WorkItem[]>(W.work(q));
 export const createWork = (body: CreateWorkRequest) => post<WorkItem>(W.work(), body);

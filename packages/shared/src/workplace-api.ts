@@ -35,6 +35,8 @@ import type {
   RoomThread,
   RoomMessage,
   AssignmentState,
+  CooMessage,
+  CooItem,
 } from './workplace.js';
 
 export const WORKPLACE_API = {
@@ -49,7 +51,7 @@ export const WORKPLACE_API = {
   employeeTalk: (id: string) => `/api/employees/${encodeURIComponent(id)}/talk`,
   employeeEndSession: (id: string) => `/api/employees/${encodeURIComponent(id)}/end-session`,
   employeeContext: (id: string) => `/api/employees/${encodeURIComponent(id)}/context`,
-  agentLog: (id: string) => `/api/agents/${encodeURIComponent(id)}/log`,
+  agentLog: (id: string, view?: 'chat') => `/api/agents/${encodeURIComponent(id)}/log${view ? `?view=${view}` : ''}`,
   agentMessage: (id: string) => `/api/agents/${encodeURIComponent(id)}/message`,
   agentInterrupt: (id: string) => `/api/agents/${encodeURIComponent(id)}/interrupt`,
   agentApprove: (id: string) => `/api/agents/${encodeURIComponent(id)}/approve`,
@@ -90,6 +92,17 @@ export const WORKPLACE_API = {
   signals: '/api/health/signals',
   pair: '/api/pair',
   pairExchange: '/api/pair/exchange',
+  /**
+   * The COO bridge (loopback only: the relay can never reach `/api/coo/*`, same as `/api/pair`).
+   * `coo.talk` mirrors `employeeTalk` but is served entirely from the bridge files, not a session.
+   */
+  cooLog: '/api/coo/log',
+  cooMessage: '/api/coo/message',
+  cooReply: '/api/coo/reply',
+  cooItems: '/api/coo/items',
+  cooAnswer: '/api/coo/answer',
+  cooForward: '/api/coo/forward',
+  cooPresence: '/api/coo/presence',
   socket: '/ws',
 } as const;
 
@@ -268,6 +281,10 @@ export interface CreateWorkRequest {
   employeeId?: string;
   requirementIds?: string[];
   platformIds?: string[];
+  /** An assignment under a feature: it counts in the feature's status and the pivot (29 Sep, iOS). */
+  featureId?: string;
+  /** false: create the assignment without starting its session. */
+  start?: boolean;
 }
 export interface TransitionRequest { to: WorkState; note?: string; evidence?: Evidence; by?: string }
 export interface CreateFeatureRequest {
@@ -303,7 +320,10 @@ export type WorkplaceServerEvent =
   | { type: 'signals.updated'; signals: HealthSignals }
   | { type: 'room.thread'; thread: RoomThread }
   | { type: 'room.message'; message: RoomMessage; thread: RoomThread }
-  | { type: 'alert'; level: 'info' | 'needs-you' | 'blocked' | 'cap'; title: string; body: string; inboxId?: string };
+  | { type: 'alert'; level: 'info' | 'needs-you' | 'blocked' | 'cap'; title: string; body: string; inboxId?: string }
+  /** The COO bridge (loopback only; see `/api/coo/*`). */
+  | { type: 'coo.message'; message: CooMessage }
+  | { type: 'coo.item'; item: CooItem };
 
 export type WorkplaceClientCommand =
   | { type: 'inbox.answer'; id: string; optionId: string; note?: string };

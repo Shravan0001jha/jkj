@@ -13,7 +13,7 @@ import { digest as render, type Telegram } from './telegram.js';
 export function build(wp: Workplace): string {
   const yesterday = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   const s = spend.summary(wp);
-  const open = inbox.list(wp, 'open');
+  const open = inbox.ownerList(wp, 'open');
   return render({
     needsYou: open.length,
     doneYesterday: work.list(wp, { kind: 'assignment', state: 'done' }).filter(a => a.updatedAt >= yesterday).length,

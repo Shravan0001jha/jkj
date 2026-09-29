@@ -5,6 +5,7 @@ import type { Employee } from '@jkj/shared';
 import type { Org } from './org.js';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
+import { assertNotRealPath } from './test-guard.js';
 
 /**
  * Every employee works in its own git worktree, never in the owner's or the
@@ -41,6 +42,9 @@ export function ensureWorktree(workDir: string, employee: Employee, workItemId: 
   const path = worktreePath(workDir, employee);
   const branch = branchFor(employee, workItemId);
 
+  // A test must never cut a branch or a worktree in a real repository (test-guard.ts).
+  assertNotRealPath(`repository of ${employee.id}`, repo);
+  assertNotRealPath('work directory', workDir);
   if (!existsSync(join(repo, '.git'))) throw new BadRequest(`${repo} is not a git repository`);
   let created = false;
 

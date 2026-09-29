@@ -69,7 +69,7 @@ export interface Role {
   budgetClass: 'high' | 'medium' | 'low';
 }
 
-export type EmployeeState = 'idle' | 'working' | 'blocked' | 'needs-owner' | 'paused';
+export type EmployeeState = 'idle' | 'working' | 'blocked' | 'needs-owner' | 'paused' | 'online' | 'offline';
 
 export interface Workspace {
   /** Absolute path of the repo the employee works in. */
@@ -97,6 +97,12 @@ export interface Employee {
   state: EmployeeState;
   /** Why the state is blocked or needs-owner, e.g. "spend cap reached (employee:mira)". */
   stateReason?: string;
+  /**
+   * True for an employee the Workplace never spawns a session for (the COO: "Claude — COO" is the
+   * lead's own terminal session on this Mac, reached through the COO bridge, not through Talk).
+   * Shown in Office and Org like any other employee; `talk`/`assign`/`spawn` refuse it.
+   */
+  virtual?: boolean;
 }
 
 export interface Unit {
@@ -290,6 +296,13 @@ export interface InboxItem {
   onApprove?: string;
   onDeny?: string;
   links?: { label: string; href: string }[];
+  /**
+   * False for routine housekeeping (a stall notice, a session that did nothing, a review request
+   * for a non-owner reviewer): it never reaches the owner's Inbox or its counts, only the pages of
+   * the employees it affects (always including the Chief of Staff). Absent or true means the owner
+   * decides it (the §0 approvals table). Never touched by clients; the server decides it on raise.
+   */
+  ownerFacing?: boolean;
 }
 
 /* ---------- org changes ---------- */
@@ -471,4 +484,52 @@ export interface RoomMessage {
   owner: boolean;
   text: string;
   mentions: string[];
+}
+
+/* ---------- the COO bridge ---------- */
+
+/**
+ * The owner's Talk with "Claude — COO" (the lead's own terminal session on this Mac, never an
+ * Agent SDK employee). No mirroring: this transcript holds only what the owner sent to `coo` in
+ * the app and what the lead sent back through `POST /api/coo/reply`; the lead's own tool calls and
+ * thinking never appear here.
+ */
+export interface CooMessage {
+  id: string;
+  at: string;
+  from: 'owner' | 'coo';
+  text: string;
+  /** Chat-style: the reply itself is the summary (short); `details` is optional extra context. */
+  summary?: string;
+  details?: string;
+  /** Set on a 'coo' message that answers a specific owner message. */
+  inReplyTo?: string;
+}
+
+export type CooItemKind = 'escalation' | 'mention';
+
+/**
+ * Something Asha would raise above her own authority, or an `@coo` Room mention, delivered to the
+ * COO bridge instead of straight to the owner's Inbox. The COO answers it (`POST /api/coo/answer`)
+ * or forwards it to the owner with a recommendation (`POST /api/coo/forward`); if the COO is
+ * offline for more than 30 minutes it falls back to the owner's Inbox on its own.
+ */
+export interface CooItem {
+  id: string;
+  at: string;
+  kind: CooItemKind;
+  title: string;
+  body: string;
+  options: InboxOption[];
+  raisedBy: string;
+  threadId?: string;
+  state: 'open' | 'answered' | 'forwarded';
+  answer?: { optionId: string; note?: string; at: string };
+  /** Set once this item reached the owner's Inbox, by the COO forwarding it or by the 30-minute fallback. */
+  forward?: { inboxId: string; recommendation?: string; at: string; auto: boolean };
+}
+
+export interface CooPresence {
+  online: boolean;
+  lastHeartbeat: string | null;
 }

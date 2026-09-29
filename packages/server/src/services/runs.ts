@@ -31,7 +31,44 @@ interface Run {
   };
   /** Images sent into this run, keyed by the entry that shows them. */
   images: Map<string, { mediaType: string; data: Buffer }>;
+  /** Diagnostics (QA B15): the last SDK message seen, the last rate-limit report, the silence timer. */
+  lastSdk?: { type: string; subtype?: string; at: string };
+  rateLimit?: { status: string; window?: string; resetsAt?: string; at: string };
+  silenceTimer?: ReturnType<typeof setTimeout>;
+  /** Set when a message got no model output within SILENT_MS; cleared by the next output. */
+  silentSince?: string;
 }
+
+/**
+ * No model output this long after a message is worth a line in the transcript and the log, with
+ * the last SDK message and the last rate-limit report as the cause we can see (QA B15: three of
+ * six spawns on 28 Sep were silent for 15 minutes with nothing logged).
+ */
+export let SILENT_MS = 60_000;
+export function setSilentMs(ms: number): void { SILENT_MS = ms; }
+
+function armSilence(run: Run): void {
+  if (run.silenceTimer) clearTimeout(run.silenceTimer);
+  run.silenceTimer = setTimeout(() => {
+    run.silenceTimer = undefined;
+    if (!runs.has(run.agent.id) || run.agent.status !== 'running') return;
+    const last = run.lastSdk ? `${run.lastSdk.type}${run.lastSdk.subtype ? `/${run.lastSdk.subtype}` : ''} at ${run.lastSdk.at.slice(11, 19)}` : 'none';
+    const limit = run.rateLimit ? `${run.rateLimit.window ?? 'window'} ${run.rateLimit.status}${run.rateLimit.resetsAt ? ` until ${run.rateLimit.resetsAt.slice(11, 16)} UTC` : ''}` : 'none reported';
+    run.silentSince = new Date().toISOString();
+    append(run, 'system', 'Silent', `No model output ${Math.round(SILENT_MS / 1000)} s after the message. Last SDK message: ${last}. Rate limit: ${limit}.`);
+    log.warn('runs', `${run.agent.id} silent for ${Math.round(SILENT_MS / 1000)} s: last sdk ${last}; rate limit ${limit}`);
+  }, SILENT_MS);
+  run.silenceTimer.unref?.();
+}
+
+function heard(run: Run): void {
+  if (run.silenceTimer) { clearTimeout(run.silenceTimer); run.silenceTimer = undefined; }
+  run.silentSince = undefined;
+}
+
+/** For the health signals and tests: runs that have had no output since their last message. */
+export const silentSince = (agentId: string): string | undefined => runs.get(agentId)?.silentSince;
+export const lastSdkMessage = (agentId: string): Run['lastSdk'] => runs.get(agentId)?.lastSdk;
 
 const runs = new Map<string, Run>();
 
@@ -231,13 +268,24 @@ function spawn(options: SpawnOptions): Agent {
         options.onSessionId?.(sessionId);
       },
 
-      onRateLimit: info => options.onRateLimit?.(info),
+      onRateLimit: info => {
+        const resetsAt = info.resetsAt ? new Date(info.resetsAt * (info.resetsAt < 1e12 ? 1000 : 1)).toISOString() : undefined;
+        run.rateLimit = { status: info.status, ...(info.rateLimitType ? { window: info.rateLimitType } : {}), ...(resetsAt ? { resetsAt } : {}), at: new Date().toISOString() };
+        log.info('runs', `${id} rate limit: ${info.rateLimitType ?? 'window'} ${info.status}${info.utilization !== undefined ? ` ${Math.round(info.utilization * 100)}%` : ''}${resetsAt ? ` resets ${resetsAt}` : ''}`);
+        if (info.status !== 'allowed') append(run, 'system', 'Rate limit', `${info.rateLimitType ?? 'window'}: ${info.status}${resetsAt ? `, resets ${resetsAt.slice(11, 16)} UTC` : ''}.`);
+        options.onRateLimit?.(info);
+      },
       onInit: init => log.info('runs', `${id} init: mcp ${init.mcpServers.join(', ') || 'none'}; ${init.workplaceTools} workplace tools of ${init.tools}`),
-      onStderr: line => { if (/error|fail|mcp/i.test(line)) log.warn('runs', `${id} stderr: ${line.slice(0, 300)}`); },
+      // Every stderr line is kept in the log (QA B15): it is the only place the CLI explains a silent start.
+      onStderr: line => log[/error|fail|mcp/i.test(line) ? 'warn' : 'info']('runs', `${id} stderr: ${line.slice(0, 300)}`),
+      onSdkMessage: (type, subtype) => {
+        run.lastSdk = { type, ...(subtype ? { subtype } : {}), at: new Date().toISOString() };
+        if (type !== 'stream_event') log.info('runs', `${id} sdk: ${type}${subtype ? `/${subtype}` : ''}`);
+      },
 
-      onText: text => append(run, 'assistant', '', text),
+      onText: text => { heard(run); append(run, 'assistant', '', text); },
 
-      onToolUse: (tool, input) => append(run, kindForTool(tool), tool, describeInput(tool, input)),
+      onToolUse: (tool, input) => { heard(run); append(run, kindForTool(tool), tool, describeInput(tool, input)); },
 
       onPermission: request2 => new Promise<'allow' | 'always' | 'deny'>(resolve => {
         update(run, {
@@ -280,15 +328,17 @@ function spawn(options: SpawnOptions): Agent {
         options.onResult?.(result);
       },
 
-      onDone: () => update(run, { status: 'waiting' }),
+      onDone: () => { heard(run); update(run, { status: 'waiting' }); },
 
       onError: message => {
+        heard(run);
         append(run, 'error', 'Failed', message);
         update(run, { status: 'error' });
       },
     },
   );
 
+  armSilence(run);
   emit({ agent: run.agent });
   return run.agent;
 }
@@ -301,6 +351,7 @@ export function sendMessage(agentId: string, text: string, attachments: Attachme
   append(run, 'user', '', text);
   update(run, { status: 'running', messageCount: (run.agent.messageCount ?? 0) + 1 });
   run.handle.send(withFiles(text, files), images);
+  armSilence(run);
 }
 
 /**
@@ -424,6 +475,7 @@ const MODE_NOTE: Record<PermissionMode, string> = {
 export function closeRun(agentId: string): void {
   const run = runs.get(agentId);
   if (!run) return;
+  heard(run);
   run.handle.close();
   runs.delete(agentId);
 }
