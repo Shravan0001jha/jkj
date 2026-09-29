@@ -17,8 +17,15 @@ struct TalkView: View {
             .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
             .onChange(of: model.router.talkEmployeeId, initial: true) { _, id in
                 guard let id, let rest = model.rest else { return }
-                model.router.talkEmployeeId = nil
-                Task { await model.talk.select(rest, employeeId: id) }
+                // Cleared only once selection finishes, not before dispatching it: both handlers
+                // fire synchronously (both `initial: true`) on first appearance, in source order —
+                // clearing it up front let the chief-of-staff default below see it as nil in that
+                // same pass and race a second, later-finishing `select` that silently overwrote an
+                // explicit `talk(to:)` (e.g. the Office card) with Asha.
+                Task {
+                    await model.talk.select(rest, employeeId: id)
+                    model.router.talkEmployeeId = nil
+                }
             }
             .onChange(of: model.office.data?.chiefOfStaff, initial: true) { _, cos in
                 // Asha by default: the first thing Talk shows is the Chief of Staff, one tap from anything.

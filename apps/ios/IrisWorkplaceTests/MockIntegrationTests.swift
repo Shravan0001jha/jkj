@@ -30,7 +30,7 @@ final class MockIntegrationTests: XCTestCase {
 
         // REST with the bearer token.
         let office = try await rest.office()
-        XCTAssertEqual(office.units.flatMap(\.employees).count, 7)
+        XCTAssertEqual(office.units.flatMap(\.employees).count, 8, "seven ordinary employees plus the COO, in her real unit")
         let inbox = try await rest.inbox()
         let question = try XCTUnwrap(inbox.first { $0.kind == .question && $0.state == .open })
 
