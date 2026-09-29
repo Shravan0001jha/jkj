@@ -134,7 +134,7 @@ test('every phone action works end to end through the relay: Office, Inbox, talk
     // The Office.
     const office = await phone<OfficeResponse>(s, 'GET', '/api/office');
     assert.equal(office.status, 200);
-    assert.equal(office.body.units.flatMap(u => u.employees).length, 7);
+    assert.equal(office.body.units.flatMap(u => u.employees).length, 8, 'the seven employees plus the virtual COO');
     assert.equal(typeof office.body.counts.needsYou, 'number');
 
     // Answering the Inbox: the answer is recorded as from the phone, and the item is gone everywhere.

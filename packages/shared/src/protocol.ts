@@ -97,7 +97,7 @@ export const API = {
   browse: (path?: string) => path ? `/api/browse?path=${encodeURIComponent(path)}` : '/api/browse',
   agents: '/api/agents',
   agent: (id: string) => `/api/agents/${id}`,
-  agentLog: (id: string) => `/api/agents/${id}/log`,
+  agentLog: (id: string, view?: 'chat') => `/api/agents/${id}/log${view ? `?view=${view}` : ''}`,
   agentResume: (id: string) => `/api/agents/${id}/resume`,
   agentMessage: (id: string) => `/api/agents/${id}/message`,
   agentImage: (id: string, ref: string) =>

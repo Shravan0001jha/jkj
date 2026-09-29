@@ -7,6 +7,7 @@ import { AgentChat } from '../agents/AgentChat.js';
 import { AssignmentRow } from '../features/FeatureDetail.js';
 import { EmployeeContext } from './EmployeeContext.js';
 import { InboxCard } from '../inbox/InboxCard.js';
+import { CooTalk } from './CooTalk.js';
 
 /**
  * One employee: who they are, what they hold, what they are on, and the
@@ -74,9 +75,11 @@ export function EmployeeView({ id }: { id: string }) {
       </div>
 
       {tab === 'talk' && (
-        open
-          ? <AgentChat agent={open} back={openAgentId && openAgentId !== open.id ? () => undefined : undefined} />
-          : <StartTalk employeeId={employee.id} name={employee.name} />
+        employee.virtual
+          ? <CooTalk online={employee.state === 'online'} />
+          : open
+            ? <AgentChat agent={open} back={openAgentId && openAgentId !== open.id ? () => undefined : undefined} />
+            : <StartTalk employeeId={employee.id} name={employee.name} />
       )}
 
       {tab === 'work' && (

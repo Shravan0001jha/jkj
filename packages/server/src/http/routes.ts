@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
   Attachment, CreateAgentRequest, Evidence, PermissionMode, PivotRows, ProposalKind, Shippable, WorkKind, WorkState,
 } from '@jkj/shared';
+import { toChatView } from '@jkj/shared';
 import type { Config } from '../config.js';
 import type { Workplace } from '../services/workplace.js';
 import type { Auth } from './auth.js';
@@ -17,6 +18,7 @@ import * as health from '../services/health.js';
 import * as views from '../services/views.js';
 import * as stall from '../services/stall.js';
 import * as room from '../services/room.js';
+import * as coo from '../services/coo.js';
 import * as features from '../services/features.js';
 import * as digest from '../services/digest.js';
 import type { Telegram } from '../services/telegram.js';
@@ -150,7 +152,13 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
 
     /* ---------- sessions (kept from JKJ) ---------- */
     r('GET', '/api/agents', async (_req, res) => json(res, 200, await agents.listAgents())),
-    r('GET', '/api/agents/:id/log', async (_req, res, _url, [id]) => json(res, 200, await agents.getTranscript(dec(id)))),
+    // Talk must read like a chat (owner, 29 Sep): ?view=chat collapses consecutive tool activity and
+    // keeps only the owner's/employee's messages; approvals stay inline (Agent.approval, not a log
+    // entry). The full log is still the default and always reachable with no query or ?view=full.
+    r('GET', '/api/agents/:id/log', async (_req, res, url, [id]) => {
+      const entries = await agents.getTranscript(dec(id));
+      json(res, 200, url.searchParams.get('view') === 'chat' ? toChatView(entries) : entries);
+    }),
     r('POST', '/api/agents/:id/message', async (req, res, _url, [id]) => {
       const body = await readJson(req);
       const { text, attachments } = validateMessage(body);
@@ -316,6 +324,31 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     // 202: the script runs on; a release takes minutes and the relay's request timeout would drop a 200.
     r('POST', '/api/releases/:id/run', async (_req, res, _url, [id]) => { const { release, done } = releases.start(wp, dec(id)); done.catch(err => log.warn('releases', String(err))); json(res, 202, release); }),
 
+    /* ---------- the COO bridge: loopback only, whatever the bearer token allows ---------- */
+    // "Claude — COO" is the lead's own terminal session, not an Agent SDK employee (no mirroring:
+    // only what the owner sent and what the lead replied ever appears here). The relay must never
+    // reach it, so every route here refuses a request that arrived through the tunnel, exactly as
+    // /api/pair and /api/relay/off already do; it needs no bearer token check beyond that.
+    r('GET', '/api/coo/log', (req, res) => { requireLocal(req); json(res, 200, coo.transcript(wp)); }),
+    r('POST', '/api/coo/message', async (req, res) => { requireLocal(req); json(res, 201, coo.sendOwnerMessage(wp, str((await readJson(req))['text']))); }),
+    r('POST', '/api/coo/reply', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      json(res, 201, coo.replyFromCoo(wp, { inReplyTo: str(body['inReplyTo']), text: str(body['text']), ...(typeof body['details'] === 'string' && body['details'].trim() ? { details: body['details'] } : {}) }));
+    }),
+    r('GET', '/api/coo/items', (req, res, url) => { requireLocal(req); const state = url.searchParams.get('state'); json(res, 200, coo.listItems(wp, state === 'open' || state === 'answered' || state === 'forwarded' ? state : undefined)); }),
+    r('POST', '/api/coo/answer', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      json(res, 200, coo.answerItem(wp, { itemId: str(body['itemId']), optionId: str(body['optionId']), ...(typeof body['note'] === 'string' && body['note'].trim() ? { note: body['note'] } : {}) }));
+    }),
+    r('POST', '/api/coo/forward', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      json(res, 200, coo.forwardItem(wp, { itemId: str(body['itemId']), recommendation: str(body['recommendation']) }));
+    }),
+    r('GET', '/api/coo/presence', (req, res) => { requireLocal(req); json(res, 200, coo.presence(wp)); }),
+
     /* ---------- published access: the emergency off switch ---------- */
     r('POST', '/api/relay/off', (req, res) => {
       // A relay request arrives on loopback too (the tunnel forwards it); the header the tunnel sets keeps the phone out (as for pairing).
@@ -393,6 +426,11 @@ export function json(res: ServerResponse, status: number, body: unknown): void {
 }
 
 const dec = (s: string | undefined): string => decodeURIComponent(s ?? '');
+
+/** The COO bridge, pairing and the off switch: this Mac only, never through the tunnel. */
+function requireLocal(req: IncomingMessage): void {
+  if (!isLoopback(req.socket.remoteAddress) || req.headers['x-via-tunnel']) throw new BadRequest('This is reached from this Mac only.');
+}
 
 const viaOf = (req: IncomingMessage): 'web' | 'phone' => {
   const ua = String(req.headers['user-agent'] ?? '');

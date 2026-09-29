@@ -163,6 +163,9 @@ export function check(wp: Workplace, day = dayOf()): SpendSummary {
     if (u.budget && (s.byUnit[u.id] ?? 0) >= u.budget.inrPerDay) overs.push({ scope: `unit:${u.id}`, spent: s.byUnit[u.id] ?? 0, cap: u.budget.inrPerDay });
   }
   for (const e of wp.org.employees) {
+    // A virtual employee (the COO) is never spawned and never spends: its ₹0/day budget is not a
+    // cap to reach, so it never joins a paused scope, a cap Inbox item, or a pause listener's list.
+    if (e.virtual) continue;
     if ((s.byEmployee[e.id] ?? 0) >= e.budget.inrPerDay) overs.push({ scope: `employee:${e.id}`, spent: s.byEmployee[e.id] ?? 0, cap: e.budget.inrPerDay });
   }
   for (const over of overs) {

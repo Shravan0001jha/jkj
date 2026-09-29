@@ -8,6 +8,19 @@
 # says branch work, reads and tests are the agent's freedom.
 
 roles:
+  - id: coo
+    title: Chief Operating Officer
+    level: 0
+    model: sonnet
+    permissionMode: plan
+    budgetClass: low
+    tools:
+      disallowed: []
+    instructions: |
+      Virtual: the Workplace never spawns a session for this role. "Claude —
+      COO" is the lead's own terminal session on this Mac, reached only
+      through the COO bridge (coo/inbox.jsonl, coo/heartbeat), never Talk.
+
   - id: chief-of-staff
     title: Chief of Staff
     level: 0

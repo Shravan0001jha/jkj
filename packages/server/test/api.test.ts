@@ -45,7 +45,7 @@ test('the Office answers with the seed organisation, coverage, the open decision
     const { status, body } = await call<OfficeResponse>(b.base, 'GET', '/api/office');
     assert.equal(status, 200);
     assert.equal(body.units.length, 4);
-    assert.equal(body.units.flatMap(u => u.employees).length, 7);
+    assert.equal(body.units.flatMap(u => u.employees).length, 8, 'the seven employees plus the virtual COO');
     assert.equal(body.coverage.total, 206);
     assert.equal(body.coverage.owned, 206);
     assert.equal(body.needsYou, 8, 'the eight open product decisions are in the Inbox on first boot');

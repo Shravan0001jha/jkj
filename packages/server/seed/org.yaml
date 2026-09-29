@@ -37,13 +37,26 @@ units:
     kind: unit
 
 employees:
+  # Virtual (HLD "the COO bridge", owner 29 Sep): the lead's own terminal session on this Mac, never
+  # spawned by the Workplace. Shown in Office and Org, reachable only through /api/coo/*.
+  - id: coo
+    name: Claude — COO
+    roleId: coo
+    virtual: true
+    charterIds: []
+    unitId: product
+    chapterIds: []
+    reportsTo: null
+    workspace: { repo: /Users/shravan0001jha/claude-dev, branch: feat/iris-character }
+    budget: { inrPerDay: 0, concurrentSessions: 0 }
+
   - id: asha
     name: Asha
     roleId: chief-of-staff
     charterIds: [chief-of-staff, product-and-business]
     unitId: product
     chapterIds: []
-    reportsTo: null
+    reportsTo: coo
     workspace: { repo: /Users/shravan0001jha/claude-dev, branch: feat/iris-character }
     budget: { inrPerDay: 250, concurrentSessions: 1 }
     githubApp: iris-chief-of-staff

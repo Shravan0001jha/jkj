@@ -15,6 +15,7 @@ import { guardTool, type GuardContext } from './guards.js';
 import { resolve as resolveOwner } from './ownership.js';
 import * as stall from './stall.js';
 import * as room from './room.js';
+import * as coo from './coo.js';
 import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
 import { now } from './store.js';
 import { BadRequest } from '../util/errors.js';
@@ -150,6 +151,7 @@ export interface SpawnOptions {
 
 export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions): Agent {
   const emp = employee(wp, employeeId);
+  if (emp.virtual) throw new BadRequest(`${emp.name} is not spawned by the Workplace; reach it through the COO bridge (POST /api/coo/message).`);
   const budget = spend.canSpend(wp, employeeId);
   if (!budget.ok && !options.ownerTalk) throw new BadRequest(`${emp.name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox, or talk to ${emp.name} and say "continue".`);
   for (const s of sessionsOf(employeeId)) if (!isLive(s.agentId)) close(wp, s.agentId, 'replaced: the run was dead');
@@ -304,6 +306,7 @@ export function readOauthToken(wp: Workplace): string | null {
  * stays under the cap.
  */
 export function talk(wp: Workplace, employeeId: string, text: string, attachments: Attachment[] = [], opts: { probe?: boolean; autonomous?: boolean } = {}): Agent {
+  if (employee(wp, employeeId).virtual) throw new BadRequest(`${employee(wp, employeeId).name} is reached through POST /api/coo/message, not Talk.`);
   const ownerTalk = !opts.autonomous;
   if (ownerTalk) maybeLiftPause(wp, employeeId, text);
   // The owner may carry on an interrupted session; autonomous work goes only to a live one (QA B4).
@@ -563,6 +566,11 @@ export function stateOf(wp: Workplace, employeeId: string): EmployeeState {
  */
 export function stateWithReason(wp: Workplace, employeeId: string): { state: EmployeeState; reason?: string } {
   const e = employee(wp, employeeId);
+  // The COO is never spawned; its card shows presence (the lead's heartbeat), not session state.
+  if (e.virtual) {
+    const p = coo.presence(wp);
+    return p.online ? { state: 'online' } : { state: 'offline', reason: 'messages wait; Asha handles routine' };
+  }
   // Order: what needs the owner first (a parked tool call, an open question), then live work,
   // then what stops autonomous work (a cap, a blocked assignment), then idle.
   const open = openSession(employeeId);

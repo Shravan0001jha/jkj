@@ -17,6 +17,7 @@ import { Watchdog } from './services/watchdog.js';
 import { SuspendDetector } from './services/suspend.js';
 import { PowerMonitor } from './services/power.js';
 import * as room from './services/room.js';
+import { wireMentionReplies } from './services/mentions.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
 import * as employees from './services/employees.js';
@@ -81,7 +82,10 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
 
   // The first real feature, with Iris's real statuses, once; then the Team Room's real threads.
   try { features.seedFeature(wp); } catch (err) { log.warn('boot', `feature seed failed: ${err instanceof Error ? err.message : err}`); }
+  try { room.ensureGeneral(wp); } catch (err) { log.warn('boot', `General channel: ${err instanceof Error ? err.message : err}`); }
   try { const made = room.seedThreads(wp); if (made.length) log.info('boot', `seeded ${made.length} Team Room threads from the 27 Sep plans`); } catch (err) { log.warn('boot', `room seed failed: ${err instanceof Error ? err.message : err}`); }
+  // @mentions wake a short, rate-limited reply turn (RCA, 29 Sep: nothing did this before); @coo goes to the COO bridge.
+  wireMentionReplies(wp);
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.

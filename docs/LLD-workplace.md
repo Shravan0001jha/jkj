@@ -470,3 +470,124 @@ Known trade-off: a stranger can exhaust the shared code budget or lock the owner
 refused; passkey → in; WebSocket without a session → rejected; tunnel down → "Mac offline";
 new-device Telegram ping arrives.
 
+## 18. The COO in the app, a chat view of Talk, and the Room as a real group chat (owner, 29 Sep)
+
+Order followed: this RCA/design note → failing tests → code (`coo.test.ts`, `coo-routes.test.ts`,
+`mentions.test.ts`, `chat-view.test.ts`, plus edits to `room.test.ts`'s escalate coverage and the
+employee-count assertions in `api.test.ts`/`org.test.ts`/`phone-e2e.test.ts`/`fix-batch.test.ts`).
+
+### 18a. RCA: why `@mentions` went unanswered
+
+`room.ts`'s `mentionsIn`/`post` have always computed and stored `RoomMessage.mentions`. The only
+code that ever read that field was `push.ts`'s `intentFor`, and only for an `@owner`/`@shravan`
+mention (`ownerMentionPattern`) — a phone push, not a turn. Nothing subscribed to `room.message` to
+start or resume the mentioned *employee's* session. The Team Room context layer
+(`room.contextFor`) does surface a thread to an employee, but only the next time something spawns
+it for other reasons (a new assignment, the owner talking to it) — there was no path that made a
+mention itself the reason for a turn. Fix: `services/mentions.ts` subscribes once at boot
+(`wireMentionReplies`, wired in `index.ts` next to `room.seedThreads`) to the same `room.message`
+event `room.post`/`createThread` already emit — covering the REST route, the `room_post` tool and
+the seed uniformly, with no new dependency from `room.ts` onto `employees.ts` (that would cycle:
+`employees.ts` already depends on `room.ts` for the context layer).
+
+### 18b. The COO: a virtual employee, not a session
+
+**Decision.** `coo` is a real row in `org.yaml` (`Employee.virtual: true`, new field), shown in
+Office/Org/the ownership tree like anyone else (Asha's `reportsTo` becomes `coo`), but
+`employees.spawn`/`talk` refuse it outright (`BadRequest`, pointed at the bridge). Its
+`EmployeeState` gains two values, `online`/`offline`, and `stateWithReason` special-cases a virtual
+employee to read `coo.presence` (the lead's `coo/heartbeat` mtime, online under 3 minutes) instead of
+session state — offline shows "messages wait; Asha handles routine" per the owner's spec.
+
+**Why not spawn it as a session:** the COO *is* the lead's own terminal session on this Mac; spawning
+a second Claude Code session under that name would be a second, competing "COO" with no shared
+memory, defeating the point. **Why still an `Employee` row:** so it sorts into Office/Org for free —
+card, org tree, `needsYou` — without a parallel UI.
+
+**No mirroring (owner clarification, 29 Sep, replacing an earlier draft that reused the session/
+transcript machinery).** The COO's Talk transcript is not a driven session's log: it is exactly
+`{ what the owner sent to coo } + { what the lead sent back through POST /api/coo/reply }`, nothing
+else — no tool calls, no thinking, ever. This is why it is its own small store (`coo_messages`,
+`coo_items` — SQLite, HLD D2: operational data) behind its own routes, not a `runs.ts` session
+reused with a filter; a filter can leak (a rendering bug shows the raw log) where a separate store
+cannot.
+
+**The bridge, concretely.** `<workplaceDir>/coo/`: `inbox.jsonl` (write-only from the server; the
+lead tails it — owner messages, escalations and `@coo` mentions, one JSON object per line, tagged by
+`kind`) and `heartbeat` (write-only from the lead, touched every 60 s; read-only here, `mtime` only).
+The transcript and escalation items themselves live in SQLite because only the Workplace ever reads
+or writes them — the file is purely the outbound artifact the lead's own process needs.
+
+**Escalation routing.** `coo.routeEscalation` is what `room.escalate` (Asha's Team Room escalations)
+and `mentions.ts` (`@coo`) both call: it always writes a `coo_items` row and an `inbox.jsonl` entry
+first; if the COO has been offline for more than 30 minutes (`OFFLINE_FALLBACK_MS`, separate from
+the 3-minute online threshold the card uses) it *also* raises the item straight to the owner's Inbox
+on its own, so an urgent decision never silently waits on an absent COO. `POST /api/coo/answer`
+settles an item within the COO's own authority (no owner Inbox item ever created).
+`POST /api/coo/forward { itemId, recommendation }` raises it to the owner's Inbox with the
+recommendation folded into the body. The §0/D8 owner-only gates (release, deploy, org changes, a
+cap) are untouched — those are already separate, dedicated Inbox items from `releases.ts`/
+`proposals.ts`/`spend.ts`, never routed through `room.escalate`, so this change never touches them.
+
+**Loopback only, no exception.** Every `/api/coo/*` route calls the same guard `/api/pair` and
+`/api/relay/off` use (`isLoopback(remoteAddress) && !headers['x-via-tunnel']`) — "the API needs no
+auth beyond loopback" is read literally: the *entire* surface, including the owner's own outgoing
+message, not just the lead's reply. The socket hub was leaking this: `wp.on(event => broadcast(event))`
+fanned every event, including a new `coo.message`/`coo.item`, out to *every* connected client — a
+paired phone with a valid bearer token would have received it over `/ws` even though the REST route
+refused it. Fixed in `ws/hub.ts`: a socket's loopback-ness is captured once at the upgrade (same
+check), and `coo.*` events are only ever sent to sockets that passed it.
+
+### 18c. Chat view of Talk (`toChatView`, `@jkj/shared/chat-view.ts`)
+
+A pure function, not a stored second copy of the transcript: `'assistant'`/`'user'`/`'image'` pass
+through unchanged (an assistant entry already carries D16's `summary`/`details`); a run of **two or
+more** consecutive `'read'|'edit'|'bash'|'search'|'task'|'tool'` entries collapses into one
+`kind: 'activity'` entry (`"worked · 6 steps · 1m 12s"`, the original entries kept on `.activity.entries`
+for the expand control); a lone tool call is left as it is (a one-step "activity" reads worse than
+just showing it); `'system'`/`'error'` entries (an approval decided, a rate limit, a session note)
+are left in place, uncollapsed — neither a chat message nor tool activity, and nothing the owner
+might need to see (an approval that was granted, a session that closed) should vanish into a
+"worked" line. The live approval prompt is not a transcript entry (`Agent.approval`) and this
+transform never touches it — "approval requests still shown inline" falls out for free.
+
+**Why one function, not two implementations.** The server serves it at `GET /api/agents/:id/log?view=chat`
+(default/`view=full`/no query still returns everything — LLD §14 stays stable). The web needs the
+*same* collapsing to stay correct while a session is still streaming: a raw tool-call entry lands
+over `/ws` (`agent.log`) one at a time, so a client-side-only "ask the server once, then diff" scheme
+would visibly un-collapse as new entries arrived. `Transcript.tsx` instead calls `toChatView` itself,
+live, over whatever is already in the store; `AgentChat.tsx` adds a "Chat / Full log" toggle. Because
+it is one pure function in `@jkj/shared` (a "tiny pure helper", per that package's own rule) rather
+than a duplicated transform, the server and the client can never disagree about what counts as a
+message.
+
+### 18d. The Room: a General channel, and mentions that wake a turn
+
+**General channel.** `room.ensureGeneral` (idempotent, fixed id `th_general`, called once at boot
+next to `seedThreads`) is an ordinary `RoomThread` — no new type, no special-cased route — so every
+existing Room screen, the `room_post` tool and `mentionsIn` already work on it unchanged.
+
+**Mention-reply turns (the RCA fix, §18a).** A mention starts (or, if a session is already open,
+merges into) a turn for that employee with the thread as its prompt, via `employees.talk(...,
+{ autonomous: true, probe: true })`: `autonomous` keeps it off the owner-talk path (so a real-money
+cap still pauses it, caught and logged rather than thrown); `probe` means it never overwrites the
+employee's real `status.md`/`handoff.md` — a Room reply is not an assignment. `@coo` is routed to
+`coo.notifyMention` (§18b) instead of a spawn, since the COO is never spawned. Bounded, per the
+owner's brief: `MENTION_COOLDOWN_MS` (10 minutes) is a per-`(employee, thread)` rate limit, so a
+burst of replies in one thread wakes each mentioned employee at most once per window — "one reply
+turn per mention" without a duplicate-message index, because a single `RoomMessage`'s `mentions` is
+already a `Set` (an employee cannot be mentioned twice in one message).
+
+### 18e. What changed in the existing contract, for the record
+
+`Employee.virtual?`, `EmployeeState` gains `online`/`offline`, `LogEntry.kind` gains `'activity'`
+with a new `LogEntry.activity` field, new types `CooMessage`/`CooItem`/`CooPresence`, new
+`WorkplaceServerEvent` cases `coo.message`/`coo.item` (loopback-delivered only, §18b), new REST
+`/api/coo/{log,message,reply,items,answer,forward,presence}`, `GET /api/agents/:id/log` gains
+`?view=chat`. Nothing existing was removed or renamed. `packages/server/seed/org.yaml`/`roles.yaml`
+gain the `coo` employee/role and change Asha's `reportsTo`; `proposals.ts`'s hire-with-no-`reportsTo`
+default now explicitly prefers the chief-of-staff charter holder over "whoever is level 0" (the COO
+is level 0 too, but virtual, and must never become a new hire's default lead);
+`spend.ts`'s cap check skips virtual employees (a ₹0/day budget on an employee that never spends
+would otherwise show as permanently "at cap" and pollute every paused-scope list).
+

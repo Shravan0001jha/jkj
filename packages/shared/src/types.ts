@@ -48,6 +48,12 @@ export interface LogEntry {
    * than inlined, so a transcript stays small enough to send on every poll.
    */
   image?: { mediaType: string; ref: string };
+  /**
+   * Set only on a chat-view `'activity'` entry (see `toChatView`, never written to a stored
+   * transcript): the run of consecutive tool-kind entries it stands for, collapsed to one line
+   * ("worked · 6 steps · 1m 12s"), and the original entries for the expanded view.
+   */
+  activity?: { count: number; durationMs: number; entries: LogEntry[] };
 }
 
 export type LogKind =
@@ -56,7 +62,8 @@ export type LogKind =
   | 'image'      // an image pasted into the conversation
   | 'read' | 'edit' | 'bash' | 'search' | 'task' | 'tool'
   | 'error'
-  | 'system';    // JKJ itself speaking (interrupted, restarted, …)
+  | 'system'     // JKJ itself speaking (interrupted, restarted, …)
+  | 'activity';  // chat view only: a collapsed run of consecutive tool-kind entries
 
 /** A permission request the agent is blocked on. */
 export interface PendingApproval {

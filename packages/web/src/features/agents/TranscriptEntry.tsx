@@ -45,6 +45,19 @@ export function TranscriptEntry({ entry, agentId }: { entry: LogEntry; agentId: 
     );
   }
 
+  // The chat view (toChatView, @jkj/shared): a run of consecutive tool calls collapsed to one line,
+  // expandable to the full log underneath it.
+  if (entry.kind === 'activity' && entry.activity) {
+    return (
+      <details className="activity">
+        <summary>{entry.text}</summary>
+        <div className="activitylog">
+          {entry.activity.entries.map(e => <TranscriptEntry key={e.id} entry={e} agentId={agentId} />)}
+        </div>
+      </details>
+    );
+  }
+
   // Everything else is a tool call: dense, monospaced, scannable in a column.
   return (
     <div className={`ln ${entry.kind}`}>

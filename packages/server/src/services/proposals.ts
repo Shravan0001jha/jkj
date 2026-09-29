@@ -172,7 +172,10 @@ function hire(params: Record<string, unknown>, wp: Workplace): Mutation {
     const role = org.roles.find(r => r.id === roleId);
     if (!role) throw new BadRequest(`No role ${roleId}`);
     if (org.employees.some(e => e.id === id)) throw new BadRequest(`Employee ${id} already exists`);
-    const reportsTo = typeof params['reportsTo'] === 'string' ? params['reportsTo'] : (org.employees.find(e => e.level === 0)?.id ?? null);
+    // Default to the Chief of Staff, not just "whoever is level 0" — the COO is level 0 too, but
+    // it is virtual and never spawned, so a hire with no explicit reportsTo must not land there.
+    const reportsTo = typeof params['reportsTo'] === 'string' ? params['reportsTo']
+      : (org.employees.find(e => e.charterIds.includes('chief-of-staff'))?.id ?? org.employees.find(e => e.level === 0 && !e.virtual)?.id ?? null);
     const lead = reportsTo ? org.employees.find(e => e.id === reportsTo) : undefined;
     if (reportsTo && !lead) throw new BadRequest(`No employee ${reportsTo} to report to`);
     if (lead && lead.level === 2) throw new BadRequest('A hire cannot report to a hire (no level 3).');

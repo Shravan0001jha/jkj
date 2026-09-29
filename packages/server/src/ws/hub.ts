@@ -4,6 +4,7 @@ import type { ClientCommand, ServerEvent, WorkplaceClientCommand, WorkplaceServe
 import { API } from '@jkj/shared';
 import type { Workplace } from '../services/workplace.js';
 import type { Auth } from '../http/auth.js';
+import { isLoopback } from '../http/auth.js';
 import * as agents from '../services/agents.js';
 import * as inbox from '../services/inbox.js';
 import * as views from '../services/views.js';
@@ -26,6 +27,10 @@ export interface SocketHub {
 export function attachSocket(server: Server, wp: Workplace, auth: Auth): SocketHub {
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Set<WebSocket>();
+  // The COO bridge is loopback-only (same rule as /api/coo/*, /api/pair): a socket that arrived
+  // through the tunnel (x-via-tunnel) or off loopback never gets a coo.* event, whatever it is
+  // authorised for otherwise — a paired phone still must not see or mirror the COO's Talk.
+  const localOnly = new WeakSet<WebSocket>();
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -35,12 +40,20 @@ export function attachSocket(server: Server, wp: Workplace, auth: Auth): SocketH
       socket.destroy();
       return;
     }
-    wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+    const local = isLoopback(req.socket.remoteAddress) && !req.headers['x-via-tunnel'];
+    wss.handleUpgrade(req, socket, head, ws => {
+      if (local) localOnly.add(ws);
+      wss.emit('connection', ws, req);
+    });
   });
 
   const broadcast = (event: unknown): void => {
+    const isCooEvent = typeof event === 'object' && event !== null && String((event as { type?: unknown }).type ?? '').startsWith('coo.');
     const payload = JSON.stringify(event);
-    for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(payload);
+    for (const ws of clients) {
+      if (isCooEvent && !localOnly.has(ws)) continue;
+      if (ws.readyState === ws.OPEN) ws.send(payload);
+    }
   };
 
   onRunEvent(({ agent, entry }) => {
