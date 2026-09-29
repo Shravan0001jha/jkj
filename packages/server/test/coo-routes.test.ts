@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import WebSocket from 'ws';
 import type { CooMessage, LogEntry } from '@jkj/shared';
 import { loadConfig } from '../src/config.js';
 import { start, type Running } from '../src/index.js';
@@ -9,10 +10,15 @@ import { installFakeRuntime, type FakeRuntime } from './fakes/fake-runtime.js';
 import { tmpWorkplace, type TmpWorkplace } from './fakes/tmp-workplace.js';
 
 /**
- * The COO bridge and the chat-view query param, over real HTTP — same shape as api.test.ts. The
- * COO routes must refuse a request that arrived through the tunnel (`x-via-tunnel`), exactly like
- * /api/pair and /api/relay/off (LLD "the COO bridge"); everything else here is loopback already, so
- * that header is the only thing standing in for "this came through the relay".
+ * The COO bridge and the chat-view query param, over real HTTP — same shape as api.test.ts.
+ *
+ * The owner reaches the Workplace only through the tunnel from his phone, so the owner-facing
+ * routes (log, message, presence) must work over it: an ordinary bearer/cookie session, same as
+ * every other /api/* route. Only the lead-only routes (reply, items, answer, forward — only the
+ * lead's own process ever writes as the COO) refuse a request that arrived through the tunnel,
+ * exactly like /api/pair and /api/relay/off. Every request here is physically loopback already
+ * (127.0.0.1); `x-via-tunnel` is the header the tunnel itself sets on a forwarded request, so it is
+ * what stands in for "this came through the relay" — `isLoopback` alone would not tell the two apart.
  */
 
 interface Booted { running: Running; base: string; tmp: TmpWorkplace; fake: FakeRuntime; stop(): Promise<void> }
@@ -37,7 +43,7 @@ async function call<T>(base: string, method: string, path: string, body?: unknow
   return { status: res.status, body: await res.json() as T };
 }
 
-test('the COO bridge works from loopback and refuses a request that arrived through the tunnel', async () => {
+test('owner-facing (log, message, presence) works both from loopback and through the tunnel', async () => {
   const b = await boot();
   try {
     const sent = await call<CooMessage>(b.base, 'POST', '/api/coo/message', { text: 'Is the release ready?' });
@@ -48,20 +54,78 @@ test('the COO bridge works from loopback and refuses a request that arrived thro
     assert.equal(log.status, 200);
     assert.equal(log.body.length, 1);
 
+    const presence = await call<{ online: boolean }>(b.base, 'GET', '/api/coo/presence');
+    assert.equal(presence.status, 200);
+    assert.equal(presence.body.online, false, 'no heartbeat yet');
+
+    // The same three, through the tunnel (the owner's phone): still allowed.
+    const tunneledSend = await call<CooMessage>(b.base, 'POST', '/api/coo/message', { text: 'From the phone.' }, { 'x-via-tunnel': '1' });
+    assert.equal(tunneledSend.status, 201);
+    const tunneledLog = await call<CooMessage[]>(b.base, 'GET', '/api/coo/log', undefined, { 'x-via-tunnel': '1' });
+    assert.equal(tunneledLog.status, 200);
+    assert.equal(tunneledLog.body.length, 2);
+    const tunneledPresence = await call<{ online: boolean }>(b.base, 'GET', '/api/coo/presence', undefined, { 'x-via-tunnel': '1' });
+    assert.equal(tunneledPresence.status, 200);
+  } finally {
+    await b.stop();
+  }
+});
+
+test('lead-only (reply, items, answer, forward) works from loopback but refuses a request that arrived through the tunnel', async () => {
+  const b = await boot();
+  try {
+    const sent = await call<CooMessage>(b.base, 'POST', '/api/coo/message', { text: 'Is the release ready?' });
+
     const reply = await call<CooMessage>(b.base, 'POST', '/api/coo/reply', { inReplyTo: sent.body.id, text: 'Yes, shipping now.' });
     assert.equal(reply.status, 201);
     assert.equal(reply.body.from, 'coo');
+    const items = await call<unknown[]>(b.base, 'GET', '/api/coo/items');
+    assert.equal(items.status, 200);
 
     // The same requests, through the tunnel: refused, whatever a bearer token would otherwise allow.
-    const tunneled = await call<{ error: string }>(b.base, 'POST', '/api/coo/message', { text: 'leak?' }, { 'x-via-tunnel': '1' });
-    assert.equal(tunneled.status, 400);
-    const tunneledLog = await call<{ error: string }>(b.base, 'GET', '/api/coo/log', undefined, { 'x-via-tunnel': '1' });
-    assert.equal(tunneledLog.status, 400);
+    const tunneledReply = await call<{ error: string }>(b.base, 'POST', '/api/coo/reply', { inReplyTo: sent.body.id, text: 'leak?' }, { 'x-via-tunnel': '1' });
+    assert.equal(tunneledReply.status, 400);
+    const tunneledItems = await call<{ error: string }>(b.base, 'GET', '/api/coo/items', undefined, { 'x-via-tunnel': '1' });
+    assert.equal(tunneledItems.status, 400);
+    const tunneledAnswer = await call<{ error: string }>(b.base, 'POST', '/api/coo/answer', { itemId: 'coi_x', optionId: 'ok' }, { 'x-via-tunnel': '1' });
+    assert.equal(tunneledAnswer.status, 400);
+    const tunneledForward = await call<{ error: string }>(b.base, 'POST', '/api/coo/forward', { itemId: 'coi_x', recommendation: 'leak?' }, { 'x-via-tunnel': '1' });
+    assert.equal(tunneledForward.status, 400);
 
     // The transcript is unchanged by the refused attempt: no mirroring, no leakage.
     const after = await call<CooMessage[]>(b.base, 'GET', '/api/coo/log');
     assert.equal(after.body.length, 2);
   } finally {
+    await b.stop();
+  }
+});
+
+test('over the socket: coo.message reaches a tunnelled client too; coo.item never does', async () => {
+  const b = await boot();
+  const wsUrl = b.base.replace('http', 'ws') + '/ws';
+  const local = new WebSocket(wsUrl);
+  const tunnelled = new WebSocket(wsUrl, { headers: { 'x-via-tunnel': '1' } });
+  const localEvents: string[] = [];
+  const tunnelledEvents: string[] = [];
+  try {
+    await Promise.all([
+      new Promise<void>(resolve => local.on('open', () => resolve())),
+      new Promise<void>(resolve => tunnelled.on('open', () => resolve())),
+    ]);
+    local.on('message', raw => localEvents.push((JSON.parse(String(raw)) as { type: string }).type));
+    tunnelled.on('message', raw => tunnelledEvents.push((JSON.parse(String(raw)) as { type: string }).type));
+
+    const sent = await call<CooMessage>(b.base, 'POST', '/api/coo/message', { text: 'Ping from the owner.' });
+    await call<CooMessage>(b.base, 'POST', '/api/coo/reply', { inReplyTo: sent.body.id, text: 'Pong.' }); // coo.message
+    await call(b.base, 'POST', '/api/room', { title: 'x', text: '@coo status?', charterIds: [] }); // room.message, then coo.item (offline fallback)
+    await new Promise(resolve => setTimeout(resolve, 30));
+
+    assert.ok(localEvents.includes('coo.message'), 'the loopback client gets the owner/coo conversation');
+    assert.ok(localEvents.includes('coo.item'), 'the loopback client gets the lead-only escalation bookkeeping too');
+    assert.ok(tunnelledEvents.includes('coo.message'), 'the phone, through the tunnel, gets the conversation it is part of');
+    assert.ok(!tunnelledEvents.includes('coo.item'), 'but never the lead-only bookkeeping');
+  } finally {
+    local.close(); tunnelled.close();
     await b.stop();
   }
 });

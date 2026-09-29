@@ -529,14 +529,29 @@ recommendation folded into the body. The §0/D8 owner-only gates (release, deplo
 cap) are untouched — those are already separate, dedicated Inbox items from `releases.ts`/
 `proposals.ts`/`spend.ts`, never routed through `room.escalate`, so this change never touches them.
 
-**Loopback only, no exception.** Every `/api/coo/*` route calls the same guard `/api/pair` and
-`/api/relay/off` use (`isLoopback(remoteAddress) && !headers['x-via-tunnel']`) — "the API needs no
-auth beyond loopback" is read literally: the *entire* surface, including the owner's own outgoing
-message, not just the lead's reply. The socket hub was leaking this: `wp.on(event => broadcast(event))`
-fanned every event, including a new `coo.message`/`coo.item`, out to *every* connected client — a
-paired phone with a valid bearer token would have received it over `/ws` even though the REST route
-refused it. Fixed in `ws/hub.ts`: a socket's loopback-ness is captured once at the upgrade (same
-check), and `coo.*` events are only ever sent to sockets that passed it.
+**Loopback only for the lead's own writes — not for the owner (correction, 29 Sep).** The first cut
+of this guarded the whole `/api/coo/*` surface with the `/api/pair`/`/api/relay/off` check
+(`isLoopback(remoteAddress) && !headers['x-via-tunnel']`), reading "the API needs no auth beyond
+loopback" as covering the entire surface. That is wrong for the owner's own side of the bridge: the
+owner reaches the Workplace **only** through the tunnel from his phone (D11b — there is no LAN
+listener once publishing is on), so a loopback-only `POST /api/coo/message` would make the app
+useless for the one person it is for. The split that actually matches the threat model:
+
+- **Owner-facing** — `GET /api/coo/log`, `POST /api/coo/message`, `GET /api/coo/presence` — need
+  nothing beyond the ordinary bearer/cookie session every other `/api/*` route already requires off
+  loopback; there is no extra guard, because there is nothing extra to guard against here.
+- **Lead-only** — `POST /api/coo/reply`, `GET /api/coo/items`, `POST /api/coo/answer`,
+  `POST /api/coo/forward` — only the lead's own process on this Mac ever writes *as* the COO, so
+  these keep the loopback-and-not-tunnelled guard: a stolen or leaked owner bearer token must not be
+  enough to forge a COO reply.
+
+The socket hub needed the same split, and had a real leak before it: `wp.on(event =>
+broadcast(event))` fanned every event to every connected client with no filter at all, so a `coo.item`
+(lead-only bookkeeping) would have reached a paired phone the moment the REST guard was added but the
+hub was not. Fixed in `ws/hub.ts`: a socket's loopback-ness is captured once at the upgrade (the same
+check), `coo.message` goes to every authorised socket (it is the owner's own conversation, and he is
+never loopback), and only `coo.item` is held back to loopback sockets. Tested both ways in
+`coo-routes.test.ts`, over HTTP and over a real socket connection with `x-via-tunnel` set.
 
 ### 18c. Chat view of Talk (`toChatView`, `@jkj/shared/chat-view.ts`)
 
