@@ -201,37 +201,6 @@
     "type": "office.snapshot",
     "office": {
       "chiefOfStaff": "asha",
-      "coo": {
-        "employee": {
-          "id": "coo",
-          "name": "Claude",
-          "roleId": "coo",
-          "level": 0,
-          "permanent": true,
-          "charterIds": [],
-          "unitId": "leadership",
-          "chapterIds": [],
-          "reportsTo": null,
-          "workspace": {
-            "repo": "/Users/shravan0001jha/claude-dev",
-            "worktree": "/Users/shravan0001jha/claude-dev-coo",
-            "branch": "wp/coo"
-          },
-          "budget": {
-            "inrPerDay": 150,
-            "concurrentSessions": 2
-          },
-          "githubApp": "iris-coo",
-          "state": "idle",
-          "presence": "online"
-        },
-        "charters": [],
-        "currentWork": null,
-        "lastReport": "Here for the whole picture — ask anything, any time.",
-        "session": null,
-        "spendTodayInr": 0,
-        "needsYou": 0
-      },
       "units": [
         {
           "unit": {
@@ -241,6 +210,37 @@
             "kind": "unit"
           },
           "employees": [
+            {
+              "employee": {
+                "id": "coo",
+                "name": "Claude — COO",
+                "roleId": "coo",
+                "level": 0,
+                "permanent": true,
+                "charterIds": [],
+                "unitId": "product",
+                "chapterIds": [],
+                "reportsTo": null,
+                "workspace": {
+                  "repo": "/Users/shravan0001jha/claude-dev",
+                  "worktree": "/Users/shravan0001jha/claude-dev-coo",
+                  "branch": "wp/coo"
+                },
+                "budget": {
+                  "inrPerDay": 150,
+                  "concurrentSessions": 2
+                },
+                "githubApp": "iris-chief-of-staff",
+                "state": "online",
+                "virtual": true
+              },
+              "charters": [],
+              "currentWork": null,
+              "lastReport": "Here for the whole picture — ask anything, any time.",
+              "session": null,
+              "spendTodayInr": 0,
+              "needsYou": 0
+            },
             {
               "employee": {
                 "id": "asha",
@@ -1330,12 +1330,12 @@
         "employees": [
           {
             "id": "coo",
-            "name": "Claude",
+            "name": "Claude — COO",
             "roleId": "coo",
             "level": 0,
             "permanent": true,
             "charterIds": [],
-            "unitId": "leadership",
+            "unitId": "product",
             "chapterIds": [],
             "reportsTo": null,
             "workspace": {
@@ -1347,9 +1347,9 @@
               "inrPerDay": 150,
               "concurrentSessions": 2
             },
-            "githubApp": "iris-coo",
-            "state": "idle",
-            "presence": "online"
+            "githubApp": "iris-chief-of-staff",
+            "state": "online",
+            "virtual": true
           },
           {
             "id": "asha",
@@ -1747,12 +1747,12 @@
         "employees": [
           {
             "id": "coo",
-            "name": "Claude",
+            "name": "Claude — COO",
             "roleId": "coo",
             "level": 0,
             "permanent": true,
             "charterIds": [],
-            "unitId": "leadership",
+            "unitId": "product",
             "chapterIds": [],
             "reportsTo": null,
             "workspace": {
@@ -1764,9 +1764,9 @@
               "inrPerDay": 150,
               "concurrentSessions": 2
             },
-            "githubApp": "iris-coo",
-            "state": "idle",
-            "presence": "online"
+            "githubApp": "iris-chief-of-staff",
+            "state": "online",
+            "virtual": true
           },
           {
             "id": "asha",
@@ -2398,9 +2398,41 @@
     }
   },
   {
-    "type": "room.typing",
-    "threadId": "general",
-    "employeeId": "coo"
+    "type": "room.replying",
+    "threadId": "th_general",
+    "employeeId": "coo",
+    "state": "started"
+  },
+  {
+    "type": "coo.message",
+    "message": {
+      "id": "com-2",
+      "at": "2026-09-27T07:32:00.000Z",
+      "from": "coo",
+      "text": "Just the socket contract (ib-5); everything else is on track.",
+      "summary": "Just the socket contract (ib-5); everything else is on track.",
+      "inReplyTo": "com-1"
+    }
+  },
+  {
+    "type": "coo.item",
+    "item": {
+      "id": "coi-1",
+      "at": "2026-09-27T09:00:00.000Z",
+      "kind": "mention",
+      "title": "Mentioned in \"General\"",
+      "body": "ask the COO",
+      "options": [],
+      "raisedBy": "asha",
+      "state": "open"
+    }
+  },
+  {
+    "type": "coo.presence",
+    "presence": {
+      "online": true,
+      "lastHeartbeat": "2026-09-27T09:00:00.000Z"
+    }
   },
   {
     "type": "future.event",

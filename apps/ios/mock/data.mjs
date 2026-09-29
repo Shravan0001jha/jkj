@@ -67,9 +67,10 @@ const emp = (id, name, roleId, level, charterIds, unitId, chapterIds, reportsTo,
 });
 
 export const employees = [
-  // The owner's own AI colleague, not a report of Asha's: shown once, above the units, with a
-  // presence dot (Room D26 / Office D3). `unitId` names no real unit so it never lands in one.
-  emp('coo', 'Claude', 'coo', 0, [], 'leadership', [], null, 'idle', { githubApp: 'iris-coo', presence: 'online' }),
+  // Virtual (the COO bridge, LLD §18): the lead's own terminal session on this Mac, never spawned.
+  // Lives in `product` like the real org.yaml seed; the app pulls her card out to show once, above
+  // the units. `state` here is presence (online/offline), not a session/work state.
+  emp('coo', 'Claude — COO', 'coo', 0, [], 'product', [], null, 'online', { virtual: true }),
   emp('asha', 'Asha', 'chief-of-staff', 0, ['chief-of-staff', 'product-and-business'], 'product', [], null, 'working'),
   emp('dev', 'Dev', 'lead', 1, ['conversation', 'character'], 'capabilities', [], 'asha', 'idle'),
   emp('mira', 'Mira', 'lead', 1, ['experts'], 'capabilities', [], 'asha', 'needs-owner', { stateReason: 'waiting for your approval to run the errand tests' }),
@@ -329,7 +330,7 @@ export const requestStatus = (f, assignmentsList = assignments) => {
 
 export const office = () => ({
   chiefOfStaff: 'asha',
-  coo: cards.find(c => c.employee.id === 'coo'),
+  // The COO lives in her unit's list like anyone else (org.yaml: product), flagged `virtual`.
   units: units.filter(u => u.kind === 'unit').map(unit => ({ unit, employees: cards.filter(c => c.employee.unitId === unit.id) })),
   coverage,
   needsYou: inbox.filter(i => i.state === 'open').length,
@@ -500,6 +501,11 @@ export const releasesReady = () => [
   { shippable: 'ios', unreleased: [] , last: { id: 'rel-ios-1', shippable: 'ios', version: '0.3.0', state: 'done', unreleased: [], inboxId: 'ib-00', createdAt: iso(-6000) } },
 ];
 
+export const cooLog = [
+  { id: 'com-1', at: iso(-90), from: 'owner', text: 'Morning — anything I should look at first?' },
+  { id: 'com-2', at: iso(-88), from: 'coo', text: 'Just the socket contract (ib-5); everything else is on track.', summary: 'Just the socket contract (ib-5); everything else is on track.', inReplyTo: 'com-1' },
+];
+
 export const release = {
   id: 'rel-1', shippable: 'desktop-mac', version: '0.2.16', state: 'proposed',
   unreleased: ['8034a09', 'ce943c7', '46e43c1'], inboxId: 'ib-1', createdAt: iso(-12),
@@ -508,7 +514,7 @@ export const release = {
 export const roomThreads = [
   // The default channel: everyone's in it, it never resolves, and the app pins it above the
   // per-topic threads (Room D2).
-  { id: 'general', title: 'General', charterIds: [], createdBy: 'workplace', createdAt: iso(-4000), state: 'open', lastAt: iso(-3), messageCount: 6, participants: ['owner', 'coo', 'asha', 'dev', 'mira', 'kabir', 'rohan', 'tara', 'nikhil'], escalations: [], headline: 'Where the whole team and you talk.' },
+  { id: 'th_general', title: 'General', charterIds: [], createdBy: 'workplace', createdAt: iso(-4000), state: 'open', lastAt: iso(-3), messageCount: 6, participants: ['owner', 'coo', 'asha', 'dev', 'mira', 'kabir', 'rohan', 'tara', 'nikhil'], escalations: [], headline: 'Where everyone talks.' },
   { id: 'rt-socket', title: 'Mac socket contract for errands', charterIds: ['experts', 'server'], createdBy: 'kabir', createdAt: iso(-120), state: 'open', lastAt: iso(-8), messageCount: 4, participants: ['kabir', 'mira', 'asha'], escalations: ['ib-5'] , headline: 'Blocked on the socket shape; escalated to you as ib-5.' },
   { id: 'rt-release', title: 'Release readiness 0.2.16', charterIds: ['qa-release', 'desktop-mac'], createdBy: 'nikhil', createdAt: iso(-200), state: 'open', lastAt: iso(-14), messageCount: 3, participants: ['nikhil', 'rohan'], escalations: ['ib-1'] , headline: 'Release 0.2.16 waits for your approval (ib-1).' },
   { id: 'rt-voice', title: 'iPad voice default: push-to-talk or wake word', charterIds: ['conversation', 'mobile'], createdBy: 'dev', createdAt: iso(-300), state: 'open', lastAt: iso(-35), messageCount: 5, participants: ['dev', 'tara', 'asha'], escalations: ['ib-2'] , headline: 'Default is your call (ib-2); mis-fire numbers attached.' },
@@ -518,13 +524,13 @@ export const roomThreads = [
 
 const rm = (id, threadId, minutesAgo, by, text, mentions = []) => ({ id, threadId, at: iso(-minutesAgo), by, owner: by === 'owner', text, mentions });
 export const roomMessages = {
-  general: [
-    rm('m-g1', 'general', 400, 'asha', 'Morning. Errand flow (f-errands) is decomposed and routed; five charters building.', []),
-    rm('m-g2', 'general', 300, 'nikhil', '0.2.16 is prepared; release waits on ib-1.', []),
-    rm('m-g3', 'general', 60, 'owner', 'Good work everyone. @coo anything I should know before the day starts?', ['coo']),
-    rm('m-g4', 'general', 55, 'coo', 'One thing: Kabir is blocked on the Mac socket contract (ib-5) — that is the one worth your first look. Everything else is on track.', ['owner']),
-    rm('m-g5', 'general', 20, 'tara', 'Paused at the daily cap again — flagging in case that should move.', []),
-    rm('m-g6', 'general', 3, 'workplace', 'Inbox item ib-5 is open and waiting for the owner.', []),
+  th_general: [
+    rm('m-g1', 'th_general', 400, 'asha', 'Morning. Errand flow (f-errands) is decomposed and routed; five charters building.', []),
+    rm('m-g2', 'th_general', 300, 'nikhil', '0.2.16 is prepared; release waits on ib-1.', []),
+    rm('m-g3', 'th_general', 60, 'owner', 'Good work everyone. @coo anything I should know before the day starts?', ['coo']),
+    rm('m-g4', 'th_general', 55, 'coo', 'One thing: Kabir is blocked on the Mac socket contract (ib-5) — that is the one worth your first look. Everything else is on track.', ['owner']),
+    rm('m-g5', 'th_general', 20, 'tara', 'Paused at the daily cap again — flagging in case that should move.', []),
+    rm('m-g6', 'th_general', 3, 'workplace', 'Inbox item ib-5 is open and waiting for the owner.', []),
   ],
   'rt-socket': [
     rm('m-1', 'rt-socket', 120, 'kabir', 'Starting the errand endpoint on iris-api. @mira what shape does the Mac socket message take? I need the field names before I persist anything.', ['mira']),
@@ -575,7 +581,10 @@ export const sampleEvents = [
   { type: 'alert', level: 'needs-you', title: 'Mira needs an approval', body: 'Kabir is blocked: reuse ask_mac for Mac errands now, or wait for the experts contract?', inboxId: 'ib-5' },
   { type: 'room.thread', thread: roomThreads.find(t => t.id === 'rt-socket') },
   { type: 'room.message', message: roomMessages['rt-socket'][3], thread: roomThreads.find(t => t.id === 'rt-socket') },
-  { type: 'room.typing', threadId: 'general', employeeId: 'coo' },
+  { type: 'room.replying', threadId: 'th_general', employeeId: 'coo', state: 'started' },
+  { type: 'coo.message', message: cooLog[1] },
+  { type: 'coo.item', item: { id: 'coi-1', at: T0, kind: 'mention', title: 'Mentioned in "General"', body: 'ask the COO', options: [], raisedBy: 'asha', state: 'open' } },
+  { type: 'coo.presence', presence: { online: true, lastHeartbeat: T0 } },
   { type: 'future.event', anything: 1 },
 ];
 
@@ -599,7 +608,9 @@ export const fixtures = () => ({
   'spend.json': spend,
   'spend-entries.json': spendEntries,
   'room.json': { threads: roomThreads },
-  'room-thread.json': { thread: roomThreads[0], messages: roomMessages['rt-socket'] },
+  'room-thread.json': { thread: roomThreads.find(t => t.id === 'rt-socket'), messages: roomMessages['rt-socket'] },
+  'coo-log.json': cooLog,
+  'coo-presence.json': { online: true, lastHeartbeat: T0 },
   'signals.json': signals,
   'release.json': release,
   'releases-ready.json': releasesReady(),

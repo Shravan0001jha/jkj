@@ -60,6 +60,7 @@ final class AppModel {
     let talk = TalkStore()
     let features = FeaturesStore()
     let room = RoomStore()
+    let coo = CooStore()
     let requests = RequestsStore()
     let alerts: AlertsStore
     /// Releases updated over the socket, and their streamed log lines.
@@ -479,6 +480,7 @@ final class AppModel {
         talk.handle(event)
         features.handle(event)
         room.handle(event)
+        coo.handle(event)
         requests.handle(event)
         alerts.handle(event)
         switch event {

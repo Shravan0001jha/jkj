@@ -95,12 +95,12 @@
   "employees": [
     {
       "id": "coo",
-      "name": "Claude",
+      "name": "Claude — COO",
       "roleId": "coo",
       "level": 0,
       "permanent": true,
       "charterIds": [],
-      "unitId": "leadership",
+      "unitId": "product",
       "chapterIds": [],
       "reportsTo": null,
       "workspace": {
@@ -112,9 +112,9 @@
         "inrPerDay": 150,
         "concurrentSessions": 2
       },
-      "githubApp": "iris-coo",
-      "state": "idle",
-      "presence": "online"
+      "githubApp": "iris-chief-of-staff",
+      "state": "online",
+      "virtual": true
     },
     {
       "id": "asha",
@@ -544,12 +544,12 @@
         "employees": [
           {
             "id": "coo",
-            "name": "Claude",
+            "name": "Claude — COO",
             "roleId": "coo",
             "level": 0,
             "permanent": true,
             "charterIds": [],
-            "unitId": "leadership",
+            "unitId": "product",
             "chapterIds": [],
             "reportsTo": null,
             "workspace": {
@@ -561,9 +561,9 @@
               "inrPerDay": 150,
               "concurrentSessions": 2
             },
-            "githubApp": "iris-coo",
-            "state": "idle",
-            "presence": "online"
+            "githubApp": "iris-chief-of-staff",
+            "state": "online",
+            "virtual": true
           },
           {
             "id": "asha",
@@ -961,12 +961,12 @@
         "employees": [
           {
             "id": "coo",
-            "name": "Claude",
+            "name": "Claude — COO",
             "roleId": "coo",
             "level": 0,
             "permanent": true,
             "charterIds": [],
-            "unitId": "leadership",
+            "unitId": "product",
             "chapterIds": [],
             "reportsTo": null,
             "workspace": {
@@ -978,9 +978,9 @@
               "inrPerDay": 150,
               "concurrentSessions": 2
             },
-            "githubApp": "iris-coo",
-            "state": "idle",
-            "presence": "online"
+            "githubApp": "iris-chief-of-staff",
+            "state": "online",
+            "virtual": true
           },
           {
             "id": "asha",

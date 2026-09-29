@@ -20,12 +20,20 @@ enum WorkspaceMode: String, Codable, CaseIterable {
 }
 
 enum LogKind: String, Codable, CaseIterable {
-    case assistant, user, image, read, edit, bash, search, task, tool, error, system
+    case assistant, user, image, read, edit, bash, search, task, tool, error, system, activity
 }
 
 struct LogImage: Codable, Equatable, Hashable {
     var mediaType: String
     var ref: String
+}
+
+/// Set only on a chat-view `'activity'` entry (`toChatView`, mirrored in `ChatView.swift`): the run
+/// of consecutive tool-kind entries it stands for, and the original entries for "expand".
+struct LogActivity: Codable, Equatable, Hashable {
+    var count: Int
+    var durationMs: Int
+    var entries: [LogEntry]
 }
 
 struct LogEntry: Codable, Equatable, Hashable, Identifiable {
@@ -39,6 +47,7 @@ struct LogEntry: Codable, Equatable, Hashable, Identifiable {
     var image: LogImage?
     var summary: String?
     var details: String?
+    var activity: LogActivity?
 }
 
 struct PendingApproval: Codable, Equatable, Hashable {
@@ -246,6 +255,8 @@ enum EmployeeState: String, Codable, CaseIterable {
     case idle, working, blocked
     case needsOwner = "needs-owner"
     case paused
+    /// The COO bridge's presence (a virtual employee's card), from the lead's heartbeat — not a session.
+    case online, offline
 }
 
 struct Workspace: Codable, Equatable, Hashable {
@@ -274,8 +285,9 @@ struct Employee: Codable, Equatable, Hashable, Identifiable {
     var githubApp: String?
     var state: EmployeeState
     var stateReason: String?
-    /// "online" | "offline"; not yet in packages/shared. Only the COO sets it today.
-    var presence: String?
+    /// True for an employee the Workplace never spawns (the COO): shown in Office/Org like any
+    /// other employee; `talk`/`assign`/`spawn` refuse it. Reached through the COO bridge instead.
+    var virtual: Bool?
 }
 
 enum UnitKind: String, Codable, CaseIterable {
@@ -492,6 +504,10 @@ struct InboxItem: Codable, Equatable, Hashable, Identifiable {
     var links: [InboxLink]?
     var summary: String
     var details: String?
+    /// False for routine housekeeping that never reaches the owner's Inbox (a stall notice, a
+    /// no-op session, a non-owner review) — only the affected employees' pages show it. Absent or
+    /// true means the owner decides it. The server decides this; clients never set it.
+    var ownerFacing: Bool?
 }
 
 struct InboxLink: Codable, Equatable, Hashable {
@@ -870,8 +886,6 @@ struct OfficeCounts: Codable, Equatable, Hashable {
 
 struct OfficeResponse: Codable, Equatable {
     var chiefOfStaff: String
-    /// The owner's own AI colleague, shown once above the units; not yet in packages/shared.
-    var coo: EmployeeCard?
     var units: [OfficeUnit]
     var coverage: Coverage
     var needsYou: Int
@@ -1039,6 +1053,11 @@ struct PostMessageRequest: Codable, Equatable {
     var mentions: [String]?
 }
 
+/// `POST /api/coo/message` body: `{ text }`, no dedicated TS request type (the route reads it raw).
+struct CooMessageRequest: Codable, Equatable {
+    var text: String
+}
+
 struct ResolveThreadRequest: Codable, Equatable {
     var summary: String
 }
@@ -1056,6 +1075,10 @@ struct CreateWorkRequest: Codable, Equatable {
     var employeeId: String?
     var requirementIds: [String]?
     var platformIds: [String]?
+    /// An assignment under a feature: it counts in the feature's status and the pivot.
+    var featureId: String?
+    /// false: create the assignment without starting its session.
+    var start: Bool?
 }
 
 struct TransitionRequest: Codable, Equatable {
@@ -1152,4 +1175,64 @@ enum JSONValue: Codable, Equatable, Hashable {
         if case .string(let s) = self { return s }
         return nil
     }
+}
+
+// MARK: - workplace.ts · the COO bridge
+
+enum CooSpeaker: String, Codable, CaseIterable {
+    case owner, coo
+}
+
+struct CooMessage: Codable, Equatable, Hashable, Identifiable {
+    var id: String
+    var at: String
+    var from: CooSpeaker
+    var text: String
+    /// Chat-style: the reply itself is the summary (short); `details` is optional extra context.
+    var summary: String?
+    var details: String?
+    /// Set on a `coo` message that answers a specific owner message.
+    var inReplyTo: String?
+}
+
+enum CooItemKind: String, Codable, CaseIterable {
+    case escalation, mention
+}
+enum CooItemState: String, Codable, CaseIterable {
+    case open, answered, forwarded
+}
+
+struct CooItemAnswer: Codable, Equatable, Hashable {
+    var optionId: String
+    var note: String?
+    var at: String
+}
+
+struct CooItemForward: Codable, Equatable, Hashable {
+    var inboxId: String
+    var recommendation: String?
+    var at: String
+    var auto: Bool
+}
+
+/// Something Asha would raise above her own authority, or an `@coo` Room mention, delivered to the
+/// COO bridge instead of straight to the owner's Inbox. Lead-only to answer/forward (loopback);
+/// the phone only ever reads the transcript and presence.
+struct CooItem: Codable, Equatable, Hashable, Identifiable {
+    var id: String
+    var at: String
+    var kind: CooItemKind
+    var title: String
+    var body: String
+    var options: [InboxOption]
+    var raisedBy: String
+    var threadId: String?
+    var state: CooItemState
+    var answer: CooItemAnswer?
+    var forward: CooItemForward?
+}
+
+struct CooPresence: Codable, Equatable, Hashable {
+    var online: Bool
+    var lastHeartbeat: String?
 }

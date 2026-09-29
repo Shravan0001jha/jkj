@@ -11,9 +11,15 @@ struct Glyph {
 }
 
 extension Employee {
-    /// `presence` is ahead of the contract and only the COO sets it today; anyone else reads nil
-    /// (unknown), never a false "offline".
-    var isOnline: Bool? { presence.map { $0 == "online" } }
+    /// nil unless `state` is actually `.online`/`.offline` (only the COO's is today) — never a
+    /// false "offline" for an ordinary employee's idle/working/blocked/paused state.
+    var isOnline: Bool? {
+        switch state {
+        case .online: return true
+        case .offline: return false
+        default: return nil
+        }
+    }
 }
 
 /// A small filled circle with the person's initials — the group chat's stand-in for a photo.
@@ -63,6 +69,8 @@ extension EmployeeState {
         case .blocked: return Glyph(symbol: "octagon.fill", tint: .red, label: "Blocked")
         case .needsOwner: return Glyph(symbol: "exclamationmark.circle.fill", tint: .orange, label: "Needs you")
         case .paused: return Glyph(symbol: "pause.circle.fill", tint: .yellow, label: "Paused")
+        case .online: return Glyph(symbol: "circle.fill", tint: .green, label: "Online")
+        case .offline: return Glyph(symbol: "circle", tint: .secondary, label: "Offline")
         }
     }
 }

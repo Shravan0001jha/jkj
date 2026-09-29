@@ -37,11 +37,6 @@ final class OfficeStore {
         guard var d = data else { return }
         switch event {
         case .officeUpdated(let card):
-            if card.employee.id == d.coo?.employee.id {
-                d.coo = card
-                data = d
-                return
-            }
             var placed = false
             for u in d.units.indices {
                 if let i = d.units[u].employees.firstIndex(where: { $0.employee.id == card.employee.id }) {
@@ -70,10 +65,12 @@ final class OfficeStore {
         data?.needsYou = n
     }
 
-    /// Every card, including the COO's — she isn't in any unit's list but still needs a name,
-    /// charters and a look-up like anyone else.
-    var cards: [EmployeeCard] { (data.map { [$0.coo].compactMap { $0 } } ?? []) + (data?.units.flatMap(\.employees) ?? []) }
+    /// Every card, the COO's included — she lives in her unit's list like anyone else, flagged by
+    /// `employee.virtual`.
+    var cards: [EmployeeCard] { data?.units.flatMap(\.employees) ?? [] }
     func card(_ employeeId: String) -> EmployeeCard? { cards.first { $0.employee.id == employeeId } }
+    /// The COO's card, wherever her unit places her.
+    var coo: EmployeeCard? { cards.first { $0.employee.virtual == true } }
 }
 
 // MARK: - Inbox
@@ -226,52 +223,9 @@ final class TalkStore {
     var isRunning: Bool { session?.status == .running }
     var pendingApproval: PendingApproval? { session?.status == .waiting ? session?.approval : nil }
 
-    /// `log` grouped for the chat: tool activity (read/edit/bash/search/task/tool) collapses into
-    /// one row per consecutive run, so the transcript reads like a conversation, not a build log.
-    var chatItems: [ChatItem] { Self.chatItems(from: log) }
-
-    static func chatItems(from log: [LogEntry]) -> [ChatItem] {
-        let stepKinds: Set<LogKind> = [.read, .edit, .bash, .search, .task, .tool]
-        var items: [ChatItem] = []
-        var run: [LogEntry] = []
-        func flushRun() {
-            guard !run.isEmpty else { return }
-            items.append(.steps(run))
-            run = []
-        }
-        for entry in log {
-            if stepKinds.contains(entry.kind) {
-                run.append(entry)
-            } else {
-                flushRun()
-                items.append(.message(entry))
-            }
-        }
-        flushRun()
-        return items
-    }
-}
-
-/// One row of the Talk chat: a single log entry, or a run of tool/file/bash/search/task steps
-/// collapsed behind "worked · N steps".
-enum ChatItem: Identifiable, Equatable {
-    case message(LogEntry)
-    case steps([LogEntry])
-
-    var id: String {
-        switch self {
-        case .message(let e): return e.id
-        case .steps(let es): return "steps-" + (es.first?.id ?? "")
-        }
-    }
-
-    /// The timestamp a date/time separator compares against: the last entry's, for a run of steps.
-    var at: String {
-        switch self {
-        case .message(let e): return e.at
-        case .steps(let es): return es.last?.at ?? ""
-        }
-    }
+    /// The chat view of `log` (`ChatView.collapse`, a Swift port of `@jkj/shared/chat-view.ts`'s
+    /// `toChatView`): still correct as raw entries stream in over the socket while a session runs.
+    var chatLog: [LogEntry] { ChatView.collapse(log) }
 }
 
 // MARK: - Features
@@ -394,4 +348,69 @@ final class AlertsStore {
     func dismissBanner() { banner = nil }
     func markAllRead() { for i in alerts.indices { alerts[i].read = true } }
     func clear() { alerts = []; banner = nil }
+}
+
+// MARK: - The COO bridge
+
+/// The owner's Talk with "Claude — COO": not a session (no tool calls, no thinking, no mirroring)
+/// — only what the owner sent and what the lead replied through `POST /api/coo/reply`.
+/// `log`/`message`/`presence` reach the phone over the normal session, like anything else;
+/// `coo.message` arrives live to every authenticated socket. `coo.presence` is not in the
+/// contract yet, so presence is polled (`pollPresence`) rather than pushed.
+@MainActor @Observable
+final class CooStore {
+    private(set) var log: [CooMessage] = []
+    private(set) var presence: CooPresence?
+    private(set) var error: String?
+    private(set) var loading = false
+    private(set) var sending = false
+    private(set) var loaded = false
+    private var pollTask: Task<Void, Never>?
+
+    func load(_ rest: RestClient) async {
+        loading = true
+        defer { loading = false }
+        do {
+            log = try await rest.cooLog()
+            error = nil
+            loaded = true
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func send(_ rest: RestClient, text: String) async throws {
+        sending = true
+        defer { sending = false }
+        let m = try await rest.cooMessage(text)
+        append(m)
+    }
+
+    func handle(_ event: ServerEvent) {
+        switch event {
+        case .cooMessage(let m): append(m)
+        case .cooPresence(let p): presence = p
+        default: break
+        }
+    }
+
+    /// Live on an online↔offline flip (`coo.presence`); polled too, so a fresh screen isn't stuck
+    /// on a stale flip that happened before it opened.
+    func pollPresence(_ rest: RestClient, every seconds: TimeInterval = 30) {
+        pollTask?.cancel()
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                if let p = try? await rest.cooPresence() { self?.presence = p }
+                try? await Task.sleep(for: .seconds(seconds))
+            }
+        }
+    }
+
+    func stopPolling() { pollTask?.cancel(); pollTask = nil }
+
+    private func append(_ m: CooMessage) {
+        guard !log.contains(where: { $0.id == m.id }) else { return }
+        log.append(m)
+        log.sort { $0.at < $1.at }
+    }
 }

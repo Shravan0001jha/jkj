@@ -13,14 +13,16 @@ final class RoomStore {
     private(set) var posting: Set<String> = []
     /// Threads with messages the owner has not opened since they arrived.
     private(set) var unread: Set<String> = []
-    /// Thread id → employee id composing a reply, from `room.typing`; cleared once any message
-    /// lands in that thread (the reply, or anything else that makes it stale).
+    /// Thread id → employee id, while `room.replying` says `started` for it; cleared on `done`,
+    /// `skipped`, or any message landing in the thread (belt and suspenders).
     private(set) var replying: [String: String] = [:]
 
-    /// The `general` channel, always first regardless of activity (Room D2).
-    var general: RoomThread? { threads.first { $0.id == "general" } }
-    var open: [RoomThread] { threads.filter { $0.state == .open && $0.id != "general" } }
-    var resolved: [RoomThread] { threads.filter { $0.state == .resolved && $0.id != "general" } }
+    /// The default channel every employee and the owner share (`room.ensureGeneral`), always
+    /// first regardless of activity (Room D2).
+    static let generalId = "th_general"
+    var general: RoomThread? { threads.first { $0.id == Self.generalId } }
+    var open: [RoomThread] { threads.filter { $0.state == .open && $0.id != Self.generalId } }
+    var resolved: [RoomThread] { threads.filter { $0.state == .resolved && $0.id != Self.generalId } }
 
     func load(_ rest: RestClient) async {
         loading = true
@@ -73,8 +75,11 @@ final class RoomStore {
             upsert(t)
             replying.removeValue(forKey: m.threadId)
             if append(m), !m.owner { unread.insert(m.threadId) }
-        case .roomReplying(let threadId, let employeeId):
-            replying[threadId] = employeeId
+        case .roomReplying(let threadId, let employeeId, let state):
+            switch state {
+            case .started: replying[threadId] = employeeId
+            case .done, .skipped: replying.removeValue(forKey: threadId)
+            }
         default:
             break
         }

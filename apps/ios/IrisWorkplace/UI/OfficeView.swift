@@ -11,7 +11,7 @@ struct OfficeView: View {
                 }
                 if let d = model.office.data {
                     Section { OfficeHeader(data: d) }
-                    if let coo = d.coo {
+                    if let coo = model.office.coo {
                         Section {
                             Button { model.router.talk(to: coo.employee.id) } label: {
                                 CooCardView(card: coo)
@@ -22,7 +22,7 @@ struct OfficeView: View {
                     }
                     ForEach(d.units) { u in
                         Section {
-                            ForEach(u.employees) { card in
+                            ForEach(u.employees.filter { $0.employee.virtual != true }) { card in
                                 Button { model.router.talk(to: card.employee.id) } label: {
                                     EmployeeCardView(card: card)
                                 }
@@ -237,12 +237,9 @@ struct CooCardView: View {
                 PresenceDot(online: online).offset(x: 2, y: 2)
             }
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(card.employee.name).font(.headline)
-                    Pill(text: "COO", tint: .indigo)
-                }
+                Text(card.employee.name).font(.headline)
                 if online == false {
-                    Text("Messages will wait; Asha handles routine").font(.caption).foregroundStyle(.secondary)
+                    Text(card.employee.stateReason ?? "Messages wait; Asha handles routine").font(.caption).foregroundStyle(.secondary)
                 } else if let r = card.lastReport, !r.isEmpty {
                     Text(r).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 } else {

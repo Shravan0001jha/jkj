@@ -1,26 +1,25 @@
 {
   "thread": {
-    "id": "general",
-    "title": "General",
-    "charterIds": [],
-    "createdBy": "workplace",
-    "createdAt": "2026-09-24T14:20:00.000Z",
-    "state": "open",
-    "lastAt": "2026-09-27T08:57:00.000Z",
-    "messageCount": 6,
-    "participants": [
-      "owner",
-      "coo",
-      "asha",
-      "dev",
-      "mira",
-      "kabir",
-      "rohan",
-      "tara",
-      "nikhil"
+    "id": "rt-socket",
+    "title": "Mac socket contract for errands",
+    "charterIds": [
+      "experts",
+      "server"
     ],
-    "escalations": [],
-    "headline": "Where the whole team and you talk."
+    "createdBy": "kabir",
+    "createdAt": "2026-09-27T07:00:00.000Z",
+    "state": "open",
+    "lastAt": "2026-09-27T08:52:00.000Z",
+    "messageCount": 4,
+    "participants": [
+      "kabir",
+      "mira",
+      "asha"
+    ],
+    "escalations": [
+      "ib-5"
+    ],
+    "headline": "Blocked on the socket shape; escalated to you as ib-5."
   },
   "messages": [
     {

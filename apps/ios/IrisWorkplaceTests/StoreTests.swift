@@ -54,19 +54,20 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(s.data?.spend.companyInr, 999)
     }
 
-    func testOfficeCardsIncludeTheCooEvenThoughSheIsInNoUnit() async throws {
+    func testOfficeCardsIncludeTheCooFlaggedVirtualInHerRealUnit() async throws {
         let s = OfficeStore()
         await s.load(rest)
-        XCTAssertEqual(s.data?.coo?.employee.id, "coo")
-        XCTAssertFalse(s.data!.units.flatMap(\.employees).contains { $0.employee.id == "coo" }, "not double-counted in a unit")
-        XCTAssertEqual(s.card("coo")?.employee.name, "Claude")
+        XCTAssertEqual(s.coo?.employee.id, "coo")
+        XCTAssertEqual(s.coo?.employee.virtual, true)
+        XCTAssertTrue(s.data!.units.flatMap(\.employees).contains { $0.employee.id == "coo" }, "she lives in her real unit, like anyone else")
+        XCTAssertEqual(s.card("coo")?.employee.name, "Claude — COO")
         XCTAssertEqual(s.card("coo")?.employee.isOnline, true)
 
-        var offline = s.data!.coo!
-        offline.employee.presence = "offline"
+        var offline = s.coo!
+        offline.employee.state = .offline
         s.handle(.officeUpdated(offline))
-        XCTAssertEqual(s.data?.coo?.employee.isOnline, false)
-        XCTAssertNil(s.card("asha")?.employee.isOnline, "presence is ahead of the contract; nil unless the server sends it")
+        XCTAssertEqual(s.coo?.employee.isOnline, false)
+        XCTAssertNil(s.card("asha")?.employee.isOnline, "isOnline is nil unless state is actually online/offline")
     }
 
     func testOfficeSnapshotReplacesTheWholeOffice() async throws {
@@ -188,33 +189,30 @@ final class StoreTests: XCTestCase {
         XCTAssertTrue(s.log.isEmpty)
     }
 
-    func testChatItemsCollapseConsecutiveToolStepsIntoOneRun() async {
+    func testChatLogCollapsesRunsOfTwoOrMoreButLeavesALoneStepAsItself() async {
         // The real Mira fixture: user, assistant, read, edit, search, assistant, bash — three
-        // tool kinds back to back, then one lone one; no tool noise between the two replies.
+        // tool kinds back to back (collapses), then one lone one (does not: `toChatView`'s rule).
         let s = TalkStore()
         await s.select(rest, employeeId: "mira")
         XCTAssertEqual(s.log.count, 7)
-        let items = s.chatItems
-        XCTAssertEqual(items.count, 5, "user, assistant, [read,edit,search], assistant, [bash]")
-        guard case .message(let m0) = items[0] else { return XCTFail() }
-        XCTAssertEqual(m0.kind, .user)
-        guard case .message(let m1) = items[1] else { return XCTFail() }
-        XCTAssertEqual(m1.kind, .assistant)
-        guard case .steps(let run1) = items[2] else { return XCTFail() }
-        XCTAssertEqual(run1.map(\.kind), [.read, .edit, .search])
-        guard case .message(let m2) = items[3] else { return XCTFail() }
-        XCTAssertEqual(m2.kind, .assistant)
-        guard case .steps(let run2) = items[4] else { return XCTFail() }
-        XCTAssertEqual(run2.map(\.kind), [.bash])
+        let items = s.chatLog
+        XCTAssertEqual(items.count, 5, "user, assistant, activity(read+edit+search), assistant, bash")
+        XCTAssertEqual(items[0].kind, .user)
+        XCTAssertEqual(items[1].kind, .assistant)
+        XCTAssertEqual(items[2].kind, .activity)
+        XCTAssertEqual(items[2].activity?.entries.map(\.kind), [.read, .edit, .search])
+        XCTAssertEqual(items[2].activity?.count, 3)
+        XCTAssertTrue(items[2].text.hasPrefix("worked · 3 steps ·"))
+        XCTAssertEqual(items[3].kind, .assistant)
+        XCTAssertEqual(items[4].kind, .bash, "a lone step is left as itself, not wrapped")
     }
 
-    func testChatItemsWithNoToolStepsIsOneItemPerEntry() {
+    func testChatViewCollapseWithNoToolStepsIsUnchanged() {
         let entries = [
-            LogEntry(id: "1", agentId: "a", at: "t", kind: .user, label: "", text: "hi"),
-            LogEntry(id: "2", agentId: "a", at: "t", kind: .assistant, label: "", text: "hello"),
+            LogEntry(id: "1", agentId: "a", at: "2026-09-27T09:00:00.000Z", kind: .user, label: "", text: "hi"),
+            LogEntry(id: "2", agentId: "a", at: "2026-09-27T09:00:01.000Z", kind: .assistant, label: "", text: "hello"),
         ]
-        let items = TalkStore.chatItems(from: entries)
-        XCTAssertEqual(items.map(\.id), ["1", "2"])
+        XCTAssertEqual(ChatView.collapse(entries), entries)
     }
 
     func testChatSeparatorOmittedWithinFiveMinutesShownAcrossAGap() {
@@ -376,21 +374,9 @@ final class RoomStoreTests: XCTestCase {
     func testGeneralChannelIsPinnedAboveTheTopicThreads() async {
         let s = RoomStore()
         await s.load(rest)
-        XCTAssertEqual(s.general?.id, "general")
-        XCTAssertFalse(s.open.contains { $0.id == "general" }, "general is not one of the topic threads")
-        XCTAssertFalse(s.resolved.contains { $0.id == "general" })
-    }
-
-    func testRoomTypingShowsReplyingUntilAnyMessageLandsInTheThread() async {
-        let s = RoomStore()
-        await s.load(rest)
-        await s.loadThread(rest, id: "rt-socket")
-        s.handle(.roomReplying(threadId: "rt-socket", employeeId: "mira"))
-        XCTAssertEqual(s.replying["rt-socket"], "mira")
-        let thread = s.thread("rt-socket")!
-        let m = RoomMessage(id: "m-new", threadId: "rt-socket", at: "2026-09-27T12:00:00.000Z", by: "mira", owner: false, text: "Published.", mentions: [])
-        s.handle(.roomMessage(m, thread: thread))
-        XCTAssertNil(s.replying["rt-socket"], "the reply landing clears the indicator")
+        XCTAssertEqual(s.general?.id, "th_general")
+        XCTAssertFalse(s.open.contains { $0.id == "th_general" }, "general is not one of the topic threads")
+        XCTAssertFalse(s.resolved.contains { $0.id == "th_general" })
     }
 }
 

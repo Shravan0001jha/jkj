@@ -80,8 +80,29 @@ struct ConversationView: View {
 
     private var talk: TalkStore { model.talk }
     private var name: String { talk.detail?.employee.name ?? model.employeeName(talk.employeeId) }
+    /// The COO is never spawned (no session, no tool calls): its own chat, not this one.
+    private var isCoo: Bool { talk.detail?.employee.virtual == true || talk.employeeId == "coo" }
 
     var body: some View {
+        Group {
+            if isCoo { CooTalkView() } else { employeeConversation }
+        }
+        .navigationTitle(name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { toolbarContent }
+        .sheet(isPresented: $showProfile) { EmployeeProfileView() }
+        .sheet(isPresented: $showAssign) { AssignView(employeeId: talk.employeeId) }
+        .confirmationDialog("End \(name)'s session?", isPresented: $confirmEnd, titleVisibility: .visible) {
+            Button("End and write handoff", role: .destructive) {
+                Task { do { if let r = model.rest { try await model.talk.endSession(r) } } catch { self.error = error.localizedDescription } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The employee writes status and handoff, then the session closes. The next message starts a fresh one from the files.")
+        }
+    }
+
+    private var employeeConversation: some View {
         VStack(spacing: 0) {
             sessionStrip
             ScrollViewReader { proxy in
@@ -101,13 +122,13 @@ struct ConversationView: View {
                             }
                             .padding(24)
                         }
-                        let items = talk.chatItems
+                        let items = talk.chatLog
                         ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
                             let previousAt = i > 0 ? items[i - 1].at : nil
                             if let label = Format.chatSeparator(since: previousAt, at: item.at) {
                                 DateSeparator(text: label)
                             }
-                            ChatItemRow(item: item).id(item.id)
+                            LogRow(entry: item).id(item.id)
                         }
                         if talk.isRunning {
                             WorkingBubble(name: name).id("working")
@@ -130,14 +151,19 @@ struct ConversationView: View {
             }
             composer
         }
-        .navigationTitle(name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { model.talk.deselect() } label: { Label("Someone else", systemImage: "person.2") }
-                    .accessibilityLabel("Talk to someone else")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
+    }
+
+    @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button { model.talk.deselect() } label: { Label("Someone else", systemImage: "person.2") }
+                .accessibilityLabel("Talk to someone else")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            if isCoo {
+                // The COO is never assigned, has no permission mode and no session to end.
+                Button { Task { if let r = model.rest { await model.coo.load(r) } } } label: { Image(systemName: "arrow.clockwise") }
+                    .accessibilityLabel("Refresh")
+            } else {
                 Menu {
                     Button { showProfile = true } label: { Label("Charter and status", systemImage: "doc.text") }
                     Button { showAssign = true } label: { Label("Assign work to \(name)", systemImage: "tray.and.arrow.down") }
@@ -157,16 +183,6 @@ struct ConversationView: View {
                 } label: { Image(systemName: "ellipsis.circle") }
                 .accessibilityLabel("More")
             }
-        }
-        .sheet(isPresented: $showProfile) { EmployeeProfileView() }
-        .sheet(isPresented: $showAssign) { AssignView(employeeId: talk.employeeId) }
-        .confirmationDialog("End \(name)'s session?", isPresented: $confirmEnd, titleVisibility: .visible) {
-            Button("End and write handoff", role: .destructive) {
-                Task { do { if let r = model.rest { try await model.talk.endSession(r) } } catch { self.error = error.localizedDescription } }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The employee writes status and handoff, then the session closes. The next message starts a fresh one from the files.")
         }
     }
 
@@ -229,16 +245,128 @@ extension TalkStore {
     func deselect() { clear() }
 }
 
-/// One row of the chat, by `ChatItem`: a message bubble, or a collapsed run of tool steps.
-struct ChatItemRow: View {
-    let item: ChatItem
+/// The owner's Talk with "Claude — COO": not a session — no tool calls, no thinking, no mirroring.
+/// Only what the owner sent and what the lead replied through `POST /api/coo/reply` ever appear
+/// here. `coo.presence` is not in the contract yet, so presence is polled while this is on screen.
+struct CooTalkView: View {
+    @Environment(AppModel.self) private var model
+    @State private var draft = ""
+    @State private var error: String?
+    @FocusState private var composing: Bool
+
+    private var coo: CooStore { model.coo }
+    private var online: Bool { coo.presence?.online ?? (model.talk.detail?.employee.state == .online) }
 
     var body: some View {
-        switch item {
-        case .message(let entry): LogRow(entry: entry)
-        case .steps(let entries): StepsRow(entries: entries)
+        VStack(spacing: 0) {
+            if !online {
+                Text("The COO is offline: messages wait; Asha handles routine work in the meantime.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.bar)
+            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        if coo.loading && coo.log.isEmpty {
+                            HStack { Spacer(); ProgressView(); Spacer() }.padding()
+                        } else if coo.log.isEmpty {
+                            VStack(spacing: 8) {
+                                Image(systemName: "bubble.left.and.text.bubble.right").font(.largeTitle).foregroundStyle(.secondary)
+                                Text("Nothing yet").font(.headline)
+                                Text("Say what you need. The COO answers within its own authority, or brings you a recommendation.")
+                                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            }
+                            .padding(24)
+                        }
+                        ForEach(Array(coo.log.enumerated()), id: \.element.id) { i, m in
+                            let previousAt = i > 0 ? coo.log[i - 1].at : nil
+                            if let label = Format.chatSeparator(since: previousAt, at: m.at) {
+                                DateSeparator(text: label)
+                            }
+                            CooMessageRow(message: m).id(m.id)
+                        }
+                        if let e = coo.error ?? error {
+                            Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline).padding(.horizontal)
+                        }
+                        Color.clear.frame(height: 1).id("bottom")
+                    }
+                    .padding(.vertical, 8)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: coo.log.count) { _, _ in withAnimation { proxy.scrollTo("bottom") } }
+                .onAppear { proxy.scrollTo("bottom") }
+            }
+            composer
+        }
+        .task {
+            guard let rest = model.rest else { return }
+            await coo.load(rest)
+            coo.pollPresence(rest)
+        }
+        .onDisappear { coo.stopPolling() }
+    }
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField("Message the COO", text: $draft, axis: .vertical)
+                .lineLimit(1...5)
+                .textFieldStyle(.roundedBorder)
+                .focused($composing)
+            Button { Task { await sendDraft() } } label: {
+                if coo.sending { ProgressView().frame(width: 28, height: 28) } else { Image(systemName: "arrow.up.circle.fill").font(.title) }
+            }
+            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || coo.sending)
+            .accessibilityLabel("Send")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private func sendDraft() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let rest = model.rest else { return }
+        error = nil
+        do {
+            try await coo.send(rest, text: text)
+            draft = ""
+        } catch {
+            self.error = error.localizedDescription
         }
     }
+}
+
+/// One line from the owner or the COO; bubbled like Talk's. `summary`/`details` behind expand.
+struct CooMessageRow: View {
+    let message: CooMessage
+    @State private var expanded = false
+
+    private var owner: Bool { message.from == .owner }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            if owner { Spacer(minLength: 40) }
+            VStack(alignment: owner ? .trailing : .leading, spacing: 3) {
+                Text(Format.time(message.at)).font(.caption2).foregroundStyle(.tertiary)
+                let c = CompactText(text: message.summary ?? message.text, details: message.details)
+                Text(expanded ? (c.details ?? c.line) : c.line)
+                    .font(.subheadline)
+                    .multilineTextAlignment(owner ? .trailing : .leading)
+                    .foregroundStyle(owner ? .white : .primary)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(owner ? Color.accentColor.opacity(0.9) : Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+            }
+            if !owner { Spacer(minLength: 40) }
+        }
+        .frame(maxWidth: .infinity, alignment: owner ? .trailing : .leading)
+        .padding(.horizontal, 12)
+        .contentShape(Rectangle())
+        .onTapGesture { if c(message).hasDetails { withAnimation(.snappy) { expanded.toggle() } } }
+    }
+
+    private func c(_ message: CooMessage) -> CompactText { CompactText(text: message.summary ?? message.text, details: message.details) }
 }
 
 /// A quiet date/time break in the chat, like iMessage's — only when the gap is worth marking.
@@ -250,37 +378,41 @@ struct DateSeparator: View {
     }
 }
 
-/// A run of tool/read/edit/bash/search/task steps, collapsed to one row: "worked · N steps".
-/// No tool noise in the chat unless the owner asks for it.
-struct StepsRow: View {
-    let entries: [LogEntry]
+/// A collapsed run of tool activity: `entry.text` is already "worked · N steps · Xs"
+/// (`ChatView.collapse`, mirroring `toChatView`); expand shows `entry.activity.entries`.
+struct ActivityRow: View {
+    let entry: LogEntry
     @State private var expanded = false
+
+    private var steps: [LogEntry] { entry.activity?.entries ?? [] }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button { withAnimation(.snappy) { expanded.toggle() } } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "wrench.and.screwdriver").font(.caption).foregroundStyle(.secondary)
-                    Text("worked · \(entries.count) step\(entries.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                    Text(entry.text).font(.caption).foregroundStyle(.secondary)
                     Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.tertiary)
                 }
             }
             .buttonStyle(.plain)
             if expanded {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(entries) { e in StepRow(entry: e) }
+                    ForEach(steps) { e in StepRow(entry: e) }
                 }
                 .padding(.leading, 4)
             }
         }
         .padding(.horizontal, 16)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Worked, \(entries.count) steps")
+        .accessibilityLabel(entry.text)
         .accessibilityHint(expanded ? "Collapses the steps" : "Expands the steps")
     }
 }
 
-private struct StepRow: View {
+/// A single, uncollapsed tool/read/edit/bash/search/task entry (`toChatView` leaves a lone one as
+/// itself rather than wrapping it — "worked · 1 step" reads worse than just showing the read).
+struct StepRow: View {
     let entry: LogEntry
 
     var body: some View {
@@ -360,9 +492,9 @@ struct LogRow: View {
             }
             .padding(.horizontal, 12)
         case .read, .edit, .bash, .search, .task, .tool:
-            // Reached only if a lone step arrives with no run around it (e.g. the first entry);
-            // `chatItems` normally folds these into a `StepsRow`.
-            StepsRow(entries: [entry])
+            StepRow(entry: entry).padding(.horizontal, 16)
+        case .activity:
+            ActivityRow(entry: entry)
         }
     }
 }

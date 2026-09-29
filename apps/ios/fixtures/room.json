@@ -1,7 +1,7 @@
 {
   "threads": [
     {
-      "id": "general",
+      "id": "th_general",
       "title": "General",
       "charterIds": [],
       "createdBy": "workplace",
@@ -21,7 +21,7 @@
         "nikhil"
       ],
       "escalations": [],
-      "headline": "Where the whole team and you talk."
+      "headline": "Where everyone talks."
     },
     {
       "id": "rt-socket",

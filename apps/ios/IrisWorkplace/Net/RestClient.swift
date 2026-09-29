@@ -96,6 +96,12 @@ final class RestClient {
         try await post(API.roomResolve(id), ResolveThreadRequest(summary: summary))
     }
 
+    // The COO bridge: only the phone-safe subset (reply/items/answer/forward are the lead's own,
+    // loopback-only actions on the Mac and have no client here).
+    func cooLog() async throws -> [CooMessage] { try await get(API.cooLog) }
+    func cooMessage(_ text: String) async throws -> CooMessage { try await post(API.cooMessage, CooMessageRequest(text: text)) }
+    func cooPresence() async throws -> CooPresence { try await get(API.cooPresence) }
+
     // Relay-only routes (never proxied to the Mac).
     func relayHealth() async throws -> RelayHealth { try await get(API.relayHealth) }
     func registerPush(token: String, env: PushEnvironment, device: String?) async throws -> PushRegisterResponse {

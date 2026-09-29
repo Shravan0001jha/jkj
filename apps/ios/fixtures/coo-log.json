@@ -1,0 +1,16 @@
+[
+  {
+    "id": "com-1",
+    "at": "2026-09-27T07:30:00.000Z",
+    "from": "owner",
+    "text": "Morning — anything I should look at first?"
+  },
+  {
+    "id": "com-2",
+    "at": "2026-09-27T07:32:00.000Z",
+    "from": "coo",
+    "text": "Just the socket contract (ib-5); everything else is on track.",
+    "summary": "Just the socket contract (ib-5); everything else is on track.",
+    "inReplyTo": "com-1"
+  }
+]

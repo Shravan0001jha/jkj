@@ -38,9 +38,12 @@ const fresh = () => ({
   spend: structuredClone(D.spend),
   threads: structuredClone(D.roomThreads),
   messages: structuredClone(D.roomMessages),
+  cooLog: structuredClone(D.cooLog),
+  cooOnline: true,
   usedCodes: new Set(),
 });
 let msgSeq = 100;
+let cooSeq = 100;
 let state = fresh();
 let logSeq = 100;
 
@@ -77,7 +80,6 @@ const html = (res, body) => { res.writeHead(200, { 'content-type': 'text/html; c
 
 const office = () => ({
   chiefOfStaff: 'asha',
-  coo: state.cards.find(c => c.employee.id === 'coo'),
   units: D.units.filter(u => u.kind === 'unit').map(unit => ({ unit, employees: state.cards.filter(c => c.employee.unitId === unit.id) })),
   coverage: D.coverage,
   needsYou: state.inbox.filter(i => i.state === 'open').length,
@@ -127,9 +129,34 @@ const server = createServer(async (req, res) => {
     const body = await readJson(req);
     const c = state.cards.find(c => c.employee.id === (body?.id ?? 'coo'));
     if (!c) return json(res, 404, { error: 'no such employee' });
-    c.employee.presence = body?.presence ?? 'online';
+    c.employee.state = body?.online === false ? 'offline' : 'online';
+    if (c.employee.state === 'offline') c.employee.stateReason = 'messages wait; Asha handles routine';
+    else delete c.employee.stateReason;
+    state.cooOnline = c.employee.state === 'online';
     broadcast({ type: 'office.updated', card: c });
-    return json(res, 200, { ok: true, presence: c.employee.presence });
+    return json(res, 200, { ok: true, state: c.employee.state });
+  }
+  // The COO bridge: log/message/presence reach the phone over the normal session, like anything
+  // else (reply/items/answer/forward are the lead's own actions and stay loopback-only).
+  if (m === 'GET' && p === '/api/coo/log') return json(res, 200, state.cooLog);
+  if (m === 'POST' && p === '/api/coo/message') {
+    const body = await readJson(req);
+    const text = (body?.text ?? '').trim();
+    if (!text) return json(res, 400, { error: 'Nothing to send.' });
+    const message = { id: `com-${cooSeq++}`, at: new Date().toISOString(), from: 'owner', text };
+    state.cooLog.push(message);
+    broadcast({ type: 'coo.message', message });
+    if (state.cooOnline !== false) setTimeout(() => {
+      const reply = { id: `com-${cooSeq++}`, at: new Date().toISOString(), from: 'coo', text: 'Noted — I will look and get back to you.', summary: 'Noted — I will look and get back to you.', inReplyTo: message.id };
+      state.cooLog.push(reply);
+      broadcast({ type: 'coo.message', message: reply });
+    }, 1200);
+    return json(res, 201, message);
+  }
+  if (m === 'GET' && p === '/api/coo/presence') {
+    const c = state.cards.find(c => c.employee.id === 'coo');
+    const online = c ? c.employee.state === 'online' : state.cooOnline !== false;
+    return json(res, 200, { online, lastHeartbeat: online ? new Date().toISOString() : null });
   }
   if (m === 'GET' && p === '/api/office') return json(res, 200, office());
   if (m === 'GET' && p === '/api/org') return json(res, 200, D.org());
@@ -295,12 +322,13 @@ const server = createServer(async (req, res) => {
     (state.messages[id] ??= []).push(message);
     thread.lastAt = now; thread.messageCount += 1; if (!thread.participants.includes('owner')) thread.participants.push('owner');
     broadcast({ type: 'room.message', message, thread }); broadcast({ type: 'room.thread', thread });
-    // A mentioned employee answers in a moment; "replying…" shows from now until that reply lands.
+    // A mentioned employee answers in a moment; "replying…" shows from `started` until `done`/the message.
     const who = (body.mentions ?? [])[0] ?? thread.participants.find(x => x !== 'owner' && x !== 'workplace');
-    if (who) broadcast({ type: 'room.typing', threadId: id, employeeId: who });
+    if (who) broadcast({ type: 'room.replying', threadId: id, employeeId: who, state: 'started' });
     if (who) setTimeout(() => {
       const reply = { id: `m-${msgSeq++}`, threadId: id, at: new Date().toISOString(), by: who, owner: false, text: `Noted. I will answer in the thread with evidence.\n\nDetails: reading the latest messages and my charter first; back within the hour.`, mentions: ['owner'] };
       state.messages[id].push(reply); thread.lastAt = reply.at; thread.messageCount += 1; thread.headline = `${who} replied; will answer with evidence within the hour.`;
+      broadcast({ type: 'room.replying', threadId: id, employeeId: who, state: 'done' });
       broadcast({ type: 'room.message', message: reply, thread }); broadcast({ type: 'room.thread', thread });
     }, 1500);
     return json(res, 200, message);

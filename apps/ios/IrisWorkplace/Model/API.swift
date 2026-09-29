@@ -15,7 +15,10 @@ enum API {
     static func employeeTalk(_ id: String) -> String { "/api/employees/\(enc(id))/talk" }
     static func employeeEndSession(_ id: String) -> String { "/api/employees/\(enc(id))/end-session" }
     static func employeeContext(_ id: String) -> String { "/api/employees/\(enc(id))/context" }
-    static func agentLog(_ id: String) -> String { "/api/agents/\(enc(id))/log" }
+    static func agentLog(_ id: String, view: String? = nil) -> String {
+        let base = "/api/agents/\(enc(id))/log"
+        return view.map { "\(base)?view=\($0)" } ?? base
+    }
     static func agentMessage(_ id: String) -> String { "/api/agents/\(enc(id))/message" }
     static func agentInterrupt(_ id: String) -> String { "/api/agents/\(enc(id))/interrupt" }
     static func agentApprove(_ id: String) -> String { "/api/agents/\(enc(id))/approve" }
@@ -58,6 +61,17 @@ enum API {
     static func roomResolve(_ id: String) -> String { "/api/room/\(enc(id))/resolve" }
     static let pair = "/api/pair"
     static let pairExchange = "/api/pair/exchange"
+
+    // The COO bridge: log/message/presence reach the phone over the session, like anything else;
+    // reply/items/answer/forward are the lead's own actions and stay loopback-only.
+    static let cooLog = "/api/coo/log"
+    static let cooMessage = "/api/coo/message"
+    static let cooReply = "/api/coo/reply"
+    static let cooItems = "/api/coo/items"
+    static let cooAnswer = "/api/coo/answer"
+    static let cooForward = "/api/coo/forward"
+    static let cooPresence = "/api/coo/presence"
+
     static let socket = "/ws"
 
     // Relay-only (LLD-workplace-push §2, relay LLD): answered by the relay, never proxied.

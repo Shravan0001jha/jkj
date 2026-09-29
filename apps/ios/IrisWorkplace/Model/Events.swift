@@ -41,22 +41,35 @@ enum ServerEvent: Equatable {
     case alert(AlertEvent)
     case roomThread(RoomThread)
     case roomMessage(RoomMessage, thread: RoomThread)
-    /// A mentioned employee is composing a reply; not yet in packages/shared, reported to the lead.
-    case roomReplying(threadId: String, employeeId: String)
+    /// The COO bridge (loopback-only reply/answer/forward aside): the owner's and the lead's
+    /// messages reach every authenticated socket, phone included.
+    case cooMessage(CooMessage)
+    /// Lead-only (local sockets only; the phone never receives this — see hub.ts).
+    case cooItem(CooItem)
+    /// Only on an online↔offline flip, to every authenticated socket.
+    case cooPresence(CooPresence)
+    /// A mentioned employee's reply turn: `started` (show "…is replying"), `done` (it posted, or
+    /// chose not to), `skipped` (no `started` came first — it decided not to reply).
+    case roomReplying(threadId: String, employeeId: String, state: ReplyingState)
     case unknown(type: String)
 
     static let knownTypes: [String] = [
         "hello", "snapshot", "agent.updated", "agent.removed", "agent.log", "mcp.updated", "activity", "error",
         "office.snapshot", "office.updated", "inbox.updated", "work.updated", "proposal.updated", "release.updated", "release.log",
-        "spend.updated", "signals.updated", "alert", "room.thread", "room.message", "room.typing",
+        "spend.updated", "signals.updated", "alert", "room.thread", "room.message", "coo.message", "coo.item", "coo.presence",
+        "room.replying",
     ]
+}
+
+enum ReplyingState: String, Codable, CaseIterable {
+    case started, done, skipped
 }
 
 extension ServerEvent: Decodable {
     private enum Keys: String, CodingKey {
         case type, version, startedAt, agents, agent, agentId, entry, server, event, message
         case office, card, item, proposal, release, id, line, summary, signals, level, title, body, inboxId
-        case thread, threadId, employeeId
+        case thread, presence, threadId, employeeId, state
     }
 
     init(from decoder: Decoder) throws {
@@ -107,8 +120,16 @@ extension ServerEvent: Decodable {
             self = .roomThread(try c.decode(RoomThread.self, forKey: .thread))
         case "room.message":
             self = .roomMessage(try c.decode(RoomMessage.self, forKey: .message), thread: try c.decode(RoomThread.self, forKey: .thread))
-        case "room.typing":
-            self = .roomReplying(threadId: try c.decode(String.self, forKey: .threadId), employeeId: try c.decode(String.self, forKey: .employeeId))
+        case "coo.message":
+            self = .cooMessage(try c.decode(CooMessage.self, forKey: .message))
+        case "coo.item":
+            self = .cooItem(try c.decode(CooItem.self, forKey: .item))
+        case "coo.presence":
+            self = .cooPresence(try c.decode(CooPresence.self, forKey: .presence))
+        case "room.replying":
+            self = .roomReplying(threadId: try c.decode(String.self, forKey: .threadId),
+                                  employeeId: try c.decode(String.self, forKey: .employeeId),
+                                  state: try c.decode(ReplyingState.self, forKey: .state))
         default:
             self = .unknown(type: type)
         }

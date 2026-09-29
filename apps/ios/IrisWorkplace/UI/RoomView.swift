@@ -327,6 +327,7 @@ struct RoomMessageRow: View {
 }
 
 /// A mentioned employee is composing a reply — shown from `room.typing` until their message lands.
+/// `room.replying` said `started` for this employee, in this thread — no `done`/`skipped`/message yet.
 struct ReplyingBubble: View {
     let name: String
     var body: some View {

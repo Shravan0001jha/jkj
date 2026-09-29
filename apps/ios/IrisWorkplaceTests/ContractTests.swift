@@ -113,9 +113,15 @@ final class ContractTests: XCTestCase {
 
     func testOfficeFixtureHasEveryEmployeeState() throws {
         let office = try Fixtures.decode("office", as: OfficeResponse.self)
-        let states = Set(office.units.flatMap(\.employees).map(\.employee.state))
-        XCTAssertEqual(states, Set(EmployeeState.allCases), "the office fixture must exercise every employee state")
-        XCTAssertEqual(office.units.flatMap(\.employees).count, 7)
+        let cards = office.units.flatMap(\.employees)
+        // online/offline is the COO bridge's presence, not a work state: only a virtual employee
+        // ever has it, and a single snapshot can only show her one way at a time (see
+        // OfficeStoreTests for the online↔offline flip itself).
+        let workStates = Set(EmployeeState.allCases).subtracting([.online, .offline])
+        let states = Set(cards.map(\.employee.state)).subtracting([.online, .offline])
+        XCTAssertEqual(states, workStates, "the office fixture must exercise every work state")
+        XCTAssertTrue(cards.contains { $0.employee.virtual == true && $0.employee.state == .online }, "the COO's card is there too")
+        XCTAssertEqual(cards.count, 8, "seven ordinary employees plus the COO")
     }
 
     func testInboxFixtureHasEveryKindAndState() throws {
