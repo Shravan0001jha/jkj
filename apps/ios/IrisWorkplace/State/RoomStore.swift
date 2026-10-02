@@ -74,7 +74,8 @@ final class RoomStore {
         case .roomMessage(let m, let t):
             upsert(t)
             replying.removeValue(forKey: m.threadId)
-            if append(m), !m.owner { unread.insert(m.threadId) }
+            // The COO posts as herself (by: coo); only the owner's own words are never unread.
+            if append(m), !(m.by == "owner" || (m.owner && m.by != "coo")) { unread.insert(m.threadId) }
         case .roomReplying(let threadId, let employeeId, let state):
             switch state {
             case .started: replying[threadId] = employeeId

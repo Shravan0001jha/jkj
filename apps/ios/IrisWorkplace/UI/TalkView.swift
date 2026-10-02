@@ -1,43 +1,34 @@
 import SwiftUI
 
-/// Pick an employee, then the conversation: the session log streamed live, the composer, inline
-/// tool approvals, interrupt, and the charter / status sheet.
+/// Talk: a list of everyone you can talk to (the COO pinned first, Asha second, then by last
+/// activity), and one chat component for every conversation (ChatThread.swift).
 struct TalkView: View {
     @Environment(AppModel.self) private var model
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if model.talk.employeeId == nil {
-                    EmployeePicker()
-                } else {
-                    ConversationView()
-                }
-            }
-            .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
-            .onChange(of: model.router.talkEmployeeId, initial: true) { _, id in
-                guard let id, let rest = model.rest else { return }
-                // Cleared only once selection finishes, not before dispatching it: both handlers
-                // fire synchronously (both `initial: true`) on first appearance, in source order —
-                // clearing it up front let the chief-of-staff default below see it as nil in that
-                // same pass and race a second, later-finishing `select` that silently overwrote an
-                // explicit `talk(to:)` (e.g. the Office card) with Asha.
-                Task {
-                    await model.talk.select(rest, employeeId: id)
+        NavigationStack(path: $path) {
+            TalkListView()
+                .navigationDestination(for: TalkRoute.self) { r in ConversationView(employeeId: r.employeeId, path: $path) }
+                .v2Destinations()
+                .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
+                .onChange(of: model.router.talkEmployeeId, initial: true) { _, id in
+                    guard let id else { return }
+                    path = NavigationPath([TalkRoute(employeeId: id)])
                     model.router.talkEmployeeId = nil
                 }
-            }
-            .onChange(of: model.office.data?.chiefOfStaff, initial: true) { _, cos in
-                // Asha by default: the first thing Talk shows is the Chief of Staff, one tap from anything.
-                guard model.talk.employeeId == nil, model.router.talkEmployeeId == nil, let cos, let rest = model.rest else { return }
-                Task { await model.talk.select(rest, employeeId: cos) }
-            }
         }
     }
 }
 
-struct EmployeePicker: View {
+struct TalkRoute: Hashable { let employeeId: String }
+
+/// WhatsApp-style: avatar with presence, name, a one-line preview or role, time and a badge.
+/// Rows are one height. The COO first, Asha second, then by last activity.
+struct TalkListView: View {
     @Environment(AppModel.self) private var model
+
+    static let rowHeight: CGFloat = 64
 
     var body: some View {
         List {
@@ -45,60 +36,143 @@ struct EmployeePicker: View {
                 if let e = model.office.error {
                     ErrorRow(message: e) { Task { if let r = model.rest { await model.office.load(r) } } }
                 } else {
-                    HStack { Spacer(); ProgressView("Loading the employees…"); Spacer() }
+                    HStack { Spacer(); ProgressView("Loading…"); Spacer() }
                 }
             }
-            ForEach(model.office.data?.units ?? []) { u in
-                Section {
-                    ForEach(u.employees) { card in
-                        Button {
-                            model.router.talk(to: card.employee.id)
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: card.employee.state.glyph.symbol).foregroundStyle(card.employee.state.glyph.tint).font(.title3).frame(width: 26)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(card.employee.name).font(.headline)
-                                    Text(card.charters.map(\.title).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text(card.employee.state.glyph.label).font(.caption).foregroundStyle(.secondary)
-                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                } header: { SectionHeader(text: u.unit.title) }
+            ForEach(Self.ordered(model.office.cards, chiefOfStaff: model.chiefOfStaff)) { card in
+                NavigationLink(value: TalkRoute(employeeId: card.employee.id)) {
+                    TalkListRow(card: card, preview: preview(card), time: time(card))
+                }
+                .frame(height: Self.rowHeight)
+                .listRowInsets(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 12))
+                .accessibilityIdentifier("talk.row.\(card.employee.id)")
             }
         }
-        .listStyle(.insetGrouped)
-        .navigationTitle("Talk to…")
-        .task { if model.office.data == nil, let r = model.rest { await model.office.load(r) } }
+        .listStyle(.plain)
+        .navigationTitle("Talk")
+        .refreshable { if let r = model.rest { await model.office.load(r); await model.coo.load(r) } }
+        .task {
+            guard let rest = model.rest else { return }
+            if model.office.data == nil { await model.office.load(rest) }
+            if !model.coo.loaded { await model.coo.load(rest) }
+        }
+    }
+
+    /// The COO, then the Chief of Staff, then everyone else by last activity (newest first).
+    static func ordered(_ cards: [EmployeeCard], chiefOfStaff: String?) -> [EmployeeCard] {
+        var seen = Set<String>()
+        let unique = cards.filter { seen.insert($0.employee.id).inserted }
+        func rank(_ c: EmployeeCard) -> Int { c.employee.virtual == true ? 0 : c.employee.id == chiefOfStaff ? 1 : 2 }
+        return unique.sorted { a, b in
+            if rank(a) != rank(b) { return rank(a) < rank(b) }
+            let la = lastActivity(a) ?? "", lb = lastActivity(b) ?? ""
+            if la != lb { return la > lb }
+            return a.employee.name < b.employee.name
+        }
+    }
+
+    static func lastActivity(_ c: EmployeeCard) -> String? { c.session.map { $0.endedAt ?? $0.startedAt } }
+
+    private func preview(_ c: EmployeeCard) -> String {
+        if c.employee.virtual == true, let last = model.coo.log.last { return (last.from == .owner ? "You: " : "") + last.text }
+        if let r = c.lastReport, !r.isEmpty { return r }
+        if let w = c.currentWork { return w.title }
+        return c.charters.map(\.title).joined(separator: " · ")
+    }
+
+    private func time(_ c: EmployeeCard) -> String? {
+        if c.employee.virtual == true, let last = model.coo.log.last { return Format.ago(last.at) }
+        return Self.lastActivity(c).map { Format.ago($0) }
     }
 }
 
+struct TalkListRow: View {
+    let card: EmployeeCard
+    let preview: String
+    let time: String?
+
+    /// Presence: the COO's heartbeat; for an employee, a session that is live right now.
+    private var online: Bool? {
+        if let o = card.employee.isOnline { return o }
+        switch card.session?.status {
+        case .running?, .waiting?: return true
+        default: return false
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack(alignment: .bottomTrailing) {
+                InitialsAvatar(name: card.employee.name, size: 44, tint: card.employee.virtual == true ? .indigo : .accentColor)
+                PresenceDot(online: online).offset(x: 1, y: 1)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(card.employee.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Spacer(minLength: 6)
+                    if let time { Text(time).font(.caption2).foregroundStyle(.secondary) }
+                }
+                HStack {
+                    Text(preview).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 6)
+                    if card.needsYou > 0 {
+                        Text("\(card.needsYou)").font(.caption2.weight(.bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 6).frame(minWidth: 18, minHeight: 18)
+                            .background(Color.orange, in: Capsule())
+                            .accessibilityLabel("\(card.needsYou) waiting on you")
+                    }
+                }
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A day break in a chat.
+struct DaySeparator: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            .padding(.horizontal, 10).padding(.vertical, 3)
+            .background(Color(.tertiarySystemFill), in: Capsule())
+            .frame(maxWidth: .infinity).padding(.vertical, 8)
+    }
+}
+
+/// One conversation: the COO's bridge chat or an employee's session, in the same component.
 struct ConversationView: View {
     @Environment(AppModel.self) private var model
+    let employeeId: String
+    @Binding var path: NavigationPath
     @State private var draft = ""
     @State private var error: String?
     @State private var showProfile = false
     @State private var showAssign = false
     @State private var confirmEnd = false
-    @FocusState private var composing: Bool
+    @State private var confirmInterrupt = false
 
     private var talk: TalkStore { model.talk }
-    private var name: String { talk.detail?.employee.name ?? model.employeeName(talk.employeeId) }
-    /// The COO is never spawned (no session, no tool calls): its own chat, not this one.
-    private var isCoo: Bool { talk.detail?.employee.virtual == true || talk.employeeId == "coo" }
+    private var isCoo: Bool { employeeId == "coo" || model.office.card(employeeId)?.employee.virtual == true }
+    private var name: String { isCoo ? (model.office.card(employeeId)?.employee.name ?? "Claude — COO") : (talk.detail?.employee.name ?? model.employeeName(employeeId)) }
+    private var cooOnline: Bool? { model.coo.presence?.online ?? model.office.card(employeeId)?.employee.isOnline }
 
     var body: some View {
         Group {
-            if isCoo { CooTalkView() } else { employeeConversation }
+            if isCoo { cooChat } else { employeeChat }
         }
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { toolbarContent }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                ChatTitle(name: name, subtitle: subtitle, online: isCoo ? cooOnline : sessionOnline, tint: isCoo ? .indigo : .accentColor)
+            }
+            ToolbarItem(placement: .topBarTrailing) { menu }
+        }
+        .toolbar(.visible, for: .tabBar)
         .sheet(isPresented: $showProfile) { EmployeeProfileView() }
-        .sheet(isPresented: $showAssign) { AssignView(employeeId: talk.employeeId) }
+        .sheet(isPresented: $showAssign) { AssignView(employeeId: employeeId) }
         .confirmationDialog("End \(name)'s session?", isPresented: $confirmEnd, titleVisibility: .visible) {
             Button("End and write handoff", role: .destructive) {
                 Task { do { if let r = model.rest { try await model.talk.endSession(r) } } catch { if let m = error.userMessage { self.error = m } } }
@@ -107,374 +181,167 @@ struct ConversationView: View {
         } message: {
             Text("The employee writes status and handoff, then the session closes. The next message starts a fresh one from the files.")
         }
-    }
-
-    private var employeeConversation: some View {
-        VStack(spacing: 0) {
-            sessionStrip
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        if let d = talk.detail, !d.needsYou.isEmpty {
-                            NeedsYouBanner(count: d.needsYou.count, name: name)
-                        }
-                        if talk.loading && talk.log.isEmpty {
-                            HStack { Spacer(); ProgressView(); Spacer() }.padding()
-                        } else if talk.session == nil && !talk.loading {
-                            VStack(spacing: 8) {
-                                Image(systemName: "bubble.left.and.text.bubble.right").font(.largeTitle).foregroundStyle(.secondary)
-                                Text("No session open").font(.headline)
-                                Text("Your first message starts one from \(name)'s layered context: handbook, unit, charter, status and handoff.")
-                                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                            }
-                            .padding(24)
-                        }
-                        let items = talk.chatLog
-                        ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
-                            let previousAt = i > 0 ? items[i - 1].at : nil
-                            if let label = Format.chatSeparator(since: previousAt, at: item.at) {
-                                DateSeparator(text: label)
-                            }
-                            LogRow(entry: item).id(item.id)
-                        }
-                        if talk.isRunning {
-                            TypingIndicator(name: name).id("working")
-                        }
-                        if let a = talk.pendingApproval, let s = talk.session {
-                            ApprovalCard(approval: a, agentId: s.id) { self.error = $0 }.id("approval")
-                        }
-                        if let e = talk.error ?? error {
-                            Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline).padding(.horizontal)
-                        }
-                        Color.clear.frame(height: 1).id("bottom")
-                    }
-                    .padding(.vertical, 8)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: talk.log.count) { _, _ in withAnimation { proxy.scrollTo("bottom") } }
-                .onChange(of: talk.isRunning) { _, running in if running { withAnimation { proxy.scrollTo("working") } } }
-                .onChange(of: talk.pendingApproval) { _, a in if a != nil { withAnimation { proxy.scrollTo("approval") } } }
-                .onAppear { proxy.scrollTo("bottom") }
+        .confirmationDialog("Stop \(name)'s current run?", isPresented: $confirmInterrupt, titleVisibility: .visible) {
+            Button("Stop the run", role: .destructive) {
+                Task { do { if let r = model.rest { try await talk.interrupt(r) } } catch { if let m = error.userMessage { self.error = m } } }
             }
-            composer
-        }
-    }
-
-    @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Button { model.talk.deselect() } label: { Label("Someone else", systemImage: "person.2") }
-                .accessibilityLabel("Talk to someone else")
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-            if isCoo {
-                // The COO is never assigned, has no permission mode and no session to end.
-                Button { Task { if let r = model.rest { await model.coo.load(r) } } } label: { Image(systemName: "arrow.clockwise") }
-                    .accessibilityLabel("Refresh")
-            } else {
-                Menu {
-                    Button { showProfile = true } label: { Label("Charter and status", systemImage: "doc.text") }
-                    Button { showAssign = true } label: { Label("Assign work to \(name)", systemImage: "tray.and.arrow.down") }
-                    if let s = talk.session {
-                        Menu {
-                            ForEach(PermissionMode.choices, id: \.self) { m in
-                                Button {
-                                    Task { await send(.agentMode(agentId: s.id, mode: m)) }
-                                } label: {
-                                    if s.permissionMode == m { Label(m.title, systemImage: "checkmark") } else { Text(m.title) }
-                                }
-                            }
-                        } label: { Label("Permission: \(s.permissionMode?.title ?? "—")", systemImage: "lock.shield") }
-                        Button(role: .destructive) { confirmEnd = true } label: { Label("End session (write handoff)", systemImage: "square.and.arrow.down") }
-                    }
-                    Button { Task { if let r = model.rest { await model.talk.reload(r) } } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                } label: { Image(systemName: "ellipsis.circle") }
-                .accessibilityLabel("More")
-            }
-        }
-    }
-
-    @ViewBuilder private var sessionStrip: some View {
-        if let s = talk.session {
-            HStack(spacing: 8) {
-                StateLabel(glyph: s.status.glyph, compact: true)
-                Text("·").foregroundStyle(.secondary)
-                Text(s.task).font(.caption).lineLimit(1).foregroundStyle(.secondary)
-                Spacer()
-                if let m = s.permissionMode { Pill(text: m.title, symbol: "lock.shield", tint: .secondary) }
-                Text("$\(s.usage.costUsd, specifier: "%.2f")").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 6)
-            .background(.bar)
-        }
-    }
-
-    private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message \(name)", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.roundedBorder)
-                .focused($composing)
-            if talk.isRunning {
-                Button {
-                    Task { do { if let r = model.rest { try await model.talk.interrupt(r) } } catch { if let m = error.userMessage { self.error = m } } }
-                } label: { Image(systemName: "stop.circle.fill").font(.title) }
-                .foregroundStyle(.red)
-                .accessibilityLabel("Interrupt")
-            }
-            Button { Task { await sendDraft() } } label: {
-                if talk.sending { ProgressView().frame(width: 28, height: 28) } else { Image(systemName: "arrow.up.circle.fill").font(.title) }
-            }
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || talk.sending)
-            .accessibilityLabel("Send")
-        }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.bar)
-    }
-
-    private func sendDraft() async {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let rest = model.rest else { return }
-        error = nil
-        do {
-            try await model.talk.send(rest, text: text)
-            draft = ""
-        } catch {
-            if let m = error.userMessage { self.error = m }
-        }
-    }
-
-    private func send(_ command: ClientCommand) async {
-        do { try await model.send(command) } catch { if let m = error.userMessage { self.error = m } }
-    }
-}
-
-extension TalkStore {
-    func deselect() { clear() }
-}
-
-/// The owner's Talk with "Claude — COO": not a session — no tool calls, no thinking, no mirroring.
-/// Only what the owner sent and what the lead replied through `POST /api/coo/reply` ever appear
-/// here. `coo.presence` is not in the contract yet, so presence is polled while this is on screen.
-struct CooTalkView: View {
-    @Environment(AppModel.self) private var model
-    @State private var draft = ""
-    @State private var error: String?
-    @FocusState private var composing: Bool
-
-    private var coo: CooStore { model.coo }
-    private var online: Bool { coo.presence?.online ?? (model.talk.detail?.employee.state == .online) }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if !online {
-                Text("The COO is offline: messages wait; Asha handles routine work in the meantime.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .padding(.horizontal, 16).padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.bar)
-            }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        if coo.loading && coo.log.isEmpty {
-                            HStack { Spacer(); ProgressView(); Spacer() }.padding()
-                        } else if coo.log.isEmpty {
-                            VStack(spacing: 8) {
-                                Image(systemName: "bubble.left.and.text.bubble.right").font(.largeTitle).foregroundStyle(.secondary)
-                                Text("Nothing yet").font(.headline)
-                                Text("Say what you need. The COO answers within its own authority, or brings you a recommendation.")
-                                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                            }
-                            .padding(24)
-                        }
-                        ForEach(Array(coo.log.enumerated()), id: \.element.id) { i, m in
-                            let previousAt = i > 0 ? coo.log[i - 1].at : nil
-                            if let label = Format.chatSeparator(since: previousAt, at: m.at) {
-                                DateSeparator(text: label)
-                            }
-                            CooMessageRow(message: m).id(m.id)
-                        }
-                        if let e = coo.error ?? error {
-                            Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline).padding(.horizontal)
-                        }
-                        Color.clear.frame(height: 1).id("bottom")
-                    }
-                    .padding(.vertical, 8)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: coo.log.count) { _, _ in withAnimation { proxy.scrollTo("bottom") } }
-                .onAppear { proxy.scrollTo("bottom") }
-            }
-            composer
-        }
-        .task {
+            Button("Keep working", role: .cancel) {}
+        } message: { Text("The session stops mid-step; the work so far stays on its branch.") }
+        .task(id: employeeId) {
             guard let rest = model.rest else { return }
-            await coo.load(rest)
-            coo.pollPresence(rest)
-        }
-        .onDisappear { coo.stopPolling() }
-    }
-
-    private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message the COO", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.roundedBorder)
-                .focused($composing)
-            Button { Task { await sendDraft() } } label: {
-                if coo.sending { ProgressView().frame(width: 28, height: 28) } else { Image(systemName: "arrow.up.circle.fill").font(.title) }
+            if isCoo {
+                await model.coo.load(rest)
+                model.coo.pollPresence(rest)
+            } else if talk.employeeId != employeeId || talk.detail == nil {
+                await talk.select(rest, employeeId: employeeId)
+            } else {
+                await talk.reload(rest)
             }
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || coo.sending)
-            .accessibilityLabel("Send")
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.bar)
+        .onDisappear { if isCoo { model.coo.stopPolling() } }
     }
 
-    private func sendDraft() async {
+    private var sessionOnline: Bool? {
+        switch talk.session?.status {
+        case .running?, .waiting?: return true
+        default: return false
+        }
+    }
+
+    private var subtitle: String {
+        if isCoo { return cooOnline == false ? "Offline · messages wait" : "Online" }
+        guard talk.employeeId == employeeId, let s = talk.session else { return talk.detail?.employee.state.glyph.label ?? " " }
+        switch s.status {
+        case .running: return "Working…"
+        case .waiting: return "Waiting for you"
+        default: return "\(s.status.glyph.label) · $\(String(format: "%.2f", s.usage.costUsd))"
+        }
+    }
+
+    private func open(_ link: AppLink) {
+        switch link {
+        case .item(let id): path.append(ItemRoute(id: id))
+        case .room(let id): path.append(ThreadRoute(id: id))
+        case .releasePost(let id): path.append(ReleasePostRoute(id: id))
+        default: model.open(link)
+        }
+    }
+
+    // MARK: employee
+
+    private var employeeChat: some View {
+        let mine = talk.employeeId == employeeId
+        return ChatThreadView(
+            items: mine ? ChatItem.from(log: talk.chatLog) : [],
+            typing: mine && talk.isRunning,
+            typingName: name,
+            loading: talk.loading || !mine,
+            emptyTitle: "No session open",
+            emptyText: "Your first message starts one from \(name)'s context: handbook, unit, charter, status and handoff.",
+            placeholder: "Message \(name)",
+            draft: $draft,
+            sending: talk.sending,
+            onSend: { Task { await sendToEmployee() } },
+            trailing: {
+                if mine && talk.isRunning {
+                    // Confirmed first: a stray tap next to Send must never stop a live session.
+                    Button { confirmInterrupt = true } label: {
+                        Image(systemName: "stop.fill").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                            .frame(width: 36, height: 36).background(Color.red, in: Circle())
+                    }
+                    .accessibilityLabel("Interrupt")
+                }
+            },
+            header: {
+                if mine, let d = talk.detail, !d.needsYou.isEmpty {
+                    NeedsYouBanner(count: d.needsYou.count, name: name).padding(.top, 6)
+                }
+            },
+            footer: {
+                VStack(spacing: 8) {
+                    if mine, let a = talk.pendingApproval, let s = talk.session {
+                        ApprovalCard(approval: a, agentId: s.id) { self.error = $0 }
+                    }
+                    if let e = (mine ? talk.error : nil) ?? error {
+                        Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.footnote)
+                    }
+                }
+            },
+            onOpen: open
+        )
+    }
+
+    private func sendToEmployee() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let rest = model.rest else { return }
         error = nil
-        do {
-            try await coo.send(rest, text: text)
-            draft = ""
-        } catch {
-            if let m = error.userMessage { self.error = m }
-        }
-    }
-}
-
-/// One line from the owner or the COO; bubbled like Talk's. `summary`/`details` behind expand.
-struct CooMessageRow: View {
-    let message: CooMessage
-    @State private var expanded = false
-
-    private var owner: Bool { message.from == .owner }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            if owner { Spacer(minLength: 40) }
-            VStack(alignment: owner ? .trailing : .leading, spacing: 3) {
-                Text(Format.time(message.at)).font(.caption2).foregroundStyle(.tertiary)
-                let c = CompactText(text: message.summary ?? message.text, details: message.details)
-                Text(expanded ? (c.details ?? c.line) : c.line)
-                    .font(.subheadline)
-                    .multilineTextAlignment(owner ? .trailing : .leading)
-                    .foregroundStyle(owner ? .white : .primary)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(owner ? Color.accentColor.opacity(0.9) : Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-            }
-            if !owner { Spacer(minLength: 40) }
-        }
-        .frame(maxWidth: .infinity, alignment: owner ? .trailing : .leading)
-        .padding(.horizontal, 12)
-        .contentShape(Rectangle())
-        .onTapGesture { if c(message).hasDetails { withAnimation(.snappy) { expanded.toggle() } } }
+        do { try await talk.send(rest, text: text); draft = "" } catch { if let m = error.userMessage { self.error = m } }
     }
 
-    private func c(_ message: CooMessage) -> CompactText { CompactText(text: message.summary ?? message.text, details: message.details) }
-}
+    // MARK: COO
 
-/// A quiet date/time break in the chat, like iMessage's — only when the gap is worth marking.
-struct DateSeparator: View {
-    let text: String
-    var body: some View {
-        Text(text).font(.caption2).foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity).padding(.top, 6)
-    }
-}
-
-/// What happened between messages, folded into one quiet line (`ChatView.collapse`, mirroring
-/// `toChatView`): tool runs, Workplace prompts and system notes. Not a message: small, grey,
-/// centred; tap to see the steps.
-struct ActivityRow: View {
-    let entry: LogEntry
-    @State private var expanded = false
-
-    private var steps: [LogEntry] { entry.activity?.entries ?? [] }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button { withAnimation(.snappy) { expanded.toggle() } } label: {
-                HStack(spacing: 4) {
-                    Rectangle().fill(Color(.separator)).frame(height: 0.5)
-                    Text(entry.text).font(.caption2).foregroundStyle(.tertiary).fixedSize()
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 8)).foregroundStyle(.tertiary)
-                    Rectangle().fill(Color(.separator)).frame(height: 0.5)
+    private var cooChat: some View {
+        ChatThreadView(
+            items: ChatItem.from(coo: model.coo.log),
+            typing: false,
+            typingName: name,
+            loading: model.coo.loading,
+            emptyTitle: "Nothing yet",
+            emptyText: "Say what you need. The COO answers within its own authority, or brings you a recommendation.",
+            placeholder: "Message the COO",
+            draft: $draft,
+            sending: model.coo.sending,
+            onSend: { Task { await sendToCoo() } },
+            trailing: { EmptyView() },
+            header: {
+                if cooOnline == false {
+                    Text("The COO is offline: messages wait; Asha handles routine work meanwhile.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity).padding(.vertical, 6).background(.bar)
                 }
-            }
-            .buttonStyle(.plain)
-            if expanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(steps) { e in
-                        if e.kind == .user || e.kind == .system {
-                            Text(e.text).font(.caption).foregroundStyle(.secondary).lineLimit(6)
-                        } else {
-                            StepRow(entry: e)
+            },
+            footer: {
+                if let e = model.coo.error ?? error {
+                    Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.footnote)
+                }
+            },
+            onOpen: open
+        )
+    }
+
+    private func sendToCoo() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let rest = model.rest else { return }
+        error = nil
+        do { try await model.coo.send(rest, text: text); draft = "" } catch { if let m = error.userMessage { self.error = m } }
+    }
+
+    // MARK: menu
+
+    @ViewBuilder private var menu: some View {
+        if isCoo {
+            Button { Task { if let r = model.rest { await model.coo.load(r) } } } label: { Image(systemName: "arrow.clockwise") }
+                .accessibilityLabel("Refresh")
+        } else {
+            Menu {
+                Button { showProfile = true } label: { Label("Charter and status", systemImage: "doc.text") }
+                Button { showAssign = true } label: { Label("Assign work to \(name)", systemImage: "tray.and.arrow.down") }
+                if let s = talk.session {
+                    Menu {
+                        ForEach(PermissionMode.choices, id: \.self) { m in
+                            Button {
+                                Task { do { try await model.send(.agentMode(agentId: s.id, mode: m)) } catch { if let msg = error.userMessage { self.error = msg } } }
+                            } label: {
+                                if s.permissionMode == m { Label(m.title, systemImage: "checkmark") } else { Text(m.title) }
+                            }
                         }
-                    }
+                    } label: { Label("Permission: \(s.permissionMode?.title ?? "—")", systemImage: "lock.shield") }
+                    Button(role: .destructive) { confirmEnd = true } label: { Label("End session (write handoff)", systemImage: "square.and.arrow.down") }
                 }
-                .padding(.leading, 4)
-            }
+                Button { Task { if let r = model.rest { await talk.reload(r) } } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+            } label: { Image(systemName: "ellipsis.circle") }
+            .accessibilityLabel("More")
         }
-        .padding(.horizontal, 16)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(entry.text)
-        .accessibilityHint(expanded ? "Collapses the steps" : "Expands the steps")
-    }
-}
-
-/// A single, uncollapsed tool/read/edit/bash/search/task entry (`toChatView` leaves a lone one as
-/// itself rather than wrapping it — "worked · 1 step" reads worse than just showing the read).
-struct StepRow: View {
-    let entry: LogEntry
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.label.isEmpty ? entry.kind.rawValue : entry.label).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Text(entry.text).font(.caption.monospaced()).lineLimit(4).textSelection(.enabled)
-            }
-            Spacer()
-            Text(Format.time(entry.at)).font(.caption2).foregroundStyle(.tertiary)
-        }
-    }
-
-    private var symbol: String {
-        switch entry.kind {
-        case .read: return "doc.text.magnifyingglass"
-        case .edit: return "pencil"
-        case .bash: return "terminal"
-        case .search: return "magnifyingglass"
-        case .task: return "person.2"
-        default: return "wrench"
-        }
-    }
-}
-
-/// The employee is working on a reply: three dots, like iMessage, gone when the reply lands.
-struct TypingIndicator: View {
-    let name: String
-    @State private var phase = 0
-    private let timer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
-
-    var body: some View {
-        HStack {
-            HStack(spacing: 4) {
-                ForEach(0..<3) { i in
-                    Circle().fill(Color.secondary).frame(width: 7, height: 7).opacity(phase == i ? 1 : 0.35)
-                }
-            }
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .background(Color(.secondarySystemBackground), in: Capsule())
-            Spacer(minLength: 48)
-        }
-        .padding(.horizontal, 12)
-        .onReceive(timer) { _ in phase = (phase + 1) % 3 }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(name) is typing")
     }
 }
 
@@ -499,130 +366,6 @@ struct NeedsYouBanner: View {
             .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 12)
-    }
-}
-
-struct LogRow: View {
-    let entry: LogEntry
-
-    var body: some View {
-        switch entry.kind {
-        case .user where entry.from == .workplace:
-            // Never under the owner's name: the Workplace wrote it (ChatView folds these; belt and braces).
-            ActivityRow(entry: LogEntry(id: entry.id, agentId: entry.agentId, at: entry.at, kind: .activity, label: "", text: "Workplace note",
-                                        activity: LogActivity(count: 1, durationMs: 0, entries: [entry])))
-        case .user:
-            HStack {
-                Spacer(minLength: 48)
-                Text(entry.text)
-                    .font(.subheadline)
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(Color.accentColor.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
-                    .foregroundStyle(.white)
-                    .textSelection(.enabled)
-            }
-            .padding(.horizontal, 12)
-        case .assistant:
-            HStack(alignment: .bottom) {
-                CompactRow(text: entry.text, summary: entry.summary, details: entry.details)
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-                Spacer(minLength: 48)
-            }
-            .padding(.horizontal, 12)
-        case .error:
-            Label(entry.text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline).padding(.horizontal, 16)
-        case .system, .unknown:
-            Text(entry.text).font(.caption2).foregroundStyle(.tertiary).lineLimit(2).frame(maxWidth: .infinity).padding(.horizontal, 16)
-        case .image:
-            HStack {
-                Label("Image", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
-                    .padding(10).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-                Spacer(minLength: 48)
-            }
-            .padding(.horizontal, 12)
-        case .read, .edit, .bash, .search, .task, .tool:
-            // A lone tool run is not a message either: the same quiet line, one step behind it.
-            ActivityRow(entry: LogEntry(id: entry.id, agentId: entry.agentId, at: entry.at, kind: .activity, label: "",
-                                        text: "worked · \(entry.label.isEmpty ? entry.kind.rawValue : entry.label)",
-                                        activity: LogActivity(count: 1, durationMs: 0, entries: [entry])))
-        case .activity:
-            ActivityRow(entry: entry)
-        }
-    }
-}
-
-/// An assistant message: one line by default, the whole text on tap.
-struct CompactRow: View {
-    let text: String
-    var summary: String? = nil
-    var details: String? = nil
-    @State private var expanded = false
-
-    var body: some View {
-        let c = CompactText(text: text, summary: summary, details: details)
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top, spacing: 6) {
-                if expanded {
-                    Prose(text: c.details ?? text)
-                } else {
-                    Text(c.line).font(.subheadline).lineLimit(3)
-                }
-                if c.hasDetails {
-                    Spacer(minLength: 0)
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(.secondary).padding(.top, 4)
-                }
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { if c.hasDetails { withAnimation(.snappy) { expanded.toggle() } } }
-        .accessibilityElement(children: .combine)
-        .accessibilityHint(c.hasDetails ? (expanded ? "Collapses the message" : "Expands the message") : "")
-    }
-}
-
-/// What this employee is waiting on you for: each item with what approve and deny do, and its options.
-struct NeedsYouSection: View {
-    @Environment(AppModel.self) private var model
-    let items: [InboxItem]
-    let name: String
-    /// Collapsed by default when the list would push the conversation off the screen.
-    @State private var collapsed: Bool
-    init(items: [InboxItem], name: String) {
-        self.items = items; self.name = name
-        _collapsed = State(initialValue: items.count > 2)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button { withAnimation(.snappy) { collapsed.toggle() } } label: {
-                HStack {
-                    Label("Needs you · \(items.count)", systemImage: "exclamationmark.circle.fill").font(.subheadline.weight(.semibold)).foregroundStyle(.orange)
-                    Spacer()
-                    Image(systemName: collapsed ? "chevron.down" : "chevron.up").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .buttonStyle(.plain)
-            if !collapsed {
-                ForEach(items) { item in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            StateLabel(glyph: item.kind.glyph, compact: true)
-                            Spacer()
-                            Button("Open") { model.router.openInbox(item.id) }.font(.caption)
-                        }
-                        Text(item.title).font(.subheadline.weight(.semibold))
-                        if let a = item.onApprove, !a.isEmpty { Label(a, systemImage: "checkmark.circle").font(.caption).foregroundStyle(.secondary) }
-                        if let d = item.onDeny, !d.isEmpty { Label(d, systemImage: "xmark.circle").font(.caption).foregroundStyle(.secondary) }
-                        AnswerOptions(item: item, compact: true)
-                    }
-                    .padding(10)
-                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.orange.opacity(0.4)))
-                }
-            }
-        }
         .padding(.horizontal, 12)
     }
 }

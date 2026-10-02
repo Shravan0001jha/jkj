@@ -1,0 +1,264 @@
+{
+  "areas": [
+    {
+      "area": {
+        "id": "ar_muqhzr5khct7v",
+        "title": "Voice & audio",
+        "description": "Hearing, speaking and music on the Mac: STT, AEC, music controls, dance.",
+        "state": "active",
+        "rank": 1,
+        "ownerId": "owner",
+        "roomId": "area:ar_muqhzr5khct7v",
+        "threadId": "th_area_ar_muqhzr5khct7v",
+        "createdAt": "2026-10-02T05:03:42.392Z",
+        "updatedAt": "2026-10-02T05:03:42.392Z"
+      },
+      "epics": [
+        {
+          "epic": {
+            "id": "ft_mummakwyuew19",
+            "level": "epic",
+            "title": "P0 bug bundle: \"Iris during music\".",
+            "body": "P0 bug bundle: \"Iris during music\". The owner reported: \"it's vibrating almost all the time\", and \"when music is playing it's not able to hear me at all — not even when volume is 0\". Evidence is in the installed Iris 0.2.15 logs (~/Library/Application Support/Iris/agent.log and ~/Library/Logs/Iris/main.log, 29 Sep 17:10–17:17 IST; main.log timestamps are UTC, 11:40–11:47).\n\n1. \"Iris pause mute\" (17:13:06) → the DO lane set **system output volume to 0** (`device.set_volume 0`) instead of pausing the music. The music kept playing silently, and Iris's own voice was muted too. Pause, stop and mute must act on the music player; system volume only when the user explicitly says \"volume\".\n2. **The mic stream nearly stopped after the music started:** \"stt: streamed 0s of audio in the last minute\" at 17:14 and 17:15, and 8 s at 17:16, while the owner was speaking. It was 13–28 s during the music. Suspect the adaptive SendGate floor (the quietest-20-of-100 chunks × 2.5) staying high after loud music, or something else gating the mic. RCA with evidence.\n3. **While the music is audible, speech is garbled** (\"i disposed\", \"i just called you a bit\", \"i respond music\"). The music plays via a native player (afplay), outside the renderer's WebRTC AEC, so there's no echo reference. Options: play music through the renderer so AEC cancels it, and/or duck the music on speech onset or the wake word.\n4. **A garbled line restarted the music:** \"i respond music\" → [[PLAY]] a new track. Low-confidence or garbled utterances during music must never trigger play/stop.\n5. **\"Vibrating\":** the dance re-plans every 6–9 s from beat detection with confidence 0.35–0.54, tempo jumping 60–184 BPM. Also the listening micro-motion runs continuously while music keeps the mic busy. Require a confidence threshold (else gentle sway), smooth and clamp the tempo, and don't run the pending micro-motion while merely listening.\n\n**Rules:**\n- RCA first with log evidence per item;\n- tests that fail before each fix;\n- fixes on employee branches;\n- QA verifies with real music playing (audible, and at volume 0) on the Mac;\n- the lead reviews before merge, then a release as 0.2.16 with owner approval.\n\n**Priority P0:** keep other work paused (the weekly subscription window is at 80%).",
+            "status": "in-progress",
+            "statusSince": "2026-10-02T03:27:26.410Z",
+            "epicId": "ft_mummakwyuew19",
+            "areaId": "ar_muqhzr5khct7v",
+            "ownerId": "dev",
+            "rank": 4,
+            "acceptance": [],
+            "legacy": {
+              "kind": "feature",
+              "state": "in-progress"
+            },
+            "createdAt": "2026-09-29T11:53:01.282Z",
+            "updatedAt": "2026-10-02T06:36:27.580Z"
+          },
+          "progress": {
+            "pointsDone": 0,
+            "pointsTotal": 0,
+            "storiesDone": 1,
+            "storiesTotal": 3,
+            "pct": 33
+          },
+          "next": {
+            "id": "as_muqecr89jhjst",
+            "title": "P0 bug bundle: \"Iris during music\". — Conversation"
+          },
+          "flags": [],
+          "inFocus": true
+        }
+      ]
+    },
+    {
+      "area": {
+        "id": "ar_muqhzr6q88hw4",
+        "title": "Character & greeting",
+        "description": "Iris's personality, the daily greeting and the context she greets with.",
+        "state": "active",
+        "rank": 2,
+        "ownerId": "owner",
+        "roomId": "area:ar_muqhzr6q88hw4",
+        "threadId": "th_area_ar_muqhzr6q88hw4",
+        "createdAt": "2026-10-02T05:03:42.434Z",
+        "updatedAt": "2026-10-02T05:03:42.434Z"
+      },
+      "epics": [
+        {
+          "epic": {
+            "id": "ft_muk0zk573q8v1",
+            "level": "epic",
+            "title": "Daily greeting, weather-aware",
+            "body": "Once a day, the first time the owner is at the Mac, Iris greets him with one spoken sentence that uses the weather facts she already has (context/weather.py), then stays quiet. Never twice a day, never when muted, never during a meeting or screen share. The definition lists this under Personality and it is one of the three spoken moments.",
+            "status": "in-progress",
+            "statusSince": "2026-09-27T16:46:51.494Z",
+            "epicId": "ft_muk0zk573q8v1",
+            "areaId": "ar_muqhzr6q88hw4",
+            "ownerId": "asha",
+            "rank": 2,
+            "acceptance": [],
+            "legacy": {
+              "kind": "feature",
+              "state": "in-progress"
+            },
+            "createdAt": "2026-09-27T16:21:02.779Z",
+            "updatedAt": "2026-10-02T06:36:27.586Z"
+          },
+          "progress": {
+            "pointsDone": 0,
+            "pointsTotal": 0,
+            "storiesDone": 0,
+            "storiesTotal": 5,
+            "pct": 0
+          },
+          "next": {
+            "id": "as_muk1cyy841xrt",
+            "title": "Daily greeting, weather-aware — Conversation"
+          },
+          "flags": [],
+          "inFocus": true
+        },
+        {
+          "epic": {
+            "id": "ft_mulrmufpu49uj",
+            "level": "epic",
+            "title": "Greeting context contract shared by memory and the greeting expert",
+            "body": "Define one event shape, greeting_context, that the memory store publishes and the greeting expert consumes: the fields (last greeted local date, the weather facts used, whether the owner was on a call or muted), who writes it, who reads it, and where it is persisted. Both the memory charter and the experts charter currently describe this differently (experts/memory.py sits under experts by path prefix but the experts charter says it belongs to memory), so the two must agree on the same shape and the map must say who owns experts/memory.py. Mac only.",
+            "status": "in-progress",
+            "statusSince": "2026-09-28T21:44:38.765Z",
+            "epicId": "ft_mulrmufpu49uj",
+            "areaId": "ar_muqhzr6q88hw4",
+            "ownerId": "asha",
+            "rank": 3,
+            "acceptance": [],
+            "legacy": {
+              "kind": "feature",
+              "state": "in-progress"
+            },
+            "createdAt": "2026-09-28T21:34:45.397Z",
+            "updatedAt": "2026-10-02T06:36:27.595Z"
+          },
+          "progress": {
+            "pointsDone": 0,
+            "pointsTotal": 0,
+            "storiesDone": 0,
+            "storiesTotal": 3,
+            "pct": 0
+          },
+          "next": {
+            "id": "as_mulrsdzj2xqf3",
+            "title": "Greeting context contract shared by memory and the greeting expert — Experts"
+          },
+          "flags": [
+            {
+              "kind": "stalled",
+              "itemId": "as_mulrsdzkl8w47",
+              "title": "Greeting context contract shared by memory and the greeting expert — Memory",
+              "reason": "In review 3 hours, untouched",
+              "waitingOn": "coo",
+              "since": "2026-10-02T03:30:36.189Z"
+            },
+            {
+              "kind": "stalled",
+              "itemId": "as_mulrsdzlsqnsl",
+              "title": "Greeting context contract shared by memory and the greeting expert — Desktop (Mac)",
+              "reason": "In review 3 days, untouched",
+              "waitingOn": "coo",
+              "since": "2026-09-28T22:58:15.621Z"
+            }
+          ],
+          "inFocus": true
+        }
+      ]
+    },
+    {
+      "area": {
+        "id": "ar_muqhzr7lq5qxd",
+        "title": "Mac & mobile apps",
+        "description": "The desktop app and phone apps, and the errands that run between them.",
+        "state": "active",
+        "rank": 3,
+        "ownerId": "owner",
+        "roomId": "area:ar_muqhzr7lq5qxd",
+        "threadId": "th_area_ar_muqhzr7lq5qxd",
+        "createdAt": "2026-10-02T05:03:42.465Z",
+        "updatedAt": "2026-10-02T05:03:42.465Z"
+      },
+      "epics": [
+        {
+          "epic": {
+            "id": "ft_muk0srruh7dwv",
+            "level": "epic",
+            "title": "Phone→Mac errand flow",
+            "body": "The owner states an errand on the phone (\"tidy my Chrome tabs\", \"make me a doc about X\"); it runs on the Mac through the cloud agent when the Mac is awake, is queued durably when it is not, and the result comes back to the phone, with one spoken sentence on the Mac when it lands. Machine-bound tasks run on the Mac; portable tasks (documents, answers) run in iris-api with the laptop shut. Road doc move 2: every task carries a locality.",
+            "status": "in-progress",
+            "statusSince": "2026-09-27T16:15:46.090Z",
+            "epicId": "ft_muk0srruh7dwv",
+            "areaId": "ar_muqhzr7lq5qxd",
+            "ownerId": "asha",
+            "rank": 1,
+            "acceptance": [],
+            "legacy": {
+              "kind": "feature",
+              "state": "in-progress"
+            },
+            "createdAt": "2026-09-27T16:15:46.074Z",
+            "updatedAt": "2026-10-02T06:36:27.601Z"
+          },
+          "progress": {
+            "pointsDone": 0,
+            "pointsTotal": 0,
+            "storiesDone": 0,
+            "storiesTotal": 5,
+            "pct": 0
+          },
+          "next": {
+            "id": "as_muk0srs9kx5vs",
+            "title": "Phone→Mac errand flow — Mobile"
+          },
+          "flags": [
+            {
+              "kind": "stalled",
+              "itemId": "as_muk0srs9kx5vs",
+              "title": "Phone→Mac errand flow — Mobile",
+              "reason": "In review 3 days, untouched",
+              "waitingOn": "coo",
+              "since": "2026-09-29T01:54:04.661Z"
+            },
+            {
+              "kind": "stalled",
+              "itemId": "as_muk0srsacscc8",
+              "title": "Phone→Mac errand flow — Server",
+              "reason": "In review 4 days, untouched",
+              "waitingOn": "coo",
+              "since": "2026-09-27T16:15:46.091Z"
+            },
+            {
+              "kind": "stalled",
+              "itemId": "as_muk0srsaw3n4j",
+              "title": "Phone→Mac errand flow — Desktop (Mac)",
+              "reason": "In review 4 days, untouched",
+              "waitingOn": "coo",
+              "since": "2026-09-27T19:14:14.614Z"
+            }
+          ],
+          "inFocus": false
+        }
+      ]
+    },
+    {
+      "area": {
+        "id": "ar_muqhzr8cy1akx",
+        "title": "Memory",
+        "description": "The one account memory Iris shares across devices.",
+        "state": "active",
+        "rank": 4,
+        "ownerId": "owner",
+        "roomId": "area:ar_muqhzr8cy1akx",
+        "threadId": "th_area_ar_muqhzr8cy1akx",
+        "createdAt": "2026-10-02T05:03:42.492Z",
+        "updatedAt": "2026-10-02T05:03:42.492Z"
+      },
+      "epics": []
+    }
+  ],
+  "unfiled": [],
+  "mine": [],
+  "focus": {
+    "epicIds": [
+      "ft_mummakwyuew19",
+      "ft_mulrmufpu49uj",
+      "ft_muk0zk573q8v1"
+    ],
+    "setBy": "owner",
+    "at": "2026-10-02T06:52:08.837Z"
+  },
+  "counts": {
+    "backlog": 10,
+    "ready": 0,
+    "in-progress": 1,
+    "in-review": 9,
+    "done": 14,
+    "blocked": 0
+  }
+}

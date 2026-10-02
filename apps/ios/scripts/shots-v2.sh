@@ -30,6 +30,8 @@ shot v2-06-inbox 5 ${=MOCK} WORKPLACE_TAB=inbox
 shot v2-07-inbox-thread 5 ${=MOCK} WORKPLACE_INBOX_ITEM=in_muqel76q1h1i1
 shot v2-08-talk 6 ${=MOCK} WORKPLACE_TALK=mira
 shot v2-09-talk-coo 5 ${=MOCK} WORKPLACE_TALK=coo
+shot v2-15-talk-list 5 ${=MOCK} WORKPLACE_TAB=talk
+shot v2-16-talk-asha 5 ${=MOCK} WORKPLACE_TALK=asha
 shot v2-10-rooms 5 ${=MOCK} WORKPLACE_ROOM=list
 shot v2-11-epic-thread 5 ${=MOCK} WORKPLACE_ROOM=th_epic_ft_mummakwyuew19
 shot v2-12-updates 5 ${=MOCK} WORKPLACE_TAB=updates

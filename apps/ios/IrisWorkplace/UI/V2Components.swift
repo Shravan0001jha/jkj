@@ -150,7 +150,7 @@ struct FlagLine: View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: blocked ? "octagon.fill" : "hourglass").foregroundStyle(blocked ? .red : .orange).font(.caption)
             VStack(alignment: .leading, spacing: 1) {
-                Text(blocked ? "Blocked" + (flag.waitingOn.map { " · waiting on \(model.employeeName($0))" } ?? "") : "Stalled")
+                Text((blocked ? "Blocked" : "Stalled") + (flag.waitingOn.map { " · waiting on \(model.employeeName($0))" } ?? ""))
                     .font(.caption.weight(.semibold)).foregroundStyle(blocked ? .red : .orange)
                 Text(Self.humanize(flag.reason)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }

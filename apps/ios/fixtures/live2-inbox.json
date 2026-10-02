@@ -1,0 +1,389 @@
+[
+  {
+    "id": "in_muqel76q1h1i1",
+    "kind": "decision",
+    "title": "2 Iris paths mis-owned; no proposal kind exists to fix them",
+    "body": "Ran lint() + resolve() against the live map (~/iris-workplace/map.yaml + org.yaml) for the 9 paths flagged by ft_mummakwyuew19.\n\nFindings:\n- 7/9 already resolve correctly, matching the suggested scheme: media.py, experts/media.py, experts/device.py → experts; stt_stream.py, speaker.py → conversation; desktop/character/driver.js, conversation.js → character. No change needed.\n- 2 are genuinely mis-owned: services/agent-svc/voice_native.py and wake_listen.py fall back to \"experts\" (the agent-svc directory default) instead of \"conversation\" (where stt/voice/wake/speaker belongs).\n- Full lint found nothing else unowned — only one unrelated warning (mobile-android has no holder).\n\nBlocker: propose_org_change's six kinds (hire/retire/split/merge/reassign/restructure) have no way to add or move a single path entry between two existing charters. \"reassign\" only moves which employee holds a charter; split/merge only operate on whole charters and split can't target an already-existing charter (throws \"already exists\"). I checked proposals.ts directly — this isn't a usage error, the capability isn't there. I also have no write path to map.yaml myself (it's outside my worktree's allowed paths), so I can't fix it by hand either.\n\nRecommendation: approve a one-off direct edit adding exactly 2 entries (voice_native.py, wake_listen.py → primary: conversation) — smallest possible fix, no new charter. Longer-term, proposals.ts could get a small \"remap-paths\" kind for cases like this, but that's jkj server code change, separate decision.",
+    "summary": "Ran lint() + resolve() against the live map (~/iris-workplace/map.yaml + org.yaml) for the 9 paths flagged by…",
+    "details": "Ran lint() + resolve() against the live map (~/iris-workplace/map.yaml + org.yaml) for the 9 paths flagged by ft_mummakwyuew19.\n\nFindings:\n- 7/9 already resolve correctly, matching the suggested scheme: media.py, experts/media.py, experts/device.py → experts; stt_stream.py, speaker.py → conversation; desktop/character/driver.js, conversation.js → character. No change needed.\n- 2 are genuinely mis-owned: services/agent-svc/voice_native.py and wake_listen.py fall back to \"experts\" (the agent-svc directory default) instead of \"conversation\" (where stt/voice/wake/speaker belongs).\n- Full lint found nothing else unowned — only one unrelated warning (mobile-android has no holder).\n\nBlocker: propose_org_change's six kinds (hire/retire/split/merge/reassign/restructure) have no way to add or move a single path entry between two existing charters. \"reassign\" only moves which employee holds a charter; split/merge only operate on whole charters and split can't target an already-existing charter (throws \"already exists\"). I checked proposals.ts directly — this isn't a usage error, the capability isn't there. I also have no write path to map.yaml myself (it's outside my worktree's allowed paths), so I can't fix it by hand either.\n\nRecommendation: approve a one-off direct edit adding exactly 2 entries (voice_native.py, wake_listen.py → primary: conversation) — smallest possible fix, no new charter. Longer-term, proposals.ts could get a small \"remap-paths\" kind for cases like this, but that's jkj server code change, separate decision.",
+    "context": {},
+    "options": [
+      {
+        "id": "approve-the-2-entry-manual-map-edit-now",
+        "label": "Approve the 2-entry manual map edit now"
+      },
+      {
+        "id": "add-a-remap-paths-proposal-kind-first-then-redo-this-properly",
+        "label": "Add a remap-paths proposal kind first, then redo this properly"
+      },
+      {
+        "id": "hold-for-now",
+        "label": "Hold for now"
+      }
+    ],
+    "state": "answered",
+    "raisedBy": "asha",
+    "createdAt": "2026-10-02T03:28:24.482Z",
+    "affects": [
+      "asha"
+    ],
+    "onApprove": "the first option is taken and recorded",
+    "onDeny": "the other option is taken and recorded",
+    "answer": {
+      "optionId": "approve-the-2-entry-manual-map-edit-now",
+      "at": "2026-10-02T06:44:34.856Z",
+      "via": "phone"
+    },
+    "messageCount": 0,
+    "urgency": "normal"
+  },
+  {
+    "id": "in_mum0ysmq3xo8t",
+    "kind": "org-change",
+    "title": "Hire: Neel as lead holding nothing yet",
+    "body": "Owner decided directly (th_muk65j9udjztm, 2026-09-29) that context-provider should be a new permanent hire rather than a second charter for Rohan or Dev, closing the lead-choice piece left open on op_mum0guxu46tvd.\n\nDiff: +16 −0 lines in 1 file(s): org/org.yaml. The full diff is on the proposal.",
+    "summary": "Owner decided directly (th_muk65j9udjztm, 2026-09-29) that context-provider should be a new permanent hire rather than…",
+    "details": "Owner decided directly (th_muk65j9udjztm, 2026-09-29) that context-provider should be a new permanent hire rather than a second charter for Rohan or Dev, closing the lead-choice piece left open on op_mum0guxu46tvd.\n\nDiff: +16 −0 lines in 1 file(s): org/org.yaml. The full diff is on the proposal.",
+    "context": {
+      "proposalId": "op_mum0ysmpsrark",
+      "kind": "hire",
+      "lintErrors": 0,
+      "params": {
+        "name": "Neel",
+        "charterId": "context-provider",
+        "roleId": "lead",
+        "scope": "Owns context/weather.py, context/generators/system.py, and the new screen-share/meeting detector (AC8) per op_mum0guxu46tvd; consumers (conversation/character, experts) keep reading facts through the existing context query interface."
+      }
+    },
+    "options": [
+      {
+        "id": "approve",
+        "label": "Approve"
+      },
+      {
+        "id": "reject",
+        "label": "Reject",
+        "danger": true
+      }
+    ],
+    "state": "answered",
+    "raisedBy": "asha",
+    "createdAt": "2026-09-29T01:55:59.474Z",
+    "affects": [
+      "asha"
+    ],
+    "onApprove": "the org files are written and committed; routing and every affected context change on the next session",
+    "onDeny": "nothing changes; the proposal is kept with your reason",
+    "answer": {
+      "optionId": "approve",
+      "at": "2026-09-29T01:56:24.708Z",
+      "via": "phone"
+    },
+    "messageCount": 0,
+    "urgency": "normal"
+  },
+  {
+    "id": "in_mum0guxwi92n9",
+    "kind": "org-change",
+    "title": "Restructure: 0 unit(s), 0 move(s)",
+    "body": "Closes the real gap from th_muk65j9udjztm (nobody owns screen-share/meeting detection, yet the definition calls auto-hide-on-share the one non-negotiable) and stops context-sensing code drifting into whichever charter's file it landed near — weather (context/weather.py) and presence/call signals (context/generators/system.py) are already sitting inside conversation/character's paths by accident, not by design, per Kabir/Dev's grounding in th_muk7n3n78lbde.\n\nDiff: +1401 −308 lines in 2 file(s): org/map.yaml, org/org.yaml. The full diff is on the proposal.",
+    "summary": "Closes the real gap from th_muk65j9udjztm (nobody owns screen-share/meeting detection, yet the definition calls —…",
+    "details": "Closes the real gap from th_muk65j9udjztm (nobody owns screen-share/meeting detection, yet the definition calls auto-hide-on-share the one non-negotiable) and stops context-sensing code drifting into whichever charter's file it landed near — weather (context/weather.py) and presence/call signals (context/generators/system.py) are already sitting inside conversation/character's paths by accident, not by design, per Kabir/Dev's grounding in th_muk7n3n78lbde.\n\nDiff: +1401 −308 lines in 2 file(s): org/map.yaml, org/org.yaml. The full diff is on the proposal.",
+    "context": {
+      "proposalId": "op_mum0guxu46tvd",
+      "kind": "restructure",
+      "lintErrors": 0,
+      "params": {
+        "newCharter": {
+          "id": "context-provider",
+          "mission": "Detect and expose facts about the user's environment and device state — screen/share content, meeting or call presence, weather, and future sources like calendar or location — through the existing context query interface, so any charter can read a fact without building its own sensor.",
+          "owns": [
+            "context/weather.py",
+            "context/generators/system.py",
+            "context/generators/*.py (context-fact sources)",
+            "the new screen-share/meeting detector (AC8, th_muk65j9udjztm)"
+          ],
+          "explicitlyNotOwned": [
+            "how a fact is used once read (the Speaker/delivery gate, character voice, proactive triggers) — stays with conversation/character",
+            "raw OS-level controls like mic mute UI or desktop permissions — stays with desktop-mac/mobile; context-provider owns exposing the resulting state as a context fact, not the control surface itself"
+          ]
+        },
+        "reassignFrom": {
+          "conversation-character": [
+            "context/weather.py",
+            "context/generators/system.py"
+          ]
+        },
+        "leadOptions": [
+          "Hire a new lead for context-provider",
+          "Have Rohan (desktop-mac) hold it as a second charter until load justifies a split",
+          "Have Dev (conversation/character) hold it as a second charter since he already owns the consuming side"
+        ]
+      }
+    },
+    "options": [
+      {
+        "id": "approve",
+        "label": "Approve"
+      },
+      {
+        "id": "reject",
+        "label": "Reject",
+        "danger": true
+      }
+    ],
+    "state": "answered",
+    "raisedBy": "asha",
+    "createdAt": "2026-09-29T01:42:02.660Z",
+    "affects": [
+      "asha"
+    ],
+    "onApprove": "the org files are written and committed; routing and every affected context change on the next session",
+    "onDeny": "nothing changes; the proposal is kept with your reason",
+    "answer": {
+      "optionId": "approve",
+      "at": "2026-09-29T01:43:20.992Z",
+      "via": "phone"
+    },
+    "messageCount": 0,
+    "urgency": "normal"
+  },
+  {
+    "id": "in_mulrkfhfkssn2",
+    "kind": "question",
+    "title": "Waiting: Phone→Mac errand flow — Mobile",
+    "body": "Tara's assignment as_muk0srs9kx5vs (building) has had no session activity since 2026-09-27 16:15 UTC. Why: waiting on the org-change proposal: split mobile (in_muk2tcfs1i860).\nAnswer with what should happen, or nothing: it is noted, not forgotten.",
+    "summary": "Tara's assignment as_muk0srs9kx5vs (building) has had no session activity since 2026-09-27 16:15 UTC.",
+    "details": "Tara's assignment as_muk0srs9kx5vs (building) has had no session activity since 2026-09-27 16:15 UTC. Why: waiting on the org-change proposal: split mobile (in_muk2tcfs1i860).\nAnswer with what should happen, or nothing: it is noted, not forgotten.",
+    "context": {
+      "assignmentId": "as_muk0srs9kx5vs",
+      "employeeId": "tara",
+      "stalledSince": "2026-09-27T16:15:46.091Z",
+      "reason": "waiting on the org-change proposal: split mobile (in_muk2tcfs1i860)",
+      "dedupeKey": "stall:as_muk0srs9kx5vs:2026-09-29"
+    },
+    "options": [
+      {
+        "id": "resume",
+        "label": "Resume it now"
+      },
+      {
+        "id": "wait",
+        "label": "Let it wait"
+      },
+      {
+        "id": "answered",
+        "label": "Instruction",
+        "needsNote": true
+      }
+    ],
+    "state": "expired",
+    "raisedBy": "asha",
+    "createdAt": "2026-09-28T21:32:52.707Z",
+    "affects": [
+      "asha",
+      "tara"
+    ],
+    "onApprove": "your answer goes to the employee",
+    "onDeny": "nothing changes",
+    "answer": {
+      "optionId": "expired",
+      "note": "Moved to Asha's queue: routine stall/idle notices never reach the owner's Inbox.",
+      "at": "2026-09-28T22:07:33.212Z",
+      "via": "workplace"
+    },
+    "messageCount": 0,
+    "urgency": "normal"
+  },
+  {
+    "id": "in_mulqdvwbbgfqm",
+    "kind": "org-change",
+    "title": "Hire: Testy2 as engineer holding experts",
+    "body": "[TEST] QA fixture 2 (re-verify B10 after the web rebuild): reject this; nothing changes.\n\ndiff -ruN --exclude .git --exclude workplace.db* --exclude employees org/map.yaml org/map.yaml\n--- org/map.yaml\t2026-09-27 22:04:13\n+++ org/map.yaml\t2026-09-29 02:29:47\n@@ -1,273 +1,1321 @@\n-# The ownership map: things → the charter that owns them.\n-# Path keys are \"<repo>:<path>\" with repos from org.yaml; paths match by the\n-# longest prefix, everything else exactly. Keywords route free text.\n-# Requirement groups are the 15 groups of the checklist plus the definition's\n-# other sections; a \"requirement\" entry overrides its group for one id.\n-\n entries:\n-  # ---------- capability: conversation ----------\n-  - { kind: path, key: \"iris:services/agent-svc/speaker.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speaker_gate.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speech.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speech_acts.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/stt_stream.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/responsiveness.py\", primary: conversation, consulted: [character] }\n-  - { kind: path, key: \"iris:services/agent-svc/reply_stream.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/state_intent.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/email_speech.py\", primary: conversation, consulted: [experts] }\n-  - { kind: path, key: \"iris:services/agent-svc/prompt_cache.py\", primary: conversation, consulted: [server] }\n-  - { kind: path, key: \"iris:services/agent-svc/speculate.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/jokes.py\", primary: conversation }\n-  - { kind: path, key: \"iris:harness\", primary: conversation, consulted: [qa-release] }\n-  - { kind: path, key: \"iris:docs/HLD-responsiveness.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-single-speaker.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-live-voice.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-voice-expressivity.md\", primary: conversation }\n-  - { kind: path, key: \"iris:desktop/renderer\", primary: conversation, consulted: [character, desktop-mac] }\n-  - { kind: keyword, key: \"voice\", primary: conversation }\n-  - { kind: keyword, key: \"stt\", primary: conversation }\n-  - { kind: keyword, key: \"tts\", primary: conversation }\n-  - { kind: keyword, key: \"wake word\", primary: conversation }\n-  - { kind: keyword, key: \"responsiveness\", primary: conversation }\n-  - { kind: keyword, key: \"500 ms\", primary: conversation }\n-  - { kind: keyword, key: \"push-to-talk\", primary: conversation, consulted: [product-and-business] }\n-  - { kind: keyword, key: \"speaks\", primary: conversation }\n-  - { kind: keyword, key: \"spoken\", primary: conversation }\n-  - { kind: keyword, key: \"speaker\", primary: conversation }",
+    "summary": "[TEST] QA fixture 2 (re-verify B10 after the web rebuild): reject this; nothing changes.",
+    "details": "[TEST] QA fixture 2 (re-verify B10 after the web rebuild): reject this; nothing changes.\n\ndiff -ruN --exclude .git --exclude workplace.db* --exclude employees org/map.yaml org/map.yaml\n--- org/map.yaml\t2026-09-27 22:04:13\n+++ org/map.yaml\t2026-09-29 02:29:47\n@@ -1,273 +1,1321 @@\n-# The ownership map: things → the charter that owns them.\n-# Path keys are \"<repo>:<path>\" with repos from org.yaml; paths match by the\n-# longest prefix, everything else exactly. Keywords route free text.\n-# Requirement groups are the 15 groups of the checklist plus the definition's\n-# other sections; a \"requirement\" entry overrides its group for one id.\n-\n entries:\n-  # ---------- capability: conversation ----------\n-  - { kind: path, key: \"iris:services/agent-svc/speaker.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speaker_gate.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speech.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speech_acts.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/stt_stream.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/responsiveness.py\", primary: conversation, consulted: [character] }\n-  - { kind: path, key: \"iris:services/agent-svc/reply_stream.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/state_intent.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/email_speech.py\", primary: conversation, consulted: [experts] }\n-  - { kind: path, key: \"iris:services/agent-svc/prompt_cache.py\", primary: conversation, consulted: [server] }\n-  - { kind: path, key: \"iris:services/agent-svc/speculate.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/jokes.py\", primary: conversation }\n-  - { kind: path, key: \"iris:harness\", primary: conversation, consulted: [qa-release] }\n-  - { kind: path, key: \"iris:docs/HLD-responsiveness.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-single-speaker.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-live-voice.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-voice-expressivity.md\", primary: conversation }\n-  - { kind: path, key: \"iris:desktop/renderer\", primary: conversation, consulted: [character, desktop-mac] }\n-  - { kind: keyword, key: \"voice\", primary: conversation }\n-  - { kind: keyword, key: \"stt\", primary: conversation }\n-  - { kind: keyword, key: \"tts\", primary: conversation }\n-  - { kind: keyword, key: \"wake word\", primary: conversation }\n-  - { kind: keyword, key: \"responsiveness\", primary: conversation }\n-  - { kind: keyword, key: \"500 ms\", primary: conversation }\n-  - { kind: keyword, key: \"push-to-talk\", primary: conversation, consulted: [product-and-business] }\n-  - { kind: keyword, key: \"speaks\", primary: conversation }\n-  - { kind: keyword, key: \"spoken\", primary: conversation }\n-  - { kind: keyword, key: \"speaker\", primary: conversation }",
+    "context": {
+      "proposalId": "op_mulqdvwaakqxp",
+      "kind": "hire",
+      "lintErrors": 0,
+      "params": {
+        "name": "Testy2",
+        "roleId": "engineer",
+        "charterIds": [
+          "experts"
+        ],
+        "reportsTo": "mira"
+      }
+    },
+    "options": [
+      {
+        "id": "approve",
+        "label": "Approve"
+      },
+      {
+        "id": "reject",
+        "label": "Reject",
+        "danger": true
+      }
+    ],
+    "state": "answered",
+    "raisedBy": "owner",
+    "createdAt": "2026-09-28T20:59:47.771Z",
+    "affects": [
+      "mira",
+      "asha"
+    ],
+    "onApprove": "the org files are written and committed; routing and every affected context change on the next session",
+    "onDeny": "nothing changes; the proposal is kept with your reason",
+    "answer": {
+      "optionId": "reject",
+      "at": "2026-09-28T21:00:48.143Z",
+      "via": "web"
+    },
+    "messageCount": 0,
+    "urgency": "normal"
+  },
+  {
+    "id": "in_mulpu939eab7o",
+    "kind": "org-change",
+    "title": "Hire: Testy as engineer holding experts",
+    "body": "[TEST] QA fixture (29 Sep night): reject this item; nothing changes. Not a real hire.\n\ndiff -ruN --exclude .git --exclude workplace.db* --exclude employees org/map.yaml org/map.yaml\n--- org/map.yaml\t2026-09-27 22:04:13\n+++ org/map.yaml\t2026-09-29 02:14:31\n@@ -1,273 +1,1321 @@\n-# The ownership map: things → the charter that owns them.\n-# Path keys are \"<repo>:<path>\" with repos from org.yaml; paths match by the\n-# longest prefix, everything else exactly. Keywords route free text.\n-# Requirement groups are the 15 groups of the checklist plus the definition's\n-# other sections; a \"requirement\" entry overrides its group for one id.\n-\n entries:\n-  # ---------- capability: conversation ----------\n-  - { kind: path, key: \"iris:services/agent-svc/speaker.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speaker_gate.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speech.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speech_acts.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/stt_stream.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/responsiveness.py\", primary: conversation, consulted: [character] }\n-  - { kind: path, key: \"iris:services/agent-svc/reply_stream.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/state_intent.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/email_speech.py\", primary: conversation, consulted: [experts] }\n-  - { kind: path, key: \"iris:services/agent-svc/prompt_cache.py\", primary: conversation, consulted: [server] }\n-  - { kind: path, key: \"iris:services/agent-svc/speculate.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/jokes.py\", primary: conversation }\n-  - { kind: path, key: \"iris:harness\", primary: conversation, consulted: [qa-release] }\n-  - { kind: path, key: \"iris:docs/HLD-responsiveness.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-single-speaker.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-live-voice.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-voice-expressivity.md\", primary: conversation }\n-  - { kind: path, key: \"iris:desktop/renderer\", primary: conversation, consulted: [character, desktop-mac] }\n-  - { kind: keyword, key: \"voice\", primary: conversation }\n-  - { kind: keyword, key: \"stt\", primary: conversation }\n-  - { kind: keyword, key: \"tts\", primary: conversation }\n-  - { kind: keyword, key: \"wake word\", primary: conversation }\n-  - { kind: keyword, key: \"responsiveness\", primary: conversation }\n-  - { kind: keyword, key: \"500 ms\", primary: conversation }\n-  - { kind: keyword, key: \"push-to-talk\", primary: conversation, consulted: [product-and-business] }\n-  - { kind: keyword, key: \"speaks\", primary: conversation }\n-  - { kind: keyword, key: \"spoken\", primary: conversation }\n-  - { kind: keyword, key: \"speaker\", primary: conversation }",
+    "summary": "[TEST] QA fixture (29 Sep night): reject this item; nothing changes.",
+    "details": "[TEST] QA fixture (29 Sep night): reject this item; nothing changes. Not a real hire.\n\ndiff -ruN --exclude .git --exclude workplace.db* --exclude employees org/map.yaml org/map.yaml\n--- org/map.yaml\t2026-09-27 22:04:13\n+++ org/map.yaml\t2026-09-29 02:14:31\n@@ -1,273 +1,1321 @@\n-# The ownership map: things → the charter that owns them.\n-# Path keys are \"<repo>:<path>\" with repos from org.yaml; paths match by the\n-# longest prefix, everything else exactly. Keywords route free text.\n-# Requirement groups are the 15 groups of the checklist plus the definition's\n-# other sections; a \"requirement\" entry overrides its group for one id.\n-\n entries:\n-  # ---------- capability: conversation ----------\n-  - { kind: path, key: \"iris:services/agent-svc/speaker.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speaker_gate.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speech.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/speech_acts.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/stt_stream.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/responsiveness.py\", primary: conversation, consulted: [character] }\n-  - { kind: path, key: \"iris:services/agent-svc/reply_stream.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/state_intent.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/email_speech.py\", primary: conversation, consulted: [experts] }\n-  - { kind: path, key: \"iris:services/agent-svc/prompt_cache.py\", primary: conversation, consulted: [server] }\n-  - { kind: path, key: \"iris:services/agent-svc/speculate.py\", primary: conversation }\n-  - { kind: path, key: \"iris:services/agent-svc/jokes.py\", primary: conversation }\n-  - { kind: path, key: \"iris:harness\", primary: conversation, consulted: [qa-release] }\n-  - { kind: path, key: \"iris:docs/HLD-responsiveness.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-single-speaker.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-live-voice.md\", primary: conversation }\n-  - { kind: path, key: \"iris:docs/HLD-voice-expressivity.md\", primary: conversation }\n-  - { kind: path, key: \"iris:desktop/renderer\", primary: conversation, consulted: [character, desktop-mac] }\n-  - { kind: keyword, key: \"voice\", primary: conversation }\n-  - { kind: keyword, key: \"stt\", primary: conversation }\n-  - { kind: keyword, key: \"tts\", primary: conversation }\n-  - { kind: keyword, key: \"wake word\", primary: conversation }\n-  - { kind: keyword, key: \"responsiveness\", primary: conversation }\n-  - { kind: keyword, key: \"500 ms\", primary: conversation }\n-  - { kind: keyword, key: \"push-to-talk\", primary: conversation, consulted: [product-and-business] }\n-  - { kind: keyword, key: \"speaks\", primary: conversation }\n-  - { kind: keyword, key: \"spoken\", primary: conversation }\n-  - { kind: keyword, key: \"speaker\", primary: conversation }",
+    "context": {
+      "proposalId": "op_mulpu9388jywa",
+      "kind": "hire",
+      "lintErrors": 0,
+      "params": {
+        "name": "Testy",
+        "roleId": "engineer",
+        "charterIds": [
+          "experts"
+        ],
+        "reportsTo": "mira"
+      }
+    },
+    "options": [
+      {
+        "id": "approve",
+        "label": "Approve"
+      },
+      {
+        "id": "reject",
+        "label": "Reject",
+        "danger": true
+      }
+    ],
+    "state": "answered",
+    "raisedBy": "owner",
+    "createdAt": "2026-09-28T20:44:31.749Z",
+    "affects": [
+      "mira",
+      "asha"
+    ],
+    "onApprove": "the org files are written and committed; routing and every affected context change on the next session",
+    "onDeny": "nothing changes; the proposal is kept with your reason",
+    "answer": {
+      "optionId": "reject",
+      "note": "[TEST] rejected from the phone by QA (CSRF header set by hand: the web client never sends it, see B10)",
+      "at": "2026-09-28T20:48:43.910Z",
+      "via": "web"
+    },
+    "messageCount": 0,
+    "urgency": "normal"
+  },
+  {
+    "id": "in_mulll5gw5o4z2",
+    "kind": "question",
+    "title": "Waiting: Daily greeting, weather-aware — Experts",
+    "body": "Mira's assignment as_muk1cyyahy9ka (building) has had no session activity since 2026-09-27 20:29 UTC. Why: waiting on your answer: \"Mira is stalled\".\nAnswer with what should happen, or nothing: it is noted, not forgotten.",
+    "summary": "Mira's assignment as_muk1cyyahy9ka (building) has had no session activity since 2026-09-27 20:29 UTC.",
+    "details": "Mira's assignment as_muk1cyyahy9ka (building) has had no session activity since 2026-09-27 20:29 UTC. Why: waiting on your answer: \"Mira is stalled\".\nAnswer with what should happen, or nothing: it is noted, not forgotten.",
+    "context": {
+      "assignmentId": "as_muk1cyyahy9ka",
+      "employeeId": "mira",
+      "stalledSince": "2026-09-27T20:29:50.381Z",
+      "reason": "waiting on your answer: \"Mira is stalled\"",
+      "dedupeKey": "stall:as_muk1cyyahy9ka:2026-09-29"
+    },
+    "options": [
+      {
+        "id": "resume",
+        "label": "Resume it now"
+      },
+      {
+        "id": "wait",
+        "label": "Let it wait"
+      },
+      {
+        "id": "answered",
+        "label": "Instruction",
+        "needsNote": true
+      }
+    ],
+    "state": "expired",
+    "raisedBy": "asha",
+    "createdAt": "2026-09-28T18:45:28.688Z",
+    "affects": [
+      "asha",
+      "mira"
+    ],
+    "onApprove": "your answer goes to the employee",
+    "onDeny": "nothing changes",
+    "answer": {
+      "optionId": "expired",
+      "note": "Moved to Asha's queue: routine stall/idle notices never reach the owner's Inbox.",
+      "at": "2026-09-28T22:07:33.212Z",
+      "via": "workplace"
+    },
+    "messageCount": 0,
+    "urgency": "normal"
+  },
+  {
+    "id": "in_mulll5gnn2hqt",
+    "kind": "question",
+    "title": "Waiting: Daily greeting, weather-aware — Conversation",
+    "body": "Dev's assignment as_muk1cyy841xrt (planned) has had no session activity since 2026-09-27 20:14 UTC. Why: waiting on your answer: \"Dev is stalled\".\nAnswer with what should happen, or nothing: it is noted, not forgotten.",
+    "summary": "Dev's assignment as_muk1cyy841xrt (planned) has had no session activity since 2026-09-27 20:14 UTC.",
+    "details": "Dev's assignment as_muk1cyy841xrt (planned) has had no session activity since 2026-09-27 20:14 UTC. Why: waiting on your answer: \"Dev is stalled\".\nAnswer with what should happen, or nothing: it is noted, not forgotten.",
+    "context": {
+      "assignmentId": "as_muk1cyy841xrt",
+      "employeeId": "dev",
+      "stalledSince": "2026-09-27T20:14:11.426Z",
+      "reason": "waiting on your answer: \"Dev is stalled\"",
+      "dedupeKey": "stall:as_muk1cyy841xrt:2026-09-29"
+    },
+    "options": [
+      {
+        "id": "resume",
+        "label": "Resume it now"
+      },
+      {
+        "id": "wait",
+        "label": "Let it wait"
+      },
+      {
+        "id": "answered",
+        "label": "Instruction",
+        "needsNote": true
+      }
+    ],
+    "state": "expired",
+    "raisedBy": "asha",
+    "createdAt": "2026-09-28T18:45:28.679Z",
+    "affects": [
+      "asha",
+      "dev"
+    ],
+    "onApprove": "your answer goes to the employee",
+    "onDeny": "nothing changes",
+    "answer": {
+      "optionId": "expired",
+      "note": "Moved to Asha's queue: routine stall/idle notices never reach the owner's Inbox.",
+      "at": "2026-09-28T22:07:33.212Z",
+      "via": "workplace"
+    },
+    "messageCount": 0,
+    "urgency": "normal"
+  }
+]

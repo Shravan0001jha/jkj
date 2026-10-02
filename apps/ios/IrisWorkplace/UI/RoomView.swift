@@ -219,6 +219,14 @@ struct ThreadView: View {
     private var messages: [RoomMessage] { model.room.messages[id] ?? [] }
     /// General and each area's own channel: everyone's, never resolved from here.
     private var isChannel: Bool { id == RoomStore.generalId || id.hasPrefix("th_area_") }
+    /// The server refuses to resolve General, an area's channel, an epic's thread and Releases
+    /// (400): only ordinary topic threads offer Resolve.
+    private var canResolve: Bool {
+        guard let t = thread, t.state == .open else { return false }
+        if isChannel || id.hasPrefix("th_epic_") || id == "th_releases" || t.epicId != nil { return false }
+        if let r = t.roomId, r != "general" { return false }
+        return true
+    }
     /// Who can be @mentioned: everyone in the Office, plus the thread's participants (the Office may not be loaded yet).
     private var knownIds: [String] {
         Array(Set(model.office.cards.map(\.employee.id) + (thread?.participants ?? []) + messages.map(\.by))).filter { $0 != "owner" && $0 != "workplace" }
@@ -290,7 +298,7 @@ struct ThreadView: View {
         .navigationTitle(thread?.title ?? "Thread")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if thread?.state == .open && !isChannel {
+            if canResolve {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button { showResolve = true } label: { Label("Resolve with a summary", systemImage: "checkmark.circle") }
@@ -395,8 +403,11 @@ struct RoomMessageRow: View {
     let message: RoomMessage
     @State private var expanded = false
 
+    /// Only the owner's own words are "You": the COO posts as herself (`by: 'coo'`).
+    private var isOwner: Bool { message.by == "owner" || (message.owner && message.by != "coo") }
+
     private var senderName: String {
-        message.owner ? "You" : message.by == "workplace" ? "Workplace" : model.employeeName(message.by)
+        isOwner ? "You" : message.by == "workplace" ? "Workplace" : message.by == "coo" ? "Claude — COO" : model.employeeName(message.by)
     }
 
     var body: some View {
@@ -406,26 +417,26 @@ struct RoomMessageRow: View {
     private var bubble: some View {
         let c = CompactText(text: message.text, details: message.details)
         return HStack(alignment: .top, spacing: 8) {
-            if message.owner { Spacer(minLength: 40) }
-            if !message.owner { InitialsAvatar(name: senderName, tint: message.by == "workplace" ? .secondary : .accentColor) }
-            VStack(alignment: message.owner ? .trailing : .leading, spacing: 3) {
+            if isOwner { Spacer(minLength: 40) }
+            if !isOwner { InitialsAvatar(name: senderName, tint: message.by == "workplace" ? .secondary : .accentColor) }
+            VStack(alignment: isOwner ? .trailing : .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(senderName).font(.caption.weight(.semibold)).foregroundStyle(message.owner ? Color.accentColor : .primary)
+                    Text(senderName).font(.caption.weight(.semibold)).foregroundStyle(isOwner ? Color.accentColor : .primary)
                     Text(Format.ago(message.at)).font(.caption2).foregroundStyle(.tertiary)
                     if c.hasDetails { Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.secondary) }
                 }
                 Text(highlighted(expanded ? (message.details ?? message.text) : c.line))
                     .font(.subheadline)
                     .lineLimit(expanded ? nil : 1)
-                    .multilineTextAlignment(message.owner ? .trailing : .leading)
-                    .foregroundStyle(message.owner ? .white : .primary)
+                    .multilineTextAlignment(isOwner ? .trailing : .leading)
+                    .foregroundStyle(isOwner ? .white : .primary)
                     .textSelection(.enabled)
                     .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(message.owner ? Color.accentColor.opacity(0.9) : Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                    .background(isOwner ? Color.accentColor.opacity(0.9) : Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
             }
-            if !message.owner { Spacer(minLength: 40) }
+            if !isOwner { Spacer(minLength: 40) }
         }
-        .frame(maxWidth: .infinity, alignment: message.owner ? .trailing : .leading)
+        .frame(maxWidth: .infinity, alignment: isOwner ? .trailing : .leading)
         .padding(.horizontal, 12)
         .contentShape(Rectangle())
         .onTapGesture { if c.hasDetails { withAnimation(.snappy) { expanded.toggle() } } }

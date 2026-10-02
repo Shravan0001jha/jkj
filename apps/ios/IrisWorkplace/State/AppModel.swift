@@ -571,9 +571,9 @@ final class AppModel {
     /// The employee's name for an id, from whatever is loaded.
     func employeeName(_ id: String?) -> String {
         guard let id, !id.isEmpty else { return "—" }
+        if id == "owner" { return "You" }
         if let name = office.card(id)?.employee.name { return name }
         switch id {
-        case "owner": return "You"
         case "workplace": return "Workplace"
         case "coo": return "Claude — COO"
         default: return id

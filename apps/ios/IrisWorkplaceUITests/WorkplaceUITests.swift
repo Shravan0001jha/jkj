@@ -220,6 +220,7 @@ final class WorkplaceUITests: XCTestCase {
         XCTAssertTrue(sent.waitForExistence(timeout: 20), "the sent line comes back from the session log")
         shot("real-talk-running")
         interrupt.tap()
+        app.buttons["Stop the run"].firstMatch.tap()   // interrupt is confirmed first
         let stopped = NSPredicate { _, _ in !self.app.buttons["Interrupt"].exists }
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: stopped, object: nil)], timeout: 60), .completed, "interrupt ends the running state")
         sleep(3)

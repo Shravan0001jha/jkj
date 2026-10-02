@@ -1,0 +1,202 @@
+[
+  {
+    "id": "up_muqmaem6yobhj",
+    "at": "2026-10-02T07:03:57.822Z",
+    "kind": "unblocked",
+    "line": "Unblocked: Greeting context contract shared by memory and the greeting expert — Experts — Mira",
+    "by": "workplace",
+    "itemId": "as_mulrsdzj2xqf3",
+    "href": "item/as_mulrsdzj2xqf3",
+    "push": false
+  },
+  {
+    "id": "up_muqmae6pbkx6t",
+    "at": "2026-10-02T07:03:57.265Z",
+    "kind": "blocked",
+    "line": "Blocked: Greeting context contract shared by memory and the greeting expert — Experts — waiting on Claude — COO: session run_80vcml20 was shut down by the Workplace; start it again to continue from the branch and the handoff",
+    "by": "workplace",
+    "itemId": "as_mulrsdzj2xqf3",
+    "href": "item/as_mulrsdzj2xqf3",
+    "push": true
+  },
+  {
+    "id": "up_muqlv7p695ra7",
+    "at": "2026-10-02T06:52:09.018Z",
+    "kind": "started",
+    "line": "Started: Daily greeting, weather-aware — Desktop (Mac) — Rohan",
+    "by": "asha",
+    "itemId": "as_muk1cyy9pd5qj",
+    "href": "item/as_muk1cyy9pd5qj",
+    "push": true
+  },
+  {
+    "id": "up_muqlv7kbbua98",
+    "at": "2026-10-02T06:52:08.843Z",
+    "kind": "started",
+    "line": "Started: Daily greeting, weather-aware — Memory — Kabir",
+    "by": "asha",
+    "itemId": "as_muk1cyya6zx1f",
+    "href": "item/as_muk1cyya6zx1f",
+    "push": true
+  },
+  {
+    "id": "up_muqlsecks61lm",
+    "at": "2026-10-02T06:49:57.668Z",
+    "kind": "started",
+    "line": "Started: Greeting context contract shared by memory and the greeting expert — Experts — Mira",
+    "by": "asha",
+    "itemId": "as_mulrsdzj2xqf3",
+    "href": "item/as_mulrsdzj2xqf3",
+    "push": true
+  },
+  {
+    "id": "up_muqllh9m46p26",
+    "at": "2026-10-02T06:44:34.858Z",
+    "kind": "decided",
+    "line": "Decided: 2 Iris paths mis-owned; no proposal kind exists to fix them — Approve the 2-entry manual map edit now",
+    "by": "owner",
+    "inboxId": "in_muqel76q1h1i1",
+    "href": "inbox/in_muqel76q1h1i1",
+    "push": false
+  },
+  {
+    "id": "up_muqk8y14dylwk",
+    "at": "2026-10-02T06:06:50.440Z",
+    "kind": "shipped",
+    "line": "Shipped: P0 music bundle — AC1, AC2, AC5 (music controls): pause/stop/mute act on the player not system volume; no stray volume-0; garbled/low-confidence lines never trigger play/stop — Mira",
+    "by": "nikhil",
+    "itemId": "as_muqed3ed0cpmg",
+    "href": "item/as_muqed3ed0cpmg",
+    "push": false
+  },
+  {
+    "id": "up_muqk8tyulzdxu",
+    "at": "2026-10-02T06:06:45.174Z",
+    "kind": "unblocked",
+    "line": "Unblocked: P0 music bundle — AC1, AC2, AC5 (music controls): pause/stop/mute act on the player not system volume; no stray volume-0; garbled/low-confidence lines never trigger play/stop — Mira",
+    "by": "nikhil",
+    "itemId": "as_muqed3ed0cpmg",
+    "href": "item/as_muqed3ed0cpmg",
+    "push": false
+  },
+  {
+    "id": "up_muqk65wj9e43o",
+    "at": "2026-10-02T06:04:40.675Z",
+    "kind": "unblocked",
+    "line": "Unblocked: P0 bug bundle: \"Iris during music\". — Conversation — Dev",
+    "by": "workplace",
+    "itemId": "as_muqecr89jhjst",
+    "href": "item/as_muqecr89jhjst",
+    "push": false
+  },
+  {
+    "id": "up_muqk65h1y9uon",
+    "at": "2026-10-02T06:04:40.117Z",
+    "kind": "blocked",
+    "line": "Blocked: P0 bug bundle: \"Iris during music\". — Conversation — waiting on Claude — COO: session run_7aawxgor was shut down by the Workplace; start it again to continue from the branch and the handoff",
+    "by": "workplace",
+    "itemId": "as_muqecr89jhjst",
+    "href": "item/as_muqecr89jhjst",
+    "push": true
+  },
+  {
+    "id": "up_muqjzzlwo0aqc",
+    "at": "2026-10-02T05:59:52.580Z",
+    "kind": "blocked",
+    "line": "Blocked: P0 music bundle — AC1, AC2, AC5 (music controls): pause/stop/mute act on the player not system volume; no stray volume-0; garbled/low-confidence lines never trigger play/stop — waiting on Claude — COO: Cannot complete verification: the Bash tool's Workplace guard blocks any command containing the substring \"agent-svc\" — including plain `ls services/agent-svc` or `echo agent-svc`, not just app-launch commands — so I cannot run the charter-sanctioned suite (`cd services/agent-svc && ../../.venv/bin/python -m pytest -q tests`) for this review or any future agent-svc review. Code review itself is done and looks correct (see item comment); only the test-count evidence is missing.",
+    "by": "nikhil",
+    "itemId": "as_muqed3ed0cpmg",
+    "href": "item/as_muqed3ed0cpmg",
+    "push": true
+  },
+  {
+    "id": "up_muqjpoe27d6a5",
+    "at": "2026-10-02T05:51:51.482Z",
+    "kind": "unblocked",
+    "line": "Unblocked: P0 bug bundle: \"Iris during music\". — Conversation — Dev",
+    "by": "workplace",
+    "itemId": "as_muqecr89jhjst",
+    "href": "item/as_muqecr89jhjst",
+    "push": false
+  },
+  {
+    "id": "up_muqjpo00egw78",
+    "at": "2026-10-02T05:51:50.976Z",
+    "kind": "blocked",
+    "line": "Blocked: P0 bug bundle: \"Iris during music\". — Conversation — waiting on Claude — COO: session run_l2jvjde5 was shut down by the Workplace; start it again to continue from the branch and the handoff",
+    "by": "workplace",
+    "itemId": "as_muqecr89jhjst",
+    "href": "item/as_muqecr89jhjst",
+    "push": true
+  },
+  {
+    "id": "up_muqi4bt7lrvk4",
+    "at": "2026-10-02T05:07:15.787Z",
+    "kind": "unblocked",
+    "line": "Unblocked: P0 bug bundle: \"Iris during music\". — Conversation — Dev",
+    "by": "owner",
+    "itemId": "as_muqecr89jhjst",
+    "href": "item/as_muqecr89jhjst",
+    "push": false
+  },
+  {
+    "id": "up_muqi39cp0woeq",
+    "at": "2026-10-02T05:06:25.945Z",
+    "kind": "unblocked",
+    "line": "Unblocked: P0 music bundle — AC1, AC2, AC5 (music controls): pause/stop/mute act on the player not system volume; no stray volume-0; garbled/low-confidence lines never trigger play/stop — Mira",
+    "by": "workplace",
+    "itemId": "as_muqed3ed0cpmg",
+    "href": "item/as_muqed3ed0cpmg",
+    "push": false
+  },
+  {
+    "id": "up_muqi3912gm3nn",
+    "at": "2026-10-02T05:06:25.526Z",
+    "kind": "blocked",
+    "line": "Blocked: P0 music bundle — AC1, AC2, AC5 (music controls): pause/stop/mute act on the player not system volume; no stray volume-0; garbled/low-confidence lines never trigger play/stop — waiting on Claude — COO: session run_m0mbfs84 was shut down by the Workplace; start it again to continue from the branch and the handoff",
+    "by": "workplace",
+    "itemId": "as_muqed3ed0cpmg",
+    "href": "item/as_muqed3ed0cpmg",
+    "push": true
+  },
+  {
+    "id": "up_muqi0c64wm3wl",
+    "at": "2026-10-02T05:04:09.628Z",
+    "kind": "blocked",
+    "line": "Blocked: P0 bug bundle: \"Iris during music\". — Conversation — waiting on Claude — COO: 4th consecutive session blocked on as_muqecr89jhjst by a session-wide infra failure: every mutating tool call (Bash, Write) is rejected with \"server-side auto mode classifier gave no verdict,\" confirmed even on trivial unrelated commands (echo-only works; touch/rm/git add/Write all fail, retried once each per the error's own instructions, still rejected). Read-only tools work. No code, test, or commit was possible this session either. Needs Workplace infra fix, not another retry session.",
+    "by": "dev",
+    "itemId": "as_muqecr89jhjst",
+    "href": "item/as_muqecr89jhjst",
+    "push": true
+  },
+  {
+    "id": "up_muqhzbbqukktc",
+    "at": "2026-10-02T05:03:21.878Z",
+    "kind": "brief",
+    "line": "Brief: 0 done since yesterday · focus: none set · 0 blocked · 1 decision waits on you",
+    "by": "asha",
+    "details": "Done since yesterday\n- nothing\n\nIn progress on the focus\n- nothing\n\nBlocked\n- nothing\n\nDecisions waiting on you\n- 2 Iris paths mis-owned; no proposal kind exists to fix them",
+    "href": "plan",
+    "push": true
+  },
+  {
+    "id": "up_muqhy0z5g1ef5",
+    "at": "2026-10-02T05:02:21.809Z",
+    "kind": "unblocked",
+    "line": "Unblocked: P0 bug bundle: \"Iris during music\". — Conversation — Dev",
+    "by": "workplace",
+    "itemId": "as_muqecr89jhjst",
+    "href": "item/as_muqecr89jhjst",
+    "push": false
+  },
+  {
+    "id": "up_muqhy0y8y18yh",
+    "at": "2026-10-02T05:02:21.776Z",
+    "kind": "unblocked",
+    "line": "Unblocked: P0 music bundle — AC1, AC2, AC5 (music controls): pause/stop/mute act on the player not system volume; no stray volume-0; garbled/low-confidence lines never trigger play/stop — Mira",
+    "by": "workplace",
+    "itemId": "as_muqed3ed0cpmg",
+    "href": "item/as_muqed3ed0cpmg",
+    "push": false
+  }
+]

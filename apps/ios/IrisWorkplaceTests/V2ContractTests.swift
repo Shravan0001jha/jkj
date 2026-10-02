@@ -86,6 +86,25 @@ final class V2ContractTests: XCTestCase {
         XCTAssertEqual(log.first?.from, .workplace, "the assignment prompt is the Workplace's, not the owner's")
     }
 
+    /// A second capture (2 Oct, afternoon) after the server's follow-ups: urgency and messageCount
+    /// always present, waitingOn on stalled flags, human-readable reasons, epic owners.
+    func testSecondLiveCaptureAfterServerFollowUps() throws {
+        try roundTrip("live2-plan", PlanResponse.self)
+        try roundTrip("live2-plan-board", PlanResponse.self)
+        try roundTrip("live2-items", [Item].self)
+        try roundTrip("live2-item-epic", ItemDetail.self)
+        try roundTrip("live2-updates", [Update].self)
+        try roundTrip("live2-inbox", [InboxItem].self)
+        let plan = try Fixtures.decode("live2-plan", as: PlanResponse.self)
+        let stalled = plan.areas.flatMap(\.epics).flatMap(\.flags).filter { $0.kind == .stalled }
+        XCTAssertFalse(stalled.isEmpty)
+        XCTAssertTrue(stalled.allSatisfy { $0.waitingOn != nil }, "stalled flags say who is acting")
+        XCTAssertTrue(stalled.allSatisfy { !$0.reason.contains(" min,") || $0.reason.contains("hour") }, "reasons are readable")
+        XCTAssertTrue(plan.areas.flatMap(\.epics).allSatisfy { $0.epic.ownerId != nil }, "every epic has an owner now")
+        let inbox = try Fixtures.decode("live2-inbox", as: [InboxItem].self)
+        XCTAssertTrue(inbox.allSatisfy { $0.urgency != nil && $0.messageCount != nil })
+    }
+
     // MARK: unknown values never fail a screen
 
     func testUnknownEnumValuesDecodeAsUnknown() throws {

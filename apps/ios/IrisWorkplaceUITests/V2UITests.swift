@@ -115,9 +115,47 @@ final class V2UITests: XCTestCase {
         app.launchEnvironment["WORKPLACE_TALK"] = "mira"
         app.launch()
         XCTAssertTrue(app.navigationBars["Mira"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Expert added'")).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'The expert is in'")).firstMatch.waitForExistence(timeout: 8))
         XCTAssertFalse(app.staticTexts["Assignment a-1: Errand receiver on the Mac. Reply with ## Plan first."].exists, "the Workplace's prompt is not shown as the owner's message")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'worked'")).firstMatch.exists, "it is folded into a quiet activity line")
         shot("talk-chat")
     }
+}
+
+/// The unified Talk chat, measured: one left edge for the other side's bubbles, one right edge for
+/// the owner's, no bubble wider than 80% of the screen, the send button centred on the field.
+final class ChatAlignmentUITests: XCTestCase {
+    private func measure(_ talk: String, file: StaticString = #filePath, line: UInt = #line) {
+        let app = XCUIApplication()
+        app.launchEnvironment = ["WORKPLACE_URL": "127.0.0.1:4399", "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
+                                 "WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_NO_DEVICE_AUTH": "1", "WORKPLACE_TALK": talk]
+        app.launch()
+        let field = app.textFields["chat.composer"]
+        XCTAssertTrue(field.waitForExistence(timeout: 8), file: file, line: line)
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat.theirs").firstMatch.waitForExistence(timeout: 8), file: file, line: line)
+        sleep(1)
+        let width = app.windows.firstMatch.frame.width
+        let theirs = app.descendants(matching: .any).matching(identifier: "chat.theirs").allElementsBoundByIndex.map(\.frame).filter { $0.width > 0 }
+        let mine = app.descendants(matching: .any).matching(identifier: "chat.mine").allElementsBoundByIndex.map(\.frame).filter { $0.width > 0 }
+        XCTAssertFalse(theirs.isEmpty, "bubbles found", file: file, line: line)
+        let lefts = Set(theirs.map { Int($0.minX.rounded()) })
+        XCTAssertEqual(lefts.count, 1, "one left edge: \(lefts)", file: file, line: line)
+        if !mine.isEmpty {
+            let rights = Set(mine.map { Int($0.maxX.rounded()) })
+            XCTAssertEqual(rights.count, 1, "one right edge: \(rights)", file: file, line: line)
+            XCTAssertEqual(Double(lefts.first!), Double(width) - Double(rights.first!), accuracy: 1, "symmetric gutters", file: file, line: line)
+        }
+        // Accessibility frames of a combined element are outset ~4 pt on each side of the drawn
+        // bubble (the drawn left edge is the 10 pt gutter; the frame reads 6): allow for it.
+        for f in theirs + mine { XCTAssertLessThanOrEqual(f.width, width * 0.8 + 8, "≤ 80% wide: \(f.width) of \(width)", file: file, line: line) }
+        let send = app.buttons["chat.send"]
+        XCTAssertEqual(send.frame.midY, field.frame.midY, accuracy: 1, "send is centred on the field", file: file, line: line)
+        let tab = app.tabBars.firstMatch
+        if tab.exists { XCTAssertLessThanOrEqual(field.frame.maxY, tab.frame.minY, "the composer sits above the tab bar", file: file, line: line) }
+        let a = XCTAttachment(screenshot: app.screenshot()); a.name = "chat-\(talk)"; a.lifetime = .keepAlways; add(a)
+        print("ALIGN \(talk): width=\(width) theirsLeft=\(lefts) mineRight=\(Set(mine.map { Int($0.maxX.rounded()) })) maxBubble=\((theirs + mine).map(\.width).max() ?? 0) sendMidY=\(send.frame.midY) fieldMidY=\(field.frame.midY)")
+    }
+
+    func testCooChatAlignment() { measure("coo") }
+    func testEmployeeChatAlignment() { measure("mira") }
 }
