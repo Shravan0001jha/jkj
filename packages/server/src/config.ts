@@ -19,6 +19,8 @@ export interface Config {
   capInr: number;
   /** Conversion used for the equivalent-API-cost ledger. */
   usdInr: number;
+  /** Per-session runaway guard in notional USD. Subscription turns are free, so this is not a budget. */
+  sessionRunawayUsd: number;
   /** Cap on the appended context an employee session is given. */
   contextTokens: number;
   /** Hour (IST) of the daily digest. */
@@ -68,6 +70,7 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
     opsDir: env['IRIS_OPS_DIR'] ?? join(homedir(), 'iris-ops'),
     capInr: num(env['WORKPLACE_CAP_INR'], 1000),
     usdInr: num(env['WORKPLACE_USD_INR'], 88),
+    sessionRunawayUsd: num(env['WORKPLACE_SESSION_RUNAWAY_USD'], 25),
     contextTokens: num(env['WORKPLACE_CONTEXT_TOKENS'], 24_000),
     digestHour: num(env['WORKPLACE_DIGEST_HOUR'], 9),
     telegram: !argv.includes('--no-telegram') && env['WORKPLACE_TELEGRAM'] !== '0',

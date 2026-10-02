@@ -215,7 +215,9 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
         }],
       },
       // An owner-talk turn at the cap still needs room to answer: one turn's worth.
-      maxBudgetUsd: Math.max(options.ownerTalk ? OWNER_TALK_TURN_INR / wp.config.usdInr : 0.05, remaining),
+      // Subscription turns are free (the ₹ budget is real money only), so the SDK stop is a runaway
+      // guard per session, never the employee's daily ₹ budget.
+      maxBudgetUsd: Math.max(options.ownerTalk ? OWNER_TALK_TURN_INR / wp.config.usdInr : 0.05, remaining, wp.config.sessionRunawayUsd),
       mcpServers: { workplace: workplaceTools(wp, employeeId, () => session) },
     },
     onResult: result => recordUsage(wp, session, result),
