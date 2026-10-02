@@ -377,3 +377,127 @@ Inbox items; WhatsApp is never wired; every employee's outward action is a gate,
 - Tailscale needs the owner. — designed for, asked for in M5, Telegram carries approvals until then.
 - The product-definition deck is read once by the importer; a re-import diff is provided so a
   changed definition updates requirements without losing statuses. — in LLD §5.
+
+## 8. v2 — the plan is the centre (owner-approved redesign, 2 Oct)
+
+Source: the approved design doc "Iris Workplace v2 — Redesign" (claude.ai artifact
+`4ec0a8ce-…`). This section records the server-side decisions of Phase 2 ("Server"); the LLD §19
+carries the schema, state machine, API and JSON shapes, and the TDD order. Phases 3/4 (iOS,
+Android) build against `@jkj/shared`'s `workplace-v2.ts`.
+
+### Why
+
+The live Workplace on 2 Oct showed agents' activity, not the company's work: "15 stalled" with no
+reason (8 never started, 6 "in review" with nobody reviewing, 3 blocked), 34 open items with no
+grouping, the same story five times, no history on an item, a multiple-choice Inbox, a Talk thread
+where system notes read as the owner's words, an empty Room and no pushed updates. The root cause:
+work items were the agents' internal to-do list, not a plan the owner shares. v2 makes the plan the
+data model's centre and derives every screen from it.
+
+### D18. One work tree, in-house and Jira-shaped: Area → Epic → Story → Task
+
+- **Area** (new table): a long-lived product area the owner creates; **at most 5 active**; each has
+  its own Room. **Epic** = today's `feature` (gains area, rank, owner, target date). **Story** and
+  **Task** = today's `assignment` (gains level, parent, points, reviewer, blocked reason/waiting-on).
+  Bugs and questions are stories.
+- **One store, one shape.** Epics, stories and tasks stay rows of the existing `work` table, so the
+  engine that runs sessions, report_done, plans, evidence, the false-done guard, the Chief of
+  Staff's spec flow and every old route keep working unchanged. v2 fields are additive JSON fields
+  plus indexed columns. Why not new tables: a second copy of the truth would need a sync, and the
+  owner asked for agents to write to *the* plan directly (the reason Jira was rejected).
+- **Every item has an owner, a reason and a history**: an assignee (an employee or `owner` — the
+  owner can be assigned "approve the release"), a parent (tasks → story → epic), comments, and an
+  activity log written by the server on every change.
+- **Points** 1/2/3/5/8 on stories; epic progress = points done ÷ points total (story count when
+  nothing is pointed). Wont-do and duplicate stories leave both sides of the fraction.
+
+### D19. Six states, mapped onto the old seven — dual-written, not replaced
+
+v2 states: **Backlog, Ready, In progress, In review, Done, Blocked**. The old engine's states
+(`proposed, planned, building, review, done, blocked, rejected` and the feature states) stay the
+engine's own view; every write keeps both in step (LLD §19.3). Rules the server enforces:
+
+- **In review needs a reviewer**, and the reviewer is not the assignee. An agent's report_done gets a
+  default reviewer (task → its story's assignee; otherwise QA; otherwise the Chief of Staff), so "in
+  review, nobody reviewing" can no longer exist. Legacy review items get Nikhil (QA) at migration.
+- **Blocked needs a reason and a waiting-on** (an employee, `owner` or `coo`). Blocked on the owner
+  goes to his Inbox with a recommendation; anything else blocked is the COO's to clear.
+- **Done is never the assignee's own word** (the false-done guard carries over): only the
+  reviewer, the owner, or — for the owner's own items — the owner. Done can be reopened, and a
+  reopen counts in the weekly review as "reopened after a false done".
+- **Backlog is parked.** Nothing automatic ever starts a Backlog item (Phase 1 had to fake this with
+  13 items held in `blocked` by the COO; migration moves exactly those to Backlog).
+
+### D20. Focus decides what may start on its own
+
+A **focus** (a list of epics, set by the owner or the COO; the P0 music epic today) is the only
+place automatic starts happen: a Ready story or task auto-starts only when its epic is in focus and
+its assignee is a free agent within budget. Everything else waits for a person to start it. Why:
+the old routine resumed any idle planned item every 5 minutes, which fought the owner's priorities.
+
+### D21. Stalls are events, not a sweep, and every stall names its cause
+
+The 5-minute Chief-of-Staff stall loop (30-minute threshold, plus the COO's 2-hour look) is replaced
+by an **event-driven watcher**: every status change, activity row and session event re-arms a
+per-item deadline; the deadline firing is the stall, at once.
+
+| Rule | Deadline | What happens immediately |
+|---|---|---|
+| Ready, not started | 15 min in Ready | in focus and assignee free → started; otherwise → Backlog with the reason. No longer stalled either way. COO notified. |
+| In progress, no activity | 10 min since the last activity (item change, comment, session event) | COO notified (bridge item + `coo/inbox.jsonl`, never the owner's Inbox); the agent's open session is asked to self-flag; with the COO offline, Asha's fallback resumes the work once per hour. Reason logged on the item. |
+| In review, untouched | 30 min | COO notified ("unreviewed"), reviewer named. |
+| An agent's own flag | the moment it calls `flag_stall` | same as idle, with the agent's reason (and Blocked when it names a waiting-on). |
+
+Each episode notifies once; new activity ends it. Agents are told (handbook + tool) to flag their own
+stall the moment it happens; the extra compute is accepted by the owner.
+
+### D22. Talk and the Room are chats; status lives in activity and Updates
+
+- **Authored messages only.** A prompt the Workplace sends a session (an assignment, a moderation
+  turn, a handoff request, a reply relay) is logged as `from: 'workplace'`; the chat view folds it,
+  with tool runs and system notes, into the collapsed activity line. Nothing appears under the
+  owner's name that he did not write — server-originated work items and posts are attributed to
+  `workplace`.
+- **Short messages.** Agent messages in the Room, comments and Inbox replies keep at most four
+  lines / 400 characters in `text`; the rest goes to `details` (shown on "more").
+- **Updates feed** (replaces the stalled counter): newest-first one-line events — started, shipped,
+  blocked, unblocked, decided, the 09:30 brief, the Sunday review — each linking to its item.
+  Pushes: started, blocked, brief, review (the owner's approved choice); shipped is feed-only.
+- **Rooms**: General, one room per active area with a thread per epic, and one Releases room.
+  Named updates post into the epic's thread as chat lines from `workplace` ("Story 'Mic stays live
+  at volume 0' is done"), never counts. The 10:00 stand-up posts in General, one message per lead
+  (`about` the lead, authored by `workplace`, since the server compiles it from the plan).
+- **Releases room**: each release is a post listing every story and fix that shipped, grouped by
+  area; posted automatically when a release run finishes, or by hand.
+
+### D23. Decisions are conversations
+
+Every Inbox item becomes a thread: the formatted question (bold one-line question, short context,
+options with the recommended one marked, urgency as a field), then replies. The owner can pick an
+option, reply in free text, ask back or propose something else; a free-text reply leaves the item
+open and is delivered to the asker's session, which answers in the same thread (`inbox_reply`).
+
+### D24. Asha's rhythm, generated from the plan
+
+Deterministic, from the data, no LLM in the loop (so it cannot invent status): one-line feed events
+on start/block/ship; **09:30 IST brief** (yesterday's done, today's focus, blockers, decisions
+waiting on the owner; push); **10:00 IST stand-up** in the General room (done / next / blocked, three
+lines per lead); **Sunday 18:00 IST review** (points shipped, reopened after a false
+done, stalls, real spend, proposed hires; push). **On-demand status** (`GET /api/status?q=` and the
+agents' `status_of` tool) answers "what's the status of X?" from the plan with links.
+
+### D25. Migration is non-destructive and runs once
+
+At boot, versioned in `settings` (`v2-migration`): columns added, every row gets a level, parent,
+v2 status, rank and (where needed) reviewer / blocked reason; COO-parked blocked items become
+Backlog; each item's history is copied into activity rows. No row is deleted or rewritten beyond
+added fields. Grouping into areas, merging duplicates (`POST /api/items/:id/merge` keeps the merged
+item's history as a comment on the survivor) and ruling on never-started items are data operations
+done through the API by the COO, with the owner's one ruling, not code.
+
+### D26. The old API stays as adapters
+
+`/api/work*` and `/api/features*` keep their shapes (their `WorkItem`s gain the v2 fields,
+additively) until both apps have moved to `/api/plan` and `/api/items`. The relay needs no change:
+it forwards every authenticated path except `/api/pair*`; the COO's lead-only routes stay refused on
+the Mac for any request carrying `x-via-tunnel` (LLD §19.10).

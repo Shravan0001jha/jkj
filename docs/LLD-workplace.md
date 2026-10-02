@@ -637,3 +637,306 @@ is level 0 too, but virtual, and must never become a new hire's default lead);
 `spend.ts`'s cap check skips virtual employees (a ₹0/day budget on an employee that never spends
 would otherwise show as permanently "at cap" and pollute every paused-scope list).
 
+
+## 19. v2: areas, epics, stories, tasks (HLD §8, D18–D26)
+
+Order followed: HLD §8 → this section → failing tests (`v2-*.test.ts`) → code. Contract types:
+`packages/shared/src/workplace-v2.ts` (exported from `@jkj/shared`). Services: `items.ts` (the v2
+model and state machine over `work`), `activity.ts` → `trail.ts` (activity, comments, updates),
+`areas.ts`, `watch.ts` (event-driven stalls), `rhythm.ts` (brief, stand-up, weekly review),
+`status.ts` (on-demand answers), `migrate-v2.ts`; additions to `inbox.ts`, `room.ts`, `releases.ts`,
+`runs.ts`, `employees.ts`, `push.ts`, `chat-view.ts`.
+
+### 19.1 Schema (`workplace.db`, additive)
+
+```sql
+-- work: the one item store (features = epics, assignments = stories/tasks). New columns, added by
+-- `alter table … add column` on open; the JSON blob stays the source of truth.
+alter table work add column level text;        -- epic | story | task
+alter table work add column status text;       -- v2 state (19.3)
+alter table work add column parent_id text;    -- story → epic, task → story
+alter table work add column area_id text;      -- epics only; stories/tasks inherit through the parent
+alter table work add column rank real;         -- order among siblings (epics: within the area)
+alter table work add column reviewer_id text;
+create index work_parent on work(parent_id); create index work_status on work(status);
+
+create table areas (id text primary key, title text not null, state text not null,  -- active | archived
+  rank real not null, created_at text not null, json text not null);
+create table comments (id text primary key, item_id text not null, at text not null, by text not null,
+  json text not null);                              -- index (item_id, at)
+create table activity (seq integer primary key autoincrement, id text not null, at text not null,
+  item_id text, by text not null, kind text not null, json text not null);  -- index (item_id, seq)
+create table updates (seq integer primary key autoincrement, id text not null, at text not null,
+  kind text not null, item_id text, json text not null);                    -- the Updates feed
+create table inbox_messages (id text primary key, inbox_id text not null, at text not null,
+  by text not null, json text not null);
+create table release_posts (id text primary key, at text not null, version text not null, json text not null);
+-- threads gain `room_id` (general | area:<id> | releases) in their JSON and a column.
+```
+
+Limits: **≤ 5 active areas** (creating or re-activating a sixth is 409). Points ∈ {1,2,3,5,8}.
+Area rooms: thread `th_area_<areaId>` (the area's own channel) is made with the area; an epic's
+thread `th_epic_<epicId>` is made when the epic first has an area. Releases room: `th_releases`.
+Legacy threads (and `th_general`) are in `general`.
+
+### 19.2 Item fields (on `WorkItem`, all optional, additive)
+
+`level`, `status`, `statusSince`, `parentId`, `areaId` (epics), `rank`, `points`, `reviewerId`,
+`ownerId` (epic owner: `owner` or an employee), `targetDate` (YYYY-MM-DD), `acceptance: string[]`,
+`blockedReason`, `waitingOn`, `blockedSince`, `resolution` (`done | wont-do | duplicate`),
+`mergedInto`, `releasedIn`. `employeeId` is the assignee and may now be `owner` (v2 create/update
+only; such an item never gets a session). Stories also keep `featureId` = their epic, so the old
+feature roll-up, pivot and request status keep counting them; tasks keep `featureId` = the epic too.
+
+The client shape is a projection, `Item` (19.8): `toItem(workItem)`.
+
+### 19.3 State machine (`items.ts`)
+
+| From \ to | backlog | ready | in-progress | in-review | done | blocked |
+|---|---|---|---|---|---|---|
+| backlog | – | ✓ | ✓ | | owner only (wont-do) | |
+| ready | ✓ | – | ✓ | | owner only (wont-do) | ✓ |
+| in-progress | ✓ | ✓ | – | ✓ reviewer | owner/epic only | ✓ |
+| in-review | | | ✓ (sent back) | – | ✓ reviewer/owner | ✓ |
+| blocked | ✓ | ✓ | ✓ | ✓ reviewer | | – |
+| done | | | ✓ reopen (note) | | – | |
+
+- **Into in-review**: `reviewerId` set (in the request or already) and ≠ assignee, else 400.
+- **Into blocked**: `blockedReason` (non-empty) and `waitingOn` (an employee id, `owner` or `coo`),
+  else 400. `waitingOn: owner` raises one owner-facing Inbox question (dedupe `blocked:<id>`) with
+  the recommendation if given; leaving blocked expires it. Leaving blocked clears the three fields.
+- **Into done**: `by` is the reviewer or `owner`; never the assignee unless the assignee is `owner`.
+  Epics: `owner` or the epic owner. From backlog/ready only by `owner`, with `resolution: wont-do`.
+- **done → in-progress** (reopen) needs a note; recorded as activity `reopen`.
+- An agent's own report (`report_done`) still goes through the old engine (evidence required) into
+  `review`; the server fills `reviewerId` with the default reviewer: a task's story assignee (if not
+  the assignee), else the `qa-release` holder (if not the assignee), else the Chief of Staff.
+
+**Mapping old → v2** (applied whenever the old engine changes `state`):
+
+| old (assignment) | v2 | old (feature) | v2 |
+|---|---|---|---|
+| proposed | ready (backlog stays backlog) | stated, specced | ready |
+| planned, building | in-progress | decomposed, in-progress | in-progress |
+| review | in-review | built, released | done |
+| done | done | | |
+| blocked | blocked (reason = the history note, waiting on `coo`) | | |
+| rejected | done, resolution wont-do | | |
+
+**Mapping v2 → old** (applied by v2 writes, written directly, bypassing the old table): backlog,
+ready → `proposed`; in-progress → keeps `planned`/`building`, else `building` when a plan exists,
+else `proposed` (the next session is asked for its plan first); in-review → `review`; done →
+`done` (`rejected` for wont-do/duplicate); blocked → `blocked`. Epics: in-progress → `in-progress`
+(from `decomposed`), done → `built`; otherwise the feature state is left alone.
+
+### 19.4 Activity, comments, updates (`trail.ts`)
+
+- `record(wp, { itemId, by, kind, from?, to?, text, link? })` → `Activity`; emitted as
+  `activity.recorded`. Written by every item write (created, status, assigned, reviewer, points,
+  field, merged, reopen), every comment, `report_done` (commits, tests), and every system note
+  (stall, auto-start, moved to backlog, COO action). **System and COO notes go here, never to Talk.**
+- `comment(wp, itemId, { by, text })` → `Comment`; mentions as in the Room; agent comments are
+  shortened (19.9); emitted `item.comment`; a mentioned employee gets a reply turn (mentions.ts).
+- `postUpdate(wp, …)` → `Update`; emitted `update.posted`. Generated by the item writes:
+  - **started**: a story enters in-progress → `Started: <title> — <assignee>, <n> pts` (push)
+  - **shipped**: a story or epic enters done (resolution done) → `Shipped: <title> — <assignee>` (feed only)
+  - **blocked**: a story or task enters blocked → `Blocked: <title> — waiting on <who>: <reason>` (push)
+  - **unblocked**: leaves blocked → `Unblocked: <title> — <assignee>`
+  - **decided**: an owner Inbox item answered → `Decided: <title> — <option label>`
+  - **brief**, **review**: 19.7. Never a count without names.
+- The same four item events post a **named chat line** in the epic's thread of its area room
+  (author `workplace`, `kind: 'update'`): "Story 'X' started — Dev", "Story 'X' is done", "Story 'X'
+  is blocked: waiting on Rohan", "Story 'X' is unblocked", "Epic 'X' is done".
+
+### 19.5 Inbox threads
+
+`inbox_messages` rows; `InboxItem` gains `messageCount`, `lastMessageAt`, `urgency`
+(`normal | high | urgent`, default normal), and `InboxOption.recommended`. `reply(wp, id, { by,
+text?, optionId? })`: an `optionId` answers the item (the text is the note) and appends the text
+as a message; text alone appends a message and leaves the item open. A message by `owner` is
+delivered to the asker (`inbox.onReply` listener wired at boot): the raiser's session gets
+`The owner replied on "<title>" (<id>): "<text>" — answer in the thread with inbox_reply, briefly.`
+(from `workplace`, autonomous; at a cap it is logged as activity instead), the COO bridge for COO
+items (`coo/inbox.jsonl` kind `inbox-reply`), and the Chief of Staff when the raiser is
+`workplace`. An employee's reply (`inbox_reply` tool) appends by that employee.
+
+### 19.6 Event-driven stall detector (`watch.ts`)
+
+```
+evaluate(wp, item, nowMs) → { rule: 'not-started'|'idle'|'unreviewed', since, dueAt } | { dueAt } | null
+  not-started: status ready, level story|task, assignee an agent, no open session on it: since = statusSince; due +15 min
+  idle:        status in-progress: since = last activity (item.updatedAt, its newest activity row, its open session's
+               last event); due +10 min; a running turn (status 'running') is never idle
+  unreviewed:  status in-review: since = max(statusSince, last activity); due +30 min
+arm(itemId, dueAt)  setTimeout per item, replaced on every re-arm; disarmed when the item leaves those states
+triggers that re-arm: work.updated, activity.recorded, item.comment, runs.onRunEvent of a session whose assignmentId is the item
+on fire: evaluate again (the timer is only a hint) → act once per episode (settings key stall:<id> = since)
+```
+
+Actions: **not-started** → in focus and the assignee is an agent with no open session and within
+budget → `employees.assign` + activity "Started by Asha: Ready for 15 min"; else → status backlog
+with the reason ("not in focus", "Dev is busy on X", "paused by the cap"). **idle** → `coo.notifyStall`
+(a `coo_items` row kind `stall` + an `inbox.jsonl` line; **no owner fallback**), activity "No
+activity for 10 min", the open session (if any) gets "No activity on <title> for 10 minutes: if you
+are stuck call flag_stall with why; otherwise carry on." (from `workplace`); with no open session and
+the COO offline, Asha's fallback resumes it (`employees.assign`, once per item per hour, only when
+`cos.whyWaiting` is null). **unreviewed** → `coo.notifyStall` naming the reviewer. `flag_stall`
+(tool) → activity + `coo.notifyStall` at once, and Blocked when it names `waitingOn`.
+
+Thresholds: `WORKPLACE_STALL_READY_MIN` (15), `WORKPLACE_STALL_IDLE_MIN` (10),
+`WORKPLACE_STALL_REVIEW_MIN` (30). Boot arms every open item. `cos.tick`'s stall loop is no longer
+scheduled (`tick(wp, now, { stalls: false })` from `index.ts`; the function and its tests stay);
+`stall.stalledSince` ignores Backlog items, so nothing old can restart a parked item either.
+`Item.stall` is `evaluate`'s rule when past due (derived, never stored).
+
+### 19.7 Asha's rhythm (`rhythm.ts`)
+
+A one-minute timer calls `maybeRun(wp, now)`; each run is idempotent per IST day (settings
+`rhythm:<kind>:<day>`). Builders are pure and tested.
+
+- **09:30 brief** → `Update{kind:'brief', by:'asha', push:true}`: line `Brief: <n> done yesterday ·
+  focus <epic titles> · <n> blocked · <n> decisions wait on you`; details list them by name.
+- **10:00 stand-up** → one General-room message per lead with open or recently done items
+  (`by:'workplace', kind:'standup', about:<lead>`): `Done: …` / `Next: …` / `Blocked: …` (≤ 3 lines, names).
+- **Sunday 18:00 review** → `Update{kind:'review', push:true}`: points shipped in 7 days, items
+  reopened after a false done (done→in-progress and review→building sends-back), stall episodes,
+  real spend (₹, 7 days), pending hire proposals.
+
+### 19.8 API (all JSON; errors `{error}` 400/401/404/409; owner-facing, ordinary auth)
+
+| Method & path | Body → response |
+|---|---|
+| GET `/api/plan[?view=board]` | → `PlanResponse` |
+| GET `/api/focus` / POST `/api/focus` | `{ epicIds }` → `Focus` |
+| GET `/api/items?level=&status=&assigneeId=&areaId=&parentId=` | → `Item[]` (rank order) |
+| POST `/api/items` | `CreateItemRequest` → 201 `ItemDetail` |
+| GET `/api/items/:id` | → `ItemDetail` |
+| POST `/api/items/:id` | `UpdateItemRequest` → `ItemDetail` (any subset; status rules 19.3) |
+| POST `/api/items/:id/comments` | `{ text }` → 201 `Comment` |
+| POST `/api/items/:id/merge` | `{ intoId }` → `ItemDetail` (the survivor) |
+| GET `/api/updates?limit=&before=` | → `Update[]` newest first (limit ≤ 200, default 50; `before` = an update id) |
+| GET `/api/inbox/:id` | → `InboxThread` |
+| POST `/api/inbox/:id/reply` | `{ text?, optionId? }` → `InboxThread` |
+| GET `/api/status?q=` | → `StatusAnswer` |
+| GET `/api/areas` / POST `/api/areas` / POST `/api/areas/:id` | `{ title, description?, ownerId? }` / `{ title?, description?, state?, rank? }` → `Area[]` / 201 `Area` / `Area` |
+| GET `/api/rooms` / GET `/api/rooms/:id` | → `Room[]` / `RoomDetail` |
+| GET `/api/releases/posts` / POST `/api/releases/posts` / GET `/api/releases/posts/:id` | `{ version, shippable?, itemIds?, title? }` → `ReleasePost[]` / 201 `ReleasePost` / `ReleasePost` |
+
+Owner actions are attributed `by: 'owner'`. Old routes unchanged (adapters).
+
+**JSON shapes for the app teams** (exact; optional fields absent, never null unless stated):
+
+```ts
+type ItemLevel = 'epic' | 'story' | 'task';
+type ItemStatus = 'backlog' | 'ready' | 'in-progress' | 'in-review' | 'done' | 'blocked';
+type Points = 1 | 2 | 3 | 5 | 8;
+interface Item {
+  id: string; level: ItemLevel; title: string; body: string;
+  status: ItemStatus; statusSince: string; resolution?: 'done' | 'wont-do' | 'duplicate';
+  parentId?: string; epicId?: string; areaId?: string;          // areaId resolved through the epic
+  assigneeId?: string;   // employee id or 'owner'
+  reviewerId?: string; ownerId?: string; points?: Points; rank: number; targetDate?: string;
+  acceptance: string[];
+  blocked?: { reason: string; waitingOn: string; since: string };
+  stall?: { rule: 'not-started' | 'idle' | 'unreviewed'; since: string; minutes: number };
+  mergedInto?: string; releasedIn?: string;
+  legacy: { kind: 'feature' | 'assignment' | 'bug' | 'question'; state: string; charterId?: string; featureId?: string };
+  createdAt: string; updatedAt: string;
+}
+interface Area { id: string; title: string; description?: string; state: 'active' | 'archived'; rank: number;
+  ownerId: string; roomId: string; threadId: string; createdAt: string; updatedAt: string }
+interface EpicProgress { pointsDone: number; pointsTotal: number; storiesDone: number; storiesTotal: number; pct: number }
+interface PlanFlag { kind: 'blocked' | 'stalled'; itemId: string; title: string; reason: string; waitingOn?: string; since: string }
+interface EpicCard { epic: Item; progress: EpicProgress; next?: { id: string; title: string }; flags: PlanFlag[]; inFocus: boolean }
+interface Focus { epicIds: string[]; setBy: string; at: string }
+interface PlanResponse { areas: { area: Area; epics: EpicCard[] }[]; unfiled: EpicCard[]; mine: Item[]; focus: Focus;
+  counts: Record<ItemStatus, number>; board?: Record<ItemStatus, Item[]> }
+interface Comment { id: string; itemId: string; at: string; by: string; text: string; details?: string; mentions: string[] }
+interface Activity { id: string; at: string; itemId: string | null; by: string; kind: ActivityKind; from?: string; to?: string; text: string; link?: string }
+type ActivityKind = 'created' | 'status' | 'assigned' | 'reviewer' | 'points' | 'field' | 'comment' | 'commit' | 'test' | 'note' | 'stall' | 'merged' | 'reopen' | 'started';
+interface ItemDetail { item: Item; parent?: Item; epic?: Item; area?: Area; children: Item[]; comments: Comment[]; activity: Activity[]; progress?: EpicProgress; threadId?: string }
+type UpdateKind = 'started' | 'shipped' | 'blocked' | 'unblocked' | 'decided' | 'brief' | 'review';
+interface Update { id: string; at: string; kind: UpdateKind; line: string; details?: string; by: string; itemId?: string; inboxId?: string; href: string; push: boolean }
+interface InboxMessage { id: string; inboxId: string; at: string; by: string; text: string; details?: string }
+interface InboxThread { item: InboxItem; messages: InboxMessage[] }   // InboxItem + messageCount, lastMessageAt?, urgency?; options[].recommended?
+interface Room { id: string; kind: 'general' | 'area' | 'releases'; title: string; areaId?: string; headline: string; lastAt: string; threadIds: string[] }
+interface RoomDetail { room: Room; threads: RoomThread[] }               // RoomThread + roomId?, epicId?
+// RoomMessage gains kind?: 'message' | 'update' | 'standup' | 'release', about?: string, details?: string
+interface ReleasePost { id: string; at: string; title: string; version: string; shippable?: string; releaseId?: string; by: string;
+  groups: { areaId: string | null; areaTitle: string; items: { id: string; title: string; level: ItemLevel; kind: 'story' | 'fix' }[] }[];
+  text: string; threadId: string }
+interface StatusAnswer { q: string; line: string; matches: { item: Item; line: string; href: string }[] }
+// LogEntry gains from?: 'owner' | 'workplace' on 'user' entries.
+```
+
+`href`s are app routes: `item/<id>`, `inbox/<id>`, `room/<threadId>`, `releases/<postId>`, `plan`.
+Socket events (added to `WorkplaceServerEvent`): `item.updated { item: Item }`, `item.comment {
+comment }`, `activity.recorded { activity }`, `update.posted { update }`, `area.updated { area }`,
+`inbox.message { message }`, `release.post { post }`. Push intents: `update.posted` with
+`push: true` → category `WP_UPDATE`, `collapseId: update:<itemId|kind>`, link = the update's `href`.
+
+### 19.9 Chat hygiene
+
+- `runs.append` stores `from` on `user` entries; `runs.sendMessage(id, text, attachments, { from })`
+  and `createRunDirect({ promptFrom })`. `employees.talk(…, { autonomous })`, `assign`, `endSession`,
+  `deliverDenial`, the lift-pause resume and every watcher/relay prompt pass `workplace`; only the
+  owner's own Talk passes `owner`. `toChatView` folds `from: 'workplace'` user entries and `system`
+  entries into the collapsed `activity` line with the tool runs (still expandable, nothing lost).
+- `short(text)` (`one-line.ts`): ≤ 4 lines and ≤ 400 chars stay as they are; longer → `text` = the
+  first lines up to that limit, cut at a word, plus "…", `details` = the whole text. Applied to agent
+  Room posts, agent comments and agent Inbox replies. The owner's words are never shortened.
+- `work.create`'s default author is `workplace` (it was `owner`); only owner routes pass `owner`.
+
+### 19.10 Relay (work.irisforu.com) — follow-up list, nothing changed or deployed here
+
+The relay (`services/workplace-relay/app.py` in `~/claude-dev-deploy`) is a **catch-all proxy**:
+`@app.api_route("/{path:path}")` forwards every authenticated request (session cookie + CSRF, or
+app bearer) and refuses only `api/pair*`; it adds `x-via-tunnel: 1`. So every v2 route reaches the
+Mac with no relay change:
+
+`GET /api/plan`, `GET|POST /api/focus`, `GET|POST /api/items`, `GET|POST /api/items/:id`,
+`POST /api/items/:id/comments`, `POST /api/items/:id/merge`, `GET /api/updates`,
+`GET /api/inbox/:id`, `POST /api/inbox/:id/reply`, `GET /api/status`, `GET|POST /api/areas`,
+`POST /api/areas/:id`, `GET /api/rooms`, `GET /api/rooms/:id`, `GET|POST /api/releases/posts`,
+`GET /api/releases/posts/:id`; socket events ride the existing `/ws` stream.
+
+The COO's lead-only routes (`POST /api/coo/reply`, `GET /api/coo/items`, `POST /api/coo/answer`,
+`POST /api/coo/forward`, `POST /api/coo/live-window`) stay blocked **on the Mac** (`requireLocal`
+refuses any request with `x-via-tunnel`), and `coo.item` stays loopback-only on the socket — pinned
+again by `v2-api.test.ts`. Follow-ups for the relay owner (not required for v2 to work):
+1. Optional hardening: turn the catch-all into an allowlist of the owner-facing prefixes above plus
+   today's, and refuse `/api/coo/(reply|items|answer|forward|live-window)` at the relay too
+   (defence in depth; today only the Mac refuses them).
+2. Add `WP_UPDATE` to the APNs/FCM category list the relay's push forwarder accepts (it forwards
+   `category` verbatim today; confirm the apps register it).
+3. No body-size or timeout change: every v2 call is small and synchronous.
+
+### 19.11 Migration (`migrate-v2.ts`, at boot, once; key `v2-migration` in settings)
+
+1. Columns and tables (19.1) — `store.ts`, every open.
+2. For every `work` row without `level`: feature → epic; assignment/bug/question → story with
+   `parentId = featureId` (if any); status from 19.3's old→v2 map, **except** a `blocked` item whose
+   last history entry is by `coo` with a note matching /park/i → **backlog** (the 13 items Phase 1
+   parked); other blocked items get `blockedReason` = the last history note (or "No reason recorded
+   before v2"), `waitingOn: coo`; `review` with no reviewer → `reviewerId` = the `qa-release` holder
+   (Nikhil), or the Chief of Staff if Nikhil is the assignee; `rank` = creation order (epics within
+   their area, stories within their epic); `statusSince` = `updatedAt`.
+3. Every item's `history` → activity rows (`kind: status`, original `at`/`by`/note), once.
+4. Threads without `roomId` → `general`; the Releases thread is created.
+5. Returns and logs `{ items, epics, stories, byStatusBefore, byStatusAfter, parked, reviewersSet }`;
+   nothing is deleted. Idempotent: a second boot does nothing.
+
+Data clean-up done after deploy through the API (COO, owner rules once): areas (`POST /api/areas`,
+first pass Voice & audio, Character & greeting, Memory, Mac & mobile apps), epics into areas
+(`POST /api/items/:id {areaId}`), duplicates merged (`POST /api/items/:id/merge`), the 8 never-started
+items started / backlogged / closed (wont-do), points estimated.
+
+### 19.12 Agent tools (added to the Workplace MCP server)
+
+`item_create { level: story|task, parentId, title, body?, assigneeId?, points?, acceptance? }`
+(stories: the Chief of Staff or the epic owner; tasks: the story's assignee or the Chief of Staff;
+an open item with the same normalised title under the same parent is returned instead of a
+duplicate), `item_update { itemId, status?, blockedReason?, waitingOn?, reviewerId?, points?, note? }`
+(19.3 rules; an agent can never set done on its own work), `item_comment { itemId, text }`,
+`flag_stall { itemId?, reason, waitingOn? }`, `inbox_reply { inboxId, text }`, `status_of { q }`.
+The handbook gains: one story per outcome; flag your own stall the moment it happens; short messages.
