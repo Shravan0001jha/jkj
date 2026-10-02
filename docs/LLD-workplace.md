@@ -1340,3 +1340,39 @@ duplicate), `item_update { itemId, status?, blockedReason?, waitingOn?, reviewer
 `kind?: review | work`); `ask_owner` and `escalate` gain a required `recommendation`, and `item_update` gains
 `recommendation` (required with `waitingOn: owner`, as is `flag_stall`'s) — 19.5.
 The handbook gains: one story per outcome; flag your own stall the moment it happens; short messages.
+
+### 19.13 Read tools for reviewers: `item_read`, `inbox_read` (`read-tools.ts`, QA 3 Oct)
+
+**Gap (seen live).** Nikhil (QA) bounced three valid no-code / doc / decision stories because no
+employee tool read an item's comments and activity or the owner's Inbox: the evidence was there (a
+comment, a filed Inbox decision) but invisible to the reviewer. Both tools are read-only, in
+`WORKPLACE_TOOLS` (every session may call them), and answer in plain text bounded to ~8 KB.
+
+`item_read { itemId }` — `itemId` is resolved exactly as `status_of` resolves ids (`status.resolveIds`,
+shared, not copied): an exact id (as_/ft_/any v2 id), the first id written inside the text, and a
+merged id follows `mergedInto` to its survivor (the answer says "X was merged into Y"). No id found:
+the `status_of` title matches are offered as candidates, nothing is read. The answer, in order:
+- head: title, id, level, status (+ blocked/handoff), assignee, reviewer, parent (names via `nameOf`);
+- acceptance criteria; body (clipped to 1500 chars);
+- children: at most 15, one line each (`status_of`'s `lineFor` + id), "+N more";
+- linked Inbox items (`inbox.linkedTo`: `context.itemId`/`context.assignmentId` is the item, or its id
+  is in the title/body): id, state, title, the answer's option — read them with `inbox_read`;
+- comments, oldest first (author, at, text, details; text and details clipped to 600);
+- the last 30 activity entries (at, by, kind, from→to, text clipped to 200).
+Size: when the whole is over 8000 chars, the oldest comments are dropped first (keeping at least
+the newest), then the oldest activity, each with an "N older … omitted" line; then a hard cut with
+"…[truncated]". Ids in free text (body, comments, activity, Inbox text) go through `humanizeIds`
+with `keepIds`: `"Title" (as_x)` — the owner-facing id-to-title rewriting, but the id stays, because
+the reader acts on it (`inbox_read`, `item_comment`). Unknown ids are left as written.
+
+`inbox_read { itemId?, state? }` — never writes (no reply, no answer, no state change); employees
+still never answer the owner's decisions (`inbox_reply` only talks in a thread they raised).
+- `itemId` an Inbox id (`in_…`, exact or inside the text): that item — kind, state, urgency, raised
+  by, created, owner-facing or routine, title, summary, body (clipped), options with the recommended
+  one marked, the recommendation (`context.recommendation` or the recommended option), the answer
+  (option label, note, at, via) and the thread messages (by, at, text, details; oldest dropped first
+  past the bound). Title/summary/details as the owner sees them (`ownerView`) plus `keepIds`.
+- `itemId` a work item id: the Inbox items linked to it (as in `item_read`), one line each.
+- no `itemId`: a list — `state` `open` | `answered` | `expired` | `all`; default: every open item
+  plus those answered in the last 7 days; newest first, at most 25 lines, one line each (id, state,
+  kind, title, the answer's option).

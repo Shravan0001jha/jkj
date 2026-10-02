@@ -32,14 +32,18 @@ export function nameOfId(wp: Workplace, id: string): string | undefined {
   return undefined;
 }
 
-export function humanizeIds(wp: Workplace, text: string): string;
-export function humanizeIds(wp: Workplace, text: string | undefined): string | undefined;
-export function humanizeIds(wp: Workplace, text: string | undefined): string | undefined {
+/**
+ * `keepIds` (agent-facing reads, LLD §19.13): `"Title" (as_x)` instead of `"Title"`, so a reader who
+ * acts on the id (inbox_read, item_comment) still has it.
+ */
+export function humanizeIds(wp: Workplace, text: string, opts?: { keepIds?: boolean }): string;
+export function humanizeIds(wp: Workplace, text: string | undefined, opts?: { keepIds?: boolean }): string | undefined;
+export function humanizeIds(wp: Workplace, text: string | undefined, opts: { keepIds?: boolean } = {}): string | undefined {
   if (!text || !text.includes('_')) return text;
   const cache = new Map<string, string | undefined>();
   return text.replace(ID, id => {
     if (!cache.has(id)) cache.set(id, nameOfId(wp, id));
     const name = cache.get(id);
-    return name ? `"${name}"` : id;
+    return name ? (opts.keepIds ? `"${name}" (${id})` : `"${name}"`) : id;
   });
 }

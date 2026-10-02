@@ -54,6 +54,27 @@ export function baseTitle(wp: Workplace, title: string): string {
 
 const meaningful = (t: string): string => words(t).filter(w => !STOP.has(w)).join(' ');
 
+/**
+ * Every item id written in `text` (the whole text, or ids inside it), resolved to live items: a merged
+ * id follows `mergedInto` to its survivor (`merged` maps the asked id to it). Shared by `status_of`
+ * and `item_read` (LLD §19.13), so both resolve ids the same way.
+ */
+export function resolveIds(wp: Workplace, text: string, rows?: WorkItem[]): { ids: string[]; found: WorkItem[]; merged: Map<string, string> } {
+  const all = rows ?? rowsJson<WorkItem>(wp.db.prepare('select json from work order by coalesce(rank, 0), created_at').all());
+  const byId = new Map(all.map(w => [w.id, w]));
+  const merged = new Map<string, string>();
+  const resolve = (id: string): WorkItem | undefined => {
+    let w = byId.get(id) ?? byId.get(id.toLowerCase());
+    for (let hops = 0; w?.mergedInto && hops < 10; hops++) w = byId.get(w.mergedInto) ?? w;
+    const live = w && !w.mergedInto ? w : undefined;
+    if (live && live.id !== id && live.id !== id.toLowerCase()) merged.set(id, live.id);
+    return live;
+  };
+  const ids = [...new Set(text.trim().match(ID_RE) ?? [])];
+  const found = [...new Map(ids.map(resolve).filter((w): w is WorkItem => !!w).map(w => [w.id, w])).values()];
+  return { ids, found, merged };
+}
+
 export function answer(wp: Workplace, q: string, nowMs = Date.now()): StatusAnswer {
   const query = q.trim();
   const rows = rowsJson<WorkItem>(wp.db.prepare('select json from work order by coalesce(rank, 0), created_at').all());
@@ -61,14 +82,7 @@ export function answer(wp: Workplace, q: string, nowMs = Date.now()): StatusAnsw
   const none: StatusAnswer = { q: query, line: `Nothing in the plan matches "${query}".`, matches: [] };
 
   // Ids first: the whole query, or every id written inside it. A merged id answers with its survivor.
-  const byId = new Map(rows.map(w => [w.id, w]));
-  const resolve = (id: string): WorkItem | undefined => {
-    let w = byId.get(id) ?? byId.get(id.toLowerCase());
-    for (let hops = 0; w?.mergedInto && hops < 10; hops++) w = byId.get(w.mergedInto) ?? w;
-    return w && !w.mergedInto ? w : undefined;
-  };
-  const ids = [...new Set(query.match(ID_RE) ?? [])];
-  const found = [...new Map(ids.map(resolve).filter((w): w is WorkItem => !!w).map(w => [w.id, w])).values()];
+  const { ids, found } = resolveIds(wp, query, rows);
   if (found.length) {
     const matches = found.map(w => match(wp, items.toItem(wp, w, nowMs)));
     return { q: query, line: matches.map(m => m.line).join('; '), matches };

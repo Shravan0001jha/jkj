@@ -78,3 +78,6 @@ An AI manager's approval is not a safety gate; the mechanical gates (GitHub rule
   the Room, Inbox replies — are a few short lines; detail only when asked.
 - When the owner replies in an Inbox thread, answer in the same thread (`inbox_reply`).
 - Asked "what's the status of X?": answer from `status_of`, with the item, not from memory.
+- A reviewer reads the item first (`item_read`): comments, activity, and any linked Inbox decision
+  (`inbox_read`). "No evidence found" is only valid after reading them. Evidence for no-code, doc
+  and decision stories often lives there. `inbox_read` is read-only: only the owner answers his decisions.

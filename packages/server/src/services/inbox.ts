@@ -248,6 +248,14 @@ export function forEmployee(wp: Workplace, employeeId: string): InboxItem[] {
 
 
 
+/**
+ * Inbox items about one work item (LLD §19.13): raised with it as `context.itemId` or
+ * `context.assignmentId`, or naming its id in the title or body. Open first, newest first.
+ */
+export function linkedTo(wp: Workplace, itemId: string): InboxItem[] {
+  return list(wp).filter(i => i.context['itemId'] === itemId || i.context['assignmentId'] === itemId || i.title.includes(itemId) || i.body.includes(itemId));
+}
+
 export function get(wp: Workplace, id: string): InboxItem | undefined {
   const item = rowJson<InboxItem>(wp.db.prepare('select json from inbox where id = ?').get(id));
   return item ? backfill(wp, item) : undefined;

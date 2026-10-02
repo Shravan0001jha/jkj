@@ -20,6 +20,7 @@ import * as items from './items.js';
 import * as trail from './trail.js';
 import * as watch from './watch.js';
 import * as statusAnswers from './status.js';
+import * as readTools from './read-tools.js';
 import { isWaitable, nameOf, rawGet } from './v2-map.js';
 import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
 import { humanizeIds } from './id-names.js';
@@ -62,7 +63,7 @@ export const OWNER_TALK_TURN_INR = 100;
 /** The owner saying, in a talk, that paused work may go on. */
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -1116,6 +1117,15 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           const lines = a.matches.slice(0, 8).map(m => `${m.line} [${m.item.id}]`);
           return ok((a.matches.length && a.line === a.matches[0]!.line ? lines : [a.line, ...lines]).join('\n'));
         }),
+      /* ---------- read-only: the evidence behind an item (LLD §19.13) ---------- */
+      tool('item_read', 'Read one item in full before you judge it: title, status, assignee, reviewer, acceptance criteria, body, its children, every comment (author, time, text, details), the last 30 activity entries and the Inbox items linked to it. ' +
+        'Reviewing? Read the item first: evidence for no-code, doc and decision stories is often in its comments, activity or a linked Inbox decision (inbox_read). Takes an id (as_…/ft_…), an id inside text, or a merged id (shows the item it was merged into). Read-only.',
+        { itemId: z.string() },
+        async ({ itemId }) => ok(readTools.readItem(wp, itemId))),
+      tool('inbox_read', 'Read the Inbox, read-only: with no itemId, the open items and those answered in the last 7 days (state: open, answered, expired or all); with an Inbox id (in_…), that item with its thread messages, its options, its recommendation and the owner\'s answer; with a work item id, the Inbox items about it. ' +
+        'You never answer the owner\'s decisions: only he does. Use it to verify that a decision was filed or answered.',
+        { itemId: z.string().optional(), state: z.enum(['open', 'answered', 'expired', 'all']).optional() },
+        async ({ itemId, state }) => ok(readTools.readInbox(wp, { ...(itemId ? { itemId } : {}), ...(state ? { state } : {}) }))),
       tool('propose_org_change', 'Propose a hire, split, merge, reassign or restructure with a reason. The owner approves it in the Inbox. `paramsJson` is a JSON object as a string (see the handbook for the shape of each kind).',
         // A z.record() here makes the MCP SDK fail to list ANY tool of this server; a JSON string does not.
         { kind: z.enum(['hire', 'retire', 'split', 'merge', 'reassign', 'restructure']), reason: z.string(), paramsJson: z.string() },
