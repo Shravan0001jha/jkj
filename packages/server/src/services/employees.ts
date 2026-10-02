@@ -705,9 +705,12 @@ export function pausedReason(wp: Workplace, e: Employee, scope: string): string 
   return `Paused — ${whose} budget reached (₹${Math.round(spent)}/₹${cap}). You can still talk to ${e.name}.`;
 }
 
-/** Open Inbox items raised by, or addressed to, this employee: what the owner can answer on the page. */
+/**
+ * Open Inbox items that concern this employee and that the owner decides: the same set the Inbox
+ * shows (QA 2 Oct: Asha's page counted 21, 20 of them housekeeping that never reaches the owner).
+ */
 export function needsYouItems(wp: Workplace, employeeId: string) {
-  return inbox.forEmployee(wp, employeeId);
+  return inbox.forEmployee(wp, employeeId).filter(inbox.isOwnerFacing);
 }
 
 // A denial reaches the raiser (an employee) as a reason to act on.

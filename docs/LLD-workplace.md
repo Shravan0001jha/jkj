@@ -236,8 +236,9 @@ the next tick takes them, so a restart with ten stalled items costs the owner no
 `InboxItem` gains `affects: string[]` (employee ids the item concerns), `onApprove`, `onDeny` (one
 line each) and `links`. `affects` is computed at raise time: the raiser, the assignee of
 `context.assignmentId`, the holders of `context.charterId` and of a proposal's charters, the scope of
-a cap; the Chief of Staff always. `EmployeeDetail.needsYou` lists open items whose `affects` includes
-the employee. A denial (`reject`/`deny`/`no`) is delivered to the raiser: `runs.sendMessage` into its
+a cap; the Chief of Staff always. `EmployeeDetail.needsYou` lists open **owner-facing** items whose
+`affects` includes the employee, and `EmployeeCard.needsYou` counts them: the same set the Inbox shows,
+never housekeeping (`ownerFacing: false`; QA 2 Oct, Asha's 21 were 20 housekeeping). A denial (`reject`/`deny`/`no`) is delivered to the raiser: `runs.sendMessage` into its
 open session, else appended to its `handoff.md` as "## Denied: <title> — <note>".
 
 ### 10d. The Team Room (`services/room.ts`) — HLD D3b
