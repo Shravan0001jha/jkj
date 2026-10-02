@@ -7,6 +7,7 @@
  * package outside @jkj/shared. See docs/LLD-workplace.md §2 and §14.
  */
 import type { Agent, PermissionMode } from './types.js';
+import type { ItemLevel, ItemResolution, ItemStatus, Points } from './workplace-v2.js';
 
 /* ---------- organisation ---------- */
 
@@ -247,6 +248,29 @@ export interface WorkItem {
   createdAt: string;
   updatedAt: string;
   history: WorkHistoryEntry[];
+
+  /* v2 (LLD §19.2): all optional and additive; the client shape is `Item` (workplace-v2.ts). */
+  level?: ItemLevel;
+  status?: ItemStatus;
+  statusSince?: string;
+  /** story → epic, task → story. */
+  parentId?: string;
+  /** Epics only. */
+  areaId?: string;
+  rank?: number;
+  points?: Points;
+  reviewerId?: string;
+  /** Epics: who owns the outcome. */
+  ownerId?: string;
+  targetDate?: string;
+  acceptance?: string[];
+  blockedReason?: string;
+  /** An employee id, 'owner' or 'coo'. */
+  waitingOn?: string;
+  blockedSince?: string;
+  resolution?: ItemResolution;
+  mergedInto?: string;
+  releasedIn?: string;
 }
 
 /* ---------- inbox ---------- */
@@ -257,6 +281,8 @@ export interface InboxOption {
   id: string;
   label: string;
   danger?: boolean;
+  /** v2: the option the asker recommends (marked on the button). */
+  recommended?: boolean;
   /** When true the answer needs a note (e.g. a number for a cap). */
   needsNote?: boolean;
 }
@@ -309,6 +335,11 @@ export interface InboxItem {
    * decides it (the §0 approvals table). Never touched by clients; the server decides it on raise.
    */
   ownerFacing?: boolean;
+  /** v2: replies in the item's thread (GET /api/inbox/:id has them). */
+  messageCount?: number;
+  lastMessageAt?: string;
+  /** v2: shown by colour and label, not wording. Absent = normal. */
+  urgency?: 'normal' | 'high' | 'urgent';
 }
 
 /* ---------- org changes ---------- */
@@ -478,6 +509,10 @@ export interface RoomThread {
   participants: string[];
   /** Inbox items escalated from this thread. */
   escalations: string[];
+  /** v2: 'general' | 'area:<id>' | 'releases'. Absent reads as 'general'. */
+  roomId?: string;
+  /** v2: the epic this thread is about, inside its area room. */
+  epicId?: string;
 }
 
 export interface RoomMessage {
@@ -490,6 +525,14 @@ export interface RoomMessage {
   owner: boolean;
   text: string;
   mentions: string[];
+  /** v2: 'update' (a named update the room posts), 'standup', 'release'; absent = an authored message. */
+  kind?: 'message' | 'update' | 'standup' | 'release';
+  /** v2: who a stand-up is about (it is authored by 'workplace'). */
+  about?: string;
+  /** v2: the rest of a long agent message; `text` stays short. */
+  details?: string;
+  /** v2: the item an update line is about. */
+  itemId?: string;
 }
 
 /* ---------- the COO bridge ---------- */
@@ -512,7 +555,7 @@ export interface CooMessage {
   inReplyTo?: string;
 }
 
-export type CooItemKind = 'escalation' | 'mention';
+export type CooItemKind = 'escalation' | 'mention' | 'stall';
 
 /**
  * Something Asha would raise above her own authority, or an `@coo` Room mention, delivered to the
@@ -529,6 +572,8 @@ export interface CooItem {
   options: InboxOption[];
   raisedBy: string;
   threadId?: string;
+  /** v2: a stall notice is about this item. */
+  itemId?: string;
   state: 'open' | 'answered' | 'forwarded';
   answer?: { optionId: string; note?: string; at: string };
   /** Set once this item reached the owner's Inbox, by the COO forwarding it or by the 30-minute fallback. */
