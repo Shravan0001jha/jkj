@@ -66,7 +66,7 @@ test('employees post through the tools; only the Chief of Staff resolves with fo
 
     const asha = await toolsFor(wp, 'asha');
     const esc = await asha.callTool({ name: 'escalate', arguments: { threadId, title: 'Who owns app.py?', body: 'Three owners for one file.', options: ['experts', 'character'], recommendation: 'experts' } });
-    const itemId = /Escalated as (in_\w+)/.exec(JSON.stringify(esc.content))![1]!;
+    const itemId = /Inbox \(the COO is offline\) as (in_\w+)/.exec(JSON.stringify(esc.content))![1]!;
     const item = inbox.get(wp, itemId)!;
     assert.equal(item.context['threadId'], threadId);
     assert.deepEqual(item.links, [{ label: 'Team Room thread', href: `#/room/${threadId}` }]);

@@ -221,7 +221,8 @@ export function answerItem(wp: Workplace, spec: { itemId: string; optionId: stri
   if (!item) throw new NotFound(`No COO item ${spec.itemId}`);
   if (item.state !== 'open') throw new BadRequest(`${spec.itemId} was already ${item.state}`);
   const answered = updateItem(wp, { ...item, state: 'answered', answer: { optionId: spec.optionId, ...(spec.note ? { note: spec.note } : {}), at: now() } });
-  if (item.kind === 'mention' && item.threadId && spec.note?.trim()) threadReply(wp, { threadId: item.threadId, text: spec.note });
+  // A mention or an escalation answered with a note: the answer lands where it was asked, so the asker sees it.
+  if ((item.kind === 'mention' || item.kind === 'escalation') && item.threadId && spec.note?.trim()) threadReply(wp, { threadId: item.threadId, text: spec.note });
   return answered;
 }
 

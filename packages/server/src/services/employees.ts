@@ -1034,13 +1034,13 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           try { const r = room.resolve(wp, threadId, { summary, by: employeeId, ...(followUps ? { followUps } : {}) }); return ok(`Resolved ${threadId}${r.followUps.length ? `; follow-ups ${r.followUps.join(', ')}` : ''}.`); }
           catch (err) { return ok(`Not resolved: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('escalate', 'Chief of Staff only: escalate a Team Room thread to the owner as an Inbox decision, with your recommendation (required: one of the options, or what you would do). Only for what the approvals table reserves for him.',
+      tool('escalate', 'Chief of Staff only: escalate a Team Room thread for a decision above your authority, with your recommendation (required). It goes to the COO FIRST (Claude), who answers it or forwards it to the owner\'s Inbox; only when the COO is offline does it go straight to the owner. Never tell the owner it is in his Inbox unless this tool says so.',
         { threadId: z.string(), title: z.string(), body: z.string(), options: z.array(z.string()).optional(), recommendation: z.string().optional() },
         async ({ threadId, title, body, options, recommendation }) => {
           const emp = employee(wp, employeeId);
           if (!emp.charterIds.includes('chief-of-staff') && emp.level !== 0) return ok('Only the Chief of Staff escalates; mention @asha in the thread.');
           if (!recommendation?.trim()) return ok('Not escalated: give your recommendation (one of the options, or what you would do).');
-          try { const item = room.escalate(wp, threadId, { title, body, by: employeeId, recommendation, ...(options ? { options } : {}) }); return ok(`Escalated as ${item.id}.`); }
+          try { const item = room.escalate(wp, threadId, { title, body, by: employeeId, recommendation, ...(options ? { options } : {}) }); return ok(String(item.id).startsWith('in_') ? `Escalated to the OWNER's Inbox (the COO is offline) as ${item.id}.` : `Escalated to the COO as ${item.id} (not the owner's Inbox). The COO answers it or forwards it to the owner; wait for that answer in this thread.`); }
           catch (err) { return ok(`Not escalated: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       /* ---------- v2: the plan (LLD §19.12) ---------- */
