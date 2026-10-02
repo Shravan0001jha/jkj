@@ -353,6 +353,15 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const body = await readJson(req);
       json(res, 200, coo.answerItem(wp, { itemId: str(body['itemId']), optionId: str(body['optionId']), ...(typeof body['note'] === 'string' && body['note'].trim() ? { note: body['note'] } : {}) }));
     }),
+    // The COO answering in an epic thread or on an item, as itself (owner, 2 Oct): the owner's
+    // routes always write as 'owner', so the lead has its own, loopback only like the rest.
+    r('POST', '/api/coo/thread-reply', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      const threadId = typeof body['threadId'] === 'string' && body['threadId'].trim() ? body['threadId'].trim() : undefined;
+      const itemId = typeof body['itemId'] === 'string' && body['itemId'].trim() ? body['itemId'].trim() : undefined;
+      json(res, 201, coo.threadReply(wp, { ...(threadId ? { threadId } : {}), ...(itemId ? { itemId } : {}), text: str(body['text']) }));
+    }),
     r('POST', '/api/coo/forward', async (req, res) => {
       requireLocal(req);
       const body = await readJson(req);

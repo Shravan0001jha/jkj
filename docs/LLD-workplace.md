@@ -532,8 +532,13 @@ and `mentions.ts` (`@coo`) both call: it always writes a `coo_items` row and an 
 first; if the COO has been offline for more than 30 minutes (`OFFLINE_FALLBACK_MS`, separate from
 the 3-minute online threshold the card uses) it *also* raises the item straight to the owner's Inbox
 on its own, so an urgent decision never silently waits on an absent COO. `POST /api/coo/answer`
-settles an item within the COO's own authority (no owner Inbox item ever created).
-`POST /api/coo/forward { itemId, recommendation }` raises it to the owner's Inbox with the
+settles an item within the COO's own authority (no owner Inbox item ever created); answering an
+`@coo` **mention** with a note also posts that note where the mention was made — the Room thread, or
+the item's comments for an `item:<id>` mention — **as `coo`, never as the owner** (2 Oct).
+`POST /api/coo/thread-reply { threadId | itemId, text }` (lead-only, loopback, 201 with the
+`RoomMessage` or `Comment`) lets the lead post as `coo` into any Room thread or on any item: the
+owner's own routes (`POST /api/room/:id/messages`, `POST /api/items/:id/comments`) always write as
+`owner`, and `POST /api/coo/reply` only reaches the COO chat. `POST /api/coo/forward { itemId, recommendation }` raises it to the owner's Inbox with the
 recommendation folded into the body. The §0/D8 owner-only gates (release, deploy, org changes, a
 cap) are untouched — those are already separate, dedicated Inbox items from `releases.ts`/
 `proposals.ts`/`spend.ts`, never routed through `room.escalate`, so this change never touches them.
@@ -550,7 +555,7 @@ useless for the one person it is for. The split that actually matches the threat
   nothing beyond the ordinary bearer/cookie session every other `/api/*` route already requires off
   loopback; there is no extra guard, because there is nothing extra to guard against here.
 - **Lead-only** — `POST /api/coo/reply`, `GET /api/coo/items`, `POST /api/coo/answer`,
-  `POST /api/coo/forward` — only the lead's own process on this Mac ever writes *as* the COO, so
+  `POST /api/coo/forward`, `POST /api/coo/thread-reply` — only the lead's own process on this Mac ever writes *as* the COO, so
   these keep the loopback-and-not-tunnelled guard: a stolen or leaked owner bearer token must not be
   enough to forge a COO reply.
 
@@ -950,7 +955,7 @@ Mac with no relay change:
 `GET /api/releases/posts/:id`; socket events ride the existing `/ws` stream.
 
 The COO's lead-only routes (`POST /api/coo/reply`, `GET /api/coo/items`, `POST /api/coo/answer`,
-`POST /api/coo/forward`, `POST /api/coo/live-window`) stay blocked **on the Mac** (`requireLocal`
+`POST /api/coo/forward`, `POST /api/coo/thread-reply`, `POST /api/coo/live-window`) stay blocked **on the Mac** (`requireLocal`
 refuses any request with `x-via-tunnel`), and `coo.item` stays loopback-only on the socket — pinned
 again by `v2-api.test.ts`. Follow-ups for the relay owner (not required for v2 to work):
 1. Optional hardening: turn the catch-all into an allowlist of the owner-facing prefixes above plus

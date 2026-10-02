@@ -1,8 +1,10 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CooItem, CooMessage, CooPresence, InboxItem, InboxOption } from '@jkj/shared';
+import type { Comment, CooItem, CooMessage, CooPresence, InboxItem, InboxOption, RoomMessage } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as inbox from './inbox.js';
+import * as room from './room.js';
+import * as trail from './trail.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { BadRequest, NotFound } from '../util/errors.js';
 
@@ -210,12 +212,31 @@ export function notifyMention(wp: Workplace, spec: { threadId: string; threadTit
   });
 }
 
-/** The COO answers within its own authority: no owner Inbox item. */
+/**
+ * The COO answers within its own authority: no owner Inbox item. An answer to an `@coo` mention
+ * with a note is also posted where the mention was made (owner, 2 Oct), as the COO.
+ */
 export function answerItem(wp: Workplace, spec: { itemId: string; optionId: string; note?: string }): CooItem {
   const item = getItem(wp, spec.itemId);
   if (!item) throw new NotFound(`No COO item ${spec.itemId}`);
   if (item.state !== 'open') throw new BadRequest(`${spec.itemId} was already ${item.state}`);
-  return updateItem(wp, { ...item, state: 'answered', answer: { optionId: spec.optionId, ...(spec.note ? { note: spec.note } : {}), at: now() } });
+  const answered = updateItem(wp, { ...item, state: 'answered', answer: { optionId: spec.optionId, ...(spec.note ? { note: spec.note } : {}), at: now() } });
+  if (item.kind === 'mention' && item.threadId && spec.note?.trim()) threadReply(wp, { threadId: item.threadId, text: spec.note });
+  return answered;
+}
+
+/**
+ * The COO posting as itself (owner, 2 Oct): into a Room thread (`threadId`), or on an item
+ * (`itemId`, or a mention's `item:<id>` thread). The owner's routes always write as `owner`; this is
+ * the lead's own path (POST /api/coo/thread-reply, loopback only) and the mention answer's.
+ */
+export function threadReply(wp: Workplace, spec: { threadId?: string; itemId?: string; text: string }): RoomMessage | Comment {
+  const text = spec.text?.trim() ?? '';
+  if (!text) throw new BadRequest('Nothing to post.');
+  const itemId = spec.itemId ?? (spec.threadId?.startsWith('item:') ? spec.threadId.slice('item:'.length) : undefined);
+  if (itemId) return trail.comment(wp, itemId, { by: COO_ID, text });
+  if (!spec.threadId) throw new BadRequest('Give a threadId or an itemId.');
+  return room.post(wp, spec.threadId, { by: COO_ID, text });
 }
 
 /** The COO forwards it to the owner with a recommendation: becomes an owner Inbox item. */
