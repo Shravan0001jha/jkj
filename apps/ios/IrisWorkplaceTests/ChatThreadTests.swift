@@ -64,3 +64,55 @@ final class ChatThreadTests: XCTestCase {
         XCTAssertEqual(rest, rest.sorted(by: >), "then newest activity first")
     }
 }
+
+/// Typing comes only from a reply the owner is waiting for, never from a working state.
+@MainActor
+final class TypingRuleTests: XCTestCase {
+    private var rest: RestClient!
+
+    override func setUp() {
+        StubURLProtocol.reset()
+        StubURLProtocol.handler = { req in
+            switch req.url!.path {
+            case "/api/employees/mira": return (200, try! Fixtures.data("employee-detail"))
+            case "/api/agents/s-mira-1/log": return (200, try! Fixtures.data("agent-log"))
+            case "/api/employees/mira/talk": return (200, try! Fixtures.data("agent"))
+            case "/api/coo/message": return (200, Data(#"{"id":"cm_1","at":"2026-10-02T06:00:00.000Z","from":"owner","text":"hi"}"#.utf8))
+            default: return (404, Data(#"{"error":"no route"}"#.utf8))
+            }
+        }
+        rest = RestClient(config: ServerConfig(mode: .lan, baseURL: ServerConfig.parse("127.0.0.1:4317")!),
+                          tokens: MemoryTokenStore(token: "t"), session: StubURLProtocol.session())
+    }
+
+    func testAWorkingSessionAloneNeverTypes() async {
+        let s = TalkStore()
+        await s.select(rest, employeeId: "mira")
+        var running = s.session!; running.status = .running
+        s.handle(.agentUpdated(running))
+        XCTAssertTrue(s.isRunning)
+        XCTAssertFalse(s.isTyping(), "busy is not typing")
+    }
+
+    func testTypingFromSendUntilTheReplyOrTwoMinutes() async throws {
+        let s = TalkStore()
+        await s.select(rest, employeeId: "mira")
+        try await s.send(rest, text: "status?")
+        XCTAssertTrue(s.isTyping(), "a reply to the owner's message is pending")
+        XCTAssertFalse(s.isTyping(now: Date().addingTimeInterval(121)), "two-minute safety timeout")
+        let sid = s.session!.id
+        s.handle(.agentLog(LogEntry(id: "r1", agentId: sid, at: "2026-10-02T06:00:01.000Z", kind: .bash, label: "Bash", text: "ls")))
+        XCTAssertTrue(s.isTyping(), "a tool run is not the reply")
+        s.handle(.agentLog(LogEntry(id: "r2", agentId: sid, at: "2026-10-02T06:00:02.000Z", kind: .assistant, label: "", text: "All green.")))
+        XCTAssertFalse(s.isTyping(), "the reply landed")
+    }
+
+    func testCooTypesOnlyUntilTheCooAnswers() async throws {
+        let c = CooStore()
+        XCTAssertFalse(c.isTyping())
+        try await c.send(rest, text: "hi")
+        XCTAssertTrue(c.isTyping())
+        c.handle(.cooMessage(CooMessage(id: "cm_2", at: "2026-10-02T06:00:05.000Z", from: .coo, text: "Here.")))
+        XCTAssertFalse(c.isTyping())
+    }
+}

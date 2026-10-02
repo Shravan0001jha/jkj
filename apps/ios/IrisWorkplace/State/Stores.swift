@@ -175,11 +175,34 @@ final class TalkStore {
     private(set) var error: String?
     private(set) var loading = false
     private(set) var sending = false
+    /// The owner sent a message here and no reply has landed yet. Typing shows only then — never
+    /// from the employee's working state or an open session (owner bug, 2 Oct) — and at most for
+    /// `typingTimeout`.
+    private(set) var replyPendingSince: Date?
+    static let typingTimeout: TimeInterval = 120
+    private var typingTimer: Task<Void, Never>?
+
+    func isTyping(now: Date = Date()) -> Bool {
+        guard let since = replyPendingSince else { return false }
+        return now.timeIntervalSince(since) < Self.typingTimeout
+    }
+
+    private func replyPending(_ on: Bool) {
+        typingTimer?.cancel()
+        replyPendingSince = on ? Date() : nil
+        guard on else { return }
+        typingTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.typingTimeout))
+            guard !Task.isCancelled else { return }
+            self?.replyPendingSince = nil
+        }
+    }
 
     func select(_ rest: RestClient, employeeId: String) async {
         if self.employeeId != employeeId {
             self.employeeId = employeeId
             detail = nil; session = nil; log = []; error = nil
+            replyPending(false)
         }
         await reload(rest)
     }
@@ -223,6 +246,7 @@ final class TalkStore {
         }
         session = agent
         error = nil
+        replyPending(true)
     }
 
     func interrupt(_ rest: RestClient) async throws {
@@ -239,11 +263,17 @@ final class TalkStore {
     func handle(_ event: ServerEvent) {
         switch event {
         case .agentUpdated(let agent):
-            if agent.id == session?.id { session = agent }
+            if agent.id == session?.id {
+                session = agent
+                // The run ended or stopped to ask: no reply is coming right now.
+                if agent.status != .running { replyPending(false) }
+            }
             if let i = detail?.sessions.firstIndex(where: { $0.id == agent.id }) { detail?.sessions[i] = agent }
         case .agentLog(let entry):
             guard entry.agentId == session?.id else { return }
             if let i = log.firstIndex(where: { $0.id == entry.id }) { log[i] = entry } else { log.append(entry) }
+            // The reply landed (or the run failed): stop typing.
+            if entry.kind == .assistant || entry.kind == .error { replyPending(false) }
         case .agentRemoved(let id):
             if id == session?.id { session = nil; log = [] }
         case .inboxUpdated(let item):
@@ -404,6 +434,25 @@ final class CooStore {
     private(set) var sending = false
     private(set) var loaded = false
     private var pollTask: Task<Void, Never>?
+    /// Same rule as Talk: typing only while a reply to the owner's message is pending, at most 2 min.
+    private(set) var replyPendingSince: Date?
+    private var typingTimer: Task<Void, Never>?
+
+    func isTyping(now: Date = Date()) -> Bool {
+        guard let since = replyPendingSince else { return false }
+        return now.timeIntervalSince(since) < TalkStore.typingTimeout
+    }
+
+    private func replyPending(_ on: Bool) {
+        typingTimer?.cancel()
+        replyPendingSince = on ? Date() : nil
+        guard on else { return }
+        typingTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(TalkStore.typingTimeout))
+            guard !Task.isCancelled else { return }
+            self?.replyPendingSince = nil
+        }
+    }
 
     func load(_ rest: RestClient) async {
         loading = true
@@ -422,11 +471,14 @@ final class CooStore {
         defer { sending = false }
         let m = try await rest.cooMessage(text)
         append(m)
+        replyPending(true)
     }
 
     func handle(_ event: ServerEvent) {
         switch event {
-        case .cooMessage(let m): append(m)
+        case .cooMessage(let m):
+            append(m)
+            if m.from == .coo { replyPending(false) }
         case .cooPresence(let p): presence = p
         default: break
         }

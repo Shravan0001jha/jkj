@@ -75,8 +75,9 @@ struct TalkListView: View {
 
     private func preview(_ c: EmployeeCard) -> String {
         if c.employee.virtual == true, let last = model.coo.log.last { return (last.from == .owner ? "You: " : "") + last.text }
+        // Busy: what they are on. Otherwise their last line. Never "typing" from a working state.
+        if c.employee.state == .working, let w = c.currentWork { return "Working on \(w.title)" }
         if let r = c.lastReport, !r.isEmpty { return r }
-        if let w = c.currentWork { return w.title }
         return c.charters.map(\.title).joined(separator: " · ")
     }
 
@@ -212,7 +213,7 @@ struct ConversationView: View {
         if isCoo { return cooOnline == false ? "Offline · messages wait" : "Online" }
         guard talk.employeeId == employeeId, let s = talk.session else { return talk.detail?.employee.state.glyph.label ?? " " }
         switch s.status {
-        case .running: return "Working…"
+        case .running: return "Busy on a task"
         case .waiting: return "Waiting for you"
         default: return "\(s.status.glyph.label) · $\(String(format: "%.2f", s.usage.costUsd))"
         }
@@ -233,7 +234,7 @@ struct ConversationView: View {
         let mine = talk.employeeId == employeeId
         return ChatThreadView(
             items: mine ? ChatItem.from(log: talk.chatLog) : [],
-            typing: mine && talk.isRunning,
+            typing: mine && talk.isTyping(),
             typingName: name,
             loading: talk.loading || !mine,
             emptyTitle: "No session open",
@@ -283,7 +284,7 @@ struct ConversationView: View {
     private var cooChat: some View {
         ChatThreadView(
             items: ChatItem.from(coo: model.coo.log),
-            typing: false,
+            typing: model.coo.isTyping(),
             typingName: name,
             loading: model.coo.loading,
             emptyTitle: "Nothing yet",
