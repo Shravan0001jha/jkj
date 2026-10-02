@@ -31,6 +31,8 @@ export function lastActivity(wp: Workplace, item: WorkItem): number {
 
 export function stalledSince(wp: Workplace, item: WorkItem, nowMs = Date.now()): string | undefined {
   if (item.kind !== 'assignment' || !IN_PROGRESS.has(item.state)) return undefined;
+  // Backlog is parked (HLD D19): never stalled, so nothing old resumes it either.
+  if (item.status === 'backlog') return undefined;
   const open = item.employeeId ? employees.openSession(item.employeeId) : undefined;
   if (open && open.assignmentId === item.id && runs.getRunAgent(open.agentId)?.status === 'running') return undefined;
   const last = lastActivity(wp, item);

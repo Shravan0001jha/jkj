@@ -54,6 +54,12 @@ export interface LogEntry {
    * ("worked · 6 steps · 1m 12s"), and the original entries for the expanded view.
    */
   activity?: { count: number; durationMs: number; entries: LogEntry[] };
+  /**
+   * v2 chat hygiene, on 'user' entries only: who wrote it. 'workplace' = a prompt the Workplace
+   * sent the session (an assignment, a moderation turn, a handoff request); the chat view folds
+   * those into the activity line. Absent reads as 'owner'.
+   */
+  from?: 'owner' | 'workplace';
 }
 
 export type LogKind =

@@ -124,3 +124,57 @@ test('a Team Room escalation routes through the COO first; falls back to the own
     tmp.cleanup();
   }
 });
+
+test('pollPresence emits coo.presence only when online ↔ offline actually flips, to every socket (not just loopback)', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const events: { presence: { online: boolean } }[] = [];
+    wp.on(e => { if (e.type === 'coo.presence') events.push(e); });
+
+    coo.pollPresence(wp); // first poll (still offline): seeds, no event
+    assert.equal(events.length, 0);
+    coo.pollPresence(wp); // unchanged: no event
+    assert.equal(events.length, 0);
+
+    coo.touchHeartbeatForTest(wp);
+    coo.pollPresence(wp); // offline -> online: one event
+    assert.equal(events.length, 1);
+    assert.equal(events[0]!.presence.online, true);
+    coo.pollPresence(wp); // still online: no event
+    assert.equal(events.length, 1);
+
+    coo.touchHeartbeatForTest(wp, new Date(Date.now() - 10 * 60_000));
+    coo.pollPresence(wp); // online -> offline: one event
+    assert.equal(events.length, 2);
+    assert.equal(events[1]!.presence.online, false);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test('the approved live-check window is off by default, opens for a fixed number of minutes, and closes on its own', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    assert.equal(coo.liveWindowUntil(wp, 'tara'), null, 'off by default');
+    assert.equal(coo.isLiveWindowOpen(wp, 'tara'), false);
+
+    const window = coo.openLiveWindow(wp, 'tara', 10);
+    assert.equal(window.employeeId, 'tara');
+    assert.ok(coo.liveWindowUntil(wp, 'tara')! > Date.now());
+    assert.equal(coo.isLiveWindowOpen(wp, 'tara'), true);
+    // A different employee is untouched.
+    assert.equal(coo.isLiveWindowOpen(wp, 'mira'), false);
+
+    // It closes on its own once the minutes pass (an injected "now" past `until`, no real sleep).
+    const past = Date.parse(window.until) + 1;
+    assert.equal(coo.isLiveWindowOpen(wp, 'tara', past), false);
+    // A fresh window after it closes opens again.
+    coo.openLiveWindow(wp, 'tara', 5);
+    assert.equal(coo.isLiveWindowOpen(wp, 'tara'), true);
+
+    assert.throws(() => coo.openLiveWindow(wp, 'tara', 0), /positive number/);
+    assert.throws(() => coo.openLiveWindow(wp, 'tara', -5), /positive number/);
+  } finally {
+    tmp.cleanup();
+  }
+});

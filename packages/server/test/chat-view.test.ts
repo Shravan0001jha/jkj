@@ -49,14 +49,17 @@ test('a message in the middle of a tool run ends the run and starts a new one af
   assert.deepEqual(out.map(e => e.kind), ['activity', 'assistant', 'activity']);
 });
 
-test('system and error entries (an approval decided, a rate limit, a session note) are never swallowed into a collapsed run', () => {
+// v2 (owner, 2 Oct, "a chat is a chat"; LLD §19.9): system notes now fold into the activity line
+// with the tool runs — kept for "expand", never shown as a chat message. Errors still stand alone.
+test('system notes fold into the activity line (kept for expand); errors are never swallowed', () => {
   const out = toChatView([
     entry('bash', 0, 'npm test'),
     entry('system', 1_000, 'You allowed the request.', 'Allowed'),
     entry('bash', 2_000, 'npm run build'),
     entry('error', 3_000, 'The tool call failed.', 'Failed'),
   ]);
-  assert.deepEqual(out.map(e => e.kind), ['bash', 'system', 'bash', 'error']);
+  assert.deepEqual(out.map(e => e.kind), ['activity', 'error']);
+  assert.ok(out[0]!.activity!.entries.some(e => e.kind === 'system'), 'the note is still there on expand');
 });
 
 test('durations under a minute read as seconds; a clean minute drops the seconds', () => {

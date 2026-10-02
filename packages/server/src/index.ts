@@ -17,7 +17,11 @@ import { Watchdog } from './services/watchdog.js';
 import { SuspendDetector } from './services/suspend.js';
 import { PowerMonitor } from './services/power.js';
 import * as room from './services/room.js';
+import * as coo from './services/coo.js';
 import { wireMentionReplies } from './services/mentions.js';
+import { migrateV2 } from './services/migrate-v2.js';
+import * as watch from './services/watch.js';
+import * as rhythm from './services/rhythm.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
 import * as employees from './services/employees.js';
@@ -60,10 +64,16 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   const history = boots.recordBoot(wp.db, new Date(startedAt));
   log.info('boot', `boot #${history.total} (${boots.bootsWithin(history, startedAt, 24 * 60 * 60_000)} in the last 24 h)`);
 
+  // Workplace v2 (HLD D25): every legacy row gets its level, status and reason, once, non-destructively.
+  try { migrateV2(wp); } catch (err) { log.warn('boot', `v2 migration: ${err instanceof Error ? err.message : err}`); }
   // The decisions the definition leaves open go to the owner, once.
   seedDecisions(wp);
   // Sessions that were open when the last process died are reported, never forgotten.
   employees.recoverAfterRestart(wp);
+  // Work blocked only by the Workplace's own shutdown or restart restarts itself, staggered,
+  // rather than waiting on the Chief of Staff's once-a-day resume (1 Oct: Kabir and Rohan stuck
+  // for days). Owner-stopped and capped work is left alone.
+  void employees.resumeAfterShutdown(wp).catch(err => log.warn('boot', `resume after restart: ${err instanceof Error ? err.message : err}`));
   // Budget is real money only (28 Sep): relabel the old ledger, lift pauses that were on free usage.
   spend.migrateToRealMoney(wp);
   try { const c = spend.resolveStalePreMigrationCapItems(wp); if (c.resolved.length) log.info('boot', `resolved ${c.resolved.length} stale pre-migration cap item(s)`); } catch (err) { log.warn('boot', `stale cap items: ${err instanceof Error ? err.message : err}`); }
@@ -86,6 +96,9 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   try { const made = room.seedThreads(wp); if (made.length) log.info('boot', `seeded ${made.length} Team Room threads from the 27 Sep plans`); } catch (err) { log.warn('boot', `room seed failed: ${err instanceof Error ? err.message : err}`); }
   // @mentions wake a short, rate-limited reply turn (RCA, 29 Sep: nothing did this before); @coo goes to the COO bridge.
   wireMentionReplies(wp);
+  try { room.ensureReleases(wp); } catch (err) { log.warn('boot', `Releases room: ${err instanceof Error ? err.message : err}`); }
+  // v2 stalls are events, not a sweep (HLD D21): each open item has a deadline that every change re-arms.
+  const stopWatch = watch.startWatch(wp);
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
@@ -137,9 +150,15 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
     for (const id of employees.closeStale(wp)) log.info('sessions', `closed stale session ${id}`);
     health.handleParkedApprovals(wp);
     void health.handleStalls(wp).catch(err => log.warn('health', String(err)));
+    // The lead's heartbeat is a file, not an event: polled here, a coo.presence event goes out
+    // only when online ↔ offline actually flips (coo.pollPresence).
+    try { coo.pollPresence(wp); } catch (err) { log.warn('coo', `presence poll: ${err instanceof Error ? err.message : err}`); }
   }, 30_000);
   // The Chief of Staff's routine: stalled work is resumed within budget or explained in the Inbox.
-  const cosTimer = setInterval(() => { try { cos.tick(wp); } catch (err) { log.warn('cos', String(err)); } }, 5 * 60_000);
+  // Its stall loop is off in v2 (the watcher owns stalls); the Room moderation stays.
+  const cosTimer = setInterval(() => { try { cos.tick(wp, Date.now(), { stalls: false }); } catch (err) { log.warn('cos', String(err)); } }, 5 * 60_000);
+  // Asha's rhythm (HLD D24): the 09:30 brief, the 10:00 stand-up, the Sunday review.
+  const rhythmTimer = setInterval(() => { try { rhythm.maybeRun(wp); } catch (err) { log.warn('rhythm', String(err)); } }, 60_000);
   // AWS actuals once a day, after the digest hour.
   const awsTimer = setInterval(() => { if (config.awsCost) void awsCost.reconcileYesterday(wp).catch(err => log.warn('aws-cost', String(err))); }, 60 * 60_000);
   const digestTimer = setInterval(() => void digestService.maybeSend(wp, telegram, config.digestHour), 60_000);
@@ -158,6 +177,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       tunnel?.stop();
       clearInterval(stallTimer);
       clearInterval(cosTimer);
+      clearInterval(rhythmTimer);
+      stopWatch();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
       telegram.stop();

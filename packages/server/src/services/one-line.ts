@@ -53,3 +53,25 @@ function trimAtWord(s: string, max: number): string {
   const at = cut.lastIndexOf(' ');
   return `${(at > max / 2 ? cut.slice(0, at) : cut).replace(/[,;:\s]+$/, '')}…`;
 }
+
+/** How much of a chat message stays in `text` (HLD D22): a few short lines. */
+export const SHORT_LINES = 4;
+export const SHORT_CHARS = 400;
+
+/**
+ * Messages stay small (owner, 2 Oct): an agent's Room post, comment or Inbox reply keeps at most
+ * four lines and 400 characters in `text`; anything longer is cut at a word with " …" and the whole
+ * original goes to `details` (shown on "more"). Never applied to the owner's own words.
+ */
+export function short(text: string): { text: string; details?: string } {
+  const whole = text.trim();
+  const lines = whole.split('\n');
+  if (lines.length <= SHORT_LINES && whole.length <= SHORT_CHARS) return { text: whole };
+  let kept = lines.slice(0, SHORT_LINES).join('\n');
+  if (kept.length > SHORT_CHARS) {
+    const cut = kept.slice(0, SHORT_CHARS);
+    const space = cut.lastIndexOf(' ');
+    kept = space > SHORT_CHARS / 2 ? cut.slice(0, space) : cut;
+  }
+  return { text: `${kept.trimEnd()} …`, details: whole };
+}

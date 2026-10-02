@@ -55,6 +55,27 @@ export function presence(wp: Workplace, thresholdMs = ONLINE_MS): CooPresence {
 
 const isOffline = (wp: Workplace, thresholdMs: number): boolean => !presence(wp, thresholdMs).online;
 
+const PRESENCE_KEY = 'coo-presence-online';
+
+/**
+ * Called on a timer (index.ts, every 30 s, next to the stall check): the server never learns of a
+ * heartbeat write directly (the lead's own process touches the file; nothing here watches it), so
+ * presence is polled. Emits `coo.presence` only when online ↔ offline actually flips — not on every
+ * tick — to every authenticated owner socket (`ws/hub.ts`; unlike `coo.item` this is not local-only,
+ * the owner reaches the Workplace only through the tunnel). State lives in `settings`, not a module
+ * variable, so it is per-workplace and never leaks between tests.
+ */
+export function pollPresence(wp: Workplace): CooPresence {
+  const p = presence(wp);
+  const prev = (wp.db.prepare('select value from settings where key = ?').get(PRESENCE_KEY) as { value: string } | undefined)?.value;
+  const onlineFlag = p.online ? '1' : '0';
+  if (prev !== onlineFlag) {
+    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(PRESENCE_KEY, onlineFlag);
+    if (prev !== undefined) wp.emit({ type: 'coo.presence', presence: p }); // the first poll only seeds; nothing "flipped" yet
+  }
+  return p;
+}
+
 /* ---------- the owner's Talk with the COO ---------- */
 
 export function transcript(wp: Workplace): CooMessage[] {
@@ -158,6 +179,26 @@ function raiseToOwner(wp: Workplace, item: CooItem, spec: RouteEscalationSpec, n
   return ownerItem;
 }
 
+/**
+ * A stall (HLD D21): the COO hears of it at once — a `coo_items` row and a line in the bridge file —
+ * and it never falls back to the owner's Inbox (stalls are the COO's to clear; Asha covers routine
+ * resumes while the COO is offline, in watch.ts).
+ */
+export function notifyStall(wp: Workplace, spec: { itemId: string; title: string; body: string; by: string }): CooItem {
+  const item: CooItem = {
+    id: newId('coi'), at: now(), kind: 'stall', title: spec.title, body: spec.body, options: [],
+    raisedBy: spec.by, state: 'open', itemId: spec.itemId,
+  };
+  saveItem(wp, item);
+  appendInboxFile(wp, { kind: 'stall', itemId: spec.itemId, coiId: item.id, title: item.title, body: item.body });
+  return item;
+}
+
+/** The owner replied in the thread of an Inbox item the COO forwarded: the lead's watcher gets it. */
+export function relayInboxReply(wp: Workplace, spec: { inboxId: string; title: string; text: string }): void {
+  appendInboxFile(wp, { kind: 'inbox-reply', inboxId: spec.inboxId, title: spec.title, text: spec.text });
+}
+
 /** `@coo` in a Room thread: routed the same way as one of Asha's escalations. */
 export function notifyMention(wp: Workplace, spec: { threadId: string; threadTitle: string; by: string; text: string }): void {
   routeEscalation(wp, {
@@ -181,6 +222,36 @@ export function forwardItem(wp: Workplace, spec: { itemId: string; recommendatio
   if (item.state !== 'open') throw new BadRequest(`${spec.itemId} was already ${item.state}`);
   if (!spec.recommendation.trim()) throw new BadRequest('A forward needs a recommendation.');
   return raiseToOwner(wp, item, { title: item.title, body: item.body, by: item.raisedBy, ...(item.threadId ? { threadId: item.threadId } : {}) }, '', false, spec.recommendation.trim());
+}
+
+/* ---------- the approved live-check window ---------- */
+
+const LIVE_WINDOW_KEY = (employeeId: string): string => `live-window:${employeeId}`;
+
+/**
+ * POST /api/coo/live-window: the owner (loopback only, like every other COO-only route) opens a
+ * time-boxed exception that lets one employee's session run a host command on the real Mac
+ * instead of being denied by the guard (guards.ts HOST_COMMANDS). Off by default; nothing opens
+ * it on its own.
+ */
+export function openLiveWindow(wp: Workplace, employeeId: string, minutes: number): { employeeId: string; until: string } {
+  if (!Number.isFinite(minutes) || minutes <= 0) throw new BadRequest('minutes must be a positive number.');
+  const until = new Date(Date.now() + minutes * 60_000).toISOString();
+  wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(LIVE_WINDOW_KEY(employeeId), until);
+  return { employeeId, until };
+}
+
+/** The window's expiry as an absolute ms timestamp, or null when none is set. */
+export function liveWindowUntil(wp: Workplace, employeeId: string): number | null {
+  const row = wp.db.prepare('select value from settings where key = ?').get(LIVE_WINDOW_KEY(employeeId)) as { value: string } | undefined;
+  if (!row) return null;
+  const t = Date.parse(row.value);
+  return Number.isFinite(t) ? t : null;
+}
+
+export function isLiveWindowOpen(wp: Workplace, employeeId: string, nowMs = Date.now()): boolean {
+  const until = liveWindowUntil(wp, employeeId);
+  return until !== null && nowMs < until;
 }
 
 /** Test-only: simulate the lead's heartbeat without waiting on a real process. */

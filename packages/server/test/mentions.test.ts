@@ -19,12 +19,14 @@ function withMentions(wp: ReturnType<typeof testWorkplace>['wp']) {
   return wireMentionReplies(wp);
 }
 
-test('an @mention starts a short turn for the mentioned employee, with the thread as context', async () => {
+test('an @mention starts a short turn for the mentioned employee, with the thread as context, and reports room.replying started/done', async () => {
   const { wp, tmp } = testWorkplace();
   const runtime = installFakeRuntime();
   const unwire = withMentions(wp);
+  const replying: { threadId: string; employeeId: string; state: string }[] = [];
+  wp.on(e => { if (e.type === 'room.replying') replying.push(e); });
   try {
-    room.createThread(wp, { title: 'Weather source', text: 'Which module owns the weather facts? @dev', by: 'mira', charterIds: ['experts', 'conversation'] });
+    const { thread } = room.createThread(wp, { title: 'Weather source', text: 'Which module owns the weather facts? @dev', by: 'mira', charterIds: ['experts', 'conversation'] });
     await Promise.resolve(); await Promise.resolve(); // the mention handler and the fake spawn both queue a microtask
     assert.equal(runtime.sessions.length, 1, 'exactly one session was started');
     const spawned = runtime.last();
@@ -32,6 +34,12 @@ test('an @mention starts a short turn for the mentioned employee, with the threa
     assert.match(spawned.options.prompt, /Weather source/);
     assert.match(spawned.options.prompt, /Which module owns the weather facts/);
     assert.equal(employees.openSession('dev')?.agentId !== undefined, true, 'the Workplace is tracking the session against dev');
+
+    assert.deepEqual(replying, [{ type: 'room.replying', threadId: thread.id, employeeId: 'dev', state: 'started' }]);
+    runtime.last().say('context/weather.py.');
+    runtime.last().result(); // the SDK's own turn boundary: status leaves 'running'
+    assert.equal(replying.length, 2);
+    assert.deepEqual(replying[1], { type: 'room.replying', threadId: thread.id, employeeId: 'dev', state: 'done' });
   } finally {
     unwire(); runtime.restore(); tmp.cleanup();
   }
@@ -50,20 +58,24 @@ test('a self-mention never wakes the poster; the owner mentioning nobody real is
   }
 });
 
-test('one reply turn per mention: a second mention of the same employee in the same thread within the cooldown does not spawn again', async () => {
+test('one reply turn per mention: a second mention of the same employee in the same thread within the cooldown does not spawn again, and reports room.replying skipped', async () => {
   const { wp, tmp } = testWorkplace();
   const runtime = installFakeRuntime();
   const unwire = withMentions(wp);
+  const replying: { threadId: string; employeeId: string; state: string }[] = [];
+  wp.on(e => { if (e.type === 'room.replying') replying.push(e); });
   try {
     const { thread } = room.createThread(wp, { title: 'Contract', text: '@tara take a look', by: 'asha', charterIds: [] });
     await Promise.resolve(); await Promise.resolve();
     assert.equal(runtime.sessions.length, 1);
+    assert.deepEqual(replying, [{ type: 'room.replying', threadId: thread.id, employeeId: 'tara', state: 'started' }]);
     // Close the session outright (not merely idle) so a second wake cannot merge into it — only the
     // cooldown, not "there is already an open session", explains what happens next.
     employees.close(wp, employees.openSession('tara')!.agentId, 'test');
     room.post(wp, thread.id, { text: '@tara ping again', by: 'asha' });
     await Promise.resolve(); await Promise.resolve();
     assert.equal(runtime.sessions.length, 1, 'rate-limited within the cooldown: no second session');
+    assert.deepEqual(replying[1], { type: 'room.replying', threadId: thread.id, employeeId: 'tara', state: 'skipped' });
   } finally {
     unwire(); runtime.restore(); tmp.cleanup();
   }

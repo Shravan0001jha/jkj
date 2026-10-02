@@ -37,7 +37,9 @@ import type {
   AssignmentState,
   CooMessage,
   CooItem,
+  CooPresence,
 } from './workplace.js';
+import type { Activity, Area, Comment, Item, ReleasePost, Update, InboxMessage } from './workplace-v2.js';
 
 export const WORKPLACE_API = {
   health: '/api/health',
@@ -103,6 +105,23 @@ export const WORKPLACE_API = {
   cooAnswer: '/api/coo/answer',
   cooForward: '/api/coo/forward',
   cooPresence: '/api/coo/presence',
+  /* ---------- v2 (LLD §19.8) ---------- */
+  plan: (view?: 'board') => `/api/plan${view ? `?view=${view}` : ''}`,
+  focus: '/api/focus',
+  items: (q?: { level?: string; status?: string; assigneeId?: string; areaId?: string; parentId?: string }) => withQuery('/api/items', q ? { ...q } : undefined),
+  item: (id: string) => `/api/items/${encodeURIComponent(id)}`,
+  itemComments: (id: string) => `/api/items/${encodeURIComponent(id)}/comments`,
+  itemMerge: (id: string) => `/api/items/${encodeURIComponent(id)}/merge`,
+  updates: (q?: { limit?: number; before?: string }) => withQuery('/api/updates', q ? { limit: q.limit ? String(q.limit) : undefined, before: q.before } : undefined),
+  inboxThread: (id: string) => `/api/inbox/${encodeURIComponent(id)}`,
+  inboxReply: (id: string) => `/api/inbox/${encodeURIComponent(id)}/reply`,
+  status: (q: string) => withQuery('/api/status', { q }),
+  areas: '/api/areas',
+  area: (id: string) => `/api/areas/${encodeURIComponent(id)}`,
+  rooms: '/api/rooms',
+  roomDetail: (id: string) => `/api/rooms/${encodeURIComponent(id)}`,
+  releasePosts: '/api/releases/posts',
+  releasePost: (id: string) => `/api/releases/posts/${encodeURIComponent(id)}`,
   socket: '/ws',
 } as const;
 
@@ -321,9 +340,25 @@ export type WorkplaceServerEvent =
   | { type: 'room.thread'; thread: RoomThread }
   | { type: 'room.message'; message: RoomMessage; thread: RoomThread }
   | { type: 'alert'; level: 'info' | 'needs-you' | 'blocked' | 'cap'; title: string; body: string; inboxId?: string }
-  /** The COO bridge (loopback only; see `/api/coo/*`). */
+  /**
+   * The COO bridge. `coo.message` (the owner's own conversation) and `coo.presence` (online ↔
+   * offline, from the lead's heartbeat) reach every authenticated owner socket, relay included —
+   * see `/api/coo/*`'s owner-facing routes. `coo.item` (escalations raised *to* the COO) is
+   * lead-only bookkeeping and stays local (`ws/hub.ts`), like `/api/coo/{items,answer,forward,reply}`.
+   */
   | { type: 'coo.message'; message: CooMessage }
-  | { type: 'coo.item'; item: CooItem };
+  | { type: 'coo.presence'; presence: CooPresence }
+  | { type: 'coo.item'; item: CooItem }
+  /** A mention-woken Room turn (services/mentions.ts), for a "Mira is replying…" indicator. */
+  | { type: 'room.replying'; threadId: string; employeeId: string; state: 'started' | 'done' | 'skipped' }
+  /* v2 (LLD §19.8) */
+  | { type: 'item.updated'; item: Item }
+  | { type: 'item.comment'; comment: Comment }
+  | { type: 'activity.recorded'; activity: Activity }
+  | { type: 'update.posted'; update: Update }
+  | { type: 'area.updated'; area: Area }
+  | { type: 'inbox.message'; message: InboxMessage }
+  | { type: 'release.post'; post: ReleasePost };
 
 export type WorkplaceClientCommand =
   | { type: 'inbox.answer'; id: string; optionId: string; note?: string };

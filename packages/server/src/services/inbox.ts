@@ -1,8 +1,8 @@
-import type { InboxAnswer, InboxItem, InboxKind, InboxOption } from '@jkj/shared';
+import type { InboxAnswer, InboxItem, InboxKind, InboxMessage, InboxOption, InboxThread } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
-import { oneLine } from './one-line.js';
+import { oneLine, short } from './one-line.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
-import { BadRequest, Conflict } from '../util/errors.js';
+import { BadRequest, Conflict, NotFound } from '../util/errors.js';
 
 /**
  * The Inbox: every decision or approval that needs the owner, with context
@@ -30,6 +30,8 @@ export interface RaiseOptions {
   details?: string;
   /** False for routine housekeeping that must never reach the owner's Inbox (see InboxItem). */
   ownerFacing?: boolean;
+  /** v2: shown by colour and label. */
+  urgency?: InboxItem['urgency'];
 }
 
 /** True unless the raiser explicitly marked the item routine (a stall notice, a dead-session note). */
@@ -106,6 +108,7 @@ export function raise(wp: Workplace, spec: RaiseOptions): InboxItem {
     onDeny: spec.onDeny ?? DEFAULT_EFFECT[spec.kind].onDeny,
     ...(spec.links ? { links: spec.links } : {}),
     ...(spec.ownerFacing === false ? { ownerFacing: false } : {}),
+    ...(spec.urgency && spec.urgency !== 'normal' ? { urgency: spec.urgency } : {}),
   };
   wp.db.prepare('insert into inbox (id, kind, state, raised_by, created_at, json) values (?, ?, ?, ?, ?, ?)')
     .run(item.id, item.kind, item.state, item.raisedBy, item.createdAt, JSON.stringify(item));
@@ -207,3 +210,50 @@ export function onAnswer(fn: AnswerListener): () => void {
 
 export const openCount = (wp: Workplace): number => ownerList(wp, 'open').length;
 
+
+/* ---------- v2: every item is a thread (HLD D23, LLD §19.5) ---------- */
+
+export function messages(wp: Workplace, inboxId: string): InboxMessage[] {
+  return rowsJson<InboxMessage>(wp.db.prepare('select json from inbox_messages where inbox_id = ? order by at, rowid').all(inboxId));
+}
+
+export function thread(wp: Workplace, id: string): InboxThread {
+  const item = get(wp, id);
+  if (!item) throw new NotFound(`No inbox item ${id}`);
+  return { item, messages: messages(wp, id) };
+}
+
+/**
+ * A reply in an item's thread. With `optionId` it also answers the item (the text is the note);
+ * text alone leaves it open — the owner can ask back or suggest something else, and the asker
+ * answers in the same thread. An employee's reply is kept short; the owner's never is.
+ */
+export function reply(wp: Workplace, id: string, spec: { by: string; text?: string; optionId?: string; via?: InboxAnswer['via'] }): InboxThread {
+  const item = get(wp, id);
+  if (!item) throw new NotFound(`No inbox item ${id}`);
+  const text = spec.text?.trim() ?? '';
+  if (!text && !spec.optionId) throw new BadRequest('Nothing to send: write a reply or pick an option.');
+  if (spec.optionId && item.state !== 'open') throw new Conflict(`${id} was already answered`);
+  let message: InboxMessage | undefined;
+  if (text) {
+    const body = spec.by === 'owner' ? { text } : short(text);
+    message = { id: newId('im'), inboxId: id, at: now(), by: spec.by, text: body.text, ...(body.details ? { details: body.details } : {}) };
+    wp.db.prepare('insert into inbox_messages (id, inbox_id, at, by, json) values (?, ?, ?, ?, ?)').run(message.id, id, message.at, message.by, JSON.stringify(message));
+    const latest = get(wp, id)!;
+    const counted: InboxItem = { ...latest, messageCount: (latest.messageCount ?? 0) + 1, lastMessageAt: message.at };
+    wp.db.prepare('update inbox set json = ? where id = ?').run(JSON.stringify(counted), id);
+    wp.emit({ type: 'inbox.message', message });
+    wp.emit({ type: 'inbox.updated', item: counted });
+  }
+  if (spec.optionId) answer(wp, id, spec.optionId, text || undefined, spec.via ?? 'web');
+  // Delivered only when the item is still a live conversation (an answer reaches the raiser through onAnswer).
+  if (message && !spec.optionId) for (const fn of replyListeners) { try { fn(wp, get(wp, id)!, message); } catch { /* a listener never breaks the reply */ } }
+  return thread(wp, id);
+}
+
+type ReplyListener = (wp: Workplace, item: InboxItem, message: InboxMessage) => void;
+const replyListeners = new Set<ReplyListener>();
+export function onReply(fn: ReplyListener): () => void {
+  replyListeners.add(fn);
+  return () => void replyListeners.delete(fn);
+}

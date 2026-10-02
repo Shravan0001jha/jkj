@@ -5,6 +5,8 @@ import type { Workplace } from './workplace.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { route } from './ownership.js';
 import { BadRequest } from '../util/errors.js';
+import { defaultReviewer, levelOf, statusFromState } from './v2-map.js';
+import * as trail from './trail.js';
 
 /**
  * Work is independent of the org (HLD D7).
@@ -45,6 +47,8 @@ export interface CreateWork {
   platformIds?: string[];
   spec?: string;
   by?: string;
+  /** v2 fields set at creation (items.ts): level, parentId, status, points, reviewer, owner, area, rank, … */
+  v2?: Partial<Pick<WorkItem, 'level' | 'parentId' | 'status' | 'points' | 'reviewerId' | 'ownerId' | 'areaId' | 'rank' | 'targetDate' | 'acceptance'>>;
 }
 
 export function create(wp: Workplace, spec: CreateWork): WorkItem {
@@ -56,7 +60,8 @@ export function create(wp: Workplace, spec: CreateWork): WorkItem {
 
   // An assignment to a charter goes to the least-loaded holder; one to an
   // employee takes that employee's first charter unless told otherwise.
-  if (spec.kind !== 'feature') {
+  // v2: the owner can be an assignee ("approve the release"); such an item never gets a session.
+  if (spec.kind !== 'feature' && employeeId !== 'owner') {
     if (employeeId && !charterId) charterId = wp.org.employees.find(e => e.id === employeeId)?.charterIds[0];
     if (charterId && !employeeId) employeeId = leastLoadedHolder(wp, charterId);
     if (charterId && !wp.org.charters.has(charterId)) throw new BadRequest(`No charter ${charterId}`);
@@ -64,6 +69,8 @@ export function create(wp: Workplace, spec: CreateWork): WorkItem {
   }
 
   const at = now();
+  const level = spec.v2?.level ?? (spec.kind === 'feature' ? 'epic' : 'story');
+  const parentId = spec.v2?.parentId ?? (level === 'story' ? spec.featureId : undefined);
   const item: WorkItem = {
     id: newId(spec.kind === 'feature' ? 'ft' : 'as'),
     kind: spec.kind,
@@ -78,10 +85,26 @@ export function create(wp: Workplace, spec: CreateWork): WorkItem {
     ...(spec.spec ? { spec: spec.spec } : {}),
     createdAt: at,
     updatedAt: at,
-    history: [{ at, from: null, to: initial, by: spec.by ?? 'owner' }],
+    // Attributed to whoever asked; the Workplace's own creations never read as the owner's (HLD D22).
+    history: [{ at, from: null, to: initial, by: spec.by ?? 'workplace' }],
+    ...spec.v2,
+    level,
+    ...(parentId ? { parentId } : {}),
+    status: spec.v2?.status ?? 'ready',
+    statusSince: at,
+    rank: spec.v2?.rank ?? nextRank(wp, level, parentId, spec.v2?.areaId),
   };
   save(wp, item, true);
+  trail.afterChange(wp, null, item, spec.by ?? 'workplace');
   return item;
+}
+
+/** Append after the last sibling: epics within their area, everything else within its parent. */
+export function nextRank(wp: Workplace, level: string, parentId: string | undefined, areaId?: string): number {
+  const row = level === 'epic'
+    ? wp.db.prepare("select max(rank) as r from work where level = 'epic' and coalesce(area_id, '') = ?").get(areaId ?? '') as { r: number | null }
+    : wp.db.prepare('select max(rank) as r from work where parent_id = ?').get(parentId ?? '') as { r: number | null };
+  return (row?.r ?? 0) + 1;
 }
 
 export function get(wp: Workplace, id: string): WorkItem | undefined {
@@ -119,6 +142,8 @@ export interface TransitionOptions {
   evidence?: Evidence;
   plan?: string;
   spec?: string;
+  /** See WorkHistoryEntry.cause: only ever 'workplace-shutdown', only ever on a transition to 'blocked'. */
+  cause?: 'workplace-shutdown';
 }
 
 export function transition(wp: Workplace, id: string, opts: TransitionOptions): WorkItem {
@@ -161,11 +186,48 @@ export function transition(wp: Workplace, id: string, opts: TransitionOptions): 
     ...patch,
     state: opts.to,
     updatedAt: at,
-    history: [...item.history, { at, from: item.state, to: opts.to, by: opts.by, ...(opts.note ? { note: opts.note } : {}) }],
+    history: [...item.history, { at, from: item.state, to: opts.to, by: opts.by, ...(opts.note ? { note: opts.note } : {}), ...(opts.cause ? { cause: opts.cause } : {}) }],
   };
+  // v2 keeps step (LLD §19.3): the old engine's move sets the v2 status, and its rules hold here too.
+  const v2 = statusFromState(item, opts.to, item.status);
+  if (v2.status !== item.status) { updated.status = v2.status; updated.statusSince = at; }
+  if (v2.status === 'done') updated.resolution = v2.resolution ?? 'done'; else delete updated.resolution;
+  if (v2.status === 'in-review' && !updated.reviewerId) {
+    const reviewer = defaultReviewer(wp, updated);
+    if (reviewer) updated.reviewerId = reviewer;
+  }
+  if (v2.status === 'blocked') {
+    updated.blockedReason = opts.note?.trim() || item.blockedReason || 'No reason given';
+    updated.waitingOn = item.waitingOn ?? 'coo';
+    updated.blockedSince = at;
+  } else if (item.status === 'blocked') {
+    delete updated.blockedReason; delete updated.waitingOn; delete updated.blockedSince; delete updated.blockedRecommendation;
+  }
   save(wp, updated);
+  trail.afterChange(wp, item, updated, opts.by, opts.note);
+  bumpEpic(wp, updated);
   if (updated.featureId) rollUpFeature(wp, updated.featureId);
   return updated;
+}
+
+/** An epic is in progress once any of its stories is (v2 status only; the feature state is the roll-up's). */
+function bumpEpic(wp: Workplace, w: WorkItem): void {
+  if (w.kind === 'feature' || w.status !== 'in-progress' || !w.featureId) return;
+  const epic = get(wp, w.featureId);
+  if (!epic || (epic.status !== 'ready' && epic.status !== 'backlog')) return;
+  const at = now();
+  const next: WorkItem = { ...epic, status: 'in-progress', statusSince: at, updatedAt: at };
+  save(wp, next);
+  trail.afterChange(wp, epic, next, 'workplace', `Started: ${w.title}`);
+}
+
+/** A v2 write (items.ts): the row as given, saved and its trail recorded. */
+export function put(wp: Workplace, prev: WorkItem, next: WorkItem, by: string, note?: string): WorkItem {
+  save(wp, next);
+  trail.afterChange(wp, prev, next, by, note);
+  bumpEpic(wp, next);
+  if (next.featureId && next.kind !== 'feature') rollUpFeature(wp, next.featureId);
+  return next;
 }
 
 /**
@@ -295,7 +357,15 @@ function save(wp: Workplace, item: WorkItem, insert = false): void {
     wp.db.prepare('update work set state = ?, charter_id = ?, employee_id = ?, feature_id = ?, session_id = ?, updated_at = ?, json = ? where id = ?')
       .run(item.state, item.charterId ?? null, item.employeeId ?? null, item.featureId ?? null, item.sessionId ?? null, item.updatedAt, JSON.stringify(item), item.id);
   }
+  // The v2 index columns (LLD §19.1); the JSON stays the source of truth.
+  wp.db.prepare('update work set level = ?, status = ?, parent_id = ?, area_id = ?, rank = ?, reviewer_id = ? where id = ?')
+    .run(item.level ?? levelOf(item), item.status ?? null, item.parentId ?? null, item.areaId ?? null, item.rank ?? null, item.reviewerId ?? null, item.id);
   wp.emit({ type: 'work.updated', item });
+}
+
+/** Save without a trail (migration, field-only housekeeping). */
+export function saveQuiet(wp: Workplace, item: WorkItem): void {
+  save(wp, item);
 }
 
 export function setSession(wp: Workplace, id: string, sessionId: string): WorkItem {

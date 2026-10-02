@@ -26,7 +26,7 @@ export interface TickResult {
   queued: string[];
 }
 
-export function tick(wp: Workplace, nowMs = Date.now()): TickResult {
+export function tick(wp: Workplace, nowMs = Date.now(), opts: { stalls?: boolean } = {}): TickResult {
   const result: TickResult = { resumed: [], noted: [], moderated: [], queued: [] };
   const day = spend.dayOf(new Date(nowMs));
   const cos = chiefOfStaff(wp) ?? 'workplace';
@@ -45,7 +45,8 @@ export function tick(wp: Workplace, nowMs = Date.now()): TickResult {
     }
   }
 
-  for (const item of stall.stalledAssignments(wp, nowMs)) {
+  // v2 (HLD D21): stalls are the event-driven watcher's (watch.ts); index.ts runs this with stalls off.
+  for (const item of opts.stalls === false ? [] : stall.stalledAssignments(wp, nowMs)) {
     const reason = whyWaiting(wp, item, day);
     if (!reason && !resumedThisTick && !resumedToday(wp, item.id, day)) {
       try {

@@ -1,0 +1,287 @@
+/**
+ * Workplace v2 (HLD §8, LLD §19): the plan is the centre. Areas → epics → stories → tasks, with
+ * comments, an activity log, the Updates feed, threaded Inbox items, area rooms and release posts.
+ *
+ * These are the exact JSON shapes the iOS and Android apps build against (LLD §19.8). Optional
+ * fields are absent, never null, unless the type says `| null`.
+ */
+import type { InboxItem, RoomThread, WorkKind } from './workplace.js';
+
+export type ItemLevel = 'epic' | 'story' | 'task';
+export type ItemStatus = 'backlog' | 'ready' | 'in-progress' | 'in-review' | 'done' | 'blocked';
+export type ItemResolution = 'done' | 'wont-do' | 'duplicate';
+export type Points = 1 | 2 | 3 | 5 | 8;
+
+export const ITEM_STATUSES: readonly ItemStatus[] = ['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked'];
+export const POINTS: readonly Points[] = [1, 2, 3, 5, 8];
+/** At most this many areas are active at once (owner, 2 Oct). */
+export const MAX_ACTIVE_AREAS = 5;
+
+export type StallRule = 'not-started' | 'idle' | 'unreviewed';
+
+export interface Item {
+  id: string;
+  level: ItemLevel;
+  title: string;
+  body: string;
+  status: ItemStatus;
+  /** When the item entered its current status. */
+  statusSince: string;
+  resolution?: ItemResolution;
+  /** story → its epic, task → its story. */
+  parentId?: string;
+  /** The epic this item rolls up to (itself for an epic). */
+  epicId?: string;
+  /** The area, resolved through the epic. */
+  areaId?: string;
+  /** An employee id, or 'owner'. */
+  assigneeId?: string;
+  reviewerId?: string;
+  /** Epics: who owns the outcome ('owner' or an employee, usually Asha). */
+  ownerId?: string;
+  points?: Points;
+  rank: number;
+  /** YYYY-MM-DD. */
+  targetDate?: string;
+  acceptance: string[];
+  blocked?: { reason: string; waitingOn: string; since: string };
+  /** Derived, never stored: set while the item is past one of the stall deadlines (LLD §19.6). */
+  stall?: { rule: StallRule; since: string; minutes: number };
+  mergedInto?: string;
+  /** The release post it shipped in. */
+  releasedIn?: string;
+  /** The old engine's view of the same row (the /api/work adapters). */
+  legacy: { kind: WorkKind; state: string; charterId?: string; featureId?: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Area {
+  id: string;
+  title: string;
+  description?: string;
+  state: 'active' | 'archived';
+  rank: number;
+  ownerId: string;
+  /** 'area:<id>'. */
+  roomId: string;
+  /** The area's own channel in its room. */
+  threadId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EpicProgress {
+  pointsDone: number;
+  pointsTotal: number;
+  storiesDone: number;
+  storiesTotal: number;
+  /** 0..100: points when any story is pointed, else stories. */
+  pct: number;
+}
+
+export interface PlanFlag {
+  kind: 'blocked' | 'stalled';
+  itemId: string;
+  title: string;
+  reason: string;
+  waitingOn?: string;
+  since: string;
+}
+
+export interface EpicCard {
+  epic: Item;
+  progress: EpicProgress;
+  /** The next milestone: the highest-ranked story not yet done. */
+  next?: { id: string; title: string };
+  flags: PlanFlag[];
+  inFocus: boolean;
+}
+
+export interface Focus {
+  epicIds: string[];
+  setBy: string;
+  at: string;
+}
+
+export interface PlanResponse {
+  areas: { area: Area; epics: EpicCard[] }[];
+  /** Epics with no area yet. */
+  unfiled: EpicCard[];
+  /** Open items assigned to the owner: shown at the top of the Plan. */
+  mine: Item[];
+  focus: Focus;
+  /** Stories and tasks by status. */
+  counts: Record<ItemStatus, number>;
+  /** `?view=board`: stories and tasks grouped by status, rank order. */
+  board?: Record<ItemStatus, Item[]>;
+}
+
+export interface Comment {
+  id: string;
+  itemId: string;
+  at: string;
+  /** An employee id, 'owner', 'coo' or 'workplace'. */
+  by: string;
+  text: string;
+  details?: string;
+  mentions: string[];
+}
+
+export type ActivityKind =
+  | 'created' | 'status' | 'assigned' | 'reviewer' | 'points' | 'field' | 'comment'
+  | 'commit' | 'test' | 'note' | 'stall' | 'merged' | 'reopen' | 'started';
+
+export interface Activity {
+  id: string;
+  at: string;
+  itemId: string | null;
+  by: string;
+  kind: ActivityKind;
+  from?: string;
+  to?: string;
+  text: string;
+  link?: string;
+}
+
+export interface ItemDetail {
+  item: Item;
+  parent?: Item;
+  epic?: Item;
+  area?: Area;
+  children: Item[];
+  comments: Comment[];
+  /** Newest last. */
+  activity: Activity[];
+  progress?: EpicProgress;
+  /** The epic's thread in its area room, once it has one. */
+  threadId?: string;
+}
+
+export type UpdateKind = 'started' | 'shipped' | 'blocked' | 'unblocked' | 'decided' | 'brief' | 'review';
+
+export interface Update {
+  id: string;
+  at: string;
+  kind: UpdateKind;
+  /** One line, with names, never a bare count. */
+  line: string;
+  details?: string;
+  by: string;
+  itemId?: string;
+  inboxId?: string;
+  /** App route: item/<id>, inbox/<id>, plan. */
+  href: string;
+  /** Whether this one is pushed to the phone. */
+  push: boolean;
+}
+
+export interface InboxMessage {
+  id: string;
+  inboxId: string;
+  at: string;
+  by: string;
+  text: string;
+  details?: string;
+}
+
+export interface InboxThread {
+  item: InboxItem;
+  messages: InboxMessage[];
+}
+
+export type RoomKind = 'general' | 'area' | 'releases';
+
+export interface Room {
+  /** 'general', 'area:<areaId>' or 'releases'. */
+  id: string;
+  kind: RoomKind;
+  title: string;
+  areaId?: string;
+  headline: string;
+  lastAt: string;
+  threadIds: string[];
+}
+
+export interface RoomDetail {
+  room: Room;
+  threads: RoomThread[];
+}
+
+export interface ReleasePostItem {
+  id: string;
+  title: string;
+  level: ItemLevel;
+  kind: 'story' | 'fix';
+}
+
+export interface ReleasePost {
+  id: string;
+  at: string;
+  title: string;
+  version: string;
+  shippable?: string;
+  releaseId?: string;
+  by: string;
+  groups: { areaId: string | null; areaTitle: string; items: ReleasePostItem[] }[];
+  text: string;
+  threadId: string;
+}
+
+export interface StatusAnswer {
+  q: string;
+  line: string;
+  matches: { item: Item; line: string; href: string }[];
+}
+
+/* ---------- requests ---------- */
+
+export interface CreateItemRequest {
+  level: ItemLevel;
+  title: string;
+  body?: string;
+  parentId?: string;
+  /** Epics only. */
+  areaId?: string;
+  assigneeId?: string;
+  reviewerId?: string;
+  ownerId?: string;
+  points?: Points;
+  /** 'backlog' or 'ready' (default). */
+  status?: 'backlog' | 'ready';
+  targetDate?: string;
+  acceptance?: string[];
+  rank?: number;
+}
+
+export interface UpdateItemRequest {
+  title?: string;
+  body?: string;
+  assigneeId?: string;
+  reviewerId?: string;
+  ownerId?: string;
+  points?: Points | null;
+  rank?: number;
+  areaId?: string | null;
+  parentId?: string;
+  targetDate?: string | null;
+  acceptance?: string[];
+  status?: ItemStatus;
+  resolution?: ItemResolution;
+  blockedReason?: string;
+  waitingOn?: string;
+  /** Why (a reopen needs one; recorded on the activity row). */
+  note?: string;
+  /** Blocked on the owner: what the asker recommends (goes into the Inbox item). */
+  recommendation?: string;
+  /** Moving to in-progress: also start the assignee's session. */
+  start?: boolean;
+}
+
+export interface CommentRequest { text: string }
+export interface MergeRequest { intoId: string }
+export interface InboxReplyRequest { text?: string; optionId?: string }
+export interface CreateAreaRequest { title: string; description?: string; ownerId?: string }
+export interface UpdateAreaRequest { title?: string; description?: string; state?: 'active' | 'archived'; rank?: number }
+export interface CreateReleasePostRequest { version: string; shippable?: string; itemIds?: string[]; title?: string }
+export interface FocusRequest { epicIds: string[] }

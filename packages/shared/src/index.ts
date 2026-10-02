@@ -10,5 +10,6 @@ export * from './context.js';
 export * from './protocol.js';
 export * from './workplace.js';
 export * from './workplace-api.js';
+export * from './workplace-v2.js';
 export * from './csrf.js';
 export * from './chat-view.js';
