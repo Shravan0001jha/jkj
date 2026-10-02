@@ -151,3 +151,30 @@ test('pollPresence emits coo.presence only when online ↔ offline actually flip
     tmp.cleanup();
   }
 });
+
+test('the approved live-check window is off by default, opens for a fixed number of minutes, and closes on its own', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    assert.equal(coo.liveWindowUntil(wp, 'tara'), null, 'off by default');
+    assert.equal(coo.isLiveWindowOpen(wp, 'tara'), false);
+
+    const window = coo.openLiveWindow(wp, 'tara', 10);
+    assert.equal(window.employeeId, 'tara');
+    assert.ok(coo.liveWindowUntil(wp, 'tara')! > Date.now());
+    assert.equal(coo.isLiveWindowOpen(wp, 'tara'), true);
+    // A different employee is untouched.
+    assert.equal(coo.isLiveWindowOpen(wp, 'mira'), false);
+
+    // It closes on its own once the minutes pass (an injected "now" past `until`, no real sleep).
+    const past = Date.parse(window.until) + 1;
+    assert.equal(coo.isLiveWindowOpen(wp, 'tara', past), false);
+    // A fresh window after it closes opens again.
+    coo.openLiveWindow(wp, 'tara', 5);
+    assert.equal(coo.isLiveWindowOpen(wp, 'tara'), true);
+
+    assert.throws(() => coo.openLiveWindow(wp, 'tara', 0), /positive number/);
+    assert.throws(() => coo.openLiveWindow(wp, 'tara', -5), /positive number/);
+  } finally {
+    tmp.cleanup();
+  }
+});

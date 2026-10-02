@@ -353,6 +353,17 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const body = await readJson(req);
       json(res, 200, coo.forwardItem(wp, { itemId: str(body['itemId']), recommendation: str(body['recommendation']) }));
     }),
+    // A live check on the real Mac is the COO's call, never a session's own: loopback only, like
+    // the rest of the lead-only routes, and refused over the tunnel for the same reason.
+    r('POST', '/api/coo/live-window', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      const employeeId = str(body['employeeId']);
+      employees.employee(wp, employeeId); // throws if unknown
+      const window = coo.openLiveWindow(wp, employeeId, Number(body['minutes']));
+      employees.refreshLiveWindow(wp, employeeId, Date.parse(window.until));
+      json(res, 200, window);
+    }),
 
     /* ---------- published access: the emergency off switch ---------- */
     r('POST', '/api/relay/off', (req, res) => {

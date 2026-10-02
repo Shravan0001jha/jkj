@@ -1,5 +1,5 @@
-import { tmpdir } from 'node:os';
-import { relative, resolve } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { relative, resolve, sep } from 'node:path';
 import type { MapEntry } from '@jkj/shared';
 import { resolve as resolveOwner } from './ownership.js';
 
@@ -25,6 +25,13 @@ export interface GuardContext {
    * answers are fine, edits and commands are not until the owner says "continue".
    */
   readOnly?: string;
+  /**
+   * The owner's approved live-check window for this employee, as an absolute ms timestamp
+   * (POST /api/coo/live-window). While `Date.now()` is before it, a host command that would
+   * otherwise be denied as driving the real Mac is allowed instead. Unset (the default) means
+   * no window is open: live checks go through the COO, not the session.
+   */
+  liveWindowUntil?: number;
 }
 
 export interface GuardDecision {
@@ -33,6 +40,51 @@ export interface GuardDecision {
 }
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+
+/**
+ * The owner's personal folders: off limits to the Workplace outright, even to read, whatever the
+ * charter or the worktree says (found live, 1 Oct: many macOS permission prompts attributed to
+ * `node`, the Workplace under launchd, while an employee worked on an unrelated bug). No exception
+ * path here on purpose — the live-check window below applies only to host *commands*, never to
+ * these paths.
+ */
+const PROTECTED_RELATIVE = [
+  'Documents', 'Desktop', 'Downloads', 'Pictures', 'Movies', 'Music',
+  'Library/Mail', 'Library/Messages', 'Library/Calendars',
+  'Library/Application Support/AddressBook', 'Library/Containers',
+];
+
+const PROTECTED_ABS = PROTECTED_RELATIVE.map(rel => resolve(homedir(), rel));
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** `~/Documents`, `$HOME/Documents`, or the real absolute path, in a shell command. */
+const PROTECTED_COMMAND_PATTERN = new RegExp(
+  `(~|\\$HOME|${escapeRe(homedir())})/(${PROTECTED_RELATIVE.map(escapeRe).join('|')})(/|\\b)`, 'i',
+);
+
+/** The resolved path is inside (or is) one of the owner's personal folders. */
+function touchesProtectedFolder(abs: string): string | undefined {
+  return PROTECTED_ABS.find(folder => abs === folder || abs.startsWith(folder + sep));
+}
+
+/**
+ * Commands that drive the owner's real Mac rather than the employee's own sandboxed work: these
+ * are denied unless an approved live-check window is open for this employee (POST
+ * /api/coo/live-window), because a live check belongs to the COO, not to an unattended session.
+ */
+export const HOST_COMMANDS: { pattern: RegExp; why: string }[] = [
+  { pattern: /(^|[\s;&|])(osascript|afplay|say|screencapture|pmset|caffeinate|killall|launchctl|tccutil|networksetup|automator|security)\b/i,
+    why: 'this drives the owner\'s real Mac; use the test fakes, and a live check goes through the COO (POST /api/coo/live-window)' },
+  { pattern: /(^|[\s;&|])open\b/i,
+    why: 'this launches an app or a URL on the owner\'s real Mac; use the test fakes, and a live check goes through the COO' },
+  { pattern: /\bdefaults\s+write\b/i,
+    why: 'this changes the owner\'s real Mac settings; use the test fakes, and a live check goes through the COO' },
+  { pattern: /\bshortcuts\s+run\b/i,
+    why: 'this runs a Shortcut on the owner\'s real Mac; use the test fakes, and a live check goes through the COO' },
+  { pattern: /(iris-agent|agent-svc|memory-svc|llm-gateway)\b|Iris(Workplace)?\.app/i,
+    why: 'this runs the Iris app or an agent binary directly on the owner\'s real Mac; use the test fakes, and a live check goes through the COO' },
+];
 
 /** Commands that leave the worktree, the branch, or the machine. */
 export const FORBIDDEN_COMMANDS: { pattern: RegExp; why: string }[] = [
@@ -48,6 +100,12 @@ export const FORBIDDEN_COMMANDS: { pattern: RegExp; why: string }[] = [
 
 export function guardTool(tool: string, input: Record<string, unknown>, ctx: GuardContext): GuardDecision {
   if (ctx.readOnly && (EDIT_TOOLS.has(tool) || tool === 'Bash')) return { decision: 'deny', reason: ctx.readOnly };
+  // Protected folders are off limits even to read, for every tool that names a file (no exception path).
+  if (tool === 'Read' || EDIT_TOOLS.has(tool)) {
+    const filePath = String(input['file_path'] ?? input['notebook_path'] ?? '');
+    const hit = filePath ? touchesProtectedFolder(resolve(ctx.worktree, filePath)) : undefined;
+    if (hit) return { decision: 'deny', reason: `${resolve(ctx.worktree, filePath)} is in ${hit}, a protected folder; off limits to the Workplace even to read` };
+  }
   if (EDIT_TOOLS.has(tool)) return guardEdit(String(input['file_path'] ?? input['notebook_path'] ?? ''), ctx);
   if (tool === 'Bash') return guardCommand(String(input['command'] ?? ''), ctx);
   return { decision: 'allow' };
@@ -70,8 +128,16 @@ export function guardEdit(filePath: string, ctx: GuardContext): GuardDecision {
 }
 
 export function guardCommand(command: string, ctx: GuardContext): GuardDecision {
+  if (PROTECTED_COMMAND_PATTERN.test(command)) {
+    return { decision: 'deny', reason: `"${command.slice(0, 80)}": a protected folder; off limits to the Workplace even to read` };
+  }
   for (const rule of FORBIDDEN_COMMANDS) {
     if (rule.pattern.test(command)) return { decision: 'deny', reason: `"${command.slice(0, 80)}": ${rule.why}` };
+  }
+  for (const rule of HOST_COMMANDS) {
+    if (!rule.pattern.test(command)) continue;
+    if (ctx.liveWindowUntil && Date.now() < ctx.liveWindowUntil) return { decision: 'allow' };
+    return { decision: 'deny', reason: `"${command.slice(0, 80)}": ${rule.why}` };
   }
   for (const root of ctx.mainCheckouts) {
     if (command.includes(root)) return { decision: 'deny', reason: `the command names ${root}, a main checkout; use your worktree ${ctx.worktree}` };

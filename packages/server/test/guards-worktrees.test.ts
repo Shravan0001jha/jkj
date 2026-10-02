@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, existsSync, lstatSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import * as os from 'node:os';
 import { join } from 'node:path';
 import type { MapEntry } from '@jkj/shared';
 import { guardCommand, guardEdit, guardTool } from '../src/services/guards.js';
@@ -45,6 +46,59 @@ test('commands never push, merge, rebase, release, deploy, leave the machine, or
   for (const c of denied) assert.equal(guardCommand(c, ctx).decision, 'deny', c);
   const allowed = ['git status', 'git add -A && git commit -m "x"', 'git log --oneline', 'git diff', 'git checkout -b emp/tara/other', 'npm test', 'cd mobile/android && ./gradlew test', 'ls -la', 'python3 -m pytest -q', 'curl -s http://127.0.0.1:4317/api/office'];
   for (const c of allowed) assert.equal(guardCommand(c, ctx).decision, 'allow', c);
+});
+
+test('host commands that drive the owner\'s real Mac are denied, unless an approved live-check window is open', () => {
+  const denied = [
+    'osascript -e \'tell app "Finder" to activate\'', 'afplay /System/Library/Sounds/Ping.aiff', 'say "hello"',
+    'screencapture -x /tmp/shot.png', 'open -a Safari', 'open https://example.com', 'pmset -g', 'caffeinate -i -s',
+    'defaults write com.apple.dock autohide -bool true', 'killall Dock', 'launchctl list', 'tccutil reset All',
+    'networksetup -listallhardwareports', 'shortcuts run "Good Morning"', 'automator -i x myworkflow.workflow',
+    'security find-generic-password -s x', 'open -a /Applications/Iris.app', './agent-svc --once',
+  ];
+  for (const c of denied) {
+    const d = guardCommand(c, ctx);
+    assert.equal(d.decision, 'deny', c);
+    assert.match(d.reason!, /real Mac|COO/, c);
+  }
+  // The allowed test commands (pytest, npm test, gradlew, xcodebuild on the simulator) are unaffected.
+  const stillAllowed = [
+    'npm test', 'npm run test:unit', 'python3 -m pytest -q', '.venv/bin/python -m pytest tests/', 'cd mobile/android && ./gradlew test',
+    'xcodebuild test -scheme Iris -destination "platform=iOS Simulator,name=iPhone 15"',
+  ];
+  for (const c of stillAllowed) assert.equal(guardCommand(c, ctx).decision, 'allow', c);
+
+  // An approved live-check window (an absolute ms timestamp in the future) lifts the denial; an
+  // expired one (in the past, or never opened) does not.
+  const open = { ...ctx, liveWindowUntil: Date.now() + 60_000 };
+  assert.equal(guardCommand('osascript -e \'x\'', open).decision, 'allow');
+  const expired = { ...ctx, liveWindowUntil: Date.now() - 1 };
+  assert.equal(guardCommand('osascript -e \'x\'', expired).decision, 'deny');
+  assert.equal(guardCommand('osascript -e \'x\'', ctx).decision, 'deny', 'no window at all: still denied');
+  // The window never reopens the commands it was never meant for.
+  assert.equal(guardCommand('git push origin x', open).decision, 'deny', 'a live-check window is not a push window');
+});
+
+test('the owner\'s personal folders are off limits even to read, for every tool and for Bash', () => {
+  const home = os.homedir();
+  const paths = [
+    join(home, 'Documents', 'taxes.pdf'), join(home, 'Desktop', 'notes.txt'), join(home, 'Downloads', 'x.zip'),
+    join(home, 'Pictures', 'p.png'), join(home, 'Movies', 'm.mov'), join(home, 'Music', 's.mp3'),
+    join(home, 'Library', 'Mail', 'x'), join(home, 'Library', 'Messages', 'x'), join(home, 'Library', 'Calendars', 'x'),
+    join(home, 'Library', 'Application Support', 'AddressBook', 'x'), join(home, 'Library', 'Containers', 'x'),
+  ];
+  for (const p of paths) {
+    assert.equal(guardTool('Read', { file_path: p }, ctx).decision, 'deny', p);
+    assert.equal(guardTool('Edit', { file_path: p }, ctx).decision, 'deny', p);
+    assert.equal(guardTool('Write', { file_path: p }, ctx).decision, 'deny', p);
+  }
+  assert.equal(guardCommand(`cat ${join(home, 'Documents', 'taxes.pdf')}`, ctx).decision, 'deny');
+  assert.equal(guardCommand('ls ~/Desktop', ctx).decision, 'deny');
+  assert.equal(guardCommand('cat $HOME/Downloads/x', ctx).decision, 'deny');
+  // Reading ordinary code is still free, and a live-check window never reopens these folders.
+  assert.equal(guardTool('Read', { file_path: '/Users/o/claude-dev/README.md' }, ctx).decision, 'allow');
+  const open = { ...ctx, liveWindowUntil: Date.now() + 60_000 };
+  assert.equal(guardCommand('ls ~/Desktop', open).decision, 'deny', 'protected folders have no live-check exception');
 });
 
 function tempRepo(): { root: string; cleanup: () => void } {

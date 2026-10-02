@@ -119,6 +119,8 @@ export interface TransitionOptions {
   evidence?: Evidence;
   plan?: string;
   spec?: string;
+  /** See WorkHistoryEntry.cause: only ever 'workplace-shutdown', only ever on a transition to 'blocked'. */
+  cause?: 'workplace-shutdown';
 }
 
 export function transition(wp: Workplace, id: string, opts: TransitionOptions): WorkItem {
@@ -161,7 +163,7 @@ export function transition(wp: Workplace, id: string, opts: TransitionOptions): 
     ...patch,
     state: opts.to,
     updatedAt: at,
-    history: [...item.history, { at, from: item.state, to: opts.to, by: opts.by, ...(opts.note ? { note: opts.note } : {}) }],
+    history: [...item.history, { at, from: item.state, to: opts.to, by: opts.by, ...(opts.note ? { note: opts.note } : {}), ...(opts.cause ? { cause: opts.cause } : {}) }],
   };
   save(wp, updated);
   if (updated.featureId) rollUpFeature(wp, updated.featureId);

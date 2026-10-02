@@ -100,6 +100,49 @@ test('lead-only (reply, items, answer, forward) works from loopback but refuses 
   }
 });
 
+test('a live-check window opens from loopback, is refused through the tunnel, is off by default, and lifts the host-command guard for that employee\'s open session only', async () => {
+  const b = await boot();
+  try {
+    const hookOf = (session: ReturnType<FakeRuntime['last']>) => session.options.hooks!.PreToolUse![0]!.hooks[0]!;
+    const run = (session: ReturnType<FakeRuntime['last']>, command: string) =>
+      hookOf(session)({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, tool_use_id: 't', session_id: 's', transcript_path: '', cwd: session.options.cwd } as never, 't', { signal: new AbortController().signal }) as
+        Promise<{ hookSpecificOutput?: { permissionDecision: string } }>;
+
+    // Tara and Mira each get a live session.
+    assert.equal((await call(b.base, 'POST', '/api/employees/tara/talk', { text: 'status?' })).status, 201);
+    await new Promise(r => setTimeout(r, 20));
+    const tara = b.fake.last();
+    assert.equal((await call(b.base, 'POST', '/api/employees/mira/talk', { text: 'status?' })).status, 201);
+    await new Promise(r => setTimeout(r, 20));
+    const mira = b.fake.last();
+
+    // Off by default: a host command is denied for both.
+    assert.equal((await run(tara, 'osascript -e \'x\'')).hookSpecificOutput?.permissionDecision, 'deny', 'no window yet');
+    assert.equal((await run(mira, 'osascript -e \'x\'')).hookSpecificOutput?.permissionDecision, 'deny');
+
+    // An unknown employee is refused; nothing opens.
+    const unknown = await call<{ error: string }>(b.base, 'POST', '/api/coo/live-window', { employeeId: 'ghost', minutes: 10 });
+    assert.equal(unknown.status, 400);
+
+    // Refused through the tunnel, like every other lead-only COO route; nothing opens.
+    const tunneled = await call<{ error: string }>(b.base, 'POST', '/api/coo/live-window', { employeeId: 'tara', minutes: 10 }, { 'x-via-tunnel': '1' });
+    assert.equal(tunneled.status, 400);
+    assert.equal((await run(tara, 'osascript -e \'x\'')).hookSpecificOutput?.permissionDecision, 'deny');
+
+    // Opens from loopback (this Mac), for Tara only.
+    const opened = await call<{ employeeId: string; until: string }>(b.base, 'POST', '/api/coo/live-window', { employeeId: 'tara', minutes: 10 });
+    assert.equal(opened.status, 200);
+    assert.equal(opened.body.employeeId, 'tara');
+    assert.ok(Date.parse(opened.body.until) > Date.now());
+
+    // Tara's already-open session picks it up at once (no need to spawn a fresh one); Mira's is untouched.
+    assert.equal((await run(tara, 'osascript -e \'x\'')).hookSpecificOutput?.permissionDecision, undefined, 'allowed while the window is open');
+    assert.equal((await run(mira, 'osascript -e \'x\'')).hookSpecificOutput?.permissionDecision, 'deny', 'a different employee\'s window is not open');
+  } finally {
+    await b.stop();
+  }
+});
+
 test('over the socket: coo.message reaches a tunnelled client too; coo.item never does', async () => {
   const b = await boot();
   const wsUrl = b.base.replace('http', 'ws') + '/ws';

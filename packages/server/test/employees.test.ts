@@ -271,3 +271,67 @@ test('an orderly shutdown with a pending approval files the same question and bl
     tmp.cleanup();
   }
 });
+
+test('a shutdown-then-boot cycle resumes work blocked only by the Workplace\'s own restart; owner-stopped and capped work does not', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+
+    // Dev and Mira are mid-build when the Workplace shuts down.
+    const dev = work.create(wp, { kind: 'assignment', title: 'Dev work', body: 'x', employeeId: 'dev', charterId: 'character' });
+    work.attachPlan(wp, dev.id, 'p', 'dev');
+    employees.assign(wp, dev.id);
+    const mira = work.create(wp, { kind: 'assignment', title: 'Mira work', body: 'x', employeeId: 'mira', charterId: 'experts' });
+    work.attachPlan(wp, mira.id, 'p', 'mira');
+    employees.assign(wp, mira.id);
+    // Kabir too, but Kabir is capped for today.
+    const kabir = work.create(wp, { kind: 'assignment', title: 'Kabir work', body: 'x', employeeId: 'kabir', charterId: 'memory' });
+    work.attachPlan(wp, kabir.id, 'p', 'kabir');
+    employees.assign(wp, kabir.id);
+    await tick();
+
+    employees.closeAll(wp, 'shutdown');
+    assert.equal(work.get(wp, dev.id)!.state, 'blocked');
+    assert.equal(work.get(wp, dev.id)!.history.at(-1)!.cause, 'workplace-shutdown', 'tagged so a boot can tell it from an owner stop or a failure');
+    const day = spend.dayOf();
+    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`paused:${day}:employee:kabir`, new Date().toISOString());
+
+    // Tara's work was blocked by the owner, by hand: it never carries the shutdown cause.
+    const stopped = work.create(wp, { kind: 'assignment', title: 'Owner stopped', body: 'x', employeeId: 'tara', charterId: 'mobile' });
+    work.attachPlan(wp, stopped.id, 'p', 'tara');
+    work.transition(wp, stopped.id, { to: 'building', by: 'tara' });
+    work.transition(wp, stopped.id, { to: 'blocked', by: 'owner', note: 'owner paused this for now' });
+
+    // Nikhil's start genuinely failed (a guard denial, a missing worktree, ...): also by the
+    // Workplace, but not a shutdown — resumeAfterShutdown must tell these apart.
+    const failed = work.create(wp, { kind: 'assignment', title: 'Failed start', body: 'x', employeeId: 'nikhil', charterId: 'qa-release' });
+    work.attachPlan(wp, failed.id, 'p', 'nikhil');
+    work.transition(wp, failed.id, { to: 'building', by: 'nikhil' });
+    work.transition(wp, failed.id, { to: 'blocked', by: 'workplace', note: 'no handoff file found' });
+
+    const result = await employees.resumeAfterShutdown(wp, 5);
+    await tick();
+
+    assert.deepEqual(result.resumed.slice().sort(), [dev.id, mira.id].sort());
+    assert.equal(result.skipped.length, 1);
+    assert.equal(result.skipped[0]!.id, kabir.id);
+    assert.match(result.skipped[0]!.reason, /spend cap/);
+
+    assert.equal(work.get(wp, dev.id)!.state, 'building', 'resumed from the branch and the handoff');
+    assert.equal(work.get(wp, mira.id)!.state, 'building');
+    assert.ok(employees.openSession('dev'));
+    assert.ok(employees.openSession('mira'));
+
+    assert.equal(work.get(wp, kabir.id)!.state, 'blocked', 'capped work stays stopped');
+    assert.equal(work.get(wp, stopped.id)!.state, 'blocked', 'owner-stopped work stays stopped');
+    assert.equal(work.get(wp, failed.id)!.state, 'blocked', 'a genuine failure is not auto-resumed');
+
+    // Idempotent: once resumed, a second boot finds nothing new to do for Dev and Mira.
+    const again = await employees.resumeAfterShutdown(wp, 5);
+    assert.deepEqual(again.resumed, []);
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});

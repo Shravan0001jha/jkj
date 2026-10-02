@@ -204,6 +204,36 @@ export function forwardItem(wp: Workplace, spec: { itemId: string; recommendatio
   return raiseToOwner(wp, item, { title: item.title, body: item.body, by: item.raisedBy, ...(item.threadId ? { threadId: item.threadId } : {}) }, '', false, spec.recommendation.trim());
 }
 
+/* ---------- the approved live-check window ---------- */
+
+const LIVE_WINDOW_KEY = (employeeId: string): string => `live-window:${employeeId}`;
+
+/**
+ * POST /api/coo/live-window: the owner (loopback only, like every other COO-only route) opens a
+ * time-boxed exception that lets one employee's session run a host command on the real Mac
+ * instead of being denied by the guard (guards.ts HOST_COMMANDS). Off by default; nothing opens
+ * it on its own.
+ */
+export function openLiveWindow(wp: Workplace, employeeId: string, minutes: number): { employeeId: string; until: string } {
+  if (!Number.isFinite(minutes) || minutes <= 0) throw new BadRequest('minutes must be a positive number.');
+  const until = new Date(Date.now() + minutes * 60_000).toISOString();
+  wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(LIVE_WINDOW_KEY(employeeId), until);
+  return { employeeId, until };
+}
+
+/** The window's expiry as an absolute ms timestamp, or null when none is set. */
+export function liveWindowUntil(wp: Workplace, employeeId: string): number | null {
+  const row = wp.db.prepare('select value from settings where key = ?').get(LIVE_WINDOW_KEY(employeeId)) as { value: string } | undefined;
+  if (!row) return null;
+  const t = Date.parse(row.value);
+  return Number.isFinite(t) ? t : null;
+}
+
+export function isLiveWindowOpen(wp: Workplace, employeeId: string, nowMs = Date.now()): boolean {
+  const until = liveWindowUntil(wp, employeeId);
+  return until !== null && nowMs < until;
+}
+
 /** Test-only: simulate the lead's heartbeat without waiting on a real process. */
 export function touchHeartbeatForTest(wp: Workplace, at = new Date()): void {
   const file = heartbeatFile(wp);

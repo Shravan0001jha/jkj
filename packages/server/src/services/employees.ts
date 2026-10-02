@@ -166,6 +166,7 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
   const repoId = wp.org.repos.find(r => r.root === emp.workspace.repo)?.id ?? 'iris';
   const guard: GuardContext = {
     worktree: worktree.path, repoId, charterIds: emp.charterIds, map: wp.org.map, mainCheckouts: wp.org.repos.map(r => r.root),
+    ...(coo.liveWindowUntil(wp, employeeId) ? { liveWindowUntil: coo.liveWindowUntil(wp, employeeId)! } : {}),
     ...(!budget.ok ? { readOnly: `${emp.name} is paused by the ${budget.scope} spend cap: read and answer, but do not edit or run commands until the owner says "continue" in this talk` } : {}),
   };
   const context = assembleContext(wp.org, emp, { ...(options.assignment ? { assignment: options.assignment } : {}), maxTokens: wp.config.contextTokens, worktree: worktree.path, ownedPaths: ownedPaths(wp, emp, repoId), room: room.contextFor(wp, employeeId) });
@@ -196,7 +197,7 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
       disallowedTools: [...FORBIDDEN_TOOLS, ...(role?.tools.disallowed ?? []).map(t => t.startsWith('mcp__') || /^[A-Z]/.test(t) ? t : `mcp__workplace__${t}`)],
       hooks: {
         PreToolUse: [{
-          matcher: 'Edit|Write|MultiEdit|NotebookEdit|Bash',
+          matcher: 'Read|Edit|Write|MultiEdit|NotebookEdit|Bash',
           hooks: [async input => {
             const i = input as { tool_name: string; tool_input: Record<string, unknown> };
             const d = guardTool(i.tool_name, i.tool_input ?? {}, guard);
@@ -244,6 +245,14 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
   session.unsubscribe = unsubscribe;
 
   return agent;
+}
+
+/**
+ * POST /api/coo/live-window just opened (or changed) for `employeeId`: a session already running
+ * picks it up at once, the same way a lifted spend-cap pause does, rather than only on its next spawn.
+ */
+export function refreshLiveWindow(_wp: Workplace, employeeId: string, untilMs: number | null): void {
+  for (const s of sessionsOf(employeeId)) if (s.guard) s.guard.liveWindowUntil = untilMs ?? undefined;
 }
 
 /** A denial goes back to the raiser as a reason to act on: into its session, else into its handoff. */
@@ -482,7 +491,7 @@ function reportInterrupted(wp: Workplace, s: { agentId: string; employeeId: stri
   if (s.assignmentId) {
     try {
       const item = work.get(wp, s.assignmentId);
-      if (item && item.state === 'building') work.transition(wp, item.id, { to: 'blocked', by: 'workplace', note: `session ${s.agentId} was ${how} by the Workplace${pending ? ` while waiting for approval of ${pending.tool}` : ''}; start it again to continue from the branch and the handoff` });
+      if (item && item.state === 'building') work.transition(wp, item.id, { to: 'blocked', by: 'workplace', cause: 'workplace-shutdown', note: `session ${s.agentId} was ${how} by the Workplace${pending ? ` while waiting for approval of ${pending.tool}` : ''}; start it again to continue from the branch and the handoff` });
     } catch (err) { log.warn('employees', String(err)); }
   }
   if (pending) {
@@ -526,7 +535,7 @@ export function recoverAfterRestart(wp: Workplace): LostSession[] {
     if (row.assignment_id) {
       try {
         const item = work.get(wp, row.assignment_id);
-        if (item && item.state === 'building') work.transition(wp, item.id, { to: 'blocked', by: 'workplace', note: `session ${row.id} was lost when the Workplace restarted${pending ? ` while waiting for approval of ${pending.tool}` : ''}; start it again to continue from the handoff` });
+        if (item && item.state === 'building') work.transition(wp, item.id, { to: 'blocked', by: 'workplace', cause: 'workplace-shutdown', note: `session ${row.id} was lost when the Workplace restarted${pending ? ` while waiting for approval of ${pending.tool}` : ''}; start it again to continue from the handoff` });
       } catch (err) { log.warn('employees', String(err)); }
     }
     inbox.raise(wp, {
@@ -544,6 +553,47 @@ export function recoverAfterRestart(wp: Workplace): LostSession[] {
   }
   if (lost.length) log.warn('employees', `${lost.length} session(s) lost on restart; questions filed to the Inbox`);
   return lost;
+}
+
+export interface ResumeAfterShutdown {
+  resumed: string[];
+  skipped: { id: string; reason: string }[];
+}
+
+/**
+ * On boot (1 Oct): every assignment blocked only because the Workplace shut itself down or
+ * restarted — never because the owner blocked it, a spend cap paused it, or a start genuinely
+ * failed — is restarted at once, from its branch and its handoff. Before this, the only path back
+ * was the Chief of Staff's stall routine, which resumes one item per tick and each item once a
+ * day; after a restart with several employees mid-build, that left work (Kabir's, Rohan's) blocked
+ * for days. Staggered two at a time so a restart with many blocked items does not spawn them all
+ * in the same instant; an employee already at its own concurrent-session limit (spawn()'s own
+ * check) is skipped, not forced, and tried again on the next boot.
+ */
+export async function resumeAfterShutdown(wp: Workplace, staggerMs = 1500): Promise<ResumeAfterShutdown> {
+  const result: ResumeAfterShutdown = { resumed: [], skipped: [] };
+  const items = work.list(wp, { kind: 'assignment', state: 'blocked' })
+    .filter(a => a.employeeId && a.history.at(-1)?.by === 'workplace' && a.history.at(-1)?.cause === 'workplace-shutdown');
+
+  const BATCH = 2;
+  for (let i = 0; i < items.length; i += BATCH) {
+    for (const item of items.slice(i, i + BATCH)) {
+      try {
+        const budget = spend.canSpend(wp, item.employeeId!);
+        if (!budget.ok) { result.skipped.push({ id: item.id, reason: `spend cap reached (${budget.scope}); it resumes when the cap is raised or tomorrow` }); continue; }
+        work.transition(wp, item.id, { to: 'building', by: 'workplace', note: 'resumed automatically: the previous block was the Workplace\'s own restart, not the owner, a cap, or a failure' });
+        assign(wp, item.id);
+        result.resumed.push(item.id);
+      } catch (err) {
+        result.skipped.push({ id: item.id, reason: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    if (i + BATCH < items.length) await new Promise(r => setTimeout(r, staggerMs));
+  }
+  if (result.resumed.length || result.skipped.length) {
+    log.info('employees', `resume after restart: ${result.resumed.length} resumed${result.skipped.length ? `, ${result.skipped.length} skipped (${result.skipped.map(s => s.id).join(', ')})` : ''}`);
+  }
+  return result;
 }
 
 /* ---------- state and cards ---------- */

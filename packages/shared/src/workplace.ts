@@ -210,6 +210,12 @@ export interface WorkHistoryEntry {
   to: WorkState;
   by: string;
   note?: string;
+  /**
+   * Set only when `to` is `blocked` and the block is the Workplace's own planned shutdown or
+   * restart (never the owner, a spend cap, or a failed start): on boot, `employees.resumeAfterShutdown`
+   * restarts exactly these, instead of waiting on the Chief of Staff's once-a-day resume.
+   */
+  cause?: 'workplace-shutdown';
 }
 
 export interface WorkItem {
