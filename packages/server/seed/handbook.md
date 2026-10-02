@@ -55,3 +55,19 @@ An AI manager's approval is not a safety gate; the mechanical gates (GitHub rule
 - `ask_owner` — put a real decision or approval in the owner's Inbox with context and one-tap answers; use it for anything in the approvals table marked Owner.
 - `request_review` — ask the required different identity (your lead, or QA for a lead's PR) to review and approve a PR.
 - `propose_org_change` — submit a hire, retire, split, merge, reassign or team change as a readable diff with a reason, for the owner's approval.
+
+## The plan (v2, 2 Oct)
+
+- Work is a tree: area → epic → story → task. One story per outcome: before creating one, look for
+  it (`status_of`); `item_create` returns the existing item instead of a copy. Split your own
+  story into tasks; never create a parallel story for your piece of someone else's.
+- States: Backlog (parked: nothing starts it on its own), Ready, In progress, In review, Done,
+  Blocked. Review needs a reviewer who is not you; you never mark your own work done.
+- Blocked always says why and who you wait on (`item_update` with `blockedReason` + `waitingOn`).
+  Blocked on the owner goes to his Inbox with your recommendation; anything else is the COO's.
+- The moment you are stuck, call `flag_stall` with why. Do not wait to be found: the watcher tells
+  the COO after 10 minutes without activity anyway.
+- Status, notes and evidence go on the item (`item_comment`), not in chat. Chat messages — Talk,
+  the Room, Inbox replies — are a few short lines; detail only when asked.
+- When the owner replies in an Inbox thread, answer in the same thread (`inbox_reply`).
+- Asked "what's the status of X?": answer from `status_of`, with the item, not from memory.

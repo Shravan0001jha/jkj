@@ -27,7 +27,8 @@ export interface MigrationReport {
   byStatusAfter: Record<string, number>;
 }
 
-const PARKED = /park/i;
+/** Phase 1 held items in `blocked` only to stop the old routine auto-starting them: "parked by COO …", "held by COO until …". */
+const PARKED = /\bpark|\bheld\b|\bhold/i;
 
 export function migrateV2(wp: Workplace): MigrationReport {
   const report: MigrationReport = { items: 0, epics: 0, stories: 0, parked: 0, reviewersSet: 0, byStatusBefore: {}, byStatusAfter: {} };

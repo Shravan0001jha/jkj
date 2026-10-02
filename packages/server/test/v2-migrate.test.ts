@@ -35,6 +35,10 @@ test('every legacy row gets a level, a parent, a v2 status and a reason; parked 
       { at: '2026-09-28T10:00:00.000Z', from: null, to: 'proposed', by: 'owner' },
       { at: '2026-10-02T06:00:00.000Z', from: 'proposed', to: 'blocked', by: 'coo', note: 'parked by COO: focus on P0' },
     ]);
+    legacy(wp, 'as_held', 'assignment', 'blocked', { employeeId: 'nikhil' }, [
+      { at: '2026-10-02T03:21:50.554Z', from: null, to: 'proposed', by: 'chief-of-staff' },
+      { at: '2026-10-02T04:22:03.455Z', from: 'planned', to: 'blocked', by: 'coo', note: 'held by COO until as_x and as_y reach review (QA starts then)' },
+    ]);
     legacy(wp, 'as_blocked', 'assignment', 'blocked', { employeeId: 'rohan' }, [
       { at: '2026-09-28T10:00:00.000Z', from: null, to: 'building', by: 'owner' },
       { at: '2026-09-29T10:00:00.000Z', from: 'building', to: 'blocked', by: 'workplace', note: 'lost on restart' },
@@ -47,13 +51,13 @@ test('every legacy row gets a level, a parent, a v2 status and a reason; parked 
     room.createThread(wp, { title: 'Legacy topic', text: 'hello', by: 'mira' });
 
     const report = migrateV2(wp);
-    assert.equal(report.items, 11);
+    assert.equal(report.items, 12);
     assert.equal(report.epics, 2);
-    assert.equal(report.stories, 9);
-    assert.equal(report.parked, 1);
+    assert.equal(report.stories, 10);
+    assert.equal(report.parked, 2);
     assert.equal(report.reviewersSet, 2);
-    assert.equal(report.byStatusAfter['backlog'], 1);
-    assert.equal(report.byStatusBefore['blocked'], 3);
+    assert.equal(report.byStatusAfter['backlog'], 2);
+    assert.equal(report.byStatusBefore['blocked'], 4);
     assert.equal((wp.db.prepare('select count(*) as n from work').get() as { n: number }).n, rowsBefore, 'nothing deleted');
 
     const it = (id: string) => items.require$(wp, id);
@@ -66,6 +70,7 @@ test('every legacy row gets a level, a parent, a v2 status and a reason; parked 
     assert.equal(it('as_rev_qa').reviewerId, 'asha', 'Nikhil does not review himself');
     assert.equal(it('as_parked').status, 'backlog', 'the COO\'s parked items are Backlog, not Blocked');
     assert.equal(it('as_parked').legacy.state, 'proposed');
+    assert.equal(it('as_held').status, 'backlog', '"held by COO until …" is the same Phase 1 hold');
     assert.deepEqual(it('as_blocked').blocked && [it('as_blocked').blocked!.reason, it('as_blocked').blocked!.waitingOn], ['lost on restart', 'coo']);
     assert.equal(it('as_bare').blocked?.reason, 'No reason recorded before v2');
     assert.deepEqual([it('as_rej').status, it('as_rej').resolution], ['done', 'wont-do']);

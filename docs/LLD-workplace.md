@@ -870,10 +870,14 @@ interface StatusAnswer { q: string; line: string; matches: { item: Item; line: s
 ```
 
 `href`s are app routes: `item/<id>`, `inbox/<id>`, `room/<threadId>`, `releases/<postId>`, `plan`.
+`POST /api/items/:id` with `start: true` and a move to in-progress also starts the assignee's session
+(the route calls `employees.assign`; any `employees.assign` on a Ready/Backlog item marks it in progress).
 Socket events (added to `WorkplaceServerEvent`): `item.updated { item: Item }`, `item.comment {
 comment }`, `activity.recorded { activity }`, `update.posted { update }`, `area.updated { area }`,
 `inbox.message { message }`, `release.post { post }`. Push intents: `update.posted` with
-`push: true` → category `WP_UPDATE`, `collapseId: update:<itemId|kind>`, link = the update's `href`.
+`push: true` → category `WP_UPDATE`, thread `updates`, `collapseId: update:<itemId|kind>`, `data
+{ link: href, itemId?, inboxId? }`; level `blocked` for a block (sent even in quiet hours), else
+`update` (held in quiet hours, like needs-you). `coo.item` (now also kind `stall`) stays loopback-only.
 
 ### 19.9 Chat hygiene
 

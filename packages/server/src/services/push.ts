@@ -17,19 +17,19 @@ import { log } from '../util/logger.js';
  * own messages, anything while the tunnel is down or push is off.
  */
 
-export type PushLevel = 'needs-you' | 'blocked' | 'cap' | 'mention';
-export type PushCategory = 'WP_INBOX' | 'WP_ROOM' | 'WP_ALERT';
+export type PushLevel = 'needs-you' | 'blocked' | 'cap' | 'mention' | 'update';
+export type PushCategory = 'WP_INBOX' | 'WP_ROOM' | 'WP_ALERT' | 'WP_UPDATE';
 
 export interface PushIntent {
   id: string;
   title: string;
   body: string;
   collapseId: string;
-  threadId: 'inbox' | 'alerts' | 'room';
+  threadId: 'inbox' | 'alerts' | 'room' | 'updates';
   level: PushLevel;
   category: PushCategory;
   /** Ids and the deep link only; never content. */
-  data: { link: string; inboxId?: string; threadId?: string; employeeId?: string };
+  data: { link: string; inboxId?: string; threadId?: string; employeeId?: string; itemId?: string };
 }
 
 export interface PushResult { id: string; sent: number; dropped: number; failed: number }
@@ -109,6 +109,16 @@ export function intentFor(wp: Workplace, event: WorkplaceEvent, handles: string[
       data: { link: employee ? `employee/${employee.id}` : 'office', ...(employee ? { employeeId: employee.id } : {}) },
     };
   }
+  // v2 (HLD D22): the Updates the owner chose to be pushed — start, block, the brief, the review.
+  if (event.type === 'update.posted') {
+    const u = event.update;
+    if (!u.push) return null;
+    return {
+      id: newId(), title: oneLine(u.line, TITLE_MAX), body: u.kind === 'brief' ? 'Your morning brief' : u.kind === 'review' ? 'The weekly review' : 'Updates',
+      collapseId: `update:${u.itemId ?? u.kind}`, threadId: 'updates', level: u.kind === 'blocked' ? 'blocked' : 'update', category: 'WP_UPDATE',
+      data: { link: u.href, ...(u.itemId ? { itemId: u.itemId } : {}), ...(u.inboxId ? { inboxId: u.inboxId } : {}) },
+    };
+  }
   if (event.type === 'room.message') {
     const { message, thread } = event as { message: RoomMessage; thread: RoomThread };
     if (message.owner || message.by === 'owner') return null;
@@ -161,7 +171,7 @@ export class Push {
     if (!intent) return null;
     const now = this.now();
     this.rollDay(now);
-    if ((intent.level === 'needs-you' || intent.level === 'mention') && inQuietHours(this.wp.config.pushQuiet, now)) return null;
+    if ((intent.level === 'needs-you' || intent.level === 'mention' || intent.level === 'update') && inQuietHours(this.wp.config.pushQuiet, now)) return null;
     const prior = this.seen.get(intent.collapseId);
     if (prior && now - prior.at < DEDUPE_MS && prior.title === intent.title) return null;
     while (this.window.length && now - this.window[0]! >= 60_000) this.window.shift();

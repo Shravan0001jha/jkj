@@ -169,3 +169,20 @@ receives `inbox.updated` and `alert`.
    run the real script (no Iris release in this build).
 
 Everything not in this list is reported as "not live-verified".
+
+## v2 (HLD §8, LLD §19) — tests written before the code, 2 Oct
+
+| File | What it pins |
+|---|---|
+| `v2-items.test.ts` | one shape for epics/stories/tasks; tree and field validation (points 1/2/3/5/8, parents, the owner as assignee); the six-state machine (reviewer to enter review, reason + waiting-on to block, never done by the assignee, reopen needs a note, wont-do only by the owner); blocked-on-owner Inbox item and its withdrawal; the old engine keeps v2 in step (default reviewer on report_done, old blocks carry their reason, rejected → wont-do); reassign/reviewer/points as activity; started/blocked/unblocked/shipped feed lines with names and the epic room's named lines (never counts); epic progress, the Plan (areas, unfiled, mine, focus, flags, board); merge keeps history as a comment; comments with mentions, agent comments kept short |
+| `v2-areas.test.ts` | ≤ 5 active areas (409), archive/re-activate; rooms (General, per area with a thread per epic, Releases); release posts grouped by area, an item ships once; a finished release run posts by itself |
+| `v2-watch.test.ts` | Ready 15 min: in focus and free → started, else Backlog with the reason (not in focus, busy); Backlog never started, by the watcher or the old routine; idle 10 min → the COO at once, once per episode, never the owner; the open session asked to flag itself; COO offline → Asha resumes; review 30 min → the COO with the reviewer; the timers fire on their own; `flag_stall` |
+| `v2-inbox-tools.test.ts` | free-text reply keeps the item open and reaches the asker (as the Workplace's prompt, not the owner's words); `inbox_reply`; an option answers it and posts "Decided"; the six agent tools (dedupe, who may create stories/tasks, no self-done, comments, status) |
+| `v2-rhythm.test.ts` | the brief, the stand-up (authored by the Workplace, about the lead), the weekly review (reopens counted), once per IST day at 09:30 / 10:00 / Sunday 18:00; on-demand status by item, person, area |
+| `v2-hygiene.test.ts` | the chat view folds Workplace prompts and system notes; sessions the Workplace starts are prompted as the Workplace; `short()`; agent Room posts kept short, the owner's never |
+| `v2-migrate.test.ts` | legacy rows → level, parent, status, reason, reviewer, rank; COO-held blocked → Backlog; history → activity once; legacy threads → General; idempotent; nothing deleted |
+| `v2-api.test.ts` | every v2 route over HTTP with the exact shapes; the Inbox thread routes; the old routes as adapters with v2 fields; through `x-via-tunnel` every v2 route passes and the COO's lead-only routes stay refused |
+| `v2-push-mentions.test.ts` | pushed updates become `WP_UPDATE` intents (ids and the link only; shipped is not pushed); an @mention in a comment wakes the employee |
+
+Changed on purpose: `chat-view.test.ts` — system notes now fold into the activity line (the owner's
+2 Oct rule), still kept for "expand"; errors stay alone.

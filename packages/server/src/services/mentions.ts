@@ -1,4 +1,4 @@
-import type { RoomMessage, RoomThread } from '@jkj/shared';
+import type { Comment, RoomMessage, RoomThread } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as employees from './employees.js';
 import * as coo from './coo.js';
@@ -26,9 +26,41 @@ const lastTurnAt = new Map<string, number>(); // `${employeeId}:${threadId}` -> 
 
 export function wireMentionReplies(wp: Workplace): () => void {
   return wp.on(event => {
-    if (event.type !== 'room.message') return;
-    handle(wp, event.thread, event.message);
+    if (event.type === 'room.message') handle(wp, event.thread, event.message);
+    else if (event.type === 'item.comment') handleComment(wp, event.comment);
   });
+}
+
+/**
+ * v2: an @mention in an item's comments wakes that employee the same way (one turn per item per
+ * cooldown, probe, autonomous), with the item as the context; `@coo` goes to the COO bridge.
+ */
+function handleComment(wp: Workplace, comment: Comment): void {
+  if (comment.by === 'workplace') return;
+  const row = wp.db.prepare('select json from work where id = ?').get(comment.itemId) as { json: string } | undefined;
+  const title = row ? (JSON.parse(row.json) as { title: string }).title : comment.itemId;
+  for (const id of comment.mentions) {
+    if (id === comment.by) continue;
+    if (coo.isCoo(id)) {
+      try { coo.notifyMention(wp, { threadId: `item:${comment.itemId}`, threadTitle: title, by: comment.by, text: comment.text }); } catch (err) { log.warn('mentions', String(err)); }
+      continue;
+    }
+    const emp = wp.org.employees.find(e => e.id === id);
+    if (!emp || emp.virtual) continue;
+    const key = `${id}:item:${comment.itemId}`;
+    if (Date.now() - (lastTurnAt.get(key) ?? 0) < MENTION_COOLDOWN_MS) continue;
+    lastTurnAt.set(key, Date.now());
+    const who = comment.by === 'owner' ? 'the owner' : (wp.org.employees.find(e => e.id === comment.by)?.name ?? comment.by);
+    const prompt = [
+      `${who} mentioned you on "${title}" (${comment.itemId}):`,
+      '',
+      `"${comment.text.slice(0, 500)}"`,
+      '',
+      'Reply with item_comment on that item, in a few short lines, only if you have something to say. Use status_of if you need the item\'s state.',
+    ].join('\n');
+    try { employees.talk(wp, id, prompt, [], { autonomous: true, probe: true }); }
+    catch (err) { log.warn('mentions', `${id} on ${comment.itemId}: ${err instanceof Error ? err.message : err}`); }
+  }
 }
 
 function handle(wp: Workplace, thread: RoomThread, message: RoomMessage): void {
