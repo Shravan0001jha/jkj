@@ -2,6 +2,7 @@ import type { InboxAnswer, InboxItem, InboxKind, InboxMessage, InboxOption, Inbo
 import type { Workplace } from './workplace.js';
 import { oneLine, short } from './one-line.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
+import { levelOf, rawGet } from './v2-map.js';
 import { BadRequest, Conflict, NotFound } from '../util/errors.js';
 
 /**
@@ -30,8 +31,43 @@ export interface RaiseOptions {
   details?: string;
   /** False for routine housekeeping that must never reach the owner's Inbox (see InboxItem). */
   ownerFacing?: boolean;
-  /** v2: shown by colour and label. */
+  /** v2: shown by colour and label. Derived from the kind and the level of the work when absent (`urgencyOf`). */
   urgency?: InboxItem['urgency'];
+  /**
+   * v2 (the handbook: raise every decision "with your recommendation"): an option id or label, which
+   * is marked `recommended` on that option; any other text is kept as `context.recommendation` and
+   * added to the body as "Recommendation: …".
+   */
+  recommendation?: string;
+}
+
+/**
+ * Urgency (LLD §19.5) from the kind and the level of the work the item is about: a cap stops work
+ * (urgent); an approval or a release holds a session or a ship (high); a question or decision about
+ * a blocked epic is urgent, about a story high, about a task normal; everything else normal.
+ */
+export function urgencyOf(wp: Workplace, kind: InboxKind, context: Record<string, unknown> = {}): NonNullable<InboxItem['urgency']> {
+  if (kind === 'cap') return 'urgent';
+  if (kind === 'approval' || kind === 'release') return 'high';
+  const itemId = typeof context['itemId'] === 'string' ? context['itemId'] : typeof context['assignmentId'] === 'string' ? context['assignmentId'] : undefined;
+  const w = itemId ? rawGet(wp, itemId) : undefined;
+  if (w && (kind === 'question' || kind === 'decision') && w.status === 'blocked') {
+    const level = levelOf(w);
+    return level === 'epic' ? 'urgent' : level === 'story' ? 'high' : 'normal';
+  }
+  return 'normal';
+}
+
+const slugOf = (t: string): string => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/** Mark the option the raiser recommends (by id or label); `matched` is false when none is named. */
+export function markRecommended(options: InboxOption[], recommendation: string | undefined): { options: InboxOption[]; matched: boolean } {
+  const rec = recommendation?.trim();
+  if (!rec) return { options, matched: options.some(o => o.recommended) };
+  const want = slugOf(rec);
+  const hit = options.find(o => o.id === rec || slugOf(o.id) === want || slugOf(o.label) === want);
+  if (!hit) return { options, matched: false };
+  return { options: options.map(o => (o.id === hit.id ? { ...o, recommended: true } : (({ recommended: _r, ...rest }) => rest)(o))), matched: true };
 }
 
 /** True unless the raiser explicitly marked the item routine (a stall notice, a dead-session note). */
@@ -92,14 +128,18 @@ export function raise(wp: Workplace, spec: RaiseOptions): InboxItem {
     const open = list(wp, 'open').find(i => i.context['dedupeKey'] === spec.dedupeKey);
     if (open) return open;
   }
+  const recommendation = spec.recommendation?.trim();
+  const marked = markRecommended(spec.options ?? DEFAULT_OPTIONS[spec.kind], recommendation);
+  const body = recommendation && !marked.matched && !spec.body.includes(recommendation) ? `${spec.body.trimEnd()}\n\nRecommendation: ${recommendation}` : spec.body;
+  const context = { ...(spec.context ?? {}), ...(spec.dedupeKey ? { dedupeKey: spec.dedupeKey } : {}), ...(recommendation ? { recommendation } : {}) };
   const item: InboxItem = {
     id: newId('in'),
     kind: spec.kind,
     title: spec.title,
-    body: spec.body,
-    ...ownerLine(spec),
-    context: { ...(spec.context ?? {}), ...(spec.dedupeKey ? { dedupeKey: spec.dedupeKey } : {}) },
-    options: spec.options ?? DEFAULT_OPTIONS[spec.kind],
+    body,
+    ...ownerLine({ ...spec, body }),
+    context,
+    options: marked.options,
     state: 'open',
     raisedBy: spec.raisedBy,
     createdAt: now(),
@@ -108,7 +148,8 @@ export function raise(wp: Workplace, spec: RaiseOptions): InboxItem {
     onDeny: spec.onDeny ?? DEFAULT_EFFECT[spec.kind].onDeny,
     ...(spec.links ? { links: spec.links } : {}),
     ...(spec.ownerFacing === false ? { ownerFacing: false } : {}),
-    ...(spec.urgency && spec.urgency !== 'normal' ? { urgency: spec.urgency } : {}),
+    urgency: spec.urgency ?? urgencyOf(wp, spec.kind, context),
+    messageCount: 0,
   };
   wp.db.prepare('insert into inbox (id, kind, state, raised_by, created_at, json) values (?, ?, ?, ?, ?, ?)')
     .run(item.id, item.kind, item.state, item.raisedBy, item.createdAt, JSON.stringify(item));
@@ -123,7 +164,16 @@ export function list(wp: Workplace, state?: InboxItem['state']): InboxItem[] {
     ? wp.db.prepare('select json from inbox where state = ? order by created_at desc, rowid desc').all(state)
     : wp.db.prepare("select json from inbox order by case state when 'open' then 0 else 1 end, created_at desc, rowid desc").all();
   // Items raised before `affects` existed get it computed on read.
-  return rowsJson<InboxItem>(rows).map(i => backfill(wp, i));
+  const counts = messageCounts(wp);
+  return rowsJson<InboxItem>(rows).map(i => backfill(wp, i, counts));
+}
+
+/** Replies per item, from the thread itself (the stored count can lag an item raised before v2). */
+function messageCounts(wp: Workplace, id?: string): Map<string, { n: number; last: string }> {
+  const rows = (id
+    ? wp.db.prepare('select inbox_id as id, count(*) as n, max(at) as last from inbox_messages where inbox_id = ? group by inbox_id').all(id)
+    : wp.db.prepare('select inbox_id as id, count(*) as n, max(at) as last from inbox_messages group by inbox_id').all()) as { id: string; n: number; last: string }[];
+  return new Map(rows.map(r => [r.id, { n: r.n, last: r.last }]));
 }
 
 /**
@@ -135,10 +185,22 @@ export function ownerList(wp: Workplace, state?: InboxItem['state']): InboxItem[
   return list(wp, state).filter(isOwnerFacing);
 }
 
-/** Items raised before `affects` (D7b) or `summary` (D16) existed get them computed on read. */
-function backfill(wp: Workplace, i: InboxItem): InboxItem {
+/**
+ * Items raised before `affects` (D7b) or `summary` (D16) existed get them computed on read; every
+ * item carries v2's `messageCount` (0 when no reply), `lastMessageAt` when there is one, and `urgency`
+ * (QA 2 Oct: the apps never got them).
+ */
+function backfill(wp: Workplace, i: InboxItem, counts = messageCounts(wp, i.id)): InboxItem {
   const withAffects = i.affects ? i : { ...i, affects: affectsOf(wp, i), onApprove: i.onApprove ?? DEFAULT_EFFECT[i.kind].onApprove, onDeny: i.onDeny ?? DEFAULT_EFFECT[i.kind].onDeny };
-  return withAffects.summary ? withAffects : { ...withAffects, ...ownerLine(withAffects) };
+  const lined = withAffects.summary ? withAffects : { ...withAffects, ...ownerLine(withAffects) };
+  const c = counts.get(i.id);
+  const { lastMessageAt: _stale, ...rest } = lined;
+  return {
+    ...rest,
+    messageCount: c?.n ?? 0,
+    ...(c ? { lastMessageAt: c.last } : {}),
+    urgency: lined.urgency ?? urgencyOf(wp, lined.kind, lined.context),
+  };
 }
 
 /** The one line for the owner: given, or the body's first plain sentence; the rest is details. */

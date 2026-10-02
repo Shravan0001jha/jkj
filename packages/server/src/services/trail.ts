@@ -192,7 +192,7 @@ function ownerBlock(wp: Workplace, prev: WorkItem, next: WorkItem): void {
       kind: 'question', title: `Blocked on you: ${next.title}`,
       body: `${next.blockedReason ?? 'Needs you.'}${next.blockedRecommendation ? `\n\nRecommendation: ${next.blockedRecommendation}` : ''}`,
       raisedBy: next.employeeId && next.employeeId !== 'owner' ? next.employeeId : 'workplace',
-      context: { itemId: next.id }, dedupeKey: key,
+      context: { itemId: next.id, ...(next.blockedRecommendation ? { recommendation: next.blockedRecommendation } : {}) }, dedupeKey: key,
       links: [{ label: 'The item', href: `#/item/${next.id}` }],
     });
   } else if (prev.status === 'blocked') {

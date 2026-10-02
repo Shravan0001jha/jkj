@@ -337,10 +337,10 @@ export interface InboxItem {
    * decides it (the §0 approvals table). Never touched by clients; the server decides it on raise.
    */
   ownerFacing?: boolean;
-  /** v2: replies in the item's thread (GET /api/inbox/:id has them). */
+  /** v2: replies in the item's thread (GET /api/inbox/:id has them). Always set by the server (0 when none). */
   messageCount?: number;
   lastMessageAt?: string;
-  /** v2: shown by colour and label, not wording. Absent = normal. */
+  /** v2: shown by colour and label, not wording. Always set by the server since 2 Oct (from the kind and the level, LLD §19.5); absent (an old client cache) = normal. */
   urgency?: 'normal' | 'high' | 'urgent';
 }
 

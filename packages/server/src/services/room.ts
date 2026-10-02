@@ -108,13 +108,13 @@ export function resolve(wp: Workplace, threadId: string, spec: { summary: string
  * fallback `routeEscalation` itself applies. The COO then answers it or forwards it to the owner
  * with a recommendation.
  */
-export function escalate(wp: Workplace, threadId: string, spec: { title: string; body: string; by: string; options?: string[] }) {
+export function escalate(wp: Workplace, threadId: string, spec: { title: string; body: string; by: string; options?: string[]; recommendation?: string }) {
   const thread = getThread(wp, threadId);
   if (!thread) throw new BadRequest(`No thread ${threadId}`);
   const options = spec.options?.length ? spec.options.map(o => ({ id: o.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label: o })) : undefined;
   const routed = coo.routeEscalation(wp, {
     title: spec.title, body: `${spec.body}\n\nFrom the Team Room thread "${thread.title}".`, by: spec.by, threadId,
-    ...(options ? { options } : {}), context: { threadId, charterIds: thread.charterIds },
+    ...(options ? { options } : {}), ...(spec.recommendation ? { recommendation: spec.recommendation } : {}), context: { threadId, charterIds: thread.charterIds },
     links: [{ label: 'Team Room thread', href: `#/room/${threadId}` }],
   });
   const escalationId = routed.ownerInboxId ?? routed.item.id;

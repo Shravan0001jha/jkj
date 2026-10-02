@@ -147,6 +147,8 @@ export interface RouteEscalationSpec {
   /** Passed through to the owner's Inbox item if this falls back (or is forwarded) — never lost. */
   context?: Record<string, unknown>;
   links?: { label: string; href: string }[];
+  /** The raiser's recommendation: an option id or label (marked on it), else kept as text. */
+  recommendation?: string;
 }
 
 /**
@@ -157,7 +159,7 @@ export interface RouteEscalationSpec {
 export function routeEscalation(wp: Workplace, spec: RouteEscalationSpec): { item: CooItem; ownerInboxId?: string } {
   const item: CooItem = {
     id: newId('coi'), at: now(), kind: spec.kind ?? 'escalation', title: spec.title, body: spec.body,
-    options: spec.options ?? [], raisedBy: spec.by, state: 'open', ...(spec.threadId ? { threadId: spec.threadId } : {}),
+    options: inbox.markRecommended(spec.options ?? [], spec.recommendation).options, raisedBy: spec.by, state: 'open', ...(spec.threadId ? { threadId: spec.threadId } : {}),
   };
   saveItem(wp, item);
   appendInboxFile(wp, { kind: item.kind, itemId: item.id, title: item.title, body: item.body, options: item.options });
@@ -174,6 +176,7 @@ function raiseToOwner(wp: Workplace, item: CooItem, spec: RouteEscalationSpec, n
     kind: 'decision', title: item.title, body: `${item.body}\n\n${recommendation ? `The COO's recommendation: ${recommendation}` : note}`,
     raisedBy: item.raisedBy, options: item.options.length ? item.options : undefined,
     context: { ...(spec.context ?? {}), cooItemId: item.id }, ...(spec.links ? { links: spec.links } : {}),
+    ...(recommendation ?? spec.recommendation ? { recommendation: recommendation ?? spec.recommendation } : {}),
   });
   updateItem(wp, { ...item, state: 'forwarded', forward: { inboxId: ownerItem.id, at: now(), auto, ...(recommendation ? { recommendation } : {}) } });
   return ownerItem;

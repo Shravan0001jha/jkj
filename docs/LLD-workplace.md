@@ -778,7 +778,19 @@ else `proposed` (the next session is asked for its plan first); in-review → `r
 ### 19.5 Inbox threads
 
 `inbox_messages` rows; `InboxItem` gains `messageCount`, `lastMessageAt`, `urgency`
-(`normal | high | urgent`, default normal), and `InboxOption.recommended`. `reply(wp, id, { by,
+(`normal | high | urgent`, default normal), and `InboxOption.recommended`. **Always populated (QA,
+2 Oct)** on `GET /api/inbox`, `GET /api/inbox/:id` and every socket `inbox.updated`: `messageCount`
+counted from `inbox_messages` (0 when none), `lastMessageAt` when there is a reply, `urgency` = the
+raiser's if given, else `urgencyOf(kind, level)`: `cap` → urgent; `approval`, `release` → high; a
+question/decision about a **blocked** item (`context.itemId`/`assignmentId`) → urgent for an epic, high
+for a story, normal for a task; otherwise normal (items raised before this get it on read).
+`raise({ recommendation })`: an option id or label marks that option `recommended: true` (only that
+one); any other text is kept as `context.recommendation` and appended to the body as "Recommendation:
+…". The COO path carries it too (`routeEscalation({ recommendation })` marks the `coo_items` option and
+the owner item it falls back or is forwarded to). Agents' raising tools **require** it: `ask_owner`
+and `escalate` take `recommendation` and refuse without one; `item_update` to blocked and
+`flag_stall` with `waitingOn: owner` refuse without one (it becomes the "Blocked on you" item's
+recommendation). `reply(wp, id, { by,
 text?, optionId? })`: an `optionId` answers the item (the text is the note) and appends the text
 as a message; text alone appends a message and leaves the item open. A message by `owner` is
 delivered to the asker (`inbox.onReply` listener wired at boot): the raiser's session gets
@@ -969,5 +981,7 @@ items started / backlogged / closed (wont-do), points estimated.
 an open item with the same normalised title under the same parent is returned instead of a
 duplicate), `item_update { itemId, status?, blockedReason?, waitingOn?, reviewerId?, points?, note? }`
 (19.3 rules; an agent can never set done on its own work), `item_comment { itemId, text }`,
-`flag_stall { itemId?, reason, waitingOn? }`, `inbox_reply { inboxId, text }`, `status_of { q }`.
+`flag_stall { itemId?, reason, waitingOn?, recommendation? }`, `inbox_reply { inboxId, text }`,
+`status_of { q }`; `ask_owner` and `escalate` gain a required `recommendation`, and `item_update` gains
+`recommendation` (required with `waitingOn: owner`, as is `flag_stall`'s) — 19.5.
 The handbook gains: one story per outcome; flag your own stall the moment it happens; short messages.

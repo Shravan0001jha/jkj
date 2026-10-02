@@ -806,10 +806,11 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
             return ok(`Not recorded: ${err instanceof Error ? err.message : String(err)}`);
           }
         }),
-      tool('ask_owner', 'Raise a real decision to the owner\'s Inbox. Use it only for what the handbook says needs the owner.',
-        { title: z.string(), body: z.string(), options: z.array(z.string()).optional() },
-        async ({ title, body, options }) => {
-          const item = inbox.raise(wp, { kind: 'decision', title, body, raisedBy: employeeId, ...(options?.length ? { options: options.map(o => ({ id: o.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label: o })) } : {}) });
+      tool('ask_owner', 'Raise a real decision to the owner\'s Inbox, with your recommendation (required: one of the options, or what you would do). Use it only for what the handbook says needs the owner.',
+        { title: z.string(), body: z.string(), options: z.array(z.string()).optional(), recommendation: z.string().optional() },
+        async ({ title, body, options, recommendation }) => {
+          if (!recommendation?.trim()) return ok('Not filed: give your recommendation (one of the options, or what you would do). The owner decides faster with one.');
+          const item = inbox.raise(wp, { kind: 'decision', title, body, raisedBy: employeeId, recommendation, ...(options?.length ? { options: options.map(o => ({ id: o.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label: o })) } : {}) });
           setState(wp, employeeId, 'needs-owner');
           return ok(`Filed as ${item.id}. Continue with other work; the answer arrives in your next session's context.`);
         }),
@@ -893,12 +894,13 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           try { const r = room.resolve(wp, threadId, { summary, by: employeeId, ...(followUps ? { followUps } : {}) }); return ok(`Resolved ${threadId}${r.followUps.length ? `; follow-ups ${r.followUps.join(', ')}` : ''}.`); }
           catch (err) { return ok(`Not resolved: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('escalate', 'Chief of Staff only: escalate a Team Room thread to the owner as an Inbox decision. Only for what the approvals table reserves for him.',
-        { threadId: z.string(), title: z.string(), body: z.string(), options: z.array(z.string()).optional() },
-        async ({ threadId, title, body, options }) => {
+      tool('escalate', 'Chief of Staff only: escalate a Team Room thread to the owner as an Inbox decision, with your recommendation (required: one of the options, or what you would do). Only for what the approvals table reserves for him.',
+        { threadId: z.string(), title: z.string(), body: z.string(), options: z.array(z.string()).optional(), recommendation: z.string().optional() },
+        async ({ threadId, title, body, options, recommendation }) => {
           const emp = employee(wp, employeeId);
           if (!emp.charterIds.includes('chief-of-staff') && emp.level !== 0) return ok('Only the Chief of Staff escalates; mention @asha in the thread.');
-          try { const item = room.escalate(wp, threadId, { title, body, by: employeeId, ...(options ? { options } : {}) }); return ok(`Escalated as ${item.id}.`); }
+          if (!recommendation?.trim()) return ok('Not escalated: give your recommendation (one of the options, or what you would do).');
+          try { const item = room.escalate(wp, threadId, { title, body, by: employeeId, recommendation, ...(options ? { options } : {}) }); return ok(`Escalated as ${item.id}.`); }
           catch (err) { return ok(`Not escalated: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       /* ---------- v2: the plan (LLD §19.12) ---------- */
@@ -919,10 +921,11 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           } catch (err) { return ok(`Not created: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('item_update', 'Move one of your items (start, block with a reason and who you wait on, send to review with a reviewer), or set its points. You never mark your own work done; the reviewer does.',
-        { itemId: z.string(), status: z.enum(['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked']).optional(), blockedReason: z.string().optional(), waitingOn: z.string().optional(), reviewerId: z.string().optional(), points: z.number().int().optional(), note: z.string().optional() },
-        async ({ itemId, status, blockedReason, waitingOn, reviewerId, points, note }) => {
+        { itemId: z.string(), status: z.enum(['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked']).optional(), blockedReason: z.string().optional(), waitingOn: z.string().optional(), recommendation: z.string().optional(), reviewerId: z.string().optional(), points: z.number().int().optional(), note: z.string().optional() },
+        async ({ itemId, status, blockedReason, waitingOn, recommendation, reviewerId, points, note }) => {
+          if (status === 'blocked' && waitingOn === 'owner' && !recommendation?.trim()) return ok('Not changed: blocked on the owner raises a decision in his Inbox; give your recommendation.');
           try {
-            const it = items.update(wp, itemId, { ...(status ? { status } : {}), ...(blockedReason ? { blockedReason } : {}), ...(waitingOn ? { waitingOn } : {}), ...(reviewerId ? { reviewerId } : {}), ...(points ? { points: points as never } : {}), ...(note ? { note } : {}) }, employeeId);
+            const it = items.update(wp, itemId, { ...(status ? { status } : {}), ...(blockedReason ? { blockedReason } : {}), ...(waitingOn ? { waitingOn } : {}), ...(recommendation ? { recommendation } : {}), ...(reviewerId ? { reviewerId } : {}), ...(points ? { points: points as never } : {}), ...(note ? { note } : {}) }, employeeId);
             return ok(`${it.id} is ${it.status}.`);
           } catch (err) { return ok(`Not changed: ${err instanceof Error ? err.message : String(err)}`); }
         }),
@@ -933,12 +936,13 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           catch (err) { return ok(`Not commented: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('flag_stall', 'Flag your own stall the moment it happens: why you are stuck, and who you are waiting on if anyone (that also marks the item Blocked). The COO hears at once.',
-        { itemId: z.string().optional(), reason: z.string(), waitingOn: z.string().optional() },
-        async ({ itemId, reason, waitingOn }) => {
+        { itemId: z.string().optional(), reason: z.string(), waitingOn: z.string().optional(), recommendation: z.string().optional() },
+        async ({ itemId, reason, waitingOn, recommendation }) => {
           const id = itemId ?? session().assignmentId;
           if (!id) return ok('Name the item: no item is attached to this session.');
           if (waitingOn && !isPerson(wp, waitingOn)) return ok(`waitingOn must be an employee id, coo or owner; "${waitingOn}" is none.`);
-          try { watch.flag(wp, id, { by: employeeId, reason, ...(waitingOn ? { waitingOn } : {}) }); return ok(`Flagged ${id}; the COO has it.`); }
+          if (waitingOn === 'owner' && !recommendation?.trim()) return ok('Not flagged: waiting on the owner raises a decision in his Inbox; give your recommendation.');
+          try { watch.flag(wp, id, { by: employeeId, reason, ...(waitingOn ? { waitingOn } : {}), ...(recommendation ? { recommendation } : {}) }); return ok(`Flagged ${id}; the COO has it.`); }
           catch (err) { return ok(`Not flagged: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('inbox_reply', 'Answer in an Inbox item\'s thread (when the owner replied to something you raised). Keep it to a few short lines.',

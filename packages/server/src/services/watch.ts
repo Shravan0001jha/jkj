@@ -159,7 +159,7 @@ function unreviewed(wp: Workplace, w: WorkItem, ev: Evaluation, nowMs: number): 
 }
 
 /** An agent flags its own stall (tool `flag_stall`): the COO hears at once; Blocked when it names who it waits on. */
-export function flag(wp: Workplace, id: string, spec: { by: string; reason: string; waitingOn?: string }): void {
+export function flag(wp: Workplace, id: string, spec: { by: string; reason: string; waitingOn?: string; recommendation?: string }): void {
   const w = rawGet(wp, id);
   if (!w) throw new Error(`No item ${id}`);
   trail.record(wp, { itemId: id, by: spec.by, kind: 'stall', text: `Flagged by ${nameOf(wp, spec.by)}: ${spec.reason}` });
@@ -167,7 +167,7 @@ export function flag(wp: Workplace, id: string, spec: { by: string; reason: stri
   if (spec.waitingOn && w.status !== 'blocked') {
     const status = w.status ?? 'ready';
     if (status === 'ready' || status === 'in-progress' || status === 'in-review') {
-      items.update(wp, id, { status: 'blocked', blockedReason: spec.reason, waitingOn: spec.waitingOn }, spec.by);
+      items.update(wp, id, { status: 'blocked', blockedReason: spec.reason, waitingOn: spec.waitingOn, ...(spec.recommendation ? { recommendation: spec.recommendation } : {}) }, spec.by);
     }
   }
 }
