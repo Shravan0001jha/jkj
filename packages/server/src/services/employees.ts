@@ -937,9 +937,11 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
             if (real.length) evidence.commits = [...new Set([...evidence.commits, ...real.map(c => c.split(' ')[0]!)])];
           }
           try {
+            const warning = work.get(wp, id) ? work.planWarning(work.get(wp, id)!) : null;
             const item = work.reportDone(wp, id, evidence, employeeId);
             lastReport.set(employeeId, `Reported ${item.title}: ${evidence.tests.passed} passed / ${evidence.tests.failed} failed; ${evidence.commits.length} commits; live: ${evidence.liveVerified.join(', ') || 'none'}; not verified: ${evidence.notVerified.join(', ') || 'none'}`);
-            return ok(`Recorded. ${item.id} is in review; it becomes done when a verifier confirms it.`);
+            const nudge = warning ? ` Warning (on the item): ${warning}. The handbook asks for "## Plan" first, then the build: post your plan before you start next time.` : '';
+            return ok(`Recorded. ${item.id} is in review; it becomes done when a verifier confirms it.${nudge}`);
           } catch (err) {
             return ok(`Not recorded: ${err instanceof Error ? err.message : String(err)}`);
           }

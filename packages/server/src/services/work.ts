@@ -145,6 +145,16 @@ export interface TransitionOptions {
   spec?: string;
   /** See WorkHistoryEntry.cause: only ever 'workplace-shutdown', only ever on a transition to 'blocked'. */
   cause?: 'workplace-shutdown';
+  /** report_done only (owner, 2 Oct): a missing plan is a warning there, never a refusal. */
+  allowNoPlan?: boolean;
+}
+
+/** The evidence a review needs (the hard gate): test counts, and commits or notes for non-code work. */
+function checkEvidence(evidence: Evidence | undefined): Evidence {
+  if (!evidence) throw new BadRequest('Review needs evidence: tests, commits or notes for non-code work.');
+  if (!evidence.tests) throw new BadRequest('Evidence needs test counts (0/0 is allowed for non-code work).');
+  if (evidence.commits.length === 0 && !evidence.notes?.trim()) throw new BadRequest('Evidence needs commits, or notes for non-code work ("no code needed" and why).');
+  return evidence;
 }
 
 export function transition(wp: Workplace, id: string, given: TransitionOptions): WorkItem {
@@ -161,15 +171,11 @@ export function transition(wp: Workplace, id: string, given: TransitionOptions):
   if (item.kind !== 'feature') {
     if (opts.to === 'planned') {
       const plan = opts.plan ?? item.plan;
-      if (!plan?.trim()) throw new BadRequest('An assignment is planned only once a plan is attached.');
-      patch.plan = plan;
+      if (!plan?.trim() && !opts.allowNoPlan) throw new BadRequest('An assignment is planned only once a plan is attached.');
+      if (plan?.trim()) patch.plan = plan;
     }
     if (opts.to === 'review') {
-      const evidence = opts.evidence ?? item.evidence;
-      if (!evidence) throw new BadRequest('Review needs evidence: tests, commits or notes for non-code work.');
-      if (!evidence.tests) throw new BadRequest('Evidence needs test counts (0/0 is allowed for non-code work).');
-      if (evidence.commits.length === 0 && !evidence.notes?.trim()) throw new BadRequest('Evidence needs commits, or notes for non-code work.');
-      patch.evidence = evidence;
+      patch.evidence = checkEvidence(opts.evidence ?? item.evidence);
     }
     if (opts.to === 'done') {
       if (!item.evidence) throw new BadRequest('Nothing is done without evidence.');
@@ -194,7 +200,8 @@ export function transition(wp: Workplace, id: string, given: TransitionOptions):
   const v2 = statusFromState(item, opts.to, item.status);
   if (v2.status !== item.status) { updated.status = v2.status; updated.statusSince = at; }
   if (v2.status === 'done') updated.resolution = v2.resolution ?? 'done'; else delete updated.resolution;
-  if (v2.status === 'in-review' && !updated.reviewerId) {
+  if (v2.status === 'in-review' && (!updated.reviewerId || updated.reviewerId === updated.employeeId)) {
+    delete updated.reviewerId;
     const reviewer = defaultReviewer(wp, updated);
     if (reviewer) updated.reviewerId = reviewer;
   }
@@ -237,14 +244,29 @@ export function put(wp: Workplace, prev: WorkItem, next: WorkItem, given: string
  * The assignee's own "done" is a claim, so it lands in review. This is what
  * the session's report_done tool calls.
  */
-export function reportDone(wp: Workplace, id: string, evidence: Evidence, by: string): WorkItem {
+export function reportDone(wp: Workplace, id: string, evidence: Evidence, given: string): WorkItem {
+  const by = authorId(wp, given);
   const item = require$(wp, id);
-  if (item.state === 'proposed') {
-    // A build that skipped the plan still needs one on record.
-    throw new BadRequest('Attach a plan before reporting work as done.');
-  }
-  if (item.state === 'planned') transition(wp, id, { to: 'building', by });
-  return transition(wp, id, { to: 'review', by, evidence });
+  // The hard gates (owner, 2 Oct): evidence (a commit, or notes saying no code was needed; test counts)
+  // and a reviewer who is not the author. A missing or late plan never blocks: it is a warning on the item.
+  checkEvidence(evidence);
+  const reviewer = item.reviewerId && item.reviewerId !== item.employeeId && item.reviewerId !== by ? item.reviewerId : defaultReviewer(wp, item);
+  if (!reviewer || reviewer === by) throw new BadRequest('No reviewer other than you: name one (item_update reviewerId) and report again.');
+  const warning = planWarning(item);
+  if (item.state === 'proposed') transition(wp, id, { to: 'planned', by, allowNoPlan: true, ...(warning ? { note: `Plan warning: ${warning}` } : {}) });
+  if (require$(wp, id).state === 'planned') transition(wp, id, { to: 'building', by });
+  const reported = transition(wp, id, { to: 'review', by, evidence });
+  if (warning) trail.record(wp, { itemId: id, by: 'workplace', kind: 'note', text: `Warning: ${warning}. Reported done anyway (a plan is a habit, not a gate): next time reply "## Plan" before building.` });
+  return reported;
+}
+
+/**
+ * The plan habit (handbook: reply "## Plan" first, then build). Null when a plan was on record before
+ * the build; otherwise what went wrong, for the warning and the nudge.
+ */
+export function planWarning(item: WorkItem): string | null {
+  if (item.kind === 'feature' || item.history.some(h => h.to === 'planned')) return null;
+  return item.plan?.trim() ? 'the plan was posted late, after the work began' : 'no plan was posted before the work';
 }
 
 export function attachPlan(wp: Workplace, id: string, plan: string, by: string): WorkItem {

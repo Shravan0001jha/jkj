@@ -1,7 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Evidence } from '@jkj/shared';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import * as work from '../src/services/work.js';
+import * as trail from '../src/services/trail.js';
+import { workplaceTools } from '../src/services/employees.js';
 import { testWorkplace } from './fakes/workplace.js';
 
 const evidence: Evidence = { tests: { passed: 12, failed: 0, command: 'npm test' }, commits: ['abc123'], liveVerified: ['ran on the Mac'], notVerified: ['iPad'] };
@@ -39,7 +43,6 @@ test('the assignee reporting done lands in review, never in done', () => {
   try {
     const a = work.create(wp, { kind: 'assignment', title: 'T', body: 'x', employeeId: 'mira' });
     assert.equal(a.charterId, 'experts', 'an employee assignment takes its first charter');
-    assert.throws(() => work.reportDone(wp, a.id, evidence, 'mira'), /Attach a plan/);
     work.attachPlan(wp, a.id, 'plan', 'mira');
     const r = work.reportDone(wp, a.id, evidence, 'mira');
     assert.equal(r.state, 'review');
@@ -125,6 +128,63 @@ test('listing filters by every dimension', () => {
     assert.equal(work.list(wp, { charterId: 'server' }).length, 2);
     assert.equal(work.list(wp, { employeeId: 'kabir' }).length, 2);
     assert.equal(work.list(wp, { employeeId: 'tara' }).length, 0);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+/**
+ * Owner, 2 Oct: Dev's tempo fix was committed but report_done refused it because his plan was posted
+ * late. The plan is a habit, not a gate: missing or late is a warning on the item and a nudge to the
+ * agent. The hard gates are evidence (a commit, or notes saying no code was needed), test counts, and a
+ * reviewer who is not the author.
+ */
+test('report_done: a missing or late plan is a warning and a nudge, never a refusal; the hard gates hold', async () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    // No plan at all: still reported, In review, the warning on the item.
+    const a = work.create(wp, { kind: 'assignment', title: 'Dance tempo follows the beat', body: 'x', employeeId: 'dev' });
+    assert.equal(work.planWarning(a), 'no plan was posted before the work');
+    const r = work.reportDone(wp, a.id, evidence, 'dev');
+    assert.equal(r.state, 'review');
+    assert.equal(r.status, 'in-review');
+    assert.ok(r.reviewerId && r.reviewerId !== 'dev', 'a reviewer who is not the author');
+    assert.ok(trail.activityFor(wp, a.id).some(x => /Warning: no plan was posted before the work/.test(x.text)));
+
+    // A late plan (attached once the build was under way, never planned first) is the same warning.
+    const late = work.create(wp, { kind: 'assignment', title: 'Beat confidence', body: 'x', employeeId: 'dev' });
+    work.transition(wp, late.id, { to: 'blocked', by: 'dev', note: 'waiting' });
+    work.attachPlan(wp, late.id, '## Plan\n1. clamp', 'dev');
+    assert.equal(work.planWarning(work.get(wp, late.id)!), 'the plan was posted late, after the work began');
+
+    // A plan on record first: no warning.
+    const planned = work.create(wp, { kind: 'assignment', title: 'Wake duck', body: 'x', employeeId: 'dev' });
+    work.attachPlan(wp, planned.id, 'plan', 'dev');
+    assert.equal(work.planWarning(work.get(wp, planned.id)!), null);
+    work.reportDone(wp, planned.id, evidence, 'dev');
+    assert.equal(trail.activityFor(wp, planned.id).some(x => /Warning/.test(x.text)), false);
+
+    // The hard gates.
+    const b = work.create(wp, { kind: 'assignment', title: 'Mic gate', body: 'x', employeeId: 'dev' });
+    assert.throws(() => work.reportDone(wp, b.id, { ...evidence, commits: [], notes: undefined } as never, 'dev'), /commits, or notes/);
+    assert.throws(() => work.reportDone(wp, b.id, { ...evidence, tests: undefined } as never, 'dev'), /test counts/);
+    assert.equal(work.get(wp, b.id)!.state, 'proposed', 'a refused report moves nothing');
+    const noCode = work.reportDone(wp, b.id, { tests: { passed: 0, failed: 0 }, commits: [], liveVerified: [], notVerified: [], notes: 'no code needed: the config already had it' }, 'dev');
+    assert.equal(noCode.state, 'review');
+
+    // Through the agent's tool: recorded, with the nudge in the reply.
+    const c = work.create(wp, { kind: 'assignment', title: 'Hearing reaction gate', body: 'x', employeeId: 'dev' });
+    const server = workplaceTools(wp, 'dev', () => ({ agentId: 'a', employeeId: 'dev', assignmentId: c.id, startedAt: '', seen: {}, planCaptured: false }));
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(st);
+    const client = new Client({ name: 't', version: '1' });
+    await client.connect(ct);
+    const out = JSON.stringify((await client.callTool({ name: 'report_done', arguments: { testsPassed: 9, testsFailed: 0, commits: ['abc123'], liveVerified: [], notVerified: [] } })).content);
+    assert.match(out, /Recorded/);
+    assert.match(out, /Warning \(on the item\): no plan was posted before the work/);
+    assert.match(out, /## Plan/);
+    assert.equal(work.get(wp, c.id)!.state, 'review');
+    await client.close();
   } finally {
     tmp.cleanup();
   }

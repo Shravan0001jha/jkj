@@ -750,7 +750,13 @@ The client shape is a projection, `Item` (19.8): `toItem(workItem)`.
 - An epic moves Ready/Backlog → In progress when any of its stories does (either engine); it is
   closed by the owner or its owner, never by a roll-up of v2 stories.
 - An agent's own report (`report_done`) still goes through the old engine (evidence required) into
-  `review`; the server fills `reviewerId` with the default reviewer: a task's story assignee (if not
+  `review`. **Hard gates only (owner, 2 Oct):** evidence (a commit, or notes saying no code was needed),
+  test counts (0/0 allowed for non-code work), and a reviewer who is not the author. A missing or late
+  plan (no `planned` in the history) never blocks: the item moves `proposed → planned → building →
+  review` anyway, an activity note "Warning: no plan was posted before the work" (or "…posted late") is
+  recorded, and the tool's reply nudges the agent to post `## Plan` first next time (`work.planWarning`).
+  (Dev's committed tempo fix was refused for a late plan before this.) The server fills `reviewerId`
+  (when missing, or when it is the assignee) with the default reviewer: a task's story assignee (if not
   the assignee), else the `qa-release` holder (if not the assignee), else the Chief of Staff.
 
 **Mapping old → v2** (applied whenever the old engine changes `state`):
