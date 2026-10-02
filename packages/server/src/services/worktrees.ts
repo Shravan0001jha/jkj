@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync } from 'node:fs';
-import { basename, join, relative, resolve } from 'node:path';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, symlinkSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import type { Employee } from '@jkj/shared';
 import type { Org } from './org.js';
 import { BadRequest } from '../util/errors.js';
@@ -53,22 +53,21 @@ export function ensureWorktree(workDir: string, employee: Employee, workItemId: 
     const args = branchExists(repo, branch)
       ? ['worktree', 'add', path, branch]
       : ['worktree', 'add', path, '-b', branch, base];
-    git(repo, args);
+    try {
+      git(repo, args);
+    } catch (err) {
+      throw new WorktreeSwitchError(employee.id, path, branch, gitReason(err));
+    }
     created = true;
     log.info('worktrees', `${employee.id}: ${path} on ${branch} from ${base}`);
   } else {
     // git answers with the real path; /var is /private/var on macOS.
     const top = realpathSync(git(path, ['rev-parse', '--show-toplevel']).trim());
     if (top !== realpathSync(path)) throw new BadRequest(`${path} exists and is not a worktree`);
-    const current = git(path, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
-    if (current !== branch) {
-      if (isClean(path)) {
-        git(path, branchExists(repo, branch) ? ['checkout', '-q', branch] : ['checkout', '-q', '-b', branch, base]);
-      } else {
-        log.warn('worktrees', `${employee.id}: ${path} has uncommitted work on ${current}; staying there`);
-      }
-    }
   }
+
+  excludeLinked(path);
+  if (!created) switchTo(employee, path, branch, base, workItemId);
 
   for (const rel of LINKED) {
     const source = join(repo, rel);
@@ -83,7 +82,78 @@ export function ensureWorktree(workDir: string, employee: Employee, workItemId: 
     }
   }
 
-  return { path, branch: git(path, ['rev-parse', '--abbrev-ref', 'HEAD']).trim(), base, repo, created };
+  // Never hand back a worktree on another branch: the session would build on the wrong item (2 Oct).
+  const head = currentBranch(path);
+  if (head !== branch) throw new WorktreeSwitchError(employee.id, path, branch, `the worktree is on ${head}`);
+  return { path, branch: head, base, repo, created };
+}
+
+/**
+ * The worktree could not be put on the assignment's branch. The assignment is
+ * blocked with this message rather than run on whatever branch was checked out.
+ */
+export class WorktreeSwitchError extends BadRequest {
+  constructor(employeeId: string, path: string, readonly branch: string, reason: string) {
+    super(`Could not put ${employeeId}'s worktree ${path} on ${branch}: ${reason}`);
+    this.name = 'WorktreeSwitchError';
+  }
+}
+
+/** Untracked paths the auto-save never commits: the linked dirs and every virtualenv. */
+const EXCLUDED = ['.venv*', ...LINKED.filter(l => !l.startsWith('.venv')).map(l => `/${l}`)];
+
+/**
+ * Keep the virtualenvs and linked dirs out of `git status` and out of any
+ * auto-save, through the worktree's info/exclude (never the repo's .gitignore).
+ * A pattern without a trailing slash also matches the symlinks we create.
+ */
+function excludeLinked(path: string): void {
+  const file = resolve(path, git(path, ['rev-parse', '--git-path', 'info/exclude']).trim());
+  const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const lines = new Set(existing.split('\n').map(l => l.trim()));
+  const missing = EXCLUDED.filter(p => !lines.has(p));
+  if (!missing.length) return;
+  mkdirSync(dirname(file), { recursive: true });
+  const prefix = existing && !existing.endsWith('\n') ? '\n' : '';
+  appendFileSync(file, `${prefix}# Added by the Iris Workplace: untracked build/test dirs, never committed\n${missing.join('\n')}\n`);
+}
+
+/**
+ * Put an existing worktree on `branch`. Uncommitted work on the previous
+ * branch (tracked changes and untracked files, minus the excluded dirs) is
+ * committed to that branch first: no stash that can be lost, nothing discarded.
+ */
+function switchTo(employee: Employee, path: string, branch: string, base: string, workItemId: string | null): void {
+  const current = currentBranch(path);
+  if (current === branch) return;
+  const fail = (reason: string): never => { throw new WorktreeSwitchError(employee.id, path, branch, reason); };
+  try {
+    if (!isClean(path, true)) {
+      if (current === 'HEAD') fail('it has uncommitted work on a detached HEAD; commit or move it by hand');
+      const busy = ['MERGE_HEAD', 'REBASE_HEAD', 'CHERRY_PICK_HEAD', 'rebase-merge', 'rebase-apply']
+        .find(f => existsSync(resolve(path, git(path, ['rev-parse', '--git-path', f]).trim())));
+      if (busy) fail(`${current} has an unfinished merge, rebase or cherry-pick (${busy}); finish or abort it by hand`);
+      // info/exclude (excludeLinked) keeps the venvs and linked dirs out of this add.
+      git(path, ['add', '-A']);
+      git(path, ['commit', '-q', '--no-verify', '-m', `WIP (auto-saved by the Workplace before switching to ${workItemId ?? 'general'})`]);
+      log.warn('worktrees', `${employee.id}: auto-saved uncommitted work on ${current} before switching to ${branch}`);
+      if (!isClean(path, true)) fail(`uncommitted work on ${current} could not be auto-saved`);
+    }
+    git(path, branchExists(path, branch) ? ['checkout', '-q', branch] : ['checkout', '-q', '-b', branch, base]);
+    log.info('worktrees', `${employee.id}: ${path} switched from ${current} to ${branch}`);
+  } catch (err) {
+    if (err instanceof WorktreeSwitchError) throw err;
+    fail(gitReason(err));
+  }
+}
+
+function gitReason(err: unknown): string {
+  const e = err as { stderr?: string | Buffer; message?: string };
+  return String(e?.stderr || e?.message || err).trim().split('\n').slice(0, 3).join(' ');
+}
+
+function currentBranch(path: string): string {
+  return git(path, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
 }
 
 /** True when a path is (inside) one of the organisation's main checkouts. */
@@ -103,8 +173,8 @@ export function changedFiles(worktree: string, base: string): string[] {
   return [...new Set([...committed, ...uncommitted].map(f => f.trim()).filter(f => f && !LINKED.includes(f) && !f.startsWith('.venv')))].sort();
 }
 
-export function isClean(worktree: string): boolean {
-  return git(worktree, ['status', '--porcelain', '--untracked-files=no']).trim() === '';
+export function isClean(worktree: string, includeUntracked = false): boolean {
+  return git(worktree, ['status', '--porcelain', `--untracked-files=${includeUntracked ? 'all' : 'no'}`]).trim() === '';
 }
 
 export function commitsSince(worktree: string, base: string): string[] {

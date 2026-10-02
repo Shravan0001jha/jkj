@@ -10,7 +10,7 @@ import * as work from './work.js';
 import * as spend from './spend.js';
 import * as inbox from './inbox.js';
 import { assembleContext } from './context-layers.js';
-import { changedFiles, commitsSince, ensureWorktree, isMainCheckout, type Worktree } from './worktrees.js';
+import { changedFiles, commitsSince, ensureWorktree, isMainCheckout, WorktreeSwitchError, type Worktree } from './worktrees.js';
 import { guardTool, type GuardContext } from './guards.js';
 import { resolve as resolveOwner } from './ownership.js';
 import * as stall from './stall.js';
@@ -369,6 +369,23 @@ export function assign(wp: Workplace, assignmentId: string): Agent {
 }
 
 function assignSession(wp: Workplace, assignmentId: string): Agent {
+  try {
+    return startSession(wp, assignmentId);
+  } catch (err) {
+    // The worktree could not be put on this assignment's branch: block it with the reason,
+    // never run it on another item's branch (2 Oct: Dev built a P0 on a parked item's branch).
+    if (err instanceof WorktreeSwitchError) {
+      const item = work.get(wp, assignmentId);
+      if (item && item.state !== 'blocked' && item.state !== 'done' && item.state !== 'rejected') {
+        work.transition(wp, assignmentId, { to: 'blocked', by: 'workplace', note: err.message });
+      }
+      log.error('employees', `${assignmentId} blocked: ${err.message}`);
+    }
+    throw err;
+  }
+}
+
+function startSession(wp: Workplace, assignmentId: string): Agent {
   const item = work.require$(wp, assignmentId);
   if (!item.employeeId) throw new BadRequest(`${assignmentId} has no assignee`);
   if (item.employeeId === 'owner') throw new BadRequest(`${assignmentId} is the owner's own item; nobody is started on it.`);
@@ -810,7 +827,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
             const started: string[] = [];
             for (const a of result.assignments) {
               if (a.state !== 'proposed' || !a.employeeId || a.sessionId || a.employeeId === employeeId) continue;
-              try { assign(wp, a.id); started.push(a.charterId ?? a.id); } catch (err) { work.transition(wp, a.id, { to: 'blocked', by: 'workplace', note: err instanceof Error ? err.message : String(err) }); }
+              try { assign(wp, a.id); started.push(a.charterId ?? a.id); } catch (err) { if (work.get(wp, a.id)?.state !== 'blocked') work.transition(wp, a.id, { to: 'blocked', by: 'workplace', note: err instanceof Error ? err.message : String(err) }); }
             }
             const r = result.route;
             return ok(`Routed to ${r.primaries.map(h => h.charterId).join(', ')}${r.consulted.length ? ` (consult ${r.consulted.join(', ')})` : ''}; sessions started for ${started.join(', ') || 'nobody new'}.` + (r.unresolved.length ? ` Unresolved: ${r.unresolved.map(t => `${t.kind}:${t.key}`).join(', ')}.` : ''));
