@@ -454,6 +454,14 @@ function waitForHandoff(wp: Workplace, session: Session, waitMs: number): Promis
   });
 }
 
+/** Told after a session closes (the reviewer's queue starts its next review then; review-wake.ts). */
+type ClosedListener = (wp: Workplace, session: Session, reason: string) => void;
+const closedListeners = new Set<ClosedListener>();
+export function onSessionClosed(fn: ClosedListener): () => void {
+  closedListeners.add(fn);
+  return () => void closedListeners.delete(fn);
+}
+
 export function close(wp: Workplace, agentId: string, reason: string): void {
   const session = sessions.get(agentId);
   if (!session) return;
@@ -473,6 +481,7 @@ export function close(wp: Workplace, agentId: string, reason: string): void {
   const name = wp.org.employees.find(e => e.id === session.employeeId)?.name ?? session.employeeId;
   commitOrg(wp.org.dir, `${name}: session ${agentId} ${reason} (status and handoff)`);
   if (sessionsOf(session.employeeId).length === 0 && stateOverride.get(session.employeeId) === 'working') setState(wp, session.employeeId, 'idle');
+  for (const fn of closedListeners) { try { fn(wp, session, reason); } catch (err) { log.warn('employees', `session-closed listener: ${err instanceof Error ? err.message : err}`); } }
 }
 
 /** Interrupt and pause every session in a spend scope. */

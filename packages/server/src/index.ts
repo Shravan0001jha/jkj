@@ -21,6 +21,7 @@ import * as coo from './services/coo.js';
 import { wireMentionReplies } from './services/mentions.js';
 import { migrateV2 } from './services/migrate-v2.js';
 import * as watch from './services/watch.js';
+import * as reviewWake from './services/review-wake.js';
 import * as rhythm from './services/rhythm.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
@@ -99,6 +100,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   try { room.ensureReleases(wp); } catch (err) { log.warn('boot', `Releases room: ${err instanceof Error ? err.message : err}`); }
   // v2 stalls are events, not a sweep (HLD D21): each open item has a deadline that every change re-arms.
   const stopWatch = watch.startWatch(wp);
+  // The reviewer is woken the moment an item enters In review (QA, 2 Oct), not 30 min later via the COO.
+  const stopReviewWake = reviewWake.startReviewWake(wp);
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
@@ -179,6 +182,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       clearInterval(cosTimer);
       clearInterval(rhythmTimer);
       stopWatch();
+      stopReviewWake();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
       telegram.stop();

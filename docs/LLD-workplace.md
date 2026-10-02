@@ -839,6 +839,26 @@ the assignee at or after the stall's `since`); and its `reason` is human time (`
 min", "3 hours", "4 days"): "Ready 1 hour, not started", "In progress 3 hours, no activity", "In
 review 4 days, untouched". `status_of` uses the same wording.
 
+### 19.6a Waking the reviewer (`review-wake.ts`, QA 2 Oct)
+
+An item entering In review used to wake nobody; the reviewer heard of it only through the 30-minute
+`unreviewed` stall to the COO. Now `startReviewWake` (boot, beside `startWatch`) listens to
+`work.updated`: an item in `in-review` whose `reviewerId` is an agent (not the owner, not the assignee)
+gets one record `review-wake:<itemId>` = `{ reviewerId, episode: <reviewerId>:<statusSince>, state:
+queued|sent|started, queuedAt, agentId? }` and `drain(reviewer)` runs at once:
+- the reviewer's open session **between turns** gets the review request as a message (from `workplace`);
+- **no open session**, within budget and the concurrency cap → a short review session
+  (`employees.talk(…, { autonomous: true })`) with the request as its prompt;
+- **busy** (a turn running, an approval pending, capped, or the spawn refused) → stays `queued`.
+The prompt names the item, its assignee, `status_of <id>`, the branch `emp/<assignee>/<id>`, and asks
+for `item_update` done or in-progress with a note. The queue drains **one review at a time** when a
+reviewer's turn ends (run event: `waiting`, no approval) or a session closes
+(`employees.onSessionClosed`; never on `shutdown`), and at boot; order: P0 (item or epic title) or a
+focus epic first, then oldest. **Dedupe:** the episode key means any number of events about the same
+time in review wake the reviewer once, and a review session ending never starts a second one; leaving
+In review drops the record, re-entering (or a new reviewer) is a new episode. The 30-minute
+`unreviewed` stall stays as the fallback.
+
 ### 19.7 Asha's rhythm (`rhythm.ts`)
 
 A one-minute timer calls `maybeRun(wp, now)`; each run is idempotent per IST day (settings
