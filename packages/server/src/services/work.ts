@@ -48,7 +48,7 @@ export interface CreateWork {
   spec?: string;
   by?: string;
   /** v2 fields set at creation (items.ts): level, parentId, status, points, reviewer, owner, area, rank, … */
-  v2?: Partial<Pick<WorkItem, 'level' | 'parentId' | 'status' | 'points' | 'reviewerId' | 'ownerId' | 'areaId' | 'rank' | 'targetDate' | 'acceptance'>>;
+  v2?: Partial<Pick<WorkItem, 'level' | 'parentId' | 'status' | 'points' | 'reviewerId' | 'ownerId' | 'areaId' | 'rank' | 'targetDate' | 'acceptance' | 'hold'>>;
 }
 
 export function create(wp: Workplace, spec: CreateWork): WorkItem {

@@ -8,6 +8,7 @@ import * as waits from './waits.js';
 import * as coo from './coo.js';
 import * as cos from './cos.js';
 import * as spend from './spend.js';
+import * as manager from './manager.js';
 import { chiefOfStaffId, isAgent, levelOf, nameOf, rawGet, statusFromState } from './v2-map.js';
 import { log } from '../util/logger.js';
 
@@ -56,6 +57,8 @@ export function evaluate(wp: Workplace, w: WorkItem, nowMs = Date.now()): Evalua
   const at = (rule: StallRule, sinceMs: number): Evaluation => ({ rule, since: new Date(sinceMs).toISOString(), dueAt: sinceMs + t[rule], stalled: nowMs >= sinceMs + t[rule] });
   if (status === 'ready') {
     if (sessionOn(w)) return null;
+    // Queued for its busy assignee: the dispatcher starts it when they are free (LLD §19.6d).
+    if (w.queuedFor && w.queuedFor === w.employeeId && items.inFocus(wp, w)) return null;
     return at('not-started', Date.parse(w.statusSince ?? w.updatedAt));
   }
   if (status === 'in-progress') {
@@ -68,7 +71,7 @@ export function evaluate(wp: Workplace, w: WorkItem, nowMs = Date.now()): Evalua
   return null;
 }
 
-export type StallAction = 'started' | 'backlog' | 'coo-notified' | 'resumed';
+export type StallAction = 'started' | 'backlog' | 'queued' | 'notified' | 'resumed';
 
 const episodeKey = (id: string): string => `stall:${id}`;
 const handled = (wp: Workplace, id: string, episode: string): boolean =>
@@ -91,37 +94,55 @@ export function check(wp: Workplace, id: string, nowMs = Date.now()): { rule: St
 const asha = (wp: Workplace): string => chiefOfStaffId(wp) ?? 'workplace';
 const mins = (wp: Workplace, rule: StallRule): number => Math.round(thresholds(wp)[rule] / MIN);
 
-/** Ready for 15 minutes: Asha starts it (in focus, assignee free, within budget) or parks it with the reason. */
+/**
+ * Ready for 15 minutes: Asha starts it (in focus, assignee free, within budget); with the assignee busy
+ * it stays Ready, queued for them, and the dispatcher starts it when they are free (outage 2 Oct, LLD
+ * §19.6d: Backlog for "busy" was never restarted); otherwise it is parked with the reason.
+ */
 function notStarted(wp: Workplace, w: WorkItem, nowMs: number): StallAction {
   const name = nameOf(wp, w.employeeId);
   const open = employees.openSession(w.employeeId!);
   let reason: string | null = null;
-  if (!items.inFocus(wp, w)) reason = 'not in focus';
-  else if (open) reason = `${name} is busy on ${open.assignmentId ? rawGet(wp, open.assignmentId)?.title ?? open.assignmentId : 'another session'}`;
-  else if (!spend.canSpend(wp, w.employeeId!, spend.dayOf(new Date(nowMs))).ok) reason = `${name} is paused by the spend cap`;
+  let capped = false;
+  let failed = false;
   const ready = mins(wp, 'not-started');
+  if (items.inFocus(wp, w) && open) {
+    const on = open.assignmentId ? rawGet(wp, open.assignmentId)?.title ?? open.assignmentId : 'another session';
+    items.markQueued(wp, w.id, asha(wp));
+    trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: `Queued for ${name}: busy on ${on}; starts when ${name} is free (Ready for ${ready} min)` });
+    manager.alert(wp, { key: `queued:${w.id}:${w.statusSince ?? w.updatedAt}`, itemId: w.id, title: `Queued: ${w.title}`, body: `Ready for ${ready} min; ${name} is busy on ${on}, so it is queued for ${name} and starts when ${name} is free.`, by: asha(wp), subjectId: w.employeeId, notice: true }, nowMs);
+    return 'queued';
+  }
+  if (!items.inFocus(wp, w)) reason = 'not in focus';
+  else if (!spend.canSpend(wp, w.employeeId!, spend.dayOf(new Date(nowMs))).ok) { reason = `${name} is paused by the spend cap`; capped = true; }
   if (!reason) {
     try {
       employees.assign(wp, w.id);
       trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: `Started by Asha: Ready for ${ready} min and in focus` });
-      coo.notifyStall(wp, { itemId: w.id, title: `Started: ${w.title}`, body: `Ready for ${ready} min; Asha started ${name} on it.`, by: asha(wp) });
+      manager.alert(wp, { key: `started:${w.id}:${w.statusSince ?? w.updatedAt}`, itemId: w.id, title: `Started: ${w.title}`, body: `Ready for ${ready} min; Asha started ${name} on it.`, by: asha(wp), subjectId: w.employeeId, notice: true }, nowMs);
       return 'started';
     } catch (err) {
       reason = `could not start: ${err instanceof Error ? err.message : String(err)}`;
+      failed = true;
     }
   }
   items.update(wp, w.id, { status: 'backlog', note: `Moved to Backlog by Asha: ${reason}` }, asha(wp));
   trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: `Moved to Backlog: ${reason} (Ready for ${ready} min)` });
-  coo.notifyStall(wp, { itemId: w.id, title: `Parked: ${w.title}`, body: `Ready for ${ready} min and not started; moved to Backlog: ${reason}.`, by: asha(wp) });
+  // Asha first (LLD §19.6e): "not in focus" is a notice; a spend cap is the COO's call; a failed start is Asha's to act on.
+  manager.alert(wp, {
+    key: `parked:${w.id}:${w.statusSince ?? w.updatedAt}`, itemId: w.id, title: `Parked: ${w.title}`,
+    body: `Ready for ${ready} min and not started; moved to Backlog: ${reason}.`, by: asha(wp), subjectId: w.employeeId,
+    ...(capped ? { decision: 'spend' as const } : failed ? {} : { notice: true }),
+  }, nowMs);
   return 'backlog';
 }
 
-/** In progress with no activity: the COO now; the agent asked to flag itself; Asha's resume if the COO is away. */
+/** In progress with no activity: Asha now (the COO if she does not act); the agent asked to flag itself; Asha's resume if the COO is away. */
 function idle(wp: Workplace, w: WorkItem, ev: Evaluation, nowMs: number): StallAction {
   const name = nameOf(wp, w.employeeId);
   const m = Math.floor((nowMs - Date.parse(ev.since)) / MIN);
   trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'stall', text: `No activity for ${mins(wp, 'idle')} min (last at ${ev.since.slice(11, 16)} UTC)` });
-  coo.notifyStall(wp, { itemId: w.id, title: `Stalled: ${w.title}`, body: `${name}'s ${levelOf(w)} has had no activity for ${m} min (since ${ev.since.slice(11, 16)} UTC).`, by: 'workplace' });
+  manager.alert(wp, { key: `idle:${w.id}:${ev.since}`, itemId: w.id, title: `Stalled: ${w.title}`, body: `${name}'s ${levelOf(w)} has had no activity for ${m} min (since ${ev.since.slice(11, 16)} UTC).`, by: 'workplace', subjectId: w.employeeId }, nowMs);
   const s = sessionOn(w);
   if (s) {
     try {
@@ -129,7 +150,7 @@ function idle(wp: Workplace, w: WorkItem, ev: Evaluation, nowMs: number): StallA
     } catch (err) {
       log.warn('watch', `nudge ${w.id}: ${err instanceof Error ? err.message : err}`);
     }
-    return 'coo-notified';
+    return 'notified';
   }
   if (!coo.presence(wp).online) {
     const key = `stall-resume:${w.id}`;
@@ -148,28 +169,34 @@ function idle(wp: Workplace, w: WorkItem, ev: Evaluation, nowMs: number): StallA
       trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: `Not resumed: ${why}` });
     }
   }
-  return 'coo-notified';
+  return 'notified';
 }
 
 function unreviewed(wp: Workplace, w: WorkItem, ev: Evaluation, nowMs: number): StallAction {
   const m = Math.floor((nowMs - Date.parse(ev.since)) / MIN);
   const reviewer = nameOf(wp, w.reviewerId);
   trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'stall', text: `In review for ${m} min with nothing from ${reviewer}` });
-  coo.notifyStall(wp, { itemId: w.id, title: `Unreviewed: ${w.title}`, body: `In review for ${m} min; the reviewer is ${reviewer}.`, by: 'workplace' });
-  return 'coo-notified';
+  manager.alert(wp, { key: `unreviewed:${w.id}:${ev.since}`, itemId: w.id, title: `Unreviewed: ${w.title}`, body: `In review for ${m} min; the reviewer is ${reviewer}.`, by: 'workplace', ...(w.reviewerId ? { subjectId: w.reviewerId } : {}) }, nowMs);
+  return 'notified';
 }
 
 /**
- * An agent flags its own stall (tool `flag_stall`): the COO hears at once; Blocked when it names who
- * it waits on — unless that is a teammate (LLD §19.6c): then it is a review or a handoff, someone's
- * work rather than a stall, and the COO is not told. Returns the item as it now stands.
+ * An agent flags its own stall (tool `flag_stall`): Asha hears at once (the COO when it waits on the
+ * COO; LLD §19.6e); Blocked when it names who it waits on — unless that is a teammate (LLD §19.6c):
+ * then it is a review or a handoff, someone's work rather than a stall, and nobody is alerted. Returns the item as it now stands.
  */
 export function flag(wp: Workplace, id: string, spec: { by: string; reason: string; waitingOn?: string; recommendation?: string; kind?: 'review' | 'work' }): WorkItem {
   const w = rawGet(wp, id);
   if (!w) throw new Error(`No item ${id}`);
   const teammate = !!spec.waitingOn && levelOf(w) !== 'epic' && waits.classify(wp, { assigneeId: w.employeeId, waitingOn: spec.waitingOn, reason: spec.reason, kind: spec.kind }) !== 'block';
   trail.record(wp, { itemId: id, by: spec.by, kind: teammate ? 'note' : 'stall', text: `Flagged by ${nameOf(wp, spec.by)}: ${spec.reason}` });
-  if (!teammate) coo.notifyStall(wp, { itemId: id, title: `Flagged: ${w.title}`, body: `${nameOf(wp, spec.by)} is stuck: ${spec.reason}${spec.waitingOn ? ` (waiting on ${nameOf(wp, spec.waitingOn)})` : ''}.`, by: spec.by });
+  if (!teammate) {
+    const title = `Flagged: ${w.title}`;
+    const body = `${nameOf(wp, spec.by)} is stuck: ${spec.reason}${spec.waitingOn ? ` (waiting on ${nameOf(wp, spec.waitingOn)})` : ''}.`;
+    // Waiting on the COO: it is the COO who must act. Anything else is Asha's first (LLD §19.6e).
+    if (spec.waitingOn === 'coo') coo.notifyStall(wp, { itemId: id, title, body, by: spec.by });
+    else manager.alert(wp, { key: `flag:${id}:${new Date().toISOString()}`, itemId: id, title, body, by: spec.by, subjectId: spec.by });
+  }
   if (spec.waitingOn && w.status !== 'blocked') {
     const status = w.status ?? 'ready';
     if (status === 'ready' || status === 'in-progress' || status === 'in-review') {

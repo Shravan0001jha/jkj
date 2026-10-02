@@ -126,6 +126,8 @@ export function projectItem(wp: Workplace, w: WorkItem): Item {
     acceptance: w.acceptance ?? [],
     ...(blocked ? { blocked } : {}),
     ...(w.handoff && status !== 'done' ? { handoff: { fromId: w.handoff.fromId, reason: w.handoff.reason, at: w.handoff.at } } : {}),
+    ...(w.hold && status === 'backlog' ? { hold: true as const } : {}),
+    ...(w.queuedFor && status === 'ready' ? { queuedFor: w.queuedFor } : {}),
     ...(w.mergedInto ? { mergedInto: w.mergedInto } : {}),
     ...(w.releasedIn ? { releasedIn: w.releasedIn } : {}),
     legacy: { kind: w.kind, state: w.state, ...(w.charterId ? { charterId: w.charterId } : {}), ...(w.featureId ? { featureId: w.featureId } : {}) },

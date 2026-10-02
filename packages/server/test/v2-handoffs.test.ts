@@ -11,6 +11,7 @@ import * as inbox from '../src/services/inbox.js';
 import * as work from '../src/services/work.js';
 import * as employees from '../src/services/employees.js';
 import * as blocks from '../src/services/blocks.js';
+import * as manager from '../src/services/manager.js';
 import * as reviewWake from '../src/services/review-wake.js';
 import * as handoff from '../src/services/handoff.js';
 import * as waits from '../src/services/waits.js';
@@ -251,7 +252,7 @@ test('owner wait stays Blocked and raises his Inbox question; the COO is not tol
   }
 });
 
-test('external wait stays Blocked: the COO is told at once and again after 15 minutes', async () => {
+test('external wait stays Blocked: Asha is told at once and again after 15 minutes; the COO if she does not act', async () => {
   const { wp, tmp } = testWorkplace();
   const { stop } = started(wp);
   try {
@@ -262,10 +263,15 @@ test('external wait stays Blocked: the COO is told at once and again after 15 mi
     assert.equal(it.status, 'blocked');
     assert.equal(it.blocked?.waitingOn, 'external');
     await tick();
-    assert.equal(cooItems(wp, qaStory.id).length, 1);
-    assert.match(cooItems(wp, qaStory.id)[0]!.body, /someone outside the team/);
+    const alerts = () => manager.list(wp).filter(r => r.itemId === qaStory.id);
+    assert.equal(cooItems(wp, qaStory.id).length, 0, 'Asha first (LLD §19.6e)');
+    assert.equal(alerts().length, 1);
+    assert.match(alerts()[0]!.body, /someone outside the team/);
     assert.equal(blocks.check(wp, qaStory.id, Date.now() + 16 * 60_000), 'renotified');
-    assert.equal(cooItems(wp, qaStory.id).length, 2);
+    assert.equal(alerts().length, 2);
+    assert.ok(manager.escalate(wp, Date.now() + 16 * 60_000).length >= 1, 'Asha did not act: the COO hears');
+    assert.ok(cooItems(wp, qaStory.id).length >= 1);
+    assert.match(cooItems(wp, qaStory.id)[0]!.body, /Asha has not acted/);
 
     // Waiting on the COO is a real block too.
     const other = items.create(wp, { level: 'story', parentId: it.parentId!, title: 'Relay deploy', assigneeId: 'dev' }, 'asha');

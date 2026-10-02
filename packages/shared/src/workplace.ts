@@ -277,6 +277,13 @@ export interface WorkItem {
   handoff?: { fromId: string; reason: string; at: string; prev?: WorkItem['handoff'] };
   /** The last handback (internal, not projected): whom it went to, by whom, the note. */
   handedBack?: { toId: string; byId: string; note: string; at: string };
+  /**
+   * Backlog parked on purpose by the owner or the COO (or with a hold note): the dispatcher never
+   * starts it (LLD §19.6d). Cleared when the item leaves Backlog.
+   */
+  hold?: boolean;
+  /** Ready and waiting for its busy assignee (the watcher's "busy" case): the dispatcher starts it when they are free. */
+  queuedFor?: string;
 }
 
 /* ---------- inbox ---------- */

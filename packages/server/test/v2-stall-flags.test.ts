@@ -4,10 +4,11 @@ import * as items from '../src/services/items.js';
 import * as watch from '../src/services/watch.js';
 import { humanDuration } from '../src/services/v2-map.js';
 import { testWorkplace } from './fakes/workplace.js';
+import { installFakeRuntime } from './fakes/fake-runtime.js';
 
 /**
  * QA, 2 Oct (Android): a stalled flag on the Plan had no `waitingOn` (blocked flags do) and its reason
- * read "In review for 5760 min, untouched". The flag now names who acts — the COO by default, the
+ * read "In review for 5760 min, untouched". The flag now names who acts — Asha by default (she owns stall handling, LLD §19.6e; it was the COO), the
  * assignee once it flagged its own stall — and says the time the way a person would.
  */
 
@@ -34,26 +35,28 @@ test('human time: minutes, then hours, then days', () => {
   assert.equal(humanDuration(4 * DAY + 3 * HOUR), '4 days');
 });
 
-test('a stalled flag waits on the COO by default and reads as human time', () => {
+test('a stalled flag waits on Asha by default and reads as human time', () => {
   const { wp, tmp } = testWorkplace();
   try {
     const { epic, story } = setup(wp);
     items.update(wp, story.id, { status: 'in-progress' }, 'dev');
     const idle = flagOf(wp, epic.id, story.id, Date.now() + 3 * HOUR + MIN)!;
     assert.equal(idle.kind, 'stalled');
-    assert.equal(idle.waitingOn, 'coo');
+    assert.equal(idle.waitingOn, 'asha', 'Asha owns stall handling (LLD §19.6e)');
     assert.equal(idle.reason, 'In progress 3 hours, no activity');
 
     items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
     const review = flagOf(wp, epic.id, story.id, Date.now() + 4 * DAY + MIN)!;
     assert.equal(review.reason, 'In review 4 days, untouched');
-    assert.equal(review.waitingOn, 'coo');
+    assert.equal(review.waitingOn, 'asha');
   } finally {
     tmp.cleanup();
   }
 });
 
 test('after the assignee flags its own stall (no one named), the flag waits on the assignee', () => {
+  // The flag alerts Asha (LLD §19.6e), which may start her a session: never a real one in a test.
+  const fake = installFakeRuntime();
   const { wp, tmp } = testWorkplace();
   try {
     const { epic, story } = setup(wp);
@@ -64,6 +67,7 @@ test('after the assignee flags its own stall (no one named), the flag waits on t
     assert.equal(f.waitingOn, 'dev');
     assert.equal(f.reason, 'In progress 2 hours, no activity');
   } finally {
+    fake.restore();
     tmp.cleanup();
   }
 });
@@ -74,7 +78,7 @@ test('a Ready story not started reads the same way', () => {
     const { epic, story } = setup(wp);
     const f = flagOf(wp, epic.id, story.id, Date.now() + 90 * MIN)!;
     assert.equal(f.reason, 'Ready 1 hour, not started');
-    assert.equal(f.waitingOn, 'coo');
+    assert.equal(f.waitingOn, 'asha');
   } finally {
     tmp.cleanup();
   }

@@ -56,6 +56,10 @@ export interface Item {
   handoff?: ItemHandoff;
   /** Derived, never stored: set while the item is past one of the stall deadlines (LLD §19.6). */
   stall?: { rule: StallRule; since: string; minutes: number };
+  /** Backlog held by the owner or the COO: never started automatically (LLD §19.6d). */
+  hold?: true;
+  /** Ready, waiting for its busy assignee: starts the moment they are free (LLD §19.6d). */
+  queuedFor?: string;
   mergedInto?: string;
   /** The release post it shipped in. */
   releasedIn?: string;
@@ -313,6 +317,11 @@ export interface UpdateItemRequest {
   recommendation?: string;
   /** Moving to in-progress: also start the assignee's session. */
   start?: boolean;
+  /**
+   * Owner/COO only (LLD §19.6d): true parks the item in Backlog on hold (the dispatcher never starts
+   * it); false lifts the hold. Moving into Backlog as the owner/COO, or with a hold/parked note, holds it.
+   */
+  hold?: boolean;
 }
 
 export interface CommentRequest { text: string }

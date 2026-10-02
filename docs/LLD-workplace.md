@@ -845,9 +845,10 @@ triggers that re-arm: work.updated, activity.recorded, item.comment, runs.onRunE
 on fire: evaluate again (the timer is only a hint) → act once per episode (settings key stall:<id> = since)
 ```
 
-Actions: **not-started** → in focus and the assignee is an agent with no open session and within
-budget → `employees.assign` + activity "Started by Asha: Ready for 15 min"; else → status backlog
-with the reason ("not in focus", "Dev is busy on X", "paused by the cap"). **idle** → `coo.notifyStall`
+Actions (who is told: Asha first, 19.6e; "`coo.notifyStall`" below now means `manager.alert`): **not-started** → in focus and the assignee is an agent with no open session and within
+budget → `employees.assign` + activity "Started by Asha: Ready for 15 min"; assignee busy → stays
+Ready, `queuedFor` the assignee, for the dispatcher (19.6d); else → status backlog with the reason
+("not in focus", "paused by the cap"), unheld. **idle** → `coo.notifyStall`
 (a `coo_items` row kind `stall` + an `inbox.jsonl` line; **no owner fallback**), activity "No
 activity for 10 min", the open session (if any) gets "No activity on <title> for 10 minutes: if you
 are stuck call flag_stall with why; otherwise carry on." (from `workplace`); with no open session and
@@ -860,7 +861,8 @@ Thresholds: `WORKPLACE_STALL_READY_MIN` (15), `WORKPLACE_STALL_IDLE_MIN` (10),
 scheduled (`tick(wp, now, { stalls: false })` from `index.ts`; the function and its tests stay);
 `stall.stalledSince` ignores Backlog items, so nothing old can restart a parked item either.
 `Item.stall` is `evaluate`'s rule when past due (derived, never stored). On the Plan, a stalled
-`PlanFlag` (QA, 2 Oct) carries `waitingOn` = who acts: `coo` (who hears of every stall), or the
+`PlanFlag` (QA, 2 Oct) carries `waitingOn` = who acts: the Chief of Staff (Asha, who hears of every stall first since
+19.6e; `coo` only when there is none), or the
 assignee once it flagged its own stall in this episode without naming anyone (a `stall` activity by
 the assignee at or after the stall's `since`); and its `reason` is human time (`humanDuration`: "45
 min", "3 hours", "4 days"): "Ready 1 hour, not started", "In progress 3 hours, no activity", "In
@@ -966,6 +968,176 @@ so the Plan shows them without a new flag kind (decoders with closed enums are n
 whose `waitingOn` is an agent other than its assignee is re-applied through the same classification
 (`by: workplace`): review waits → In review, the rest → handoffs; their wakes follow from the watches.
 Idempotent: a converted item is no longer Blocked, and owner/COO/external blocks are left alone.
+
+### 19.6d The dispatcher (`dispatch.ts`, outage 2 Oct)
+
+**What happened.** Nothing moved for two hours. At 10:07 the watcher (19.6, not-started) moved Dev's
+story "Dance tempo…" Ready → Backlog because Dev was busy in another session. Backlog never
+auto-starts (D19), so when Dev finished at 10:37 nothing gave him his next story; every employee sat
+in "waiting", and nothing alerts on "idle while focus work is queued for them". Two more gaps: four
+items In review for days never woke their reviewer (they entered review before 19.6a existed, and
+19.6a only reacts to a change), and a finished talk session just sits idle between turns.
+
+**Root cause.** Work was *pushed* only on item events (19.6 deadlines, 19.6a, 19.6c). Nothing *pulled*
+work when a person became free, and "parked because the assignee is busy" was written as the same
+Backlog as "parked by the COO/owner", so the one could not be restarted without the other.
+
+**`hold` (new field, additive).** `WorkItem.hold?: true`, projected as `Item.hold?: true`. It marks
+Backlog that a person parked on purpose; the dispatcher never starts a held item.
+- **Set** by `POST /api/items/:id` with `hold: true` (`UpdateItemRequest.hold`), only when the actor is
+  the owner or the COO (anyone else: 400). `hold: true` with no `status` moves a Ready/In-progress item
+  to Backlog (the 19.3 table applies); with a status other than backlog it is a 400. **Inferred** on a
+  move into Backlog when `by` is the owner or the COO, or the note says hold/held/parked
+  (`/\b(on hold|hold|held|park|parked|parking)\b/i`, any author); `hold: false` in the same request
+  wins over the inference. Creating an item straight into Backlog follows the same rule.
+- **Cleared** whenever the item leaves Backlog, or by `hold: false` (owner/COO).
+- **Migration** (`dispatch.migrateHolds`, at boot, once: settings `hold-migration`): every Backlog item
+  with no `hold` whose newest move into Backlog (history entry to `proposed`, or `status` activity to
+  `backlog`) was by the owner/COO or whose note matches the pattern gets `hold: true`. On the live data
+  this holds the COO's 2 Oct "parked: P0 focus" items and Nikhil's QA story, and leaves watcher parkings
+  unheld.
+
+**`queuedFor` (new field, additive).** The watcher's busy-parking changes (19.6, not-started): when the
+assignee is busy, the item **stays Ready** with `queuedFor = <assignee>`, activity "Queued for Dev: busy
+on X; starts when Dev is free", and the COO item is titled `Queued: <title>` (was `Parked:`, Backlog).
+`watch.evaluate` returns null for a Ready item queued for its own assignee (the dispatcher owns it; no
+"not started" flag on the Plan). `queuedFor` is dropped on any status change or reassign; projected as
+`Item.queuedFor` while Ready. The "not in focus" and spend-cap branches still move to Backlog, unheld.
+
+**`dispatch(wp, employeeId, nowMs)` → `{ action: 'review'|'story'|'none'|'skipped', itemId?, reason? }`.**
+For an agent (not virtual), in order:
+1. **Busy?** (`busyReason`) — a turn running, a tool approval pending, an assignment queued for the
+   end of the turn (`employees.hasPendingSwitch`), an owner-talk session active in the last
+   `WORKPLACE_DISPATCH_TALK_GRACE_MIN` (5) minutes, or one of their own stories/tasks In progress
+   ("has 'X' In progress"). Busy → `skipped` with that reason; nothing is pushed into a turn.
+2. **Reviews first.** `reviewWake.queued(employee)` non-empty → `reviewWake.drain` (19.6a: a message
+   into the open session between turns, else a short review session). Started → `review`; else
+   `skipped` "the review could not start (cap or budget)". A story never jumps a queued review.
+3. **Next story** (`queue(wp, employee)`): their stories and tasks in `ready` or `backlog`, not merged,
+   not `hold`, **in a focus epic** (Backlog outside focus is never auto-started), ordered by the epic's
+   index in the focus list, then `rank`, then `createdAt`.
+4. **Caps.** `spend.canSpend` (real-money pause) → else `skipped` "paused by the <scope> spend cap";
+   with no open session, `sessionsOf(employee) < budget.concurrentSessions` → else `skipped`
+   "concurrency cap (N)". An open session between turns needs no new slot.
+5. **Start** with `employees.assign` (an open session between turns is switched to the item's branch
+   via `moveSession`/`ensureWorktree`, then sent the assignment; else a fresh session on that branch;
+   `markStarted` moves it In progress). Activity (`note`, by `workplace`): "Started: Dev was free; next
+   in focus". A failure is `skipped` "could not start: <error>" (a `WorktreeSwitchError` blocks it, as
+   at spawn).
+
+**Triggers (`startDispatch`, at boot after the watches).** Deferred with `setImmediate` and coalesced
+per employee, so 19.6a/19.6c listeners (registered earlier) act first:
+- a run event with status `waiting` and no approval (a turn ended) → that employee;
+- `employees.onSessionClosed` (not `shutdown`) → that employee;
+- `work.updated` where the item **was** In progress (last seen status, tracked in memory, seeded from
+  the store at start) and is no longer, or changed assignee → the previous assignee;
+- a **sweep** every `WORKPLACE_DISPATCH_SWEEP_MIN` (2): stale reviews, then `dispatch` for every agent,
+  then idle alerts. The first sweep runs `WORKPLACE_DISPATCH_BOOT_DELAY_SEC` (60) after start, so the
+  boot's staggered resumes (`resumeAfterShutdown`) land first and are never raced; the event triggers are live at once.
+
+**Stale reviews (`wakeStaleReviews`, boot and each sweep).** Every item In review whose reviewer is an
+agent other than the assignee and which has **no open review**:
+- no `review-wake:<id>` record → `reviewWake.onItem` (queued for that episode, drained if free);
+- a record `sent`/`started` whose session is no longer live (it ended with no verdict) → requeued
+  (`reviewWake.requeue`) **once per episode** (settings `stale-review:<id>` = the episode);
+- a `queued` record, or a live session holding it → nothing. Activity: "Review requested again from X:
+  it was In review with no open review". Dedupe means a sweep every 2 minutes never wakes twice.
+
+**Idle alert.** After each sweep, per agent: `queued` = queued reviews + `queue()` stories. *Idle* =
+no turn running, no approval pending. Queued > 0 and idle → an episode `dispatch-idle:<id>` = `{ since,
+alerted }` (since = first sweep that saw it). Past `WORKPLACE_DISPATCH_IDLE_MIN` (10) and not yet
+alerted → `manager.alert` (19.6e: Asha first; a spend/concurrency-cap reason is a `spend` decision and goes
+to the COO; `itemId` = the first queued item): title "Dev idle with 2
+queued items", body "Dev idle with 2 queued items: <reason>" where the reason is the last `skipped`
+reason (e.g. "paused by the employee:dev spend cap", "concurrency cap (0)", "has 'X' In progress");
+once per episode. Busy or nothing queued ends the episode (the record is dropped); the next one alerts
+again.
+
+**Config.** `WORKPLACE_DISPATCH_SWEEP_MIN` (2), `WORKPLACE_DISPATCH_IDLE_MIN` (10),
+`WORKPLACE_DISPATCH_TALK_GRACE_MIN` (5), `WORKPLACE_DISPATCH_BOOT_DELAY_SEC` (60).
+
+**Tests (`v2-dispatch.test.ts`).** Busy-parked (Ready, queued) and legacy watcher-Backlog items start
+when the assignee frees up; held Backlog (COO/owner move, hold note, `hold: true`) and Backlog outside
+focus are never started, and only the owner/COO may set `hold`; a queued review goes before a story;
+stale In review items are woken once (and requeued once after a dead review session); the idle alert
+fires once per episode; spend and concurrency caps are respected; the boot hold migration; wired at
+boot (a booted server wakes the seeded stale reviews on its first sweep).
+
+### 19.6e Asha first: operational alerts go to the manager (`manager.ts`, owner 2 Oct)
+
+**Owner decision.** Asha (Chief of Staff, `chiefOfStaffId`) manages every agent and owns stall
+handling. Operational alerts used to be COO bridge items (`coo.notifyStall`); now they go to **Asha
+first**, and the COO hears only when Asha does not act, when the call is above her authority, or when
+Asha herself is stuck.
+
+**`alert(wp, spec, nowMs)`** with `spec = { key, itemId, title, body, text?, by?, subjectId?, decision?,
+notice? }` → `'asha' | 'queued' | 'coo' | 'duplicate'`. One record per `key` (settings
+`mgr-alert:<key>` = the spec + `{ at, state: queued|delivered|coo, deliveredAt?, statusAt, assigneeAt,
+escalated?, resolved? }`); keys carry the episode (e.g. `idle:<itemId>:<since>`), so an alert is sent
+once per episode. Routing:
+- **Straight to the COO** (a bridge item, `coo.notifyStall`, the body says why) when
+  (b) `decision` is set: `spend | hiring | scope | release` (a spend or concurrency cap, a parking
+  because of the spend cap); or (c) the alert is about Asha (`subjectId` is Asha) or Asha is stuck
+  (`ashaStuck`: no Chief of Staff agent; paused by a spend cap; no open session and at her concurrency
+  cap; a tool approval pending more than `WORKPLACE_MANAGER_ESCALATE_MIN`). A `notice` that would go to
+  the COO this way is dropped (it asks nothing of anyone), unless it carries a `decision`.
+- **Otherwise to Asha**: queued, then `deliver`: her open session **between turns** gets one message
+  with every queued alert (oldest first); no open session (within budget and cap) → a short autonomous
+  session with it; mid-turn, an approval pending, or an assignment queued for her turn's end → it waits
+  and is delivered when her turn ends (run event `waiting`), her session closes (not `shutdown`), or the
+  next tick. Each delivered alert gets an activity note "Told Asha: <title>". The message tells her she
+  owns stall handling: restart, reassign, unblock, chase, or escalate with a recommendation, and say what
+  she did with `item_comment` on the item.
+
+**Escalation (a).** Each tick, an alert (not a notice) older than `WORKPLACE_MANAGER_ESCALATE_MIN` (15)
+that Asha has not acted on → one COO bridge item: `<title>`, body `<body> Asha has not acted on it in 15
+min.`; activity "Escalated to the COO: Asha had not acted in 15 min". **Acted** = since the alert: the
+item's status (or `statusSince`) or assignee changed; or Asha did anything on it (a non-`stall` activity
+row by her); or real work landed on it (a `commit`, `test`, `status`, `assigned`, `reopen` or `merged` row by
+anyone; a points or field tweak is not acting on a stall); or anyone but `workplace` commented on it; or the
+alert was `resolve`d by its source (the dispatcher ends an idle episode). Undelivered alerts (Asha never
+free) count as not acted. Once per alert.
+
+**Manager digest.** Each tick, at most every `WORKPLACE_MANAGER_DIGEST_MIN` (20) and only while work is
+active (any item In progress / In review / Blocked, or any focus work queued), Asha gets one compact
+digest through the same queue (a `notice`, key `digest:<at>`): idle employees with queued focus work
+(and why), stale reviews (In review past `WORKPLACE_STALL_REVIEW_MIN`, with the reviewer), and Blocked
+items (who they wait on, the reason's first sentence). Nothing to report → no digest. Asha stuck → no
+digest (her alerts are already going to the COO).
+
+**What now goes through `alert`:**
+| Source | Key | Routing |
+|---|---|---|
+| watch idle (19.6) | `idle:<id>:<since>` | Asha (`subjectId` the assignee); the agent nudge and the COO-offline auto-resume are unchanged |
+| watch unreviewed | `unreviewed:<id>:<since>` | Asha (`subjectId` the reviewer) |
+| watch not-started: started / queued / parked "not in focus" | `started:` / `queued:` / `parked:<id>:<since>` | Asha, `notice` |
+| watch not-started: parked "spend cap" | `parked:<id>:<since>` | the COO (`decision: spend`) |
+| watch not-started: could not start | `parked:<id>:<since>` | Asha |
+| `flag_stall` (not a teammate wait) | `flag:<id>:<at>` | Asha (`subjectId` the flagger); waiting on `coo` → the COO directly |
+| blocks (a) waiting on `external` or self | `blocked:<id>:<since>` | Asha; waiting on `coo` → the COO directly (it is the COO who is waited on) |
+| blocks (b) still blocked 15 min | `still-blocked:<id>:<since>` | Asha (`coo` waits: the COO again) |
+| dispatcher idle with queued work (19.6d) | `idle-emp:<emp>:<since>` | Asha; a spend/concurrency-cap reason → the COO (`decision: spend`) |
+
+**COO-offline fallback, kept consistent.** Asha is now always told first, so the old "Asha too while the
+COO is offline" in 19.6b is gone (she already heard). The watcher's idle fallback (no open session, the
+COO offline → Asha's automatic resume, once an hour, when `cos.whyWaiting` is null) is unchanged: it is
+Asha acting in the moment, and the escalation still files the COO item for when the COO is back.
+Bridge items to an offline COO are still filed (read on return); there is still no owner fallback.
+
+**Notes and the Plan.** "Told Asha: …" and "Escalated to the COO: …" are activity of kind `stall` (system
+notes about a stall: they never reset the idle clock nor count as someone acting). A stalled `PlanFlag`'s
+`waitingOn` is now Asha (19.6), the assignee once it flagged its own stall.
+
+**Wiring.** `startManager` (boot, after the dispatcher): Asha's run events and session closes →
+`deliver`; a tick every minute → `deliver`, `escalate`, `digest`, prune records older than 2 days.
+
+**Config.** `WORKPLACE_MANAGER_ESCALATE_MIN` (15), `WORKPLACE_MANAGER_DIGEST_MIN` (20).
+
+**Tests (`v2-manager.test.ts`; `v2-watch`, `v2-blocked-notify`, `v2-handoffs`, `v2-dispatch` updated).**
+Alerts reach Asha (message between turns, a session when she has none, queued while mid-turn and
+delivered at her turn's end); escalation to the COO after 15 minutes unacted, once, and not when she
+acted; decisions, alerts about Asha, and a capped Asha go to the COO at once; the digest every 20 minutes
+only while work is active.
 
 ### 19.7 Asha's rhythm (`rhythm.ts`)
 

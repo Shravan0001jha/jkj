@@ -5,6 +5,7 @@ import * as employees from './employees.js';
 import * as spend from './spend.js';
 import * as trail from './trail.js';
 import * as coo from './coo.js';
+import * as manager from './manager.js';
 import { baseTitle } from './status.js';
 import { chiefOfStaffId, epicOf, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { log } from '../util/logger.js';
@@ -15,10 +16,10 @@ import { log } from '../util/logger.js';
  * nothing woke Nikhil either. So:
  *
  * (a) An item entering Blocked on anyone but the owner (the owner has the Inbox question already):
- *     the COO gets a bridge item at once (`coo.notifyStall`), the one waited on (an agent) is told
- *     (a message into its session, or a short session), and Asha too when the COO is offline.
- * (b) Still blocked on the same block `stallBlockedMinutes` (15) later: the COO is told again, once
- *     (Asha as well while the COO is offline).
+ *     Asha is alerted at once (`manager.alert`, LLD §19.6e; the COO only if she does not act within 15
+ *     minutes), or the COO directly when the COO is the one waited on; the one waited on (an agent) is
+ *     told (a message into its session, or a short session).
+ * (b) Still blocked on the same block `stallBlockedMinutes` (15) later: told again, once, the same way.
  * (c) An item reaching In review or Done: each item blocked on it — its id or title in the reason,
  *     or waiting on its assignee within the same epic — has its assignee told, so it can unblock.
  *
@@ -64,17 +65,21 @@ export function tell(wp: Workplace, employeeId: string, text: string): 'message'
   }
 }
 
-/** The COO (a bridge item) and, while the COO is offline, Asha. Returns who heard. */
-function toCooOrAsha(wp: Workplace, w: WorkItem, title: string, body: string, ashaText: string, skip: Set<string>, sinceIso?: string): string[] {
-  // flag_stall with waitingOn has just told the COO about this very block ("Flagged: …"): not twice.
-  const already = sinceIso && coo.listItems(wp, 'open').some(i => i.itemId === w.id && Date.parse(i.at) >= Date.parse(sinceIso) - 5_000);
-  if (!already) coo.notifyStall(wp, { itemId: w.id, title, body, by: w.employeeId ?? 'workplace' });
-  const heard = ['the COO'];
-  if (!coo.presence(wp).online) {
-    const asha = chiefOfStaffId(wp);
-    if (asha && !skip.has(asha) && tell(wp, asha, `The COO is offline. ${ashaText}`)) heard.push(nameOf(wp, asha));
+/**
+ * Who hears of a block (LLD §19.6e): waiting on the COO → the COO (a bridge item: it is the COO who
+ * must act); anything else → Asha first, and the COO only if she does not act within 15 minutes (or it
+ * is above her, or she is stuck). Returns who heard.
+ */
+function report(wp: Workplace, w: WorkItem, key: string, title: string, body: string, ashaText: string, sinceIso?: string): string[] {
+  // flag_stall with waitingOn has just raised this very block ("Flagged: …"): not twice.
+  const recent = (iso: string) => coo.listItems(wp, 'open').some(i => i.itemId === w.id && Date.parse(i.at) >= Date.parse(iso) - 5_000) || manager.raisedSince(wp, w.id, iso);
+  if (w.waitingOn === 'coo') {
+    if (!sinceIso || !recent(sinceIso)) coo.notifyStall(wp, { itemId: w.id, title, body, by: w.employeeId ?? 'workplace' });
+    return ['the COO'];
   }
-  return heard;
+  if (sinceIso && recent(sinceIso)) return [nameOf(wp, chiefOfStaffId(wp))];
+  const r = manager.alert(wp, { key, itemId: w.id, title, body, text: ashaText, by: w.employeeId ?? 'workplace', ...(w.employeeId ? { subjectId: w.employeeId } : {}) });
+  return [r === 'coo' ? 'the COO' : nameOf(wp, chiefOfStaffId(wp))];
 }
 
 /** (a) Entering a block on anyone but the owner. Once per block episode. */
@@ -89,12 +94,12 @@ function onBlocked(wp: Workplace, w: WorkItem): void {
   if (w.waitingOn && w.waitingOn !== w.employeeId && tell(wp, w.waitingOn,
     `${who} is blocked on ${noun(w)} ${w.id} "${w.title}", waiting on you: ${reason}\n` +
     `If you can unblock it, do (or say when) with item_comment on ${w.id}; if you cannot, say why there.`)) told.add(w.waitingOn);
-  const heard = toCooOrAsha(wp, w, `Blocked: ${w.title}`, `${who} is blocked on ${w.id}, waiting on ${waiting}: ${reason}`,
-    `${who} is blocked on ${noun(w)} ${w.id} "${w.title}", waiting on ${waiting}: ${reason}. Get it moving or tell the owner.`, told, since);
+  const heard = report(wp, w, `blocked:${w.id}:${since}`, `Blocked: ${w.title}`, `${who} is blocked on ${w.id}, waiting on ${waiting}: ${reason}`,
+    `${who} is blocked on ${noun(w)} ${w.id} "${w.title}", waiting on ${waiting}: ${reason}. Get it moving or tell the owner.`, since).filter(h => ![...told].some(t => nameOf(wp, t) === h));
   trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'note', text: `Blocked on ${waiting}: told ${[...heard, ...[...told].map(t => nameOf(wp, t))].join(', ')}` });
 }
 
-/** (b) The deadline: still the same block, past `stallBlockedMinutes`, not yet re-told → tell the COO again, once. */
+/** (b) The deadline: still the same block, past `stallBlockedMinutes`, not yet re-told → tell Asha (or the COO, for a COO wait) again, once. */
 export function check(wp: Workplace, id: string, nowMs = Date.now()): 'renotified' | null {
   const w = rawGet(wp, id);
   const rec = readBlock(wp, id);
@@ -105,8 +110,8 @@ export function check(wp: Workplace, id: string, nowMs = Date.now()): 'renotifie
   const who = nameOf(wp, w.employeeId);
   const waiting = nameOf(wp, w.waitingOn);
   const reason = w.blockedReason ?? 'no reason given';
-  const heard = toCooOrAsha(wp, w, `Still blocked: ${w.title}`, `${who} has been blocked on ${w.id} for ${mins} min, waiting on ${waiting}: ${reason}`,
-    `${who} has been blocked on ${noun(w)} ${w.id} "${w.title}" for ${mins} min, waiting on ${waiting}: ${reason}. Get it moving or tell the owner.`, new Set());
+  const heard = report(wp, w, `still-blocked:${w.id}:${rec.since}`, `Still blocked: ${w.title}`, `${who} has been blocked on ${w.id} for ${mins} min, waiting on ${waiting}: ${reason}`,
+    `${who} has been blocked on ${noun(w)} ${w.id} "${w.title}" for ${mins} min, waiting on ${waiting}: ${reason}. Get it moving or tell the owner.`);
   trail.record(wp, { itemId: id, by: 'workplace', kind: 'stall', text: `Still blocked after ${mins} min: told ${heard.join(', ')} again` });
   return 'renotified';
 }

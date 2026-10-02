@@ -28,6 +28,8 @@ import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
 import * as employees from './services/employees.js';
 import * as handoff from './services/handoff.js';
+import * as dispatch from './services/dispatch.js';
+import * as manager from './services/manager.js';
 import * as spend from './services/spend.js';
 import * as health from './services/health.js';
 import * as inbox from './services/inbox.js';
@@ -110,6 +112,14 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   const stopHandoffWatch = handoff.startHandoffWatch(wp);
   // Blocked-on-a-teammate items from before that rule become reviews or handoffs; the watches above wake them.
   try { handoff.migrateBlockedWaits(wp); } catch (err) { log.warn('boot', `blocked waits: ${err instanceof Error ? err.message : err}`); }
+  // Backlog the COO/owner parked before `hold` existed is held; the watcher's "busy" parking is not (LLD §19.6d).
+  try { dispatch.migrateHolds(wp); } catch (err) { log.warn('boot', `hold migration: ${err instanceof Error ? err.message : err}`); }
+  // The dispatcher (outage 2 Oct): a free employee gets their next work (reviews first, then focus
+  // stories); stale reviews are woken; idle-with-queued-work is reported to the COO. Sweeps every 2 min.
+  const stopDispatch = dispatch.startDispatch(wp);
+  // Asha first (owner, 2 Oct): operational alerts go to her; the COO only when she does not act in
+  // 15 min, the call is above her, or she is stuck. Her digest every 20 min while work is active.
+  const stopManager = manager.startManager(wp);
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
@@ -193,6 +203,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       stopReviewWake();
       stopBlockWatch();
       stopHandoffWatch();
+      stopDispatch();
+      stopManager();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
       telegram.stop();

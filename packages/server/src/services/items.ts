@@ -157,7 +157,7 @@ export function create(wp: Workplace, req: CreateItemRequest, by: string): Item 
     kind: 'assignment', title, body: req.body ?? '', by,
     ...(req.assigneeId ? { employeeId: req.assigneeId } : {}),
     ...(epic ? { featureId: epic.id } : {}),
-    v2: { ...common, level: req.level, parentId: parent.id },
+    v2: { ...common, level: req.level, parentId: parent.id, ...(common.status === 'backlog' && holdOnEntry(authorId(wp, by), undefined) ? { hold: true } : {}) },
   });
   // work.create picks a least-loaded holder only when given a charter; an unassigned item stays unassigned.
   return toItem(wp, w);
@@ -212,6 +212,25 @@ function setAssignee(wp: Workplace, next: WorkItem, employeeId: string): void {
 }
 
 const clause = (t: string): string => t.trim().replace(/[.\s]+$/, '');
+
+/** A note that parks on purpose (LLD §19.6d). The watcher's "busy"/"not in focus" notes never match. */
+export const HOLD_NOTE = /\b(on hold|hold|held|park|parked|parking)\b/i;
+
+/** Whether a move into Backlog holds it: an explicit `hold` wins; else the owner/COO moving it, or a hold note. */
+export function holdOnEntry(by: string, note: string | undefined, explicit?: boolean): boolean {
+  if (explicit !== undefined) return explicit;
+  return by === 'owner' || by === 'coo' || (!!note && HOLD_NOTE.test(note));
+}
+
+/** Set or clear `hold` on the next row; returns whether it is held. */
+function applyHold(next: WorkItem, entering: boolean, explicit: boolean | undefined, by: string, note: string | undefined): boolean {
+  let held: boolean;
+  if (next.status !== 'backlog') held = false;
+  else if (entering) held = holdOnEntry(by, note, explicit);
+  else held = explicit ?? !!next.hold;
+  if (held) next.hold = true; else delete next.hold;
+  return held;
+}
 
 /** Back to whoever handed it (LLD §19.6c): the earlier handoff, if any, is open again. */
 function applyHandback(wp: Workplace, prev: WorkItem, next: WorkItem, byId: string, note: string, at: string): string {
@@ -268,7 +287,14 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
   }
 
   const from = prev.status ?? 'ready';
-  let to = req.status && (req.status !== from || (opts.rewait && from === 'blocked')) ? req.status : undefined;
+  if (req.hold !== undefined) {
+    if (typeof req.hold !== 'boolean') throw new BadRequest('hold must be true or false');
+    if (by !== 'owner' && by !== 'coo') throw new BadRequest('Only the owner or the COO holds an item (or lifts a hold).');
+    if (req.hold && req.status && req.status !== 'backlog') throw new BadRequest('A hold parks an item in Backlog: move it to backlog with it, or leave the status out.');
+  }
+  // hold: true with no status parks it in Backlog (LLD §19.6d).
+  const wanted = req.status ?? (req.hold === true && from !== 'backlog' ? 'backlog' : undefined);
+  let to = wanted && (wanted !== from || (opts.rewait && from === 'blocked')) ? wanted : undefined;
   if (req.status && !ITEM_STATUSES.includes(req.status)) throw new BadRequest(`Unknown status ${req.status}`);
 
   // A wait on a teammate is never Blocked (owner, 2 Oct; LLD §19.6c): a review, or a handoff.
@@ -326,8 +352,13 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
     throw new BadRequest('The reviewer cannot be the assignee.');
   }
   if (next.status === 'done') delete next.handoff;
+  // Queued for a busy assignee (LLD §19.6d) only while Ready with that assignee.
+  if (to || next.employeeId !== prev.employeeId) delete next.queuedFor;
+  // Held Backlog (LLD §19.6d): the owner/COO parking it, or a hold note; lifted by hold: false or leaving Backlog.
+  const held = applyHold(next, to === 'backlog', req.hold, by, req.note);
   next.updatedAt = at;
   const saved = work.put(wp, prev, next, by, req.note);
+  if (held && !prev.hold) trail.record(wp, { itemId: id, by, kind: 'note', text: `Held in Backlog by ${nameOf(wp, by)}: the dispatcher will not start it` });
   if (line) trail.record(wp, { itemId: id, by, kind: 'note', text: line });
   if (level === 'epic' && saved.areaId && saved.areaId !== prev.areaId) room.epicThread(wp, saved);
   // `start: true` (hand it to the assignee's session) is the route's to act on: POST /api/items/:id.
@@ -369,7 +400,20 @@ export function markStarted(wp: Workplace, id: string, by: string): void {
   const prev = rawGet(wp, id);
   if (!prev || levelOf(prev) === 'epic' || (prev.status !== 'ready' && prev.status !== 'backlog')) return;
   const at = now();
-  work.put(wp, prev, { ...prev, status: 'in-progress', statusSince: at, updatedAt: at }, by, 'A session started on it');
+  const next: WorkItem = { ...prev, status: 'in-progress', statusSince: at, updatedAt: at };
+  delete next.hold; delete next.queuedFor;
+  work.put(wp, prev, next, by, 'A session started on it');
+}
+
+/**
+ * Ready, and its assignee busy (the watcher's not-started rule, LLD §19.6d): it stays Ready, queued for
+ * them, and the dispatcher starts it the moment they are free. Never Backlog, never held.
+ */
+export function markQueued(wp: Workplace, id: string, by: string): void {
+  const prev = rawGet(wp, id);
+  if (!prev || !prev.employeeId || prev.status !== 'ready' || prev.queuedFor === prev.employeeId) return;
+  const next: WorkItem = { ...prev, queuedFor: prev.employeeId, updatedAt: now() };
+  work.put(wp, prev, next, by);
 }
 
 /* ---------- merging duplicates ---------- */
@@ -469,7 +513,8 @@ export function stallReason(rule: 'not-started' | 'idle' | 'unreviewed', ms: num
  */
 function stallActor(wp: Workplace, w: WorkItem, since: string): string {
   const selfFlag = w.employeeId && trail.activityFor(wp, w.id).some(a => a.kind === 'stall' && a.by === w.employeeId && a.at >= since);
-  return selfFlag ? w.employeeId! : 'coo';
+  // Asha owns stall handling (LLD §19.6e): she acts unless the assignee flagged it itself.
+  return selfFlag ? w.employeeId! : chiefOfStaffId(wp) ?? 'coo';
 }
 
 function card(wp: Workplace, epic: WorkItem, focus: Focus, nowMs: number): EpicCard {

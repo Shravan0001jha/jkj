@@ -25,7 +25,7 @@ import { log } from '../util/logger.js';
  * gets two review sessions. Leaving In review drops the record; re-entering is a new episode.
  */
 
-interface Wake {
+export interface Wake {
   reviewerId: string;
   /** `<reviewerId>:<statusSince>`: one wake per reviewer per time in review. */
   episode: string;
@@ -121,6 +121,27 @@ export function drain(wp: Workplace, reviewerId: string): string | null {
     log.warn('review', `${next}: ${name} cannot take the review yet: ${err instanceof Error ? err.message : err}`);
     return null;
   }
+}
+
+/** The wake record of an item, if any (the dispatcher's stale-review check, LLD §19.6d). */
+export function wakeOf(wp: Workplace, itemId: string): Readonly<Wake> | undefined {
+  return read(wp, itemId);
+}
+
+/** The episode an item is in now (reviewer + when it entered In review). */
+export const episodeNow = (w: WorkItem): string => episodeOf(w);
+
+/**
+ * Put a `sent`/`started` review whose session ended with no verdict back in the reviewer's queue and
+ * drain it (LLD §19.6d). The caller dedupes per episode. Returns whether it was requeued.
+ */
+export function requeue(wp: Workplace, itemId: string): boolean {
+  const w = rawGet(wp, itemId);
+  const wake = read(wp, itemId);
+  if (!w || !wake || statusOf(w) !== 'in-review' || wake.episode !== episodeOf(w) || wake.state === 'queued') return false;
+  write(wp, itemId, { reviewerId: wake.reviewerId, episode: wake.episode, state: 'queued', queuedAt: new Date().toISOString() });
+  drain(wp, wake.reviewerId);
+  return true;
 }
 
 /** An item changed: wake its reviewer once per episode in review; forget it once it leaves review. */

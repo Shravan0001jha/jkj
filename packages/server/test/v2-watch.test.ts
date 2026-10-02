@@ -10,6 +10,7 @@ import * as coo from '../src/services/coo.js';
 import * as cos from '../src/services/cos.js';
 import * as inbox from '../src/services/inbox.js';
 import * as employees from '../src/services/employees.js';
+import * as manager from '../src/services/manager.js';
 import { workplaceTools } from '../src/services/employees.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
 import { testWorkplace } from './fakes/workplace.js';
@@ -21,6 +22,10 @@ import { testWorkplace } from './fakes/workplace.js';
 
 const MIN = 60_000;
 const tick = (ms = 10) => new Promise(r => setTimeout(r, ms));
+/** Everything Asha was handed (LLD §19.6e: alerts go to her first). */
+const toldAsha = (fake: { sessions: { options: { cwd: string; prompt: string }; sent: { text: string }[] }[] }) =>
+  fake.sessions.filter(s => s.options.cwd.includes('/asha/')).flatMap(s => [s.options.prompt, ...s.sent.map(m => m.text)]);
+const alertsFor = (wp: Parameters<typeof manager.list>[0], itemId: string) => manager.list(wp).filter(r => r.itemId === itemId);
 
 function setup() {
   const t = testWorkplace();
@@ -28,7 +33,7 @@ function setup() {
   return { ...t, epic };
 }
 
-test('Ready for 15 minutes, in focus, assignee free: Asha starts it, and the COO hears of it', async () => {
+test('Ready for 15 minutes, in focus, assignee free: Asha starts it; a notice for Asha, nothing for the COO', async () => {
   const fake = installFakeRuntime();
   const { wp, tmp, epic } = setup();
   try {
@@ -42,7 +47,11 @@ test('Ready for 15 minutes, in focus, assignee free: Asha starts it, and the COO
     assert.equal(fake.sessions.length, 1);
     assert.equal(employees.openSession('dev')?.assignmentId, s.id);
     assert.ok(trail.activityFor(wp, s.id).some(a => a.kind === 'stall' && /Started by Asha/.test(a.text)));
-    assert.ok(coo.listItems(wp).some(i => i.kind === 'stall' && i.itemId === s.id));
+    assert.equal(coo.listItems(wp).filter(i => i.itemId === s.id).length, 0, 'Asha first: the COO is not told');
+    const notice = alertsFor(wp, s.id).find(r => r.title === 'Started: Mic stays live')!;
+    assert.equal(notice.notice, true);
+    assert.equal(notice.state, 'queued', 'a notice rides along with the next alert; it starts no session of its own');
+    assert.equal(fake.sessions.length, 1, 'no session for Asha just for a notice');
     assert.equal(inbox.ownerList(wp, 'open').filter(i => i.context['itemId'] === s.id).length, 0, 'never the owner\'s Inbox');
   } finally {
     fake.restore();
@@ -77,7 +86,7 @@ test('Ready for 15 minutes outside the focus goes to Backlog with the reason; Ba
   }
 });
 
-test('Ready for 15 minutes with the assignee busy goes to Backlog naming the work it is busy on', async () => {
+test('Ready for 15 minutes with the assignee busy stays Ready, queued for them (never Backlog), naming the work it is busy on', async () => {
   const fake = installFakeRuntime();
   const { wp, tmp, epic } = setup();
   try {
@@ -87,8 +96,14 @@ test('Ready for 15 minutes with the assignee busy goes to Backlog naming the wor
     await tick();
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Waiting', assigneeId: 'dev' }, 'asha');
     const r = watch.check(wp, s.id, Date.now() + 16 * MIN)!;
-    assert.equal(r.action, 'backlog');
-    assert.ok(trail.activityFor(wp, s.id).some(a => /Dev is busy/.test(a.text)));
+    assert.equal(r.action, 'queued');
+    const it = items.require$(wp, s.id);
+    assert.equal(it.status, 'ready');
+    assert.equal(it.queuedFor, 'dev');
+    assert.equal(it.hold, undefined);
+    assert.ok(trail.activityFor(wp, s.id).some(a => /Queued for Dev: busy on Already building/.test(a.text)));
+    assert.ok(alertsFor(wp, s.id).some(r => /^Queued:/.test(r.title) && r.notice), 'a notice for Asha');
+    assert.equal(coo.listItems(wp).filter(i => i.itemId === s.id).length, 0);
     assert.equal(fake.sessions.length, 1);
   } finally {
     fake.restore();
@@ -96,7 +111,7 @@ test('Ready for 15 minutes with the assignee busy goes to Backlog naming the wor
   }
 });
 
-test('In progress with no activity for 10 minutes: the COO is told at once, once per episode; new activity starts a new one', () => {
+test('In progress with no activity for 10 minutes: Asha is told at once, once per episode; the COO only if she does not act in 15 min', async () => {
   const fake = installFakeRuntime();
   const { wp, tmp, epic } = setup();
   try {
@@ -106,18 +121,24 @@ test('In progress with no activity for 10 minutes: the COO is told at once, once
     assert.equal(watch.check(wp, s.id, Date.now() + 9 * MIN), null);
     const r = watch.check(wp, s.id, Date.now() + 11 * MIN)!;
     assert.equal(r.rule, 'idle');
-    assert.equal(r.action, 'coo-notified');
-    const notes = coo.listItems(wp).filter(i => i.kind === 'stall' && i.itemId === s.id);
-    assert.equal(notes.length, 1);
-    assert.match(coo.readInboxFileForTest(wp), /"kind":"stall"/);
+    assert.equal(r.action, 'notified');
+    await tick();
+    assert.ok(toldAsha(fake).some(t => /Stalled: Duck music/.test(t) && t.includes(s.id)), 'Asha is told first');
+    assert.equal(coo.listItems(wp).filter(i => i.itemId === s.id).length, 0, 'not the COO, yet');
     assert.ok(trail.activityFor(wp, s.id).some(a => a.kind === 'stall' && /No activity for 10 min/.test(a.text)));
     assert.equal(inbox.ownerList(wp, 'open').length, 0, 'the owner hears nothing about a stall');
-    assert.equal(fake.sessions.length, 0, 'the COO is online: it decides');
+    assert.equal(fake.sessions.filter(x => !x.options.cwd.includes('/asha/')).length, 0, 'the COO is online: nobody is resumed');
 
     assert.equal(watch.check(wp, s.id, Date.now() + 25 * MIN), null, 'same episode: once');
+    // Asha does not act: 15 minutes later the COO gets the bridge item.
+    assert.deepEqual(manager.escalate(wp, Date.now() + 27 * MIN).length, 1);
+    const notes = coo.listItems(wp).filter(i => i.kind === 'stall' && i.itemId === s.id);
+    assert.equal(notes.length, 1);
+    assert.match(notes[0]!.body, /Asha has not acted on it in 15 min/);
+    assert.match(coo.readInboxFileForTest(wp), /"kind":"stall"/);
     trail.comment(wp, s.id, { by: 'mira', text: 'still on it' });
     assert.equal(watch.check(wp, s.id, Date.now() + 5 * MIN), null);
-    assert.equal(watch.check(wp, s.id, Date.now() + 12 * MIN)!.action, 'coo-notified', 'a new episode after new activity');
+    assert.equal(watch.check(wp, s.id, Date.now() + 12 * MIN)!.action, 'notified', 'a new episode after new activity');
   } finally {
     fake.restore();
     tmp.cleanup();
@@ -132,19 +153,20 @@ test('idle with the agent\'s session open: it is asked to flag its own stall; wi
     employees.assign(wp, s.id);
     await tick();
     items.update(wp, s.id, { status: 'in-progress' }, 'mira');
-    fake.last().result(); // the turn ended; the session sits idle
+    const mira = () => fake.sessions.find(x => x.options.cwd.includes('/mira/'))!;
+    mira().result(); // the turn ended; the session sits idle
     await tick();
     const r = watch.check(wp, s.id, Date.now() + 11 * MIN)!;
     assert.equal(r.rule, 'idle');
-    assert.ok(fake.last().sent.some(m => /flag_stall/.test(m.text)), 'the agent is asked to flag itself');
+    assert.ok(mira().sent.some(m => /flag_stall/.test(m.text)), 'the agent is asked to flag itself');
 
     const t = items.create(wp, { level: 'story', parentId: epic.id, title: 'Resume me', assigneeId: 'kabir' }, 'asha');
     items.update(wp, t.id, { status: 'in-progress' }, 'kabir');
-    const before = fake.sessions.length;
+    const kabir = () => fake.sessions.filter(x => x.options.cwd.includes('/kabir/')).length;
     const r2 = watch.check(wp, t.id, Date.now() + 11 * MIN)!;
     assert.equal(r2.action, 'resumed');
     await tick();
-    assert.equal(fake.sessions.length, before + 1);
+    assert.equal(kabir(), 1, 'the COO-offline fallback is unchanged: Asha resumes it');
     assert.ok(trail.activityFor(wp, t.id).some(a => /COO is offline/.test(a.text)));
   } finally {
     fake.restore();
@@ -152,7 +174,8 @@ test('idle with the agent\'s session open: it is asked to flag its own stall; wi
   }
 });
 
-test('In review for 30 minutes untouched: the COO is told, naming the reviewer', () => {
+test('In review for 30 minutes untouched: Asha is told, naming the reviewer; not the COO', async () => {
+  const fake = installFakeRuntime();
   const { wp, tmp, epic } = setup();
   try {
     coo.touchHeartbeatForTest(wp);
@@ -162,9 +185,12 @@ test('In review for 30 minutes untouched: the COO is told, naming the reviewer',
     assert.equal(watch.check(wp, s.id, Date.now() + 29 * MIN), null);
     const r = watch.check(wp, s.id, Date.now() + 31 * MIN)!;
     assert.equal(r.rule, 'unreviewed');
-    assert.match(coo.listItems(wp).find(i => i.itemId === s.id)!.body, /Nikhil/);
+    await tick();
+    assert.ok(toldAsha(fake).some(t => /Unreviewed: Review me/.test(t) && /Nikhil/.test(t)));
+    assert.equal(coo.listItems(wp).filter(i => i.itemId === s.id).length, 0);
     assert.equal(items.toItem(wp, work.get(wp, s.id)!, Date.now() + 31 * MIN).stall?.rule, 'unreviewed');
   } finally {
+    fake.restore();
     tmp.cleanup();
   }
 });
@@ -185,7 +211,8 @@ test('the timers fire on their own (event-driven, no sweep)', async () => {
   }
 });
 
-test('an agent flags its own stall the moment it happens', async () => {
+test('an agent flags its own stall the moment it happens: Asha hears at once', async () => {
+  const fake = installFakeRuntime();
   const { wp, tmp, epic } = setup();
   try {
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Needs Rohan', assigneeId: 'dev' }, 'asha');
@@ -197,12 +224,15 @@ test('an agent flags its own stall the moment it happens', async () => {
     await client.connect(ct);
     const out = await client.callTool({ name: 'flag_stall', arguments: { reason: 'the Speaker has no one-sentence primitive', waitingOn: 'external' } });
     assert.match(JSON.stringify(out.content), /Flagged/);
-    assert.ok(coo.listItems(wp).some(i => i.kind === 'stall' && i.itemId === s.id && /one-sentence/.test(i.body)));
+    await tick();
+    assert.ok(toldAsha(fake).some(t => /Flagged: Needs Rohan/.test(t) && /one-sentence/.test(t)));
+    assert.equal(coo.listItems(wp).filter(i => i.itemId === s.id).length, 0, 'Asha first');
     const b = items.require$(wp, s.id);
     assert.equal(b.status, 'blocked');
     assert.equal(b.blocked?.waitingOn, 'external');
     await client.close();
   } finally {
+    fake.restore();
     tmp.cleanup();
   }
 });

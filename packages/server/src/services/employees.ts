@@ -466,6 +466,9 @@ function blockOnSwitch(wp: Workplace, assignmentId: string, err: WorktreeSwitchE
   log.error('employees', `${assignmentId} blocked: ${err.message}`);
 }
 
+/** An assignment is waiting for the end of this session's turn (the dispatcher counts that as busy). */
+export const hasPendingSwitch = (agentId: string): boolean => (pendingSwitch.get(agentId)?.length ?? 0) > 0;
+
 /** The turn ended: switch to the first queued assignment and send it (the next one waits for the turn after). */
 export function drainSwitch(agentId: string): string | null {
   const q = pendingSwitch.get(agentId);

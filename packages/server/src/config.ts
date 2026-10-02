@@ -41,6 +41,18 @@ export interface Config {
   stallReviewMinutes: number;
   /** A block on anyone but the owner re-tells the COO once after this long (QA, 2 Oct). */
   stallBlockedMinutes: number;
+  /** The dispatcher (LLD §19.6d): how often it sweeps for free employees and stale reviews. */
+  dispatchSweepMinutes: number;
+  /** The dispatcher: idle this long with queued focus work → the COO is told, once per episode. */
+  dispatchIdleMinutes: number;
+  /** The dispatcher: an owner-talk session this recently active counts as busy (no work pushed into his conversation). */
+  dispatchTalkGraceMinutes: number;
+  /** The dispatcher's first sweep (stale reviews, free employees) waits this long after boot, so the staggered resumes land first. */
+  dispatchBootDelaySeconds: number;
+  /** Asha first (LLD §19.6e): an alert she has not acted on this long goes to the COO. */
+  managerEscalateMinutes: number;
+  /** Asha's manager digest, at most this often while work is active. */
+  managerDigestMinutes: number;
   /** v2: an item's identical Updates line (and its room line) is posted once within this many minutes. */
   updateDedupeMinutes: number;
   /** Poll AWS Cost Explorer once a day for the previous day's actual (about ₹1 per call). */
@@ -85,6 +97,12 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
     stallIdleMinutes: num(env['WORKPLACE_STALL_IDLE_MIN'], 10),
     stallReviewMinutes: num(env['WORKPLACE_STALL_REVIEW_MIN'], 30),
     stallBlockedMinutes: num(env['WORKPLACE_STALL_BLOCKED_MIN'], 15),
+    dispatchSweepMinutes: num(env['WORKPLACE_DISPATCH_SWEEP_MIN'], 2),
+    dispatchIdleMinutes: num(env['WORKPLACE_DISPATCH_IDLE_MIN'], 10),
+    dispatchTalkGraceMinutes: num(env['WORKPLACE_DISPATCH_TALK_GRACE_MIN'], 5),
+    dispatchBootDelaySeconds: num(env['WORKPLACE_DISPATCH_BOOT_DELAY_SEC'], 60),
+    managerEscalateMinutes: num(env['WORKPLACE_MANAGER_ESCALATE_MIN'], 15),
+    managerDigestMinutes: num(env['WORKPLACE_MANAGER_DIGEST_MIN'], 20),
     updateDedupeMinutes: num(env['WORKPLACE_UPDATE_DEDUPE_MIN'], 10),
     awsCost: env['WORKPLACE_AWS_COST'] !== '0' && !argv.includes('--no-telegram'),
     push: !argv.includes('--no-push') && env['WORKPLACE_PUSH'] !== '0',

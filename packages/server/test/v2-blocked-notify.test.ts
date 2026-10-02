@@ -8,15 +8,16 @@ import * as coo from '../src/services/coo.js';
 import * as blocks from '../src/services/blocks.js';
 import * as reviewWake from '../src/services/review-wake.js';
 import * as watch from '../src/services/watch.js';
+import * as manager from '../src/services/manager.js';
 import { installFakeRuntime, type FakeRuntime } from './fakes/fake-runtime.js';
 import { testWorkplace } from './fakes/workplace.js';
 
 /**
  * Owner, 2 Oct (live): Nikhil's QA story for the P0 sat Blocked, waiting on Dev's story, for about
  * 40 minutes and nobody was told; when Dev's story went back to In review nothing woke Nikhil
- * either. Now: (a) entering Blocked on anyone but the owner tells the COO at once (a bridge item)
- * and the one waited on (Asha too when the COO is offline); (b) still blocked 15 minutes later
- * re-tells the COO, once; (c) an item reaching Done or In review wakes the assignees of items
+ * either. Now: (a) entering Blocked on anyone but the owner tells Asha at once (owner, 2 Oct: she owns
+ * stall handling, LLD §19.6e; the COO directly only when the COO is the one waited on, else when Asha
+ * has not acted in 15 minutes) and the one waited on; (b) still blocked 15 minutes later re-tells, once; (c) an item reaching Done or In review wakes the assignees of items
  * blocked on it; (d) In review wakes the reviewer (review-wake.ts).
  *
  * Since the owner's later rule (LLD §19.6c) a story never stays Blocked on a teammate (it becomes a
@@ -32,6 +33,7 @@ function withOauth(dir: string): void {
 }
 const told = (fake: FakeRuntime, emp: string) => fake.sessions.filter(s => s.options.cwd.includes(`/${emp}/`)).flatMap(s => [s.options.prompt, ...s.sent.map(m => m.text)]);
 const cooItems = (wp: Wp, itemId: string) => coo.listItems(wp).filter(i => i.itemId === itemId);
+const alerts = (wp: Wp, itemId: string) => manager.list(wp).filter(r => r.itemId === itemId);
 
 function plan(wp: Wp) {
   const epic = items.create(wp, { level: 'epic', title: 'P0 Iris during music' }, 'owner');
@@ -48,7 +50,7 @@ function started(wp: Wp) {
   return { fake, stop: () => { for (const s of stops) s(); fake.restore(); } };
 }
 
-test('(a) blocked outside the team: the COO gets a bridge item at once; once per block', async () => {
+test('(a) blocked outside the team: Asha is told at once, not the COO; once per block', async () => {
   const { wp, tmp } = testWorkplace();
   const { fake, stop } = started(wp);
   try {
@@ -57,33 +59,36 @@ test('(a) blocked outside the team: the COO gets a bridge item at once; once per
     const { qaStory } = plan(wp);
     items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Needs the vendor\'s duck SDK build to test against.', waitingOn: 'external' }, 'nikhil');
     await tick();
-    const filed = cooItems(wp, qaStory.id);
-    assert.equal(filed.length, 1);
-    assert.equal(filed[0]!.kind, 'stall');
-    assert.match(filed[0]!.title, /^Blocked: QA the music bundle/);
-    assert.match(filed[0]!.body, /Nikhil.*waiting on someone outside the team.*duck SDK/s);
-    assert.equal(told(fake, 'asha').length, 0, 'the COO is online: Asha is not bothered');
-    assert.ok(trail.activityFor(wp, qaStory.id).some(a => /told the COO/.test(a.text)), 'who was told is on the record');
+    assert.equal(cooItems(wp, qaStory.id).length, 0, 'Asha first: not the COO');
+    assert.equal(alerts(wp, qaStory.id).length, 1);
+    assert.match(alerts(wp, qaStory.id)[0]!.title, /^Blocked: QA the music bundle/);
+    assert.ok(told(fake, 'asha').some(t => /Nikhil is blocked on Story .*QA the music bundle.*waiting on someone outside the team.*duck SDK/s.test(t)));
+    assert.ok(trail.activityFor(wp, qaStory.id).some(a => /told Asha/.test(a.text)), 'who was told is on the record');
 
     items.update(wp, qaStory.id, { points: 2 }, 'nikhil');
     await tick();
-    assert.equal(cooItems(wp, qaStory.id).length, 1, 'same block, no second item');
+    assert.equal(alerts(wp, qaStory.id).length, 1, 'same block, no second alert');
+    // Asha does not act: the COO gets it after 15 minutes, once.
+    assert.equal(manager.escalate(wp, Date.now() + 16 * 60_000).length, 1);
+    assert.equal(cooItems(wp, qaStory.id).length, 1);
+    assert.match(cooItems(wp, qaStory.id)[0]!.body, /Nikhil.*waiting on someone outside the team.*duck SDK.*Asha has not acted/s);
   } finally {
     stop();
     tmp.cleanup();
   }
 });
 
-test('(a) the COO offline: Asha is told as well; blocked on the owner is the Inbox\'s, not this', async () => {
+test('(a) waiting on the COO goes straight to the COO; blocked on the owner is the Inbox\'s, not this', async () => {
   const { wp, tmp } = testWorkplace();
   const { fake, stop } = started(wp);
   try {
     withOauth(tmp.dir);
     const { qaStory, devStory } = plan(wp);
-    items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Needs the vendor build.', waitingOn: 'external' }, 'nikhil');
+    items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Needs the relay redeployed.', waitingOn: 'coo' }, 'nikhil');
     await tick();
-    assert.equal(cooItems(wp, qaStory.id).length, 1, 'the bridge item is filed for when the COO is back');
-    assert.ok(told(fake, 'asha').some(t => t.includes(qaStory.id) && /COO is offline/i.test(t)));
+    assert.equal(cooItems(wp, qaStory.id).length, 1, 'the COO is the one waited on (filed for when the COO is back)');
+    assert.equal(alerts(wp, qaStory.id).length, 0);
+    assert.equal(told(fake, 'asha').filter(t => t.includes(qaStory.id)).length, 0);
 
     items.update(wp, devStory.id, { status: 'blocked', blockedReason: 'Which ducking curve?', waitingOn: 'owner', recommendation: 'linear' }, 'dev');
     await tick();
@@ -94,9 +99,9 @@ test('(a) the COO offline: Asha is told as well; blocked on the owner is the Inb
   }
 });
 
-test('(b) still blocked after 15 minutes: the COO is told again, once; an unblocked item is not', async () => {
+test('(b) still blocked after 15 minutes: told again, once (Asha; the COO for a COO wait); an unblocked item is not', async () => {
   const { wp, tmp } = testWorkplace();
-  const { stop } = started(wp);
+  const { fake, stop } = started(wp);
   try {
     withOauth(tmp.dir);
     coo.touchHeartbeatForTest(wp);
@@ -108,12 +113,15 @@ test('(b) still blocked after 15 minutes: the COO is told again, once; an unbloc
     assert.equal(blocks.check(wp, qaStory.id, t0 + 10 * 60_000), null, 'not yet');
     items.update(wp, devStory.id, { status: 'in-progress', note: 'API landed' }, 'dev');
     assert.equal(blocks.check(wp, qaStory.id, t0 + 16 * 60_000), 'renotified');
-    const filed = cooItems(wp, qaStory.id);
-    assert.equal(filed.length, 2);
-    assert.match(filed[0]!.title, /^Still blocked: QA the music bundle/);
-    assert.match(filed[0]!.body, /15 min/);
+    const still = alerts(wp, qaStory.id).find(r => /^Still blocked: QA the music bundle/.test(r.title))!;
+    assert.match(still.body, /15 min/);
+    assert.equal(cooItems(wp, qaStory.id).length, 0, 'Asha first');
+    for (const s of fake.sessions.filter(x => x.options.cwd.includes('/asha/'))) s.result();
+    await tick();
+    manager.deliver(wp);
+    assert.ok(told(fake, 'asha').some(t => /Still blocked: QA the music bundle/.test(t) || /blocked on Story .* for 15 min/.test(t)));
     assert.equal(blocks.check(wp, qaStory.id, t0 + 45 * 60_000), null, 'once');
-    assert.equal(cooItems(wp, qaStory.id).length, 2);
+    assert.equal(alerts(wp, qaStory.id).length, 2);
     assert.equal(blocks.check(wp, devStory.id, t0 + 16 * 60_000), null, 'unblocked in time: nothing');
     assert.equal(cooItems(wp, devStory.id).length, 1);
   } finally {
@@ -189,7 +197,7 @@ test('at start, blocks that already exist are not announced as new; they get the
   }
 });
 
-test('flag_stall naming who it waits on tells the COO once, not twice', async () => {
+test('flag_stall naming who it waits on alerts once, not twice (Asha; the COO when it waits on the COO)', async () => {
   const { wp, tmp } = testWorkplace();
   const { stop } = started(wp);
   try {
@@ -199,7 +207,14 @@ test('flag_stall naming who it waits on tells the COO once, not twice', async ()
     watch.flag(wp, qaStory.id, { by: 'nikhil', reason: 'Needs the vendor build.', waitingOn: 'external' });
     await tick();
     assert.equal(items.require$(wp, qaStory.id).status, 'blocked');
-    assert.equal(cooItems(wp, qaStory.id).length, 1);
+    assert.equal(alerts(wp, qaStory.id).length, 1, 'the flag, not the flag and the block');
+    assert.equal(cooItems(wp, qaStory.id).length, 0);
+
+    const { devStory } = { devStory: items.list(wp, { assigneeId: 'dev' })[0]! };
+    watch.flag(wp, devStory.id, { by: 'dev', reason: 'Needs the relay redeployed.', waitingOn: 'coo' });
+    await tick();
+    assert.equal(cooItems(wp, devStory.id).length, 1, 'waiting on the COO: the COO, once');
+    assert.equal(alerts(wp, devStory.id).length, 0);
   } finally {
     stop();
     tmp.cleanup();
