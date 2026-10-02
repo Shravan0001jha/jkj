@@ -50,9 +50,10 @@ export function ensureWorktree(workDir: string, employee: Employee, workItemId: 
 
   if (!existsSync(path)) {
     mkdirSync(join(workDir, employee.id), { recursive: true });
-    const args = branchExists(repo, branch)
+    // A missing branch, or one with no commits of its own (cut before the base moved on), starts at the base tip.
+    const args = branchExists(repo, branch) && !behindOnly(repo, branch, base)
       ? ['worktree', 'add', path, branch]
-      : ['worktree', 'add', path, '-b', branch, base];
+      : ['worktree', 'add', '-B', branch, path, base];
     try {
       git(repo, args);
     } catch (err) {
@@ -139,7 +140,9 @@ function switchTo(employee: Employee, path: string, branch: string, base: string
       log.warn('worktrees', `${employee.id}: auto-saved uncommitted work on ${current} before switching to ${branch}`);
       if (!isClean(path, true)) fail(`uncommitted work on ${current} could not be auto-saved`);
     }
-    git(path, branchExists(path, branch) ? ['checkout', '-q', branch] : ['checkout', '-q', '-b', branch, base]);
+    // A branch with commits of its own is checked out as it is; a missing one, or one with nothing of its
+    // own (only behind the base: cut before today's merge, never worked on), is (re)cut at the base tip.
+    git(path, branchExists(path, branch) && !behindOnly(path, branch, base) ? ['checkout', '-q', branch] : ['checkout', '-q', '-B', branch, base]);
     log.info('worktrees', `${employee.id}: ${path} switched from ${current} to ${branch}`);
   } catch (err) {
     if (err instanceof WorktreeSwitchError) throw err;
@@ -179,6 +182,11 @@ export function isClean(worktree: string, includeUntracked = false): boolean {
 
 export function commitsSince(worktree: string, base: string): string[] {
   return git(worktree, ['log', '--format=%h %s', `${base}..HEAD`]).split('\n').map(l => l.trim()).filter(Boolean);
+}
+
+/** `branch` has no commits the base lacks (it is an ancestor of the base): nothing of its own to keep. */
+function behindOnly(cwd: string, branch: string, base: string): boolean {
+  try { execFileSync('git', ['-C', cwd, 'merge-base', '--is-ancestor', branch, base], { stdio: 'ignore' }); return true; } catch { return false; }
 }
 
 function branchExists(repo: string, branch: string): boolean {

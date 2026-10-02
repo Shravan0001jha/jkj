@@ -161,3 +161,99 @@ test('starting an assignment whose branch cannot be checked out blocks it with t
     cleanup();
   }
 });
+
+/* ---------- an open session taking a new assignment (live 2 Oct) ---------- */
+
+/**
+ * Live, 2 Oct: Dev was started on a new story while his talk session was open; assign only messaged
+ * that session, so he built the story on emp/dev/general, cut before the day's merge. Now the open
+ * session is moved onto the item's branch (cut from the base tip) before the assignment is sent, or,
+ * mid-turn, at the end of that turn.
+ */
+
+const tick = (ms = 10) => new Promise(r => setTimeout(r, ms));
+
+function withOauth(dir: string): void {
+  mkdirSync(join(dir, 'ops', 'workplace'), { recursive: true });
+  writeFileSync(join(dir, 'ops', 'workplace', 'claude-oauth.env'), 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-test-token-value\n');
+}
+
+async function taraTalking(opts: { finishTurn: boolean }) {
+  const { repo, workDir, cleanup } = setup();
+  const { wp, tmp } = testWorkplace({ IRIS_WORK_DIR: workDir });
+  const fake = installFakeRuntime();
+  withOauth(tmp.dir);
+  const tara = wp.org.employees.find(e => e.id === 'tara')!;
+  tara.workspace = { repo, branch: 'feat/x' };
+  employees.talk(wp, 'tara', 'Hello', [], { autonomous: true });
+  await tick();
+  const session = employees.openSession('tara')!;
+  const path = session.worktree!.path;
+  assert.equal(out(path, ['rev-parse', '--abbrev-ref', 'HEAD']), 'emp/tara/general');
+  // The talk left uncommitted work behind; and the base moves on (today's merge) after general was cut.
+  writeFileSync(join(path, 'services', 'agent-svc', 'speaker_gate.py'), 'talk change\n');
+  out(repo, ['commit', '-q', '--allow-empty', '-m', 'P0 merged']);
+  if (opts.finishTurn) { fake.sessions[0]!.result(); await tick(); }
+  const a = work.create(wp, { kind: 'assignment', title: 'Mic stays live', body: 'x', charterId: 'mobile' });
+  assert.equal(a.employeeId, 'tara');
+  return { wp, tmp, fake, repo, path, session, a, done: () => { fake.restore(); tmp.cleanup(); cleanup(); } };
+}
+
+const sessionRow = (wp: ReturnType<typeof testWorkplace>['wp'], id: string) => {
+  const r = wp.db.prepare('select assignment_id, json from sessions where id = ?').get(id) as { assignment_id: string | null; json: string };
+  return { assignmentId: r.assignment_id, ...(JSON.parse(r.json) as { branch?: string }) };
+};
+
+test('assign with an open session between turns: the worktree moves to the item branch (cut from the base tip, work auto-saved) before the message', async () => {
+  const t = await taraTalking({ finishTurn: true });
+  try {
+    employees.assign(t.wp, t.a.id);
+    assert.equal(t.fake.sessions.length, 1, 'the open session takes it; no new session');
+    assert.equal(out(t.path, ['rev-parse', '--abbrev-ref', 'HEAD']), `emp/tara/${t.a.id}`);
+    assert.equal(out(t.path, ['rev-parse', 'HEAD']), out(t.repo, ['rev-parse', 'feat/x']), 'cut from the current base tip, not from general');
+    assert.equal(out(t.repo, ['show', 'emp/tara/general:services/agent-svc/speaker_gate.py']), 'talk change', 'the talk\'s work is saved on general');
+    assert.match(t.fake.sessions[0]!.sent.at(-1)!.text, new RegExp(`New assignment ${t.a.id}`));
+    assert.equal(t.session.assignmentId, t.a.id);
+    assert.equal(t.session.worktree!.branch, `emp/tara/${t.a.id}`);
+    const row = sessionRow(t.wp, t.session.agentId);
+    assert.equal(row.assignmentId, t.a.id);
+    assert.equal(row.branch, `emp/tara/${t.a.id}`, 'the session row records the new branch');
+  } finally {
+    t.done();
+  }
+});
+
+test('assign with an open session mid-turn: nothing moves and nothing is sent until the turn ends; then switch, then the message', async () => {
+  const t = await taraTalking({ finishTurn: false });
+  try {
+    employees.assign(t.wp, t.a.id);
+    await tick();
+    assert.equal(out(t.path, ['rev-parse', '--abbrev-ref', 'HEAD']), 'emp/tara/general', 'never moved under a running turn');
+    assert.equal(t.fake.sessions[0]!.sent.filter(m => m.text.includes(t.a.id)).length, 0, 'not sent yet');
+
+    t.fake.sessions[0]!.result();
+    await tick(30);
+    assert.equal(out(t.path, ['rev-parse', '--abbrev-ref', 'HEAD']), `emp/tara/${t.a.id}`);
+    assert.equal(out(t.path, ['rev-parse', 'HEAD']), out(t.repo, ['rev-parse', 'feat/x']));
+    assert.equal(t.fake.sessions[0]!.sent.filter(m => m.text.includes(`New assignment ${t.a.id}`)).length, 1);
+    assert.equal(sessionRow(t.wp, t.session.agentId).branch, `emp/tara/${t.a.id}`);
+    assert.equal(t.fake.sessions.length, 1);
+  } finally {
+    t.done();
+  }
+});
+
+test('an existing item branch with no commits of its own is recut at the base tip', () => {
+  const { repo, workDir, emp, cleanup } = setup();
+  try {
+    ensureWorktree(workDir, emp, 'as_a');
+    ensureWorktree(workDir, emp, 'as_b');
+    const old = out(repo, ['rev-parse', 'emp/dev/as_a']);
+    out(repo, ['commit', '-q', '--allow-empty', '-m', 'base moved on']);
+    const back = ensureWorktree(workDir, emp, 'as_a');
+    assert.notEqual(out(back.path, ['rev-parse', 'HEAD']), old);
+    assert.equal(out(back.path, ['rev-parse', 'HEAD']), out(repo, ['rev-parse', 'feat/x']), 'a stale, unworked branch starts at the base tip');
+  } finally {
+    cleanup();
+  }
+});

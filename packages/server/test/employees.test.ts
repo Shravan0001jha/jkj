@@ -167,9 +167,14 @@ test('concurrent sessions are capped per employee', async () => {
     const a = work.create(wp, { kind: 'assignment', title: 'A', body: 'x', charterId: 'memory' });
     employees.talk(wp, 'kabir', 'x');
     await tick();
-    // A second assignment goes into the open session instead of a second process.
+    // A second assignment goes into the open session instead of a second process: mid-turn it waits
+    // for the turn to end (the worktree is switched to its branch first; worktree-switch.test.ts).
     const agent = employees.assign(wp, a.id);
     assert.equal(fake.sessions.length, 1);
+    assert.ok(!fake.last().sent.some(m => m.text.includes(`New assignment ${a.id}`)), 'not pushed into a running turn');
+    fake.last().result();
+    await tick();
+    await tick();
     assert.ok(fake.last().sent.some(m => m.text.includes(`New assignment ${a.id}`)));
     assert.ok(agent);
     employees.close(wp, agent.id, 'test');

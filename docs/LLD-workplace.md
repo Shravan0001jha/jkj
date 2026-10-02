@@ -155,6 +155,18 @@ same commands are also `disallowedTools`. `report_done` refuses evidence when `g
 plus uncommitted files include anything the employee does not own, and records only real commits on the
 branch. Merging into the base branch is the lead's (a different identity), until real PRs exist.
 
+**An open session taking a new assignment (live 2 Oct).** `assign` (`POST /api/work/:id/start`, `POST
+/api/items/:id {start:true}`) with the employee's session already open used to only message it, so Dev
+built a new story on `emp/dev/general`, cut before that day's merge. Now: between turns, the worktree is
+moved with `ensureWorktree(item)` (uncommitted work auto-saved as a WIP commit on the old branch) and only
+then is the assignment sent; mid-turn (running, or an approval pending) the switch and the message are
+queued (in memory, per agent) and run when that turn ends (run event `waiting`, no approval), one per turn
+end; a session closing with assignments queued starts each in a session of its own (not on a shutdown).
+The session's `assignmentId`, `worktree` and row (`assignment_id`, `json.branch`, `json.cwd`) follow the
+move. A switch that fails blocks the assignment with the reason, as at spawn. An item branch that does
+not exist, or exists with no commits of its own (an ancestor of the base), is (re)cut at the base tip
+(`checkout -B` / `worktree add -B`); one with its own commits is checked out as it is.
+
 ### 7b. Sessions across a restart, and interrupts
 
 Every session row records its SDK session id, its status and any pending tool approval as they change.

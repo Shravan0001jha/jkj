@@ -244,7 +244,8 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
       try {
         wp.db.prepare('update sessions set sdk_session_id = ?, status = ?, json = ? where id = ?').run(
           runs.sessionIdOf(agent.id) ?? null, updated.status,
-          JSON.stringify({ truncated: context.truncated, cwd: worktree.path, branch: worktree.branch, prompt: options.prompt.slice(0, 500), pending: updated.approval ?? null, permissionMode: updated.permissionMode, ...(options.probe ? { probe: true } : {}) }),
+          // session.worktree: an open session moved onto a new assignment's branch (moveSession) records that branch.
+          JSON.stringify({ truncated: context.truncated, cwd: (session.worktree ?? worktree).path, branch: (session.worktree ?? worktree).branch, prompt: options.prompt.slice(0, 500), pending: updated.approval ?? null, permissionMode: updated.permissionMode, ...(options.probe ? { probe: true } : {}) }),
           agent.id);
       } catch (err) {
         log.warn('employees', `could not record ${agent.id}: ${err instanceof Error ? err.message : err}`);
@@ -381,13 +382,7 @@ function assignSession(wp: Workplace, assignmentId: string): Agent {
   } catch (err) {
     // The worktree could not be put on this assignment's branch: block it with the reason,
     // never run it on another item's branch (2 Oct: Dev built a P0 on a parked item's branch).
-    if (err instanceof WorktreeSwitchError) {
-      const item = work.get(wp, assignmentId);
-      if (item && item.state !== 'blocked' && item.state !== 'done' && item.state !== 'rejected') {
-        work.transition(wp, assignmentId, { to: 'blocked', by: 'workplace', note: err.message });
-      }
-      log.error('employees', `${assignmentId} blocked: ${err.message}`);
-    }
+    if (err instanceof WorktreeSwitchError) blockOnSwitch(wp, assignmentId, err);
     throw err;
   }
 }
@@ -400,8 +395,16 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
   for (const s of sessionsOf(item.employeeId)) if (!isLive(s.agentId)) close(wp, s.agentId, 'replaced: the run was dead');
   const open = openSession(item.employeeId);
   if (open) {
-    runs.sendMessage(open.agentId, `New assignment ${item.id}: ${item.title}\n\n${item.body}\n\nReply with "## Plan" first.`, [], { from: 'workplace' });
-    work.setSession(wp, assignmentId, runs.sessionIdOf(open.agentId) ?? open.agentId);
+    // The open session takes the assignment, but on the assignment's branch (live 2 Oct: Dev began a
+    // new story in his talk session's emp/dev/general, cut before that day's merge). Between turns the
+    // worktree is switched now (auto-saving any uncommitted work, as at spawn); mid-turn, the switch
+    // and the message wait for the end of that turn, so nothing is built on the old branch meanwhile.
+    const prompt = `New assignment ${item.id}: ${item.title}\n\n${item.body}\n\nReply with "## Plan" first.`;
+    if (midTurn(open.agentId)) {
+      queueSwitch(wp, open.agentId, item.id, prompt);
+      return runs.getRunAgent(open.agentId)!;
+    }
+    handOver(wp, open, item, prompt);
     return runs.getRunAgent(open.agentId)!;
   }
   if (item.state === 'planned' || item.state === 'building') {
@@ -417,6 +420,74 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
   }
   return spawn(wp, item.employeeId, { assignment: item, prompt: `Take assignment ${item.id}: ${item.title}. Read your context and reply with "## Plan" first.` });
 }
+
+/** A turn is running, or parked on a tool approval: not the moment to move the tree under it. */
+function midTurn(agentId: string): boolean {
+  const a = runs.getRunAgent(agentId);
+  return !a || a.status === 'running' || !!a.approval;
+}
+
+/**
+ * Put an open session's worktree on the assignment's branch (`ensureWorktree`: auto-save, then switch;
+ * WorktreeSwitchError when it cannot) and make the session that assignment's: the session row records
+ * the new branch and assignment.
+ */
+function moveSession(wp: Workplace, session: Session, item: WorkItem): void {
+  const wt = ensureWorktree(wp.config.workDir, employee(wp, session.employeeId), item.id);
+  session.worktree = wt;
+  session.assignmentId = item.id;
+  session.planCaptured = !!item.plan;
+  if (session.guard) session.guard.worktree = wt.path;
+  wp.db.prepare("update sessions set assignment_id = ?, json = json_set(json, '$.branch', ?, '$.cwd', ?) where id = ?").run(item.id, wt.branch, wt.path, session.agentId);
+  log.info('employees', `${session.employeeId}: open session ${session.agentId} moved to ${wt.branch} for ${item.id}`);
+}
+
+/** Switch, then send the assignment into the session. Throws WorktreeSwitchError (nothing sent). */
+function handOver(wp: Workplace, session: Session, item: WorkItem, prompt: string): void {
+  moveSession(wp, session, item);
+  runs.sendMessage(session.agentId, prompt, [], { from: 'workplace' });
+  work.setSession(wp, item.id, runs.sessionIdOf(session.agentId) ?? session.agentId);
+}
+
+/** Assignments waiting for an open session's turn to end, per agent id, oldest first. */
+const pendingSwitch = new Map<string, { wp: Workplace; assignmentId: string; prompt: string }[]>();
+
+function queueSwitch(wp: Workplace, agentId: string, assignmentId: string, prompt: string): void {
+  const q = pendingSwitch.get(agentId) ?? [];
+  if (!q.some(x => x.assignmentId === assignmentId)) q.push({ wp, assignmentId, prompt });
+  pendingSwitch.set(agentId, q);
+  log.info('employees', `${assignmentId}: queued for the end of ${agentId}'s turn (worktree switch, then the assignment)`);
+}
+
+/** Blocked with the reason, never run on another branch (as assignSession does at spawn). */
+function blockOnSwitch(wp: Workplace, assignmentId: string, err: WorktreeSwitchError): void {
+  const item = work.get(wp, assignmentId);
+  if (item && item.state !== 'blocked' && item.state !== 'done' && item.state !== 'rejected') work.transition(wp, assignmentId, { to: 'blocked', by: 'workplace', note: err.message });
+  log.error('employees', `${assignmentId} blocked: ${err.message}`);
+}
+
+/** The turn ended: switch to the first queued assignment and send it (the next one waits for the turn after). */
+export function drainSwitch(agentId: string): string | null {
+  const q = pendingSwitch.get(agentId);
+  const next = q?.shift();
+  if (!q?.length) pendingSwitch.delete(agentId);
+  const session = sessions.get(agentId);
+  if (!next || !session) return null;
+  const { wp, assignmentId, prompt } = next;
+  const item = work.get(wp, assignmentId);
+  if (!item || item.employeeId !== session.employeeId || item.state === 'done' || item.state === 'rejected') return null;
+  try { handOver(wp, session, item, prompt); return assignmentId; } catch (err) {
+    if (err instanceof WorktreeSwitchError) blockOnSwitch(wp, assignmentId, err);
+    else log.warn('employees', `${assignmentId}: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+}
+
+runs.onRunEvent(({ agent }) => {
+  if (!agent || !pendingSwitch.has(agent.id) || agent.status !== 'waiting' || agent.approval) return;
+  const id = agent.id;
+  setImmediate(() => { if (!midTurn(id)) drainSwitch(id); });
+});
 
 const HANDOFF_PROMPT =
   'This session is ending. Using the Workplace tools: call report_status with three lines (doing / done / blocked) ' +
@@ -489,6 +560,12 @@ export function close(wp: Workplace, agentId: string, reason: string): void {
   const name = wp.org.employees.find(e => e.id === session.employeeId)?.name ?? session.employeeId;
   commitOrg(wp.org.dir, `${name}: session ${agentId} ${reason} (status and handoff)`);
   if (sessionsOf(session.employeeId).length === 0 && stateOverride.get(session.employeeId) === 'working') setState(wp, session.employeeId, 'idle');
+  // Assignments queued for this session's turn end start in a session of their own (never on a shutdown).
+  const queued = pendingSwitch.get(agentId) ?? [];
+  pendingSwitch.delete(agentId);
+  if (reason !== 'shutdown') {
+    for (const q of queued) { try { assign(wp, q.assignmentId); } catch (err) { log.warn('employees', `${q.assignmentId}: ${err instanceof Error ? err.message : err}`); } }
+  }
   for (const fn of closedListeners) { try { fn(wp, session, reason); } catch (err) { log.warn('employees', `session-closed listener: ${err instanceof Error ? err.message : err}`); } }
 }
 
