@@ -116,3 +116,11 @@ final class TypingRuleTests: XCTestCase {
         XCTAssertFalse(c.isTyping())
     }
 }
+
+final class PreviewIdTests: XCTestCase {
+    func testPreviewsNeverShowBareIds() {
+        let p = IdLinks.plain("doing: Reported as_muqecr89jhjst (AC4)") { $0 == "as_muqecr89jhjst" ? "Conversation story" : nil }
+        XCTAssertEqual(p, "doing: Reported “Conversation story” (AC4)")
+        XCTAssertEqual(IdLinks.plain("Idle — as_mulrsdzj2xqf3 done") { _ in nil }, "Idle — “a story” done")
+    }
+}

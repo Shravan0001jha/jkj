@@ -9,6 +9,9 @@ struct InboxView: View {
             List {
                 if let error = model.inbox.error, !model.inbox.loaded {
                     ErrorRow(message: error) { Task { await reload() } }
+                } else if !model.inbox.loaded {
+                    // Never a blank screen while the first load is on its way (a slow relay).
+                    HStack { Spacer(); ProgressView("Loading the Inbox…"); Spacer() }
                 }
                 if model.inbox.loaded && model.inbox.items.isEmpty {
                     EmptyState(symbol: "tray", title: "Nothing waiting",

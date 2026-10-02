@@ -134,6 +134,13 @@ enum IdLinks {
         return URL(string: "\(AuthCallback.scheme)://\(route)/\(id)")
     }
 
+    /// Plain text with every id replaced by its title (list previews): never a bare id.
+    static func plain(_ text: String, title: (String) -> String?) -> String {
+        var out = text
+        for id in Set(ids(in: text)) { out = out.replacingOccurrences(of: id, with: "“\(title(id) ?? placeholder(id))”") }
+        return out
+    }
+
     /// The text with every id replaced by a tappable chip carrying the item's title.
     static func linkified(_ text: String, mine: Bool, title: (String) -> String?) -> AttributedString {
         var out = AttributedString()

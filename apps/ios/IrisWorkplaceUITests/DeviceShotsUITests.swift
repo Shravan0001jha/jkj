@@ -24,7 +24,7 @@ final class DeviceShotsUITests: XCTestCase {
             let app = XCUIApplication()
             app.launchEnvironment = env.merging(["WORKPLACE_NO_NOTIF_PROMPT": "1"]) { a, _ in a }
             app.launch()
-            sleep(6)
+            sleep(10)
             let a = XCTAttachment(screenshot: app.screenshot()); a.name = "device-\(name)"; a.lifetime = .keepAlways; add(a)
             app.terminate()
         }

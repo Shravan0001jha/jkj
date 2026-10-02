@@ -41,7 +41,7 @@ struct TalkListView: View {
             }
             ForEach(Self.ordered(model.office.cards, chiefOfStaff: model.chiefOfStaff)) { card in
                 NavigationLink(value: TalkRoute(employeeId: card.employee.id)) {
-                    TalkListRow(card: card, preview: preview(card), time: time(card))
+                    TalkListRow(card: card, preview: IdLinks.plain(preview(card)) { model.title(forId: $0) }, time: time(card))
                 }
                 .frame(height: Self.rowHeight)
                 .listRowInsets(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 12))
@@ -55,6 +55,8 @@ struct TalkListView: View {
             guard let rest = model.rest else { return }
             if model.office.data == nil { await model.office.load(rest) }
             if !model.coo.loaded { await model.coo.load(rest) }
+            // Titles for the ids the previews mention.
+            await model.loadTitles(in: model.office.cards.compactMap(\.lastReport) + model.coo.log.suffix(1).map(\.text))
         }
     }
 
