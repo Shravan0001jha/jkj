@@ -16,6 +16,11 @@ import { resolve as resolveOwner } from './ownership.js';
 import * as stall from './stall.js';
 import * as room from './room.js';
 import * as coo from './coo.js';
+import * as items from './items.js';
+import * as trail from './trail.js';
+import * as watch from './watch.js';
+import * as statusAnswers from './status.js';
+import { isPerson, rawGet } from './v2-map.js';
 import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
 import { now } from './store.js';
 import { BadRequest } from '../util/errors.js';
@@ -31,7 +36,7 @@ import { log } from '../util/logger.js';
  * in-process so the employee can report, ask and propose.
  */
 
-interface Session {
+export interface Session {
   agentId: string;
   employeeId: string;
   assignmentId?: string;
@@ -56,7 +61,7 @@ export const OWNER_TALK_TURN_INR = 100;
 /** The owner saying, in a talk, that paused work may go on. */
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'inbox_reply', 'status_of'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -185,6 +190,8 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
     permissionMode: role?.permissionMode ?? 'ask',
     ...(options.attachments ? { attachments: options.attachments } : {}),
     ...(options.resume ? { resume: options.resume } : {}),
+    // Only the owner's own Talk is the owner's words; everything else the Workplace sends (HLD D22).
+    promptFrom: options.ownerTalk ? 'owner' : 'workplace',
     employeeId,
     ...(options.assignment ? { assignmentId: options.assignment.id } : {}),
     contextTokens: context.tokens,
@@ -259,7 +266,7 @@ export function refreshLiveWindow(_wp: Workplace, employeeId: string, untilMs: n
 export function deliverDenial(wp: Workplace, employeeId: string, title: string, note: string | undefined): void {
   const text = `The owner denied "${title}"${note ? `: ${note}` : ''}. Act on it: change the plan, or ask again with what is different.`;
   const open = openSession(employeeId);
-  if (open) { runs.sendMessage(open.agentId, text); return; }
+  if (open) { runs.sendMessage(open.agentId, text, [], { from: 'workplace' }); return; }
   const current = readEmployeeFile(wp.org, employeeId, 'handoff.md').trimEnd();
   writeEmployeeFile(wp.org, employeeId, 'handoff.md', `${current}\n\n## Denied: ${title}\n${note ? `Reason: ${note}\n` : ''}${text}\n`);
 }
@@ -324,7 +331,7 @@ export function talk(wp: Workplace, employeeId: string, text: string, attachment
     const budget = spend.canSpend(wp, employeeId);
     if (!budget.ok && !ownerTalk) throw new BadRequest(`${employee(wp, employeeId).name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox.`);
     if (ownerTalk) open.ownerTalk = true;
-    runs.sendMessage(open.agentId, text, attachments);
+    runs.sendMessage(open.agentId, text, attachments, { from: ownerTalk ? 'owner' : 'workplace' });
     return runs.getRunAgent(open.agentId)!;
   }
   return spawn(wp, employeeId, { prompt: text, attachments, ...(opts.probe ? { probe: true } : {}), ...(ownerTalk ? { ownerTalk: true } : {}) });
@@ -343,24 +350,33 @@ function maybeLiftPause(wp: Workplace, employeeId: string, text: string): void {
   }
   setState(wp, employeeId, sessionsOf(employeeId).length ? 'working' : 'idle');
   const active = new Set(['planned', 'building', 'proposed']);
-  const item = work.list(wp, { kind: 'assignment', employeeId }).find(a => active.has(a.state));
+  // Backlog is parked: nothing automatic starts it (HLD D19).
+  const item = work.list(wp, { kind: 'assignment', employeeId }).find(a => active.has(a.state) && a.status !== 'backlog');
   if (item && !openSession(employeeId)) {
     try { assign(wp, item.id); } catch (err) { log.warn('employees', `resume after lift: ${err instanceof Error ? err.message : err}`); }
   } else if (item && openSession(employeeId)) {
-    runs.sendMessage(openSession(employeeId)!.agentId, `The owner says to continue. Resume assignment ${item.id}: ${item.title}. Work only in your worktree; report_done with evidence when done.`);
+    runs.sendMessage(openSession(employeeId)!.agentId, `The owner says to continue. Resume assignment ${item.id}: ${item.title}. Work only in your worktree; report_done with evidence when done.`, [], { from: 'workplace' });
   }
   log.info('employees', `${emp.name}'s pause lifted for ${day} by the owner in talk`);
 }
 
 /** Start the session for an assignment (the assignment block is the fifth layer). */
 export function assign(wp: Workplace, assignmentId: string): Agent {
+  const agent = assignSession(wp, assignmentId);
+  // v2: a session on a Ready/Backlog item means it is in progress now (a "Started" line).
+  try { items.markStarted(wp, assignmentId, 'workplace'); } catch (err) { log.warn('employees', `mark started ${assignmentId}: ${err instanceof Error ? err.message : err}`); }
+  return agent;
+}
+
+function assignSession(wp: Workplace, assignmentId: string): Agent {
   const item = work.require$(wp, assignmentId);
   if (!item.employeeId) throw new BadRequest(`${assignmentId} has no assignee`);
+  if (item.employeeId === 'owner') throw new BadRequest(`${assignmentId} is the owner's own item; nobody is started on it.`);
   // A dead session (interrupted, errored) is closed first, whatever its age: work goes to a live one.
   for (const s of sessionsOf(item.employeeId)) if (!isLive(s.agentId)) close(wp, s.agentId, 'replaced: the run was dead');
   const open = openSession(item.employeeId);
   if (open) {
-    runs.sendMessage(open.agentId, `New assignment ${item.id}: ${item.title}\n\n${item.body}\n\nReply with "## Plan" first.`);
+    runs.sendMessage(open.agentId, `New assignment ${item.id}: ${item.title}\n\n${item.body}\n\nReply with "## Plan" first.`, [], { from: 'workplace' });
     work.setSession(wp, assignmentId, runs.sessionIdOf(open.agentId) ?? open.agentId);
     return runs.getRunAgent(open.agentId)!;
   }
@@ -393,7 +409,7 @@ export async function endSession(wp: Workplace, agentId: string, waitMs = 150_00
   if (agent && (agent.status === 'running' || agent.status === 'waiting' || (evenIfIdle && agent.status === 'idle')) && waitMs > 0) {
     // Subscribe before sending, so a turn that ends at once is not missed.
     const waiting = waitForHandoff(wp, session, waitMs);
-    runs.sendMessage(agentId, HANDOFF_PROMPT);
+    runs.sendMessage(agentId, HANDOFF_PROMPT, [], { from: 'workplace' });
     await waiting;
   }
   close(wp, agentId, 'ended');
@@ -829,7 +845,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           if (!threadId) return ok(room.threadsFor(wp, employeeId).map(t => `${t.id}: ${t.title} (${t.messageCount} messages, last ${t.lastAt})`).join('\n') || 'No open threads concern you.');
           const t = room.getThread(wp, threadId);
           if (!t) return ok(`No thread ${threadId}.`);
-          return ok(`# ${t.title} [${t.state}]\n` + room.messages(wp, threadId).map(m => `${m.owner ? 'OWNER' : m.by} (${m.at}): ${m.text}`).join('\n'));
+          return ok(`# ${t.title} [${t.state}]\n` + room.messages(wp, threadId).map(m => `${m.owner ? 'OWNER' : m.by} (${m.at}): ${m.details ?? m.text}`).join('\n'));
         }),
       tool('room_resolve', 'Chief of Staff only: resolve a Team Room thread with a summary (written into the relevant charter or contract by you) and optional follow-up assignments.',
         { threadId: z.string(), summary: z.string(), followUps: z.array(z.object({ employeeId: z.string(), title: z.string(), body: z.string() })).optional() },
@@ -846,6 +862,58 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           if (!emp.charterIds.includes('chief-of-staff') && emp.level !== 0) return ok('Only the Chief of Staff escalates; mention @asha in the thread.');
           try { const item = room.escalate(wp, threadId, { title, body, by: employeeId, ...(options ? { options } : {}) }); return ok(`Escalated as ${item.id}.`); }
           catch (err) { return ok(`Not escalated: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      /* ---------- v2: the plan (LLD §19.12) ---------- */
+      tool('item_create', 'Create a story under an epic (Chief of Staff or the epic owner) or a task under a story (the story\'s assignee). One story per outcome: an open item with the same title under the same parent is returned instead of a copy.',
+        { level: z.enum(['story', 'task']), parentId: z.string(), title: z.string(), body: z.string().optional(), assigneeId: z.string().optional(), points: z.number().int().optional(), acceptance: z.array(z.string()).optional() },
+        async ({ level, parentId, title, body, assigneeId, points, acceptance }) => {
+          const parent = rawGet(wp, parentId);
+          if (!parent) return ok(`No item ${parentId}.`);
+          const emp = employee(wp, employeeId);
+          const isCos = emp.charterIds.includes('chief-of-staff') || (emp.level === 0 && !emp.virtual);
+          if (level === 'story' && !isCos && parent.ownerId !== employeeId) return ok('Only the Chief of Staff or the epic owner creates stories; ask Asha in the Room.');
+          if (level === 'task' && !isCos && parent.employeeId !== employeeId) return ok('Only the story\'s assignee (or the Chief of Staff) splits it into tasks.');
+          const twin = items.duplicateOf(wp, parentId, title);
+          if (twin) return ok(`Already exists as ${twin.id} (${twin.status}); work on that one.`);
+          try {
+            const it = items.create(wp, { level, parentId, title, ...(body ? { body } : {}), ...(assigneeId ? { assigneeId } : {}), ...(points ? { points: points as never } : {}), ...(acceptance ? { acceptance } : {}) }, employeeId);
+            return ok(`Created ${it.id} (${it.level}, ${it.status}).`);
+          } catch (err) { return ok(`Not created: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('item_update', 'Move one of your items (start, block with a reason and who you wait on, send to review with a reviewer), or set its points. You never mark your own work done; the reviewer does.',
+        { itemId: z.string(), status: z.enum(['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked']).optional(), blockedReason: z.string().optional(), waitingOn: z.string().optional(), reviewerId: z.string().optional(), points: z.number().int().optional(), note: z.string().optional() },
+        async ({ itemId, status, blockedReason, waitingOn, reviewerId, points, note }) => {
+          try {
+            const it = items.update(wp, itemId, { ...(status ? { status } : {}), ...(blockedReason ? { blockedReason } : {}), ...(waitingOn ? { waitingOn } : {}), ...(reviewerId ? { reviewerId } : {}), ...(points ? { points: points as never } : {}), ...(note ? { note } : {}) }, employeeId);
+            return ok(`${it.id} is ${it.status}.`);
+          } catch (err) { return ok(`Not changed: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('item_comment', 'Comment on an item (a few short lines; mention people with @id). Status and notes about the work go here, not in chat.',
+        { itemId: z.string(), text: z.string() },
+        async ({ itemId, text }) => {
+          try { const c = trail.comment(wp, itemId, { by: employeeId, text }); return ok(`Commented ${c.id}.`); }
+          catch (err) { return ok(`Not commented: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('flag_stall', 'Flag your own stall the moment it happens: why you are stuck, and who you are waiting on if anyone (that also marks the item Blocked). The COO hears at once.',
+        { itemId: z.string().optional(), reason: z.string(), waitingOn: z.string().optional() },
+        async ({ itemId, reason, waitingOn }) => {
+          const id = itemId ?? session().assignmentId;
+          if (!id) return ok('Name the item: no item is attached to this session.');
+          if (waitingOn && !isPerson(wp, waitingOn)) return ok(`waitingOn must be an employee id, coo or owner; "${waitingOn}" is none.`);
+          try { watch.flag(wp, id, { by: employeeId, reason, ...(waitingOn ? { waitingOn } : {}) }); return ok(`Flagged ${id}; the COO has it.`); }
+          catch (err) { return ok(`Not flagged: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('inbox_reply', 'Answer in an Inbox item\'s thread (when the owner replied to something you raised). Keep it to a few short lines.',
+        { inboxId: z.string(), text: z.string() },
+        async ({ inboxId, text }) => {
+          try { inbox.reply(wp, inboxId, { by: employeeId, text }); return ok(`Replied in ${inboxId}.`); }
+          catch (err) { return ok(`Not replied: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('status_of', 'The status of anything in the plan (an item, a person, an area), answered from the plan with links. Use it before answering "what is the status of X?".',
+        { q: z.string() },
+        async ({ q }) => {
+          const a = statusAnswers.answer(wp, q);
+          return ok([a.line, ...a.matches.slice(1, 8).map(m => m.line)].join('\n'));
         }),
       tool('propose_org_change', 'Propose a hire, split, merge, reassign or restructure with a reason. The owner approves it in the Inbox. `paramsJson` is a JSON object as a string (see the handbook for the shape of each kind).',
         // A z.record() here makes the MCP SDK fail to list ANY tool of this server; a JSON string does not.
@@ -866,3 +934,26 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
     ],
   });
 }
+
+/* ---------- v2 wiring ---------- */
+
+/**
+ * The owner replied in an Inbox thread (HLD D23): the asker hears it in its session and answers in
+ * the same thread. The prompt is the Workplace's, not the owner's words (HLD D22).
+ */
+inbox.onReply((wp, item, message) => {
+  if (message.by !== 'owner') return;
+  const prompt = `The owner replied on "${item.title}" (${item.id}): "${message.text}"\n\nAnswer in the same thread with inbox_reply, in a few short lines. The item is still open${item.options.length ? `; its options are ${item.options.map(o => o.label).join(', ')}` : ''}.`;
+  const coiId = typeof item.context['cooItemId'] === 'string' ? item.context['cooItemId'] : undefined;
+  let target = item.raisedBy;
+  if (!wp.org.employees.some(e => e.id === target && !e.virtual)) target = wp.org.employees.find(e => e.charterIds.includes('chief-of-staff'))?.id ?? '';
+  if (coiId || item.raisedBy === 'coo') {
+    try { coo.relayInboxReply(wp, { inboxId: item.id, title: item.title, text: message.text }); } catch (err) { log.warn('inbox', String(err)); }
+    if (item.raisedBy === 'coo') return;
+  }
+  if (!target) return;
+  try { talk(wp, target, prompt, [], { autonomous: true }); }
+  catch (err) { log.warn('inbox', `reply to ${target}: ${err instanceof Error ? err.message : err}`); }
+});
+
+

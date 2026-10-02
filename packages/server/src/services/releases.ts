@@ -6,6 +6,7 @@ import { gate, requestApproval } from './approvals.js';
 import * as inbox from './inbox.js';
 import * as work from './work.js';
 import * as spend from './spend.js';
+import * as posts from './release-posts.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { BadRequest, Conflict } from '../util/errors.js';
 import { log } from '../util/logger.js';
@@ -150,6 +151,11 @@ async function finish(wp: Workplace, release: Release, spec: ReturnType<typeof s
   const estimate = spec.action === 'release' ? 2 : 1;
   spend.record(wp, { employeeId: 'nikhil', source: 'aws', basis: 'estimated', what: `${spec.action} ${release.shippable} ${release.version} (${spec.command.split('/').pop()})`, inr: estimate });
   wp.emit({ type: 'alert', level: code === 0 ? 'info' : 'blocked', title: `${release.shippable} ${release.version} ${code === 0 ? 'released' : 'failed'}`, body: lines.slice(-3).join(' · ') });
+  // v2: a release that went out is a post in the Releases room, listing what shipped in it.
+  if (code === 0) {
+    try { posts.create(wp, { version: release.version, shippable: release.shippable, releaseId: release.id }, 'workplace'); }
+    catch (err) { log.warn('releases', `release post: ${err instanceof Error ? err.message : err}`); }
+  }
   return finished;
 }
 

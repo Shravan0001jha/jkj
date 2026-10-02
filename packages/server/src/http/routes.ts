@@ -21,6 +21,11 @@ import * as room from '../services/room.js';
 import * as coo from '../services/coo.js';
 import * as features from '../services/features.js';
 import * as digest from '../services/digest.js';
+import * as items from '../services/items.js';
+import * as trail from '../services/trail.js';
+import * as areas from '../services/areas.js';
+import * as releasePosts from '../services/release-posts.js';
+import * as statusAnswers from '../services/status.js';
 import type { Telegram } from '../services/telegram.js';
 import type { Tunnel } from '../services/tunnel.js';
 import type { Push } from '../services/push.js';
@@ -401,6 +406,71 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       json(res, 200, await digest.send(wp, telegram));
     }),
     r('GET', '/api/digest', (_req, res) => json(res, 200, { text: digest.build(wp) })),
+
+    /* ---------- v2: the plan (LLD §19.8) — owner-facing, ordinary auth, relay allowed ---------- */
+    r('GET', '/api/plan', (_req, res, url) => json(res, 200, items.plan(wp, url.searchParams.get('view') === 'board' ? 'board' : undefined))),
+    r('GET', '/api/focus', (_req, res) => json(res, 200, items.getFocus(wp))),
+    r('POST', '/api/focus', async (req, res) => json(res, 200, items.setFocus(wp, strs((await readJson(req))['epicIds']), 'owner'))),
+    r('GET', '/api/items', (_req, res, url) => {
+      const q = (k: string) => url.searchParams.get(k) ?? undefined;
+      json(res, 200, items.list(wp, { level: q('level'), status: q('status'), assigneeId: q('assigneeId'), areaId: q('areaId'), parentId: q('parentId') }));
+    }),
+    r('POST', '/api/items', async (req, res) => {
+      const body = await readJson(req);
+      const item = items.create(wp, body as never, 'owner');
+      json(res, 201, items.detail(wp, item.id));
+    }),
+    r('GET', '/api/items/:id', (_req, res, _url, [id]) => json(res, 200, items.detail(wp, dec(id)))),
+    r('POST', '/api/items/:id', async (req, res, _url, [id]) => {
+      const body = await readJson(req);
+      const item = items.update(wp, dec(id), body as never, 'owner');
+      // start: true on a move to in-progress hands the item to its assignee's session.
+      if (body['start'] === true && item.status === 'in-progress' && item.assigneeId && item.assigneeId !== 'owner') employees.assign(wp, item.id);
+      json(res, 200, items.detail(wp, dec(id)));
+    }),
+    r('POST', '/api/items/:id/comments', async (req, res, _url, [id]) => {
+      items.require$(wp, dec(id));
+      json(res, 201, trail.comment(wp, dec(id), { by: 'owner', text: str((await readJson(req))['text']) }));
+    }),
+    r('POST', '/api/items/:id/merge', async (req, res, _url, [id]) => {
+      const survivor = items.merge(wp, dec(id), str((await readJson(req))['intoId']), 'owner');
+      json(res, 200, items.detail(wp, survivor.id));
+    }),
+    r('GET', '/api/updates', (_req, res, url) => {
+      const limit = Number(url.searchParams.get('limit') ?? '');
+      json(res, 200, trail.updates(wp, { ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}), ...(url.searchParams.get('before') ? { before: url.searchParams.get('before')! } : {}) }));
+    }),
+    r('GET', '/api/status', (_req, res, url) => json(res, 200, statusAnswers.answer(wp, url.searchParams.get('q') ?? ''))),
+    r('GET', '/api/areas', (_req, res) => json(res, 200, areas.list(wp))),
+    r('POST', '/api/areas', async (req, res) => {
+      const body = await readJson(req);
+      json(res, 201, areas.create(wp, { title: str(body['title'], ''), ...(typeof body['description'] === 'string' ? { description: body['description'] } : {}), ...(typeof body['ownerId'] === 'string' ? { ownerId: body['ownerId'] } : {}) }, 'owner'));
+    }),
+    r('POST', '/api/areas/:id', async (req, res, _url, [id]) => json(res, 200, areas.update(wp, dec(id), await readJson(req) as never))),
+    r('GET', '/api/rooms', (_req, res) => json(res, 200, room.listRooms(wp))),
+    r('GET', '/api/rooms/:id', (_req, res, _url, [id]) => json(res, 200, room.roomDetail(wp, dec(id)))),
+    r('GET', '/api/releases/posts', (_req, res) => json(res, 200, releasePosts.list(wp))),
+    r('POST', '/api/releases/posts', async (req, res) => {
+      const body = await readJson(req);
+      json(res, 201, releasePosts.create(wp, {
+        version: str(body['version'], ''), ...(typeof body['shippable'] === 'string' ? { shippable: body['shippable'] } : {}),
+        ...(Array.isArray(body['itemIds']) ? { itemIds: strs(body['itemIds']) } : {}), ...(typeof body['title'] === 'string' ? { title: body['title'] } : {}),
+      }, 'owner'));
+    }),
+    r('GET', '/api/releases/posts/:id', (_req, res, _url, [id]) => {
+      const post = releasePosts.get(wp, dec(id));
+      if (!post) throw new NotFound(`No release post ${dec(id)}`);
+      json(res, 200, post);
+    }),
+    r('GET', '/api/inbox/:id', (_req, res, _url, [id]) => json(res, 200, inbox.thread(wp, dec(id)))),
+    r('POST', '/api/inbox/:id/reply', async (req, res, _url, [id]) => {
+      const body = await readJson(req);
+      json(res, 200, inbox.reply(wp, dec(id), {
+        by: 'owner', via: viaOf(req),
+        ...(typeof body['text'] === 'string' ? { text: body['text'] } : {}),
+        ...(typeof body['optionId'] === 'string' && body['optionId'] ? { optionId: body['optionId'] } : {}),
+      }));
+    }),
 
     /* ---------- spend and health ---------- */
     r('GET', '/api/spend', (_req, res, url) => json(res, 200, spend.summary(wp, url.searchParams.get('day') ?? undefined))),

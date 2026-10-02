@@ -207,6 +207,8 @@ interface SpawnOptions {
   /** Called when the run's SDK session id is known. */
   onSessionId?: (sessionId: string) => void;
   onRateLimit?: (info: { rateLimitType?: string; status: string; utilization?: number; resetsAt?: number }) => void;
+  /** Who wrote the first prompt (HLD D22): the owner's own Talk, or the Workplace starting work. */
+  promptFrom?: 'owner' | 'workplace';
 }
 
 export const createRunDirect = (options: SpawnOptions): Agent => spawn(options);
@@ -244,7 +246,7 @@ function spawn(options: SpawnOptions): Agent {
   runs.set(id, run);
 
   const { images, text } = attach(run, options.attachments ?? []);
-  append(run, 'user', '', options.prompt);
+  append(run, 'user', '', options.prompt, { from: options.promptFrom ?? 'owner' });
   const prompt = withFiles(options.prompt, text);
 
   run.handle = runtime(
@@ -345,10 +347,10 @@ function spawn(options: SpawnOptions): Agent {
 
 /* ---------- driving ---------- */
 
-export function sendMessage(agentId: string, text: string, attachments: Attachment[] = []): void {
+export function sendMessage(agentId: string, text: string, attachments: Attachment[] = [], opts: { from?: 'owner' | 'workplace' } = {}): void {
   const run = require$(agentId);
   const { images, text: files } = attach(run, attachments);
-  append(run, 'user', '', text);
+  append(run, 'user', '', text, { from: opts.from ?? 'owner' });
   update(run, { status: 'running', messageCount: (run.agent.messageCount ?? 0) + 1 });
   run.handle.send(withFiles(text, files), images);
   armSilence(run);

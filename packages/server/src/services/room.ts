@@ -1,12 +1,12 @@
-import type { RoomMessage, RoomThread } from '@jkj/shared';
+import type { Area, Room, RoomDetail, RoomMessage, RoomThread, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as work from './work.js';
 import * as inbox from './inbox.js';
 import * as coo from './coo.js';
 import { readEmployeeFile } from './org.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
-import { oneLine } from './one-line.js';
-import { BadRequest } from '../util/errors.js';
+import { oneLine, short } from './one-line.js';
+import { BadRequest, NotFound } from '../util/errors.js';
 
 /**
  * The Team Room (HLD D3b): cross-team work as a persistent, moderated group chat. Threads per
@@ -59,13 +59,20 @@ export function createThread(wp: Workplace, spec: { title: string; text: string;
   return { thread: getThread(wp, thread.id)!, message };
 }
 
-export function post(wp: Workplace, threadId: string, spec: { text: string; by: string; mentions?: string[]; at?: string; headline?: string }): RoomMessage {
+export function post(wp: Workplace, threadId: string, spec: { text: string; by: string; mentions?: string[]; at?: string; headline?: string; kind?: RoomMessage['kind']; about?: string; itemId?: string }): RoomMessage {
   const thread = getThread(wp, threadId);
   if (!thread) throw new BadRequest(`No thread ${threadId}`);
   if (!spec.text.trim()) throw new BadRequest('An empty message says nothing.');
   const at = spec.at ?? now();
   const mentions = [...new Set([...(spec.mentions ?? []), ...mentionsIn(wp, spec.text)])];
-  const message: RoomMessage = { id: newId('msg'), threadId, at, by: spec.by, owner: spec.by === 'owner', text: spec.text.trim(), mentions };
+  // Messages stay small (HLD D22): an employee's long post keeps its start, the rest goes to details.
+  // The owner's words and the Workplace's own lines are never cut.
+  const body = spec.by === 'owner' || spec.by === 'workplace' ? { text: spec.text.trim() } : short(spec.text);
+  const message: RoomMessage = {
+    id: newId('msg'), threadId, at, by: spec.by, owner: spec.by === 'owner', text: body.text, mentions,
+    ...(body.details ? { details: body.details } : {}),
+    ...(spec.kind ? { kind: spec.kind } : {}), ...(spec.about ? { about: spec.about } : {}), ...(spec.itemId ? { itemId: spec.itemId } : {}),
+  };
   wp.db.prepare('insert into messages (id, thread_id, at, by, text, mentions, json) values (?, ?, ?, ?, ?, ?, ?)')
     .run(message.id, threadId, at, message.by, message.text, JSON.stringify(mentions), JSON.stringify(message));
   const participants = new Set(thread.participants);
@@ -166,8 +173,82 @@ export function markSeen(wp: Workplace, moderatorId: string, at = now()): void {
 }
 
 function saveThread(wp: Workplace, t: RoomThread): void {
-  wp.db.prepare('update threads set title = ?, state = ?, last_at = ?, json = ? where id = ?').run(t.title, t.state, t.lastAt, JSON.stringify(t), t.id);
+  wp.db.prepare('update threads set title = ?, state = ?, last_at = ?, room_id = ?, json = ? where id = ?').run(t.title, t.state, t.lastAt, t.roomId ?? null, JSON.stringify(t), t.id);
   wp.emit({ type: 'room.thread', thread: t });
+}
+
+/* ---------- v2: rooms (LLD §19.1) — General, one per active area, Releases ---------- */
+
+export const RELEASES_THREAD_ID = 'th_releases';
+export const areaThreadId = (areaId: string): string => `th_area_${areaId}`;
+export const epicThreadId = (epicId: string): string => `th_epic_${epicId}`;
+
+/** A fixed-id thread, made once; an existing one is moved to `roomId` and retitled if asked. */
+export function ensureThread(wp: Workplace, spec: { id: string; title: string; roomId: string; epicId?: string; headline?: string }): RoomThread {
+  const existing = getThread(wp, spec.id);
+  if (existing) {
+    if (existing.roomId !== spec.roomId || existing.title !== spec.title) {
+      const moved: RoomThread = { ...existing, roomId: spec.roomId, title: spec.title };
+      saveThread(wp, moved);
+      return moved;
+    }
+    return existing;
+  }
+  const at = now();
+  const thread: RoomThread = {
+    id: spec.id, title: spec.title, charterIds: [], createdBy: 'workplace', createdAt: at, state: 'open',
+    headline: oneLine(spec.headline ?? spec.title).summary, lastAt: at, messageCount: 0, participants: [], escalations: [],
+    roomId: spec.roomId, ...(spec.epicId ? { epicId: spec.epicId } : {}),
+  };
+  wp.db.prepare('insert into threads (id, title, charter_ids, created_by, created_at, state, last_at, room_id, json) values (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(thread.id, thread.title, '[]', 'workplace', at, 'open', at, thread.roomId ?? null, JSON.stringify(thread));
+  wp.emit({ type: 'room.thread', thread });
+  return thread;
+}
+
+export function ensureReleases(wp: Workplace): RoomThread {
+  return ensureThread(wp, { id: RELEASES_THREAD_ID, title: 'Releases', roomId: 'releases', headline: 'Every release and what shipped in it.' });
+}
+
+/** The epic's thread in its area room; undefined while the epic has no area. */
+export function epicThread(wp: Workplace, epic: WorkItem): RoomThread | undefined {
+  if (!epic.areaId) return undefined;
+  return ensureThread(wp, { id: epicThreadId(epic.id), title: epic.title, roomId: `area:${epic.areaId}`, epicId: epic.id });
+}
+
+/** A line the Workplace itself posts (a named update, a stand-up, a release): authored by 'workplace'. */
+export function postLine(wp: Workplace, threadId: string, spec: { text: string; kind: NonNullable<RoomMessage['kind']>; itemId?: string; about?: string }): RoomMessage {
+  return post(wp, threadId, { text: spec.text, by: 'workplace', kind: spec.kind, ...(spec.itemId ? { itemId: spec.itemId } : {}), ...(spec.about ? { about: spec.about } : {}) });
+}
+
+const roomOf = (t: RoomThread): string => t.roomId ?? 'general';
+
+function activeAreas(wp: Workplace): Area[] {
+  return rowsJson<Area>(wp.db.prepare("select json from areas where state = 'active' order by rank, created_at").all());
+}
+
+/** General first, then each active area's room in rank order, then Releases. */
+export function listRooms(wp: Workplace): Room[] {
+  const threads = listThreads(wp);
+  const make = (id: string, kind: Room['kind'], title: string, headline: string, areaId?: string): Room => {
+    const mine = threads.filter(t => roomOf(t) === id);
+    return {
+      id, kind, title, ...(areaId ? { areaId } : {}), headline,
+      lastAt: mine.reduce((m, t) => (t.lastAt > m ? t.lastAt : m), ''),
+      threadIds: mine.map(t => t.id),
+    };
+  };
+  return [
+    make('general', 'general', 'General', 'Where everyone talks.'),
+    ...activeAreas(wp).map(a => make(`area:${a.id}`, 'area', a.title, a.description ?? `Everything in ${a.title}.`, a.id)),
+    make('releases', 'releases', 'Releases', 'Every release and what shipped in it.'),
+  ];
+}
+
+export function roomDetail(wp: Workplace, id: string): RoomDetail {
+  const room = listRooms(wp).find(r => r.id === id);
+  if (!room) throw new NotFound(`No room ${id}`);
+  return { room, threads: listThreads(wp).filter(t => roomOf(t) === id) };
 }
 
 /* ---------- the seed: the real cross-team threads from the 27 Sep plans ---------- */

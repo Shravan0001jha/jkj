@@ -179,6 +179,26 @@ function raiseToOwner(wp: Workplace, item: CooItem, spec: RouteEscalationSpec, n
   return ownerItem;
 }
 
+/**
+ * A stall (HLD D21): the COO hears of it at once — a `coo_items` row and a line in the bridge file —
+ * and it never falls back to the owner's Inbox (stalls are the COO's to clear; Asha covers routine
+ * resumes while the COO is offline, in watch.ts).
+ */
+export function notifyStall(wp: Workplace, spec: { itemId: string; title: string; body: string; by: string }): CooItem {
+  const item: CooItem = {
+    id: newId('coi'), at: now(), kind: 'stall', title: spec.title, body: spec.body, options: [],
+    raisedBy: spec.by, state: 'open', itemId: spec.itemId,
+  };
+  saveItem(wp, item);
+  appendInboxFile(wp, { kind: 'stall', itemId: spec.itemId, coiId: item.id, title: item.title, body: item.body });
+  return item;
+}
+
+/** The owner replied in the thread of an Inbox item the COO forwarded: the lead's watcher gets it. */
+export function relayInboxReply(wp: Workplace, spec: { inboxId: string; title: string; text: string }): void {
+  appendInboxFile(wp, { kind: 'inbox-reply', inboxId: spec.inboxId, title: spec.title, text: spec.text });
+}
+
 /** `@coo` in a Room thread: routed the same way as one of Asha's escalations. */
 export function notifyMention(wp: Workplace, spec: { threadId: string; threadTitle: string; by: string; text: string }): void {
   routeEscalation(wp, {

@@ -268,6 +268,8 @@ export interface WorkItem {
   /** An employee id, 'owner' or 'coo'. */
   waitingOn?: string;
   blockedSince?: string;
+  /** Blocked on the owner: what the asker recommends (it goes into his Inbox item). */
+  blockedRecommendation?: string;
   resolution?: ItemResolution;
   mergedInto?: string;
   releasedIn?: string;

@@ -75,7 +75,7 @@ test('every legacy row gets a level, a parent, a v2 status and a reason; parked 
     const acts = trail.activityFor(wp, 'as_blocked');
     assert.deepEqual(acts.map(a => [a.at, a.by, a.to]), [['2026-09-28T10:00:00.000Z', 'owner', 'building'], ['2026-09-29T10:00:00.000Z', 'workplace', 'blocked']]);
     assert.equal(acts[1]!.text, 'lost on restart');
-    assert.ok(room.listThreads(wp).every(t => (t.roomId ?? 'general') === 'general'));
+    assert.ok(room.listThreads(wp).filter(t => t.id !== room.RELEASES_THREAD_ID).every(t => t.roomId === 'general'), 'legacy threads are in General');
     assert.ok(room.getThread(wp, room.RELEASES_THREAD_ID), 'the Releases room exists');
 
     const again = migrateV2(wp);

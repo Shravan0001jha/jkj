@@ -19,6 +19,9 @@ import { PowerMonitor } from './services/power.js';
 import * as room from './services/room.js';
 import * as coo from './services/coo.js';
 import { wireMentionReplies } from './services/mentions.js';
+import { migrateV2 } from './services/migrate-v2.js';
+import * as watch from './services/watch.js';
+import * as rhythm from './services/rhythm.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
 import * as employees from './services/employees.js';
@@ -61,6 +64,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   const history = boots.recordBoot(wp.db, new Date(startedAt));
   log.info('boot', `boot #${history.total} (${boots.bootsWithin(history, startedAt, 24 * 60 * 60_000)} in the last 24 h)`);
 
+  // Workplace v2 (HLD D25): every legacy row gets its level, status and reason, once, non-destructively.
+  try { migrateV2(wp); } catch (err) { log.warn('boot', `v2 migration: ${err instanceof Error ? err.message : err}`); }
   // The decisions the definition leaves open go to the owner, once.
   seedDecisions(wp);
   // Sessions that were open when the last process died are reported, never forgotten.
@@ -91,6 +96,9 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   try { const made = room.seedThreads(wp); if (made.length) log.info('boot', `seeded ${made.length} Team Room threads from the 27 Sep plans`); } catch (err) { log.warn('boot', `room seed failed: ${err instanceof Error ? err.message : err}`); }
   // @mentions wake a short, rate-limited reply turn (RCA, 29 Sep: nothing did this before); @coo goes to the COO bridge.
   wireMentionReplies(wp);
+  try { room.ensureReleases(wp); } catch (err) { log.warn('boot', `Releases room: ${err instanceof Error ? err.message : err}`); }
+  // v2 stalls are events, not a sweep (HLD D21): each open item has a deadline that every change re-arms.
+  const stopWatch = watch.startWatch(wp);
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
@@ -147,7 +155,10 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
     try { coo.pollPresence(wp); } catch (err) { log.warn('coo', `presence poll: ${err instanceof Error ? err.message : err}`); }
   }, 30_000);
   // The Chief of Staff's routine: stalled work is resumed within budget or explained in the Inbox.
-  const cosTimer = setInterval(() => { try { cos.tick(wp); } catch (err) { log.warn('cos', String(err)); } }, 5 * 60_000);
+  // Its stall loop is off in v2 (the watcher owns stalls); the Room moderation stays.
+  const cosTimer = setInterval(() => { try { cos.tick(wp, Date.now(), { stalls: false }); } catch (err) { log.warn('cos', String(err)); } }, 5 * 60_000);
+  // Asha's rhythm (HLD D24): the 09:30 brief, the 10:00 stand-up, the Sunday review.
+  const rhythmTimer = setInterval(() => { try { rhythm.maybeRun(wp); } catch (err) { log.warn('rhythm', String(err)); } }, 60_000);
   // AWS actuals once a day, after the digest hour.
   const awsTimer = setInterval(() => { if (config.awsCost) void awsCost.reconcileYesterday(wp).catch(err => log.warn('aws-cost', String(err))); }, 60 * 60_000);
   const digestTimer = setInterval(() => void digestService.maybeSend(wp, telegram, config.digestHour), 60_000);
@@ -166,6 +177,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       tunnel?.stop();
       clearInterval(stallTimer);
       clearInterval(cosTimer);
+      clearInterval(rhythmTimer);
+      stopWatch();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
       telegram.stop();

@@ -23,19 +23,29 @@ import type { LogEntry, LogKind } from './types.js';
 
 const TOOL_KINDS: ReadonlySet<LogKind> = new Set(['read', 'edit', 'bash', 'search', 'task', 'tool']);
 
+/**
+ * v2 chat hygiene (owner, 2 Oct: "a chat is a chat"): besides tool runs, two more kinds of entry
+ * are not messages and fold into the activity line — a `user` entry the Workplace itself sent
+ * (`from: 'workplace'`: an assignment prompt, a moderation turn, a handoff request; it is not the
+ * owner's words) and a `system` note (stalled, resumed, an approval decided). Nothing is dropped:
+ * the activity entry keeps them for "expand". Errors stay in place.
+ */
+const isActivity = (e: LogEntry): boolean =>
+  TOOL_KINDS.has(e.kind) || e.kind === 'system' || (e.kind === 'user' && e.from === 'workplace');
+
 export function toChatView(entries: LogEntry[]): LogEntry[] {
   const out: LogEntry[] = [];
   let run: LogEntry[] = [];
 
   const flush = (): void => {
     if (run.length === 0) return;
-    if (run.length === 1) { out.push(run[0]!); run = []; return; }
+    if (run.length === 1 && TOOL_KINDS.has(run[0]!.kind)) { out.push(run[0]!); run = []; return; }
     out.push(activityEntry(run));
     run = [];
   };
 
   for (const entry of entries) {
-    if (TOOL_KINDS.has(entry.kind)) { run.push(entry); continue; }
+    if (isActivity(entry)) { run.push(entry); continue; }
     flush();
     out.push(entry);
   }

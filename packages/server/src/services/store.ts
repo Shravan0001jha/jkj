@@ -142,6 +142,55 @@ create table if not exists coo_items (
   created_at text not null,
   json text not null
 );
+create table if not exists areas (
+  id text primary key,
+  title text not null,
+  state text not null,
+  rank real not null,
+  created_at text not null,
+  json text not null
+);
+create table if not exists comments (
+  id text primary key,
+  item_id text not null,
+  at text not null,
+  by text not null,
+  json text not null
+);
+create index if not exists comments_item on comments(item_id, at);
+create table if not exists activity (
+  seq integer primary key autoincrement,
+  id text not null,
+  at text not null,
+  item_id text,
+  by text not null,
+  kind text not null,
+  json text not null
+);
+create index if not exists activity_item on activity(item_id, seq);
+create table if not exists updates (
+  seq integer primary key autoincrement,
+  id text not null,
+  at text not null,
+  kind text not null,
+  item_id text,
+  json text not null
+);
+create table if not exists inbox_messages (
+  id text primary key,
+  inbox_id text not null,
+  at text not null,
+  by text not null,
+  json text not null
+);
+create index if not exists inbox_messages_item on inbox_messages(inbox_id, at);
+create table if not exists release_posts (
+  id text primary key,
+  at text not null,
+  version text not null,
+  json text not null
+);
+
 create table if not exists coo_messages (
   id text primary key,
   at text not null,
@@ -159,6 +208,13 @@ export function openStore(path: string): Db {
   for (const col of ['tag text', 'source text', 'basis text', 'what text', 'detail text']) {
     try { db.exec(`alter table spend add column ${col}`); } catch { /* already there */ }
   }
+  // Workplace v2 (LLD §19.1): the item tree lives in `work`; these columns index what its JSON holds.
+  for (const col of ['level text', 'status text', 'parent_id text', 'area_id text', 'rank real', 'reviewer_id text']) {
+    try { db.exec(`alter table work add column ${col}`); } catch { /* already there */ }
+  }
+  try { db.exec('alter table threads add column room_id text'); } catch { /* already there */ }
+  db.exec('create index if not exists work_parent on work(parent_id)');
+  db.exec('create index if not exists work_status on work(status)');
   return db;
 }
 
