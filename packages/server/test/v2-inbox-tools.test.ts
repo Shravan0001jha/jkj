@@ -100,6 +100,8 @@ test('the agents\' v2 tools: one story per outcome, tasks by the story owner, no
     const status = await asha.call('status_of', { q: 'greeting context' });
     assert.match(status, /Greeting context contract/);
     assert.match(status, /Done/);
+    assert.match(status, new RegExp(`\\[${storyId}\\]`), 'each answer carries its id');
+    assert.match(await asha.call('status_of', { q: storyId }), /Greeting context contract/, 'an id is answered');
     for (const c of [asha, mira, dev, nikhil]) await c.client.close();
   } finally {
     tmp.cleanup();

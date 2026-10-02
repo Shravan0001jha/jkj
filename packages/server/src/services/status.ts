@@ -36,12 +36,54 @@ export function lineFor(wp: Workplace, it: Item): string {
 
 const match = (wp: Workplace, it: Item) => ({ item: it, line: lineFor(wp, it), href: `item/${it.id}` });
 
+/** Item ids as the store mints them (`newId`: `as_…`, `ft_…`, any short prefix + base36). */
+const ID_RE = /\b[a-z]{2,4}_[a-z0-9]{6,}\b/gi;
+
+/**
+ * A per-charter story's title without its " — <Charter>" suffix (`work.decompose` names each charter's
+ * piece "<feature> — <charter title>"), so "Daily greeting" finds "Daily greeting — Character".
+ */
+export function baseTitle(wp: Workplace, title: string): string {
+  const m = /^(.*\S)\s+[—–-]\s+([^—–]+)$/.exec(title.trim());
+  if (!m) return title;
+  const tail = m[2]!.trim().toLowerCase();
+  for (const c of wp.org.charters.values()) if (c.title.toLowerCase() === tail || c.id === tail) return m[1]!;
+  return title;
+}
+
+const meaningful = (t: string): string => words(t).filter(w => !STOP.has(w)).join(' ');
+
 export function answer(wp: Workplace, q: string, nowMs = Date.now()): StatusAnswer {
   const query = q.trim();
-  const tokens = words(query).filter(w => !STOP.has(w));
-  const all = rowsJson<WorkItem>(wp.db.prepare('select json from work order by coalesce(rank, 0), created_at').all()).filter(w => !w.mergedInto);
+  const rows = rowsJson<WorkItem>(wp.db.prepare('select json from work order by coalesce(rank, 0), created_at').all());
+  const all = rows.filter(w => !w.mergedInto);
   const none: StatusAnswer = { q: query, line: `Nothing in the plan matches "${query}".`, matches: [] };
+
+  // Ids first: the whole query, or every id written inside it. A merged id answers with its survivor.
+  const byId = new Map(rows.map(w => [w.id, w]));
+  const resolve = (id: string): WorkItem | undefined => {
+    let w = byId.get(id) ?? byId.get(id.toLowerCase());
+    for (let hops = 0; w?.mergedInto && hops < 10; hops++) w = byId.get(w.mergedInto) ?? w;
+    return w && !w.mergedInto ? w : undefined;
+  };
+  const ids = [...new Set(query.match(ID_RE) ?? [])];
+  const found = [...new Map(ids.map(resolve).filter((w): w is WorkItem => !!w).map(w => [w.id, w])).values()];
+  if (found.length) {
+    const matches = found.map(w => match(wp, items.toItem(wp, w, nowMs)));
+    return { q: query, line: matches.map(m => m.line).join('; '), matches };
+  }
+  const text = ids.reduce((t, id) => t.replace(id, ' '), query);
+  const tokens = words(text).filter(w => !STOP.has(w));
   if (!tokens.length) return none;
+
+  // An exact title, with or without its " — <Charter>" suffix, beats a person or an area named in it.
+  const qm = tokens.join(' ');
+  const exact = all.filter(w => meaningful(w.title) === qm);
+  const base = all.filter(w => !exact.includes(w) && meaningful(baseTitle(wp, w.title)) === qm);
+  if (exact.length || base.length) {
+    const matches = [...exact, ...base].slice(0, 10).map(w => match(wp, items.toItem(wp, w, nowMs)));
+    return { q: query, line: matches[0]!.line, matches };
+  }
 
   // A person: their open work, most active first.
   const person = wp.org.employees.find(e => tokens.includes(e.id) || tokens.includes(e.name.toLowerCase()));
@@ -53,7 +95,7 @@ export function answer(wp: Workplace, q: string, nowMs = Date.now()): StatusAnsw
   }
 
   // An area: its epics and their progress.
-  const qn = normal(query);
+  const qn = normal(text);
   const area = areas.list(wp).find(a => qn.includes(normal(a.title)));
   if (area) {
     const epics = all.filter(w => levelOf(w) === 'epic' && w.areaId === area.id).map(w => match(wp, items.toItem(wp, w, nowMs)));

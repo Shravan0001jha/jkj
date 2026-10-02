@@ -958,7 +958,9 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         { q: z.string() },
         async ({ q }) => {
           const a = statusAnswers.answer(wp, q);
-          return ok([a.line, ...a.matches.slice(1, 8).map(m => m.line)].join('\n'));
+          // Each match carries its id, so the agent can act on it (item_update, item_comment) or ask again by id.
+          const lines = a.matches.slice(0, 8).map(m => `${m.line} [${m.item.id}]`);
+          return ok((a.matches.length && a.line === a.matches[0]!.line ? lines : [a.line, ...lines]).join('\n'));
         }),
       tool('propose_org_change', 'Propose a hire, split, merge, reassign or restructure with a reason. The owner approves it in the Inbox. `paramsJson` is a JSON object as a string (see the handbook for the shape of each kind).',
         // A z.record() here makes the MCP SDK fail to list ANY tool of this server; a JSON string does not.

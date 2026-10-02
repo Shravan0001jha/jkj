@@ -867,10 +867,18 @@ A one-minute timer calls `maybeRun(wp, now)`; each run is idempotent per IST day
 | GET `/api/updates?limit=&before=` | → `Update[]` newest first (limit ≤ 200, default 50; `before` = an update id) |
 | GET `/api/inbox/:id` | → `InboxThread` |
 | POST `/api/inbox/:id/reply` | `{ text?, optionId? }` → `InboxThread` |
-| GET `/api/status?q=` | → `StatusAnswer` |
+| GET `/api/status?q=` | → `StatusAnswer` (resolution order below) |
 | GET `/api/areas` / POST `/api/areas` / POST `/api/areas/:id` | `{ title, description?, ownerId? }` / `{ title?, description?, state?, rank? }` → `Area[]` / 201 `Area` / `Area` |
 | GET `/api/rooms` / GET `/api/rooms/:id` | → `Room[]` / `RoomDetail` |
 | GET `/api/releases/posts` / POST `/api/releases/posts` / GET `/api/releases/posts/:id` | `{ version, shippable?, itemIds?, title? }` → `ReleasePost[]` / 201 `ReleasePost` / `ReleasePost` |
+
+**Status resolution (`status.answer`, QA 2 Oct).** In order: (1) item ids — the whole query or every
+id written inside it (`/[a-z]{2,4}_[a-z0-9]{6,}/`: `as_…`, `ft_…`, any v2 id), a merged id answering
+with its survivor; (2) an exact title (stop words ignored), with or without the ` — <Charter>` suffix
+`work.decompose` gives per-charter pieces (`baseTitle`), so "Daily greeting" lists every charter's
+piece and the full title finds that one — ahead of (3) a person and (4) an area named in the query
+(an area called "Memory" no longer swallows "Greeting context contract — Memory"); (5) the word-score
+title match. The `status_of` tool prints each match with its id (`… [as_…]`) so the agent can act on it.
 
 Owner actions are attributed `by: 'owner'`. Old routes unchanged (adapters).
 
