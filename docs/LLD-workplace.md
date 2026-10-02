@@ -171,6 +171,19 @@ every restart moved each building story to Blocked and the boot moved it straigh
 Unblocked line per story, a second apart, in the feed and the epic's thread. An interrupt leaves a session `idle`
 with no approval attached; a message wakes it.
 
+**Talk and review sessions across a restart (QA, 2 Oct).** A session with no assignment (owner talk,
+an autonomous talk, a review session) that the Workplace cut off **mid-turn** — its run `running` or
+parked on a tool approval at an orderly shutdown (`close(…, 'shutdown')`), or its row still open with
+status `running` / a pending approval when the boot finds a crash (`recoverAfterRestart`) — gets a
+settings marker `resume-talk:<sessionId>` = `{ employeeId, sdkSessionId }`. `resumeAfterShutdown`, after
+the assignments, spawns each one with `resume: sdkSessionId` (the same SDK conversation) and the prompt
+"The Workplace restarted while you were mid-turn; continue where you left off." (from `workplace`),
+then clears the marker; a capped employee, or one that already has a session open, keeps its marker
+for a later boot (one session per employee: an open session is never displaced). A talk whose turn
+had finished (`waiting`, no approval), one that ended normally (`ended`, `stale`, …) and probes are
+never marked. The SDK session id is written to the row the moment the SDK names it (`onSessionId`),
+so a crash before the next run event can still resume. `ResumeAfterShutdown` gains `resumedTalks`.
+
 ## 8. Approvals and gates (`services/approvals.ts`)
 
 `POLICY: Record<Action, Approver>` from the brief §0. `gate(action, ctx)` returns `{ allowed: true }`

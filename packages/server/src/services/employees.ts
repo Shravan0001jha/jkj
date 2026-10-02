@@ -222,14 +222,18 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
     },
     onResult: result => recordUsage(wp, session, result),
     onRateLimit: info => spend.recordRateLimit(wp, info),
-    onSessionId: sdkId => { if (session.assignmentId) work.setSession(wp, session.assignmentId, sdkId); },
+    onSessionId: sdkId => {
+      if (session.assignmentId) work.setSession(wp, session.assignmentId, sdkId);
+      // On the row at once: a crash before the next run event must still know which conversation to resume.
+      if (session.agentId) { try { wp.db.prepare('update sessions set sdk_session_id = ? where id = ?').run(sdkId, session.agentId); } catch { /* db closed */ } }
+    },
   });
 
   session.agentId = agent.id;
   sessions.set(agent.id, session);
   setState(wp, employeeId, 'working');
   wp.db.prepare('insert into sessions (id, employee_id, assignment_id, started_at, status, context_tokens, json) values (?, ?, ?, ?, ?, ?, ?)')
-    .run(agent.id, employeeId, session.assignmentId ?? null, session.startedAt, 'running', context.tokens, JSON.stringify({ truncated: context.truncated }));
+    .run(agent.id, employeeId, session.assignmentId ?? null, session.startedAt, 'running', context.tokens, JSON.stringify({ truncated: context.truncated, ...(options.probe ? { probe: true } : {}) }));
   log.info('employees', `${emp.name} started ${agent.id} (${context.tokens} context tokens${context.truncated ? ', truncated' : ''})`);
 
   // Watch the transcript for the first "## Plan" reply, and keep the row current so a restart
@@ -239,7 +243,7 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
       try {
         wp.db.prepare('update sessions set sdk_session_id = ?, status = ?, json = ? where id = ?').run(
           runs.sessionIdOf(agent.id) ?? null, updated.status,
-          JSON.stringify({ truncated: context.truncated, cwd: worktree.path, branch: worktree.branch, prompt: options.prompt.slice(0, 500), pending: updated.approval ?? null, permissionMode: updated.permissionMode }),
+          JSON.stringify({ truncated: context.truncated, cwd: worktree.path, branch: worktree.branch, prompt: options.prompt.slice(0, 500), pending: updated.approval ?? null, permissionMode: updated.permissionMode, ...(options.probe ? { probe: true } : {}) }),
           agent.id);
       } catch (err) {
         log.warn('employees', `could not record ${agent.id}: ${err instanceof Error ? err.message : err}`);
@@ -469,7 +473,10 @@ export function close(wp: Workplace, agentId: string, reason: string): void {
   // and leave a machine-written note in the handoff so the work the model did is not forgotten
   // (Asha's spec session was shut down with no handoff on 27 Sep and her files stayed empty).
   if (reason === 'shutdown') {
-    reportInterrupted(wp, session, runs.getRunAgent(agentId)?.approval ?? null, 'shut down');
+    const run = runs.getRunAgent(agentId);
+    // A talk/review session (no assignment) cut off mid-turn resumes on the next boot (QA, 2 Oct).
+    if (!session.assignmentId && !session.probe && run && (run.status === 'running' || run.approval)) markTalkForResume(wp, agentId, session.employeeId, runs.sessionIdOf(agentId) ?? null);
+    reportInterrupted(wp, session, run?.approval ?? null, 'shut down');
     if (!session.probe) appendShutdownNote(wp, session);
   }
   runs.note(agentId, 'Session', `Closed by the Workplace: ${reason}.`);
@@ -563,6 +570,20 @@ function markForResume(wp: Workplace, assignmentId: string, sessionId: string, n
   } catch (err) { log.warn('employees', String(err)); }
 }
 
+/**
+ * A talk or review session (no assignment) the Workplace cut off mid-turn: `resume-talk:<sessionId>`
+ * = its employee and SDK session id, so the boot continues that same conversation. A talk whose turn
+ * had finished, or that ended normally, is never marked.
+ */
+const TALK_KEY = 'resume-talk:';
+
+function markTalkForResume(wp: Workplace, sessionId: string, employeeId: string, sdkSessionId: string | null): void {
+  if (!sdkSessionId) { log.warn('employees', `talk ${sessionId} was cut off mid-turn before the SDK named its session; it cannot be resumed`); return; }
+  wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`${TALK_KEY}${sessionId}`, JSON.stringify({ employeeId, sdkSessionId, at: now() }));
+}
+
+export const TALK_RESTART_PROMPT = 'The Workplace restarted while you were mid-turn; continue where you left off.';
+
 /* ---------- recovery after a restart ---------- */
 
 export interface LostSession {
@@ -580,16 +601,17 @@ export interface LostSession {
  * its history. The SDK session id stays on the row so the conversation can be resumed.
  */
 export function recoverAfterRestart(wp: Workplace): LostSession[] {
-  const rows = wp.db.prepare("select id, employee_id, assignment_id, sdk_session_id, json from sessions where ended_at is null").all() as { id: string; employee_id: string; assignment_id: string | null; sdk_session_id: string | null; json: string }[];
+  const rows = wp.db.prepare("select id, employee_id, assignment_id, sdk_session_id, status, json from sessions where ended_at is null").all() as { id: string; employee_id: string; assignment_id: string | null; sdk_session_id: string | null; status: string | null; json: string }[];
   const lost: LostSession[] = [];
   for (const row of rows) {
-    let meta: { pending?: { tool: string; input: string } | null; prompt?: string } = {};
+    let meta: { pending?: { tool: string; input: string } | null; prompt?: string; probe?: boolean } = {};
     try { meta = JSON.parse(row.json) as typeof meta; } catch { /* an older row */ }
     const pending = meta.pending ?? null;
     wp.db.prepare("update sessions set ended_at = ?, status = 'lost-on-restart' where id = ?").run(now(), row.id);
     const emp = wp.org.employees.find(e => e.id === row.employee_id);
     const name = emp?.name ?? row.employee_id;
     if (row.assignment_id) markForResume(wp, row.assignment_id, row.id, `Session ${row.id} was lost when the Workplace restarted${pending ? ` while waiting for approval of ${pending.tool}` : ''}; it resumes from the handoff`);
+    else if (!meta.probe && (row.status === 'running' || pending)) markTalkForResume(wp, row.id, row.employee_id, row.sdk_session_id);
     inbox.raise(wp, {
       kind: 'question',
       title: pending ? `${name} lost a pending approval on restart: ${pending.tool}` : `${name}'s session was lost on restart`,
@@ -609,6 +631,8 @@ export function recoverAfterRestart(wp: Workplace): LostSession[] {
 
 export interface ResumeAfterShutdown {
   resumed: string[];
+  /** Talk/review sessions cut off mid-turn, continued in their own SDK conversation. */
+  resumedTalks: { sessionId: string; employeeId: string; agentId: string }[];
   skipped: { id: string; reason: string }[];
 }
 
@@ -624,7 +648,7 @@ export interface ResumeAfterShutdown {
  * check) is skipped, not forced, and tried again on the next boot.
  */
 export async function resumeAfterShutdown(wp: Workplace, staggerMs = 1500): Promise<ResumeAfterShutdown> {
-  const result: ResumeAfterShutdown = { resumed: [], skipped: [] };
+  const result: ResumeAfterShutdown = { resumed: [], resumedTalks: [], skipped: [] };
   const marked = (wp.db.prepare("select key from settings where key like 'resume:%'").all() as { key: string }[]).map(r => r.key.slice('resume:'.length));
   const items: WorkItem[] = [];
   for (const id of marked) {
@@ -653,8 +677,29 @@ export async function resumeAfterShutdown(wp: Workplace, staggerMs = 1500): Prom
     }
     if (i + BATCH < items.length) await new Promise(r => setTimeout(r, staggerMs));
   }
-  if (result.resumed.length || result.skipped.length) {
-    log.info('employees', `resume after restart: ${result.resumed.length} resumed${result.skipped.length ? `, ${result.skipped.length} skipped (${result.skipped.map(s => s.id).join(', ')})` : ''}`);
+
+  // Talks cut off mid-turn, after the assignments: one session per employee, so a busy or capped
+  // employee keeps its marker for the next boot rather than displacing the open session.
+  const talks = wp.db.prepare('select key, value from settings where key like ?').all(`${TALK_KEY}%`) as { key: string; value: string }[];
+  for (const t of talks) {
+    const sessionId = t.key.slice(TALK_KEY.length);
+    let mark: { employeeId: string; sdkSessionId: string };
+    try { mark = JSON.parse(t.value) as typeof mark; } catch { wp.db.prepare('delete from settings where key = ?').run(t.key); continue; }
+    const emp = wp.org.employees.find(e => e.id === mark.employeeId);
+    if (!emp || emp.virtual) { wp.db.prepare('delete from settings where key = ?').run(t.key); continue; }
+    const budget = spend.canSpend(wp, emp.id);
+    if (!budget.ok) { result.skipped.push({ id: `talk:${sessionId}`, reason: `${emp.name}: spend cap reached (${budget.scope}); the talk resumes on a later boot` }); continue; }
+    if (openSession(emp.id) || sessionsOf(emp.id).length >= emp.budget.concurrentSessions) { result.skipped.push({ id: `talk:${sessionId}`, reason: `${emp.name} already has a session open; the talk resumes on a later boot` }); continue; }
+    try {
+      const agent = spawn(wp, emp.id, { prompt: TALK_RESTART_PROMPT, resume: mark.sdkSessionId });
+      wp.db.prepare('delete from settings where key = ?').run(t.key);
+      result.resumedTalks.push({ sessionId, employeeId: emp.id, agentId: agent.id });
+    } catch (err) {
+      result.skipped.push({ id: `talk:${sessionId}`, reason: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  if (result.resumed.length || result.resumedTalks.length || result.skipped.length) {
+    log.info('employees', `resume after restart: ${result.resumed.length} resumed, ${result.resumedTalks.length} talk(s) continued${result.skipped.length ? `, ${result.skipped.length} skipped (${result.skipped.map(s => s.id).join(', ')})` : ''}`);
   }
   return result;
 }
