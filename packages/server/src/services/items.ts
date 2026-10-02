@@ -9,7 +9,7 @@ import * as areas from './areas.js';
 import * as room from './room.js';
 import * as watch from './watch.js';
 import { now, rowsJson } from './store.js';
-import { epicOf, isPerson, levelOf, projectItem, rawGet, stateFromStatus } from './v2-map.js';
+import { epicOf, humanDuration, isPerson, levelOf, projectItem, rawGet, stateFromStatus } from './v2-map.js';
 import { BadRequest, NotFound } from '../util/errors.js';
 
 /**
@@ -342,7 +342,7 @@ function flagsFor(wp: Workplace, epicId: string, nowMs: number): PlanFlag[] {
     for (const r of rows) {
       const it = toItem(wp, r, nowMs);
       if (it.blocked) flags.push({ kind: 'blocked', itemId: it.id, title: it.title, reason: it.blocked.reason, waitingOn: it.blocked.waitingOn, since: it.blocked.since });
-      else if (it.stall) flags.push({ kind: 'stalled', itemId: it.id, title: it.title, reason: STALL_REASON[it.stall.rule](it.stall.minutes), since: it.stall.since });
+      else if (it.stall) flags.push({ kind: 'stalled', itemId: it.id, title: it.title, reason: stallReason(it.stall.rule, nowMs - Date.parse(it.stall.since)), waitingOn: stallActor(wp, r, it.stall.since), since: it.stall.since });
       if (levelOf(r) === 'story') visit(childrenRows(wp, r.id));
     }
   };
@@ -350,11 +350,20 @@ function flagsFor(wp: Workplace, epicId: string, nowMs: number): PlanFlag[] {
   return flags;
 }
 
-const STALL_REASON = {
-  'not-started': (m: number) => `Ready for ${m} min and not started`,
-  idle: (m: number) => `No activity for ${m} min`,
-  unreviewed: (m: number) => `In review for ${m} min, untouched`,
-};
+/** "In review 4 days, untouched" (QA 2 Oct: it read "In review for 5760 min, untouched"). */
+export function stallReason(rule: 'not-started' | 'idle' | 'unreviewed', ms: number): string {
+  const d = humanDuration(ms);
+  return rule === 'not-started' ? `Ready ${d}, not started` : rule === 'idle' ? `In progress ${d}, no activity` : `In review ${d}, untouched`;
+}
+
+/**
+ * Who acts on a stall (QA 2 Oct: stalled flags had no waitingOn): the COO, who hears of every stall
+ * (LLD §19.6) — or the assignee once it flagged its own stall in this episode without naming anyone.
+ */
+function stallActor(wp: Workplace, w: WorkItem, since: string): string {
+  const selfFlag = w.employeeId && trail.activityFor(wp, w.id).some(a => a.kind === 'stall' && a.by === w.employeeId && a.at >= since);
+  return selfFlag ? w.employeeId! : 'coo';
+}
 
 function card(wp: Workplace, epic: WorkItem, focus: Focus, nowMs: number): EpicCard {
   const next = childrenRows(wp, epic.id).find(s => levelOf(s) === 'story' && s.status !== 'done');

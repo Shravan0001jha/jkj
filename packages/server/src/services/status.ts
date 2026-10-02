@@ -1,6 +1,7 @@
 import type { Item, StatusAnswer, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as items from './items.js';
+import { stallReason } from './items.js';
 import * as areas from './areas.js';
 import { rowsJson } from './store.js';
 import { levelOf, nameOf, STATUS_LABEL } from './v2-map.js';
@@ -29,7 +30,7 @@ export function lineFor(wp: Workplace, it: Item): string {
   }
   if (it.points) parts.push(`${it.points} pts`);
   if (it.blocked) parts.push(`waiting on ${nameOf(wp, it.blocked.waitingOn)}: ${it.blocked.reason}`);
-  else if (it.stall) parts.push(it.stall.rule === 'idle' ? `no activity for ${it.stall.minutes} min` : it.stall.rule === 'not-started' ? `not started for ${it.stall.minutes} min` : `in review untouched for ${it.stall.minutes} min`);
+  else if (it.stall) parts.push(stallReason(it.stall.rule, it.stall.minutes * 60_000).toLowerCase());
   return `${NOUN[it.level]} '${it.title}' — ${parts.join(' · ')}`;
 }
 

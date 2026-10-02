@@ -128,3 +128,13 @@ export function projectItem(wp: Workplace, w: WorkItem): Item {
     updatedAt: w.updatedAt,
   };
 }
+
+/** Elapsed time the way a person says it (QA 2 Oct): "45 min", "3 hours", "4 days" — never raw minutes. */
+export function humanDuration(ms: number): string {
+  const min = Math.max(1, Math.floor(ms / 60_000));
+  if (min < 60) return `${min} min`;
+  const hours = Math.floor(min / 60);
+  if (hours < 48) return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  const days = Math.floor(hours / 24);
+  return `${days} days`;
+}

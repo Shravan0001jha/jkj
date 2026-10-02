@@ -827,7 +827,12 @@ Thresholds: `WORKPLACE_STALL_READY_MIN` (15), `WORKPLACE_STALL_IDLE_MIN` (10),
 `WORKPLACE_STALL_REVIEW_MIN` (30). Boot arms every open item. `cos.tick`'s stall loop is no longer
 scheduled (`tick(wp, now, { stalls: false })` from `index.ts`; the function and its tests stay);
 `stall.stalledSince` ignores Backlog items, so nothing old can restart a parked item either.
-`Item.stall` is `evaluate`'s rule when past due (derived, never stored).
+`Item.stall` is `evaluate`'s rule when past due (derived, never stored). On the Plan, a stalled
+`PlanFlag` (QA, 2 Oct) carries `waitingOn` = who acts: `coo` (who hears of every stall), or the
+assignee once it flagged its own stall in this episode without naming anyone (a `stall` activity by
+the assignee at or after the stall's `since`); and its `reason` is human time (`humanDuration`: "45
+min", "3 hours", "4 days"): "Ready 1 hour, not started", "In progress 3 hours, no activity", "In
+review 4 days, untouched". `status_of` uses the same wording.
 
 ### 19.7 Asha's rhythm (`rhythm.ts`)
 
