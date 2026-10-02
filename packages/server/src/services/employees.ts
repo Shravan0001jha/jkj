@@ -885,7 +885,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           if (!t) return ok(`No thread ${threadId}.`);
           return ok(`# ${t.title} [${t.state}]\n` + room.messages(wp, threadId).map(m => `${m.owner ? 'OWNER' : m.by} (${m.at}): ${m.details ?? m.text}`).join('\n'));
         }),
-      tool('room_resolve', 'Chief of Staff only: resolve a Team Room thread with a summary (written into the relevant charter or contract by you) and optional follow-up assignments.',
+      tool('room_resolve', 'Chief of Staff only: resolve a Team Room topic thread with a summary (written into the relevant charter or contract by you) and optional follow-up assignments. An epic\'s own thread and the room channels (area, General, Releases) are standing channels and cannot be resolved: post a summary in them instead.',
         { threadId: z.string(), summary: z.string(), followUps: z.array(z.object({ employeeId: z.string(), title: z.string(), body: z.string() })).optional() },
         async ({ threadId, summary, followUps }) => {
           const emp = employee(wp, employeeId);

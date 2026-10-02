@@ -88,6 +88,7 @@ export function post(wp: Workplace, threadId: string, spec: { text: string; by: 
 export function resolve(wp: Workplace, threadId: string, spec: { summary: string; by: string; followUps?: { employeeId: string; title: string; body: string }[] }): { thread: RoomThread; followUps: string[] } {
   const thread = getThread(wp, threadId);
   if (!thread) throw new BadRequest(`No thread ${threadId}`);
+  if (isChannel(thread)) throw new BadRequest(`"${thread.title}" is a standing channel (${thread.epicId ? 'the epic\'s own thread' : 'a room channel'}); it cannot be resolved. Post a summary in it instead.`);
   if (!spec.summary.trim()) throw new BadRequest('A resolution needs a summary.');
   const created: string[] = [];
   for (const f of spec.followUps ?? []) {
@@ -162,10 +163,43 @@ export function contextFor(wp: Workplace, employeeId: string): string {
   return lines.join('\n');
 }
 
-/** Threads with messages newer than the moderator's last look. */
+/**
+ * Threads with messages from people newer than the moderator's last look. The Workplace's own lines
+ * (update, stand-up, release) are not a conversation and never wake the moderator (QA 2 Oct: Asha was
+ * handed the P0 epic's thread for every automated line, and resolved it to make them stop).
+ */
 export function needsModeration(wp: Workplace, moderatorId: string): RoomThread[] {
   const last = (wp.db.prepare('select value from settings where key = ?').get(`room-seen:${moderatorId}`) as { value: string } | undefined)?.value ?? '';
-  return listThreads(wp, 'open').filter(t => t.lastAt > last && messages(wp, t.id).at(-1)?.by !== moderatorId);
+  return listThreads(wp, 'open').filter(t => {
+    if (t.lastAt <= last) return false;
+    const spoken = messages(wp, t.id).filter(m => !isAutomated(m));
+    const newest = spoken.at(-1);
+    return !!newest && newest.at > last && newest.by !== moderatorId;
+  });
+}
+
+/** A line the Workplace posts by itself (a named update, a stand-up, a release post). */
+export const isAutomated = (m: RoomMessage): boolean => m.by === 'workplace' && !!m.kind && m.kind !== 'message';
+
+/**
+ * Standing channels (LLD §19.4, QA 2 Oct): an epic's own thread, an area's channel, General and
+ * Releases. Their update lines keep coming for as long as the work exists, so they are never
+ * resolved; a topic thread is.
+ */
+export function isChannel(t: Pick<RoomThread, 'id' | 'epicId'>): boolean {
+  return !!t.epicId || t.id.startsWith('th_epic_') || t.id.startsWith('th_area_') || t.id === GENERAL_THREAD_ID || t.id === RELEASES_THREAD_ID;
+}
+
+/** Standing channels resolved before the rule are reopened (boot migration; idempotent). */
+export function reopenChannels(wp: Workplace): string[] {
+  const reopened: string[] = [];
+  for (const t of listThreads(wp, 'resolved')) {
+    if (!isChannel(t)) continue;
+    const { summary: _summary, ...rest } = t;
+    saveThread(wp, { ...rest, state: 'open' });
+    reopened.push(t.id);
+  }
+  return reopened;
 }
 
 export function markSeen(wp: Workplace, moderatorId: string, at = now()): void {

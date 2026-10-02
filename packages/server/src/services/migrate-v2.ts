@@ -90,6 +90,9 @@ export function migrateV2(wp: Workplace): MigrationReport {
     throw err;
   }
   room.ensureReleases(wp);
+  // Every boot, idempotent (QA 2 Oct): standing channels are never resolved (LLD §19.4).
+  const reopened = room.reopenChannels(wp);
+  if (reopened.length) log.info('migrate', `reopened ${reopened.length} standing channel thread(s): ${reopened.join(', ')}`);
   if (report.items) {
     wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run('v2-migration', JSON.stringify({ at: new Date().toISOString(), ...report }));
     log.info('migrate', `v2: ${report.items} items (${report.epics} epics, ${report.stories} stories), ${report.parked} parked → Backlog, ${report.reviewersSet} reviewers set; before ${JSON.stringify(report.byStatusBefore)} after ${JSON.stringify(report.byStatusAfter)}`);

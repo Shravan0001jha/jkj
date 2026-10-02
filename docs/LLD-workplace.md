@@ -764,6 +764,16 @@ else `proposed` (the next session is asked for its plan first); in-review → `r
   **blocked** one (no "Unblocked" for a block nobody was told about). With (1), an item flapping
   Blocked ↔ In progress for the same reason produces one Blocked and one Unblocked line. The Plan's
   flags remain the live truth; the feed is the digest of changes.
+- **Standing channels are never resolved (QA, 2 Oct).** An epic's thread (`th_epic_<id>`, or any
+  thread with `epicId`), an area's channel (`th_area_<id>`), General and Releases keep receiving
+  update lines for as long as the work exists, so `room.resolve` refuses them (400 on `POST
+  /api/room/:id/resolve`, "Not resolved: …" from `room_resolve`); only topic threads resolve. The
+  boot migration reopens any standing channel resolved before the rule (`room.reopenChannels`, every
+  boot, idempotent; the summary is dropped, the headline kept). The Workplace's own lines (`by:
+  workplace` with `kind` update/standup/release) never hand a thread to the moderator
+  (`room.needsModeration` looks only at messages from people), so Asha is not woken to "moderate"
+  them. Chosen over "automated lines reopen a resolved thread" because that would let a thread flip
+  resolved ↔ open with every line, and the owner's composer would come and go with it.
 
 ### 19.5 Inbox threads
 
