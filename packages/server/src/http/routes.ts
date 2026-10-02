@@ -117,7 +117,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     }),
 
     /* ---------- inbox ---------- */
-    r('GET', '/api/inbox', (_req, res) => json(res, 200, inbox.ownerList(wp))),
+    r('GET', '/api/inbox', (_req, res, url) => json(res, 200, inbox.ownerPage(wp, { state: url.searchParams.get('state'), limit: url.searchParams.get('limit'), before: url.searchParams.get('before') }))),
     r('POST', '/api/inbox/:id/answer', async (req, res, _url, [id]) => {
       const body = await readJson(req);
       const optionId = typeof body['optionId'] === 'string' ? body['optionId'] : '';
@@ -398,7 +398,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     r('GET', '/api/room/:id', (_req, res, _url, [id]) => {
       const thread = room.getThread(wp, dec(id));
       if (!thread) throw new NotFound(`No thread ${dec(id)}`);
-      json(res, 200, { thread, messages: room.messages(wp, thread.id) });
+      json(res, 200, { thread: room.ownerThread(wp, thread), messages: room.messages(wp, thread.id) });
     }),
     r('POST', '/api/room/:id/messages', async (req, res, _url, [id]) => {
       const body = await readJson(req);

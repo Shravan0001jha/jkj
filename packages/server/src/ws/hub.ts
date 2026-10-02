@@ -62,7 +62,8 @@ export function attachSocket(server: Server, wp: Workplace, auth: Auth): SocketH
     if (agent) broadcast({ type: 'agent.updated', agent });
     if (entry) broadcast({ type: 'agent.log', entry });
   });
-  wp.on(event => broadcast(event));
+  // The owner's apps read Inbox items with known ids as titles, as GET /api/inbox does.
+  wp.on(event => broadcast(event.type === 'inbox.updated' ? { ...event, item: inbox.ownerView(wp, event.item) } : event));
 
   wss.on('connection', async ws => {
     clients.add(ws);

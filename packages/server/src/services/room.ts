@@ -7,6 +7,7 @@ import { readEmployeeFile } from './org.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { oneLine, short } from './one-line.js';
 import { authorId } from './v2-map.js';
+import { humanizeIds } from './id-names.js';
 import { BadRequest, NotFound } from '../util/errors.js';
 
 /**
@@ -16,11 +17,19 @@ import { BadRequest, NotFound } from '../util/errors.js';
  */
 
 export function listThreads(wp: Workplace, state?: RoomThread['state']): RoomThread[] {
+  return storedThreads(wp, state).map(t => ownerThread(wp, withHeadline(t)));
+}
+
+/** As stored (for writes: a read view must never be saved back). */
+function storedThreads(wp: Workplace, state?: RoomThread['state']): RoomThread[] {
   const rows = state
     ? wp.db.prepare('select json from threads where state = ? order by last_at desc').all(state)
     : wp.db.prepare("select json from threads order by case state when 'open' then 0 else 1 end, last_at desc").all();
-  return rowsJson<RoomThread>(rows).map(withHeadline);
+  return rowsJson<RoomThread>(rows);
 }
+
+/** A thread as the owner reads it: known ids in its headline read as titles (the stored headline keeps them). */
+export const ownerThread = (wp: Workplace, t: RoomThread): RoomThread => ({ ...t, headline: humanizeIds(wp, t.headline) });
 
 export function getThread(wp: Workplace, id: string): RoomThread | undefined {
   const t = rowJson<RoomThread>(wp.db.prepare('select json from threads where id = ?').get(id));
@@ -195,7 +204,7 @@ export function isChannel(t: Pick<RoomThread, 'id' | 'epicId'>): boolean {
 /** Standing channels resolved before the rule are reopened (boot migration; idempotent). */
 export function reopenChannels(wp: Workplace): string[] {
   const reopened: string[] = [];
-  for (const t of listThreads(wp, 'resolved')) {
+  for (const t of storedThreads(wp, 'resolved')) {
     if (!isChannel(t)) continue;
     const { summary: _summary, ...rest } = t;
     saveThread(wp, { ...rest, state: 'open' });

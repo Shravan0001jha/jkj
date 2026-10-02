@@ -22,6 +22,7 @@ import * as watch from './watch.js';
 import * as statusAnswers from './status.js';
 import { isPerson, rawGet } from './v2-map.js';
 import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
+import { humanizeIds } from './id-names.js';
 import { now } from './store.js';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
@@ -785,7 +786,7 @@ export function card(wp: Workplace, employeeId: string): EmployeeCard {
     employee: { ...e, state, ...(reason ? { stateReason: reason } : {}) },
     charters: e.charterIds.map(id => wp.org.charters.get(id)).filter((c): c is NonNullable<typeof c> => !!c).map(summarise),
     currentWork: current,
-    lastReport: lastReport.get(employeeId) ?? (status || null),
+    lastReport: humanizeIds(wp, lastReport.get(employeeId) ?? (status || undefined)) ?? null,
     session: open ? runs.getRunAgent(open.agentId) ?? null : null,
     spendTodayInr: spend.summary(wp).byEmployee[employeeId] ?? 0,
     needsYou: needsYouItems(wp, employeeId).length,

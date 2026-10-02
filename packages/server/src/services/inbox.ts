@@ -2,6 +2,7 @@ import type { InboxAnswer, InboxItem, InboxKind, InboxMessage, InboxOption, Inbo
 import type { Workplace } from './workplace.js';
 import { oneLine, short } from './one-line.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
+import { humanizeIds } from './id-names.js';
 import { levelOf, rawGet } from './v2-map.js';
 import { BadRequest, Conflict, NotFound } from '../util/errors.js';
 
@@ -182,7 +183,37 @@ function messageCounts(wp: Workplace, id?: string): Map<string, { n: number; las
  * the digest show; a routine item still shows on the pages of the employees it affects.
  */
 export function ownerList(wp: Workplace, state?: InboxItem['state']): InboxItem[] {
-  return list(wp, state).filter(isOwnerFacing);
+  return list(wp, state).filter(isOwnerFacing).map(i => ownerView(wp, i));
+}
+
+/**
+ * One page of the owner's Inbox (iOS QA, 2 Oct: 88 KB for 45 items, nearly all answered): `state`
+ * filters, `before` (an item id) starts after that item, `limit` (≤ 200) caps it. With none of them
+ * it is exactly `ownerList`, so older clients see no change.
+ */
+export function ownerPage(wp: Workplace, q: { state?: string | null; limit?: string | null; before?: string | null }): InboxItem[] {
+  const state = q.state || undefined;
+  if (state && state !== 'open' && state !== 'answered' && state !== 'expired') throw new BadRequest('state must be open, answered or expired');
+  let page = ownerList(wp, state as InboxItem['state'] | undefined);
+  if (q.before) {
+    const at = page.findIndex(i => i.id === q.before);
+    if (at < 0) throw new BadRequest(`No inbox item ${q.before} in this list`);
+    page = page.slice(at + 1);
+  }
+  if (q.limit) {
+    const n = Number(q.limit);
+    if (!Number.isInteger(n) || n < 1) throw new BadRequest('limit must be a positive whole number');
+    page = page.slice(0, Math.min(n, 200));
+  }
+  return page;
+}
+
+/** What the owner reads: known ids in the title, summary and details read as their titles (the stored item keeps them). */
+export function ownerView(wp: Workplace, i: InboxItem): InboxItem {
+  return {
+    ...i, title: humanizeIds(wp, i.title), summary: humanizeIds(wp, i.summary),
+    ...(i.details ? { details: humanizeIds(wp, i.details) } : {}),
+  };
 }
 
 /**
@@ -282,7 +313,7 @@ export function messages(wp: Workplace, inboxId: string): InboxMessage[] {
 export function thread(wp: Workplace, id: string): InboxThread {
   const item = get(wp, id);
   if (!item) throw new NotFound(`No inbox item ${id}`);
-  return { item, messages: messages(wp, id) };
+  return { item: ownerView(wp, item), messages: messages(wp, id) };
 }
 
 /**

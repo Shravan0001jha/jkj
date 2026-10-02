@@ -3,7 +3,10 @@ import type { Workplace } from './workplace.js';
 import * as inbox from './inbox.js';
 import * as room from './room.js';
 import { newId, now, rowsJson } from './store.js';
-import { short } from './one-line.js';
+import { oneLine, short } from './one-line.js';
+
+/** How much of a block's reason the feed line carries. */
+const BLOCKED_REASON_MAX = 100;
 import { authorId, chiefOfStaffId, epicOf, levelOf, nameOf, rawGet } from './v2-map.js';
 import { BadRequest } from '../util/errors.js';
 
@@ -138,7 +141,7 @@ function announce(wp: Workplace, prev: WorkItem, next: WorkItem, by: string): vo
   const Who = who === 'you' ? 'You' : who;
   const pts = next.points ? `, ${next.points} pts` : '';
   const noun = level === 'epic' ? 'Epic' : level === 'task' ? 'Task' : 'Story';
-  let feed: { kind: UpdateKind; line: string } | null = null;
+  let feed: { kind: UpdateKind; line: string; details?: string } | null = null;
   let roomLine: string | null = null;
   if (next.status === 'in-progress' && (prev.status === 'ready' || prev.status === 'backlog') && level === 'story') {
     feed = { kind: 'started', line: `Started: ${next.title} — ${Who}${pts}` };
@@ -148,7 +151,10 @@ function announce(wp: Workplace, prev: WorkItem, next: WorkItem, by: string): vo
     roomLine = `${noun} '${next.title}' is done`;
   } else if (next.status === 'blocked' && level !== 'epic') {
     const waiting = nameOf(wp, next.waitingOn);
-    feed = { kind: 'blocked', line: `Blocked: ${next.title} — waiting on ${waiting}: ${next.blockedReason ?? 'no reason given'}` };
+    // One sentence of the reason, ~100 chars (iOS QA, 2 Oct); the whole reason is the line's details and stays on the item.
+    const reason = next.blockedReason?.trim() || 'no reason given';
+    const said = oneLine(reason, BLOCKED_REASON_MAX).summary;
+    feed = { kind: 'blocked', line: `Blocked: ${next.title} — waiting on ${waiting}: ${said}`, ...(said !== reason ? { details: reason } : {}) };
     roomLine = `${noun} '${next.title}' is blocked: waiting on ${waiting}`;
   } else if (prev.status === 'blocked' && next.status !== 'done' && level !== 'epic') {
     feed = { kind: 'unblocked', line: `Unblocked: ${next.title} — ${Who}` };
