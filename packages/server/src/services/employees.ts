@@ -523,12 +523,7 @@ function appendShutdownNote(wp: Workplace, s: Session): void {
  */
 function reportInterrupted(wp: Workplace, s: { agentId: string; employeeId: string; assignmentId?: string }, pending: { tool: string; input: string } | null, how: string): void {
   const name = wp.org.employees.find(e => e.id === s.employeeId)?.name ?? s.employeeId;
-  if (s.assignmentId) {
-    try {
-      const item = work.get(wp, s.assignmentId);
-      if (item && item.state === 'building') work.transition(wp, item.id, { to: 'blocked', by: 'workplace', cause: 'workplace-shutdown', note: `session ${s.agentId} was ${how} by the Workplace${pending ? ` while waiting for approval of ${pending.tool}` : ''}; start it again to continue from the branch and the handoff` });
-    } catch (err) { log.warn('employees', String(err)); }
-  }
+  if (s.assignmentId) markForResume(wp, s.assignmentId, s.agentId, `Session ${s.agentId} was ${how} by the Workplace${pending ? ` while waiting for approval of ${pending.tool}` : ''}; it resumes on the next boot from the branch and the handoff`);
   if (pending) {
     inbox.raise(wp, {
       kind: 'question',
@@ -539,6 +534,24 @@ function reportInterrupted(wp: Workplace, s: { agentId: string; employeeId: stri
       dedupeKey: `lost:${s.agentId}`,
     });
   }
+}
+
+/**
+ * A building assignment whose session the Workplace itself ended (a shutdown, a restart, a crash).
+ * QA 2 Oct: this used to move the item to Blocked, and the boot moved it straight back — every
+ * restart posted a Blocked and an Unblocked line per story, seconds apart. A restart is not a
+ * transition of the work: the status stays as it is, the interruption is a note on the item's
+ * activity, and a `resume:<id>` marker tells the next boot to start it again.
+ */
+const RESUME_KEY = (id: string): string => `resume:${id}`;
+
+function markForResume(wp: Workplace, assignmentId: string, sessionId: string, note: string): void {
+  try {
+    const item = work.get(wp, assignmentId);
+    if (!item || item.state !== 'building') return;
+    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(RESUME_KEY(assignmentId), sessionId);
+    trail.record(wp, { itemId: assignmentId, by: 'workplace', kind: 'note', text: note });
+  } catch (err) { log.warn('employees', String(err)); }
 }
 
 /* ---------- recovery after a restart ---------- */
@@ -567,12 +580,7 @@ export function recoverAfterRestart(wp: Workplace): LostSession[] {
     wp.db.prepare("update sessions set ended_at = ?, status = 'lost-on-restart' where id = ?").run(now(), row.id);
     const emp = wp.org.employees.find(e => e.id === row.employee_id);
     const name = emp?.name ?? row.employee_id;
-    if (row.assignment_id) {
-      try {
-        const item = work.get(wp, row.assignment_id);
-        if (item && item.state === 'building') work.transition(wp, item.id, { to: 'blocked', by: 'workplace', cause: 'workplace-shutdown', note: `session ${row.id} was lost when the Workplace restarted${pending ? ` while waiting for approval of ${pending.tool}` : ''}; start it again to continue from the handoff` });
-      } catch (err) { log.warn('employees', String(err)); }
-    }
+    if (row.assignment_id) markForResume(wp, row.assignment_id, row.id, `Session ${row.id} was lost when the Workplace restarted${pending ? ` while waiting for approval of ${pending.tool}` : ''}; it resumes from the handoff`);
     inbox.raise(wp, {
       kind: 'question',
       title: pending ? `${name} lost a pending approval on restart: ${pending.tool}` : `${name}'s session was lost on restart`,
@@ -596,9 +604,10 @@ export interface ResumeAfterShutdown {
 }
 
 /**
- * On boot (1 Oct): every assignment blocked only because the Workplace shut itself down or
- * restarted — never because the owner blocked it, a spend cap paused it, or a start genuinely
- * failed — is restarted at once, from its branch and its handoff. Before this, the only path back
+ * On boot (1 Oct): every assignment interrupted only because the Workplace shut itself down or
+ * restarted (marked `resume:<id>` by `markForResume`, its status untouched since 2 Oct; or, from
+ * before that, blocked with `cause: workplace-shutdown`) — never one the owner blocked, a spend cap
+ * paused, or whose start genuinely failed — is restarted at once, from its branch and its handoff. Before this, the only path back
  * was the Chief of Staff's stall routine, which resumes one item per tick and each item once a
  * day; after a restart with several employees mid-build, that left work (Kabir's, Rohan's) blocked
  * for days. Staggered two at a time so a restart with many blocked items does not spawn them all
@@ -607,8 +616,17 @@ export interface ResumeAfterShutdown {
  */
 export async function resumeAfterShutdown(wp: Workplace, staggerMs = 1500): Promise<ResumeAfterShutdown> {
   const result: ResumeAfterShutdown = { resumed: [], skipped: [] };
-  const items = work.list(wp, { kind: 'assignment', state: 'blocked' })
-    .filter(a => a.employeeId && a.history.at(-1)?.by === 'workplace' && a.history.at(-1)?.cause === 'workplace-shutdown');
+  const marked = (wp.db.prepare("select key from settings where key like 'resume:%'").all() as { key: string }[]).map(r => r.key.slice('resume:'.length));
+  const items: WorkItem[] = [];
+  for (const id of marked) {
+    const item = work.get(wp, id);
+    // Moved on since (the owner reassigned, parked or closed it): nothing to resume.
+    if (!item || item.state !== 'building' || !item.employeeId) { wp.db.prepare('delete from settings where key = ?').run(RESUME_KEY(id)); continue; }
+    items.push(item);
+  }
+  // Rows blocked by a shutdown before 2 Oct (the old behaviour) are still resumed once.
+  items.push(...work.list(wp, { kind: 'assignment', state: 'blocked' })
+    .filter(a => a.employeeId && a.history.at(-1)?.by === 'workplace' && a.history.at(-1)?.cause === 'workplace-shutdown'));
 
   const BATCH = 2;
   for (let i = 0; i < items.length; i += BATCH) {
@@ -616,8 +634,9 @@ export async function resumeAfterShutdown(wp: Workplace, staggerMs = 1500): Prom
       try {
         const budget = spend.canSpend(wp, item.employeeId!);
         if (!budget.ok) { result.skipped.push({ id: item.id, reason: `spend cap reached (${budget.scope}); it resumes when the cap is raised or tomorrow` }); continue; }
-        work.transition(wp, item.id, { to: 'building', by: 'workplace', note: 'resumed automatically: the previous block was the Workplace\'s own restart, not the owner, a cap, or a failure' });
-        assign(wp, item.id);
+        if (item.state === 'blocked') work.transition(wp, item.id, { to: 'building', by: 'workplace', note: 'resumed automatically: the previous block was the Workplace\'s own restart, not the owner, a cap, or a failure' });
+        if (openSession(item.employeeId!)?.assignmentId !== item.id) assign(wp, item.id);
+        wp.db.prepare('delete from settings where key = ?').run(RESUME_KEY(item.id));
         result.resumed.push(item.id);
       } catch (err) {
         result.skipped.push({ id: item.id, reason: err instanceof Error ? err.message : String(err) });

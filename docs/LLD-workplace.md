@@ -158,9 +158,17 @@ branch. Merging into the base branch is the lead's (a different identity), until
 ### 7b. Sessions across a restart, and interrupts
 
 Every session row records its SDK session id, its status and any pending tool approval as they change.
-On boot, rows still open are closed as `lost-on-restart`; a `building` assignment is marked blocked with
-the reason; and one Inbox question per lost session names the pending tool and the resumable SDK id, so
-a decision is never dropped silently (iOS device test, 27 Sep). An interrupt leaves a session `idle`
+On boot, rows still open are closed as `lost-on-restart`; and one Inbox question per lost session names
+the pending tool and the resumable SDK id, so a decision is never dropped silently (iOS device test, 27
+Sep). **A restart is not a transition of the work (QA, 2 Oct):** a `building` assignment whose session
+the Workplace ended (an orderly shutdown, or a crash found on boot) keeps its status; the interruption is
+an activity `note` ("Session run_x was shut down by the Workplace; it resumes on the next boot…") and a
+settings marker `resume:<itemId>`. `resumeAfterShutdown` (boot, two at a time) starts each marked item
+again and clears its marker; a capped employee's item is skipped and keeps its marker for the next boot;
+an item that moved on in the meantime (no longer `building`) just loses its marker. Rows blocked by a
+shutdown under the old rule (history `cause: workplace-shutdown`) are still resumed once. Before this,
+every restart moved each building story to Blocked and the boot moved it straight back: a Blocked and an
+Unblocked line per story, a second apart, in the feed and the epic's thread. An interrupt leaves a session `idle`
 with no approval attached; a message wakes it.
 
 ## 8. Approvals and gates (`services/approvals.ts`)
@@ -749,6 +757,13 @@ else `proposed` (the next session is asked for its plan first); in-review → `r
 - The same four item events post a **named chat line** in the epic's thread of its area room
   (author `workplace`, `kind: 'update'`): "Story 'X' started — Dev", "Story 'X' is done", "Story 'X'
   is blocked: waiting on Rohan", "Story 'X' is unblocked", "Epic 'X' is done".
+- **No flapping (QA, 2 Oct).** Every transition is an activity row, but the feed line and its room
+  line are posted only when they are news: (1) an identical line (same item, kind and text, run ids
+  ignored) posted within `WORKPLACE_UPDATE_DEDUPE_MIN` (10) minutes is not posted again, in either
+  place; (2) **unblocked** is posted only when the item's newest Blocked/Unblocked line is a
+  **blocked** one (no "Unblocked" for a block nobody was told about). With (1), an item flapping
+  Blocked ↔ In progress for the same reason produces one Blocked and one Unblocked line. The Plan's
+  flags remain the live truth; the feed is the digest of changes.
 
 ### 19.5 Inbox threads
 

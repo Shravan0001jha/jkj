@@ -70,9 +70,9 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   seedDecisions(wp);
   // Sessions that were open when the last process died are reported, never forgotten.
   employees.recoverAfterRestart(wp);
-  // Work blocked only by the Workplace's own shutdown or restart restarts itself, staggered,
-  // rather than waiting on the Chief of Staff's once-a-day resume (1 Oct: Kabir and Rohan stuck
-  // for days). Owner-stopped and capped work is left alone.
+  // Work whose session the Workplace's own shutdown or restart ended (marked `resume:<id>`, its
+  // status untouched) restarts itself, staggered, rather than waiting on the Chief of Staff's
+  // once-a-day resume (1 Oct: Kabir and Rohan stuck for days). Owner-stopped and capped work is left alone.
   void employees.resumeAfterShutdown(wp).catch(err => log.warn('boot', `resume after restart: ${err instanceof Error ? err.message : err}`));
   // Budget is real money only (28 Sep): relabel the old ledger, lift pauses that were on free usage.
   spend.migrateToRealMoney(wp);

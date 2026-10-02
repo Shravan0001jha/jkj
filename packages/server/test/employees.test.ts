@@ -237,8 +237,11 @@ test('a restart reports every open session and re-raises a pending approval as a
     assert.equal(items.length, before + 1);
     assert.match(items[0]!.title, /Dev lost a pending approval on restart: mcp__travsr__get_context/);
     assert.equal(items[0]!.context['sdkSessionId'], fake.last().sessionId);
-    assert.equal(work.get(wp, a.id)!.state, 'blocked');
-    assert.match(work.get(wp, a.id)!.history.at(-1)!.note!, /lost when the Workplace restarted while waiting for approval/);
+    // A restart is not a block (QA 2 Oct): the status stays; the interruption is a note, and the boot resumes it.
+    assert.equal(work.get(wp, a.id)!.state, 'building');
+    const trail = await import('../src/services/trail.js');
+    assert.match(trail.activityFor(wp, a.id).at(-1)!.text, /lost when the Workplace restarted while waiting for approval/);
+    assert.ok(wp.db.prepare('select 1 from settings where key = ?').get(`resume:${a.id}`), 'marked for the boot to resume');
     assert.deepEqual(employees.recoverAfterRestart(wp), [], 'rows are closed; a second recovery finds nothing');
     assert.equal((wp.db.prepare('select status from sessions where id = ?').get(building.id) as { status: string }).status, 'lost-on-restart');
   } finally {
@@ -247,7 +250,7 @@ test('a restart reports every open session and re-raises a pending approval as a
   }
 });
 
-test('an orderly shutdown with a pending approval files the same question and blocks the build', async () => {
+test('an orderly shutdown with a pending approval files the same question and leaves the build in progress for the boot', async () => {
   const { wp, tmp } = testWorkplace();
   const fake = installFakeRuntime();
   try {
@@ -264,7 +267,7 @@ test('an orderly shutdown with a pending approval files the same question and bl
     const items = inbox.list(wp, 'open');
     assert.equal(items.length, before + 1);
     assert.match(items[0]!.title, /Dev lost a pending approval \(shut down\): Bash/);
-    assert.equal(work.get(wp, a.id)!.state, 'blocked');
+    assert.equal(work.get(wp, a.id)!.state, 'building', 'a shutdown is not a block; the boot resumes it');
     assert.equal(employees.allSessions().length, 0);
   } finally {
     fake.restore();
@@ -292,8 +295,8 @@ test('a shutdown-then-boot cycle resumes work blocked only by the Workplace\'s o
     await tick();
 
     employees.closeAll(wp, 'shutdown');
-    assert.equal(work.get(wp, dev.id)!.state, 'blocked');
-    assert.equal(work.get(wp, dev.id)!.history.at(-1)!.cause, 'workplace-shutdown', 'tagged so a boot can tell it from an owner stop or a failure');
+    assert.equal(work.get(wp, dev.id)!.state, 'building', 'a shutdown never blocks the work (QA 2 Oct)');
+    assert.ok(wp.db.prepare('select 1 from settings where key = ?').get(`resume:${dev.id}`), 'marked so a boot can tell it from an owner stop or a failure');
     const day = spend.dayOf();
     wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`paused:${day}:employee:kabir`, new Date().toISOString());
 
@@ -323,7 +326,8 @@ test('a shutdown-then-boot cycle resumes work blocked only by the Workplace\'s o
     assert.ok(employees.openSession('dev'));
     assert.ok(employees.openSession('mira'));
 
-    assert.equal(work.get(wp, kabir.id)!.state, 'blocked', 'capped work stays stopped');
+    assert.equal(work.get(wp, kabir.id)!.state, 'building', 'capped work keeps its status');
+    assert.equal(employees.openSession('kabir'), undefined, 'but stays stopped');
     assert.equal(work.get(wp, stopped.id)!.state, 'blocked', 'owner-stopped work stays stopped');
     assert.equal(work.get(wp, failed.id)!.state, 'blocked', 'a genuine failure is not auto-resumed');
 

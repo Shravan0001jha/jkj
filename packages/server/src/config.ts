@@ -39,6 +39,8 @@ export interface Config {
   stallIdleMinutes: number;
   /** v2: In review untouched for this long → the COO is told. */
   stallReviewMinutes: number;
+  /** v2: an item's identical Updates line (and its room line) is posted once within this many minutes. */
+  updateDedupeMinutes: number;
   /** Poll AWS Cost Explorer once a day for the previous day's actual (about ₹1 per call). */
   awsCost: boolean;
   /** Push intents to the owner's phone through the relay (LLD-workplace-push). Off with --no-push or WORKPLACE_PUSH=0. */
@@ -80,6 +82,7 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
     stallReadyMinutes: num(env['WORKPLACE_STALL_READY_MIN'], 15),
     stallIdleMinutes: num(env['WORKPLACE_STALL_IDLE_MIN'], 10),
     stallReviewMinutes: num(env['WORKPLACE_STALL_REVIEW_MIN'], 30),
+    updateDedupeMinutes: num(env['WORKPLACE_UPDATE_DEDUPE_MIN'], 10),
     awsCost: env['WORKPLACE_AWS_COST'] !== '0' && !argv.includes('--no-telegram'),
     push: !argv.includes('--no-push') && env['WORKPLACE_PUSH'] !== '0',
     ownerHandles: (env['WORKPLACE_OWNER_HANDLES'] ?? 'owner,shravan').split(',').map(s => s.trim()).filter(Boolean),

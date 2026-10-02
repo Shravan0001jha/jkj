@@ -153,12 +153,35 @@ function announce(wp: Workplace, prev: WorkItem, next: WorkItem, by: string): vo
     feed = { kind: 'unblocked', line: `Unblocked: ${next.title} — ${Who}` };
     roomLine = `${noun} '${next.title}' is unblocked`;
   }
-  if (feed) postUpdate(wp, { ...feed, by: feed.kind === 'started' ? chiefOfStaffId(wp) ?? by : by, itemId: next.id });
+  if (!feed) return;
+  // Only real, new news (QA 2 Oct): an Unblocked line needs the block it ends to have been
+  // announced, and an identical line for the same item inside the window is not posted again —
+  // neither in the feed nor in the epic's thread, so a flapping item cannot flood either.
+  if (feed.kind === 'unblocked' && lastBlockLine(wp, next.id) !== 'blocked') return;
+  if (repeated(wp, next.id, feed.kind, feed.line)) return;
+  postUpdate(wp, { ...feed, by: feed.kind === 'started' ? chiefOfStaffId(wp) ?? by : by, itemId: next.id });
   if (roomLine) {
     const epic = epicOf(wp, next);
     const thread = epic ? room.epicThread(wp, epic) : undefined;
     if (thread) room.postLine(wp, thread.id, { text: roomLine, kind: 'update', itemId: next.id });
   }
+}
+
+/** Run ids and session ids differ between two otherwise identical lines; they are not news. */
+const sameLine = (line: string): string => line.replace(/\b(run|sess|session)_[a-z0-9]+\b/gi, '$1_*').trim();
+
+/** The same item, kind and line posted within `updateDedupeMinutes`. */
+function repeated(wp: Workplace, itemId: string, kind: UpdateKind, line: string): boolean {
+  const since = new Date(Date.now() - wp.config.updateDedupeMinutes * 60_000).toISOString();
+  const recent = rowsJson<Update>(wp.db.prepare('select json from updates where item_id = ? and kind = ? and at >= ? order by seq desc limit 20').all(itemId, kind, since));
+  const want = sameLine(line);
+  return recent.some(u => sameLine(u.line) === want);
+}
+
+/** The newest Blocked/Unblocked line posted for an item, if any. */
+function lastBlockLine(wp: Workplace, itemId: string): UpdateKind | undefined {
+  const row = wp.db.prepare("select kind from updates where item_id = ? and kind in ('blocked', 'unblocked') order by seq desc limit 1").get(itemId) as { kind: UpdateKind } | undefined;
+  return row?.kind;
 }
 
 /** Blocked on the owner → one Inbox question with the recommendation; leaving blocked withdraws it. */
