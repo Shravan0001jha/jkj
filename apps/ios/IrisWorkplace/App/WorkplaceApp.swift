@@ -44,8 +44,22 @@ struct WorkplaceApp: App {
                     case .background: model.background()
                     default: break
                     }
+                    ScreenAwake.update()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryStateDidChangeNotification)) { _ in
+                    ScreenAwake.update()
                 }
         }
+    }
+}
+
+/// Keeps the screen on while the app is open and the phone is on power, so the Mac can drive
+/// live checks on a cabled phone without it locking. On battery, Auto-Lock behaves as usual.
+enum ScreenAwake {
+    @MainActor static func update() {
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        let state = UIDevice.current.batteryState
+        UIApplication.shared.isIdleTimerDisabled = state == .charging || state == .full
     }
 }
 
