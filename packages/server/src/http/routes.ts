@@ -355,6 +355,18 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     }),
     // The COO answering in an epic thread or on an item, as itself (owner, 2 Oct): the owner's
     // routes always write as 'owner', so the lead has its own, loopback only like the rest.
+    // The COO raising a real decision to the owner's Inbox (owner, 2 Oct: "you and Asha both
+    // should have a way"); loopback only like every other /api/coo/* route.
+    r('POST', '/api/coo/decision', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      const options = strs(body['options']).map(o => ({ id: o.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label: o }));
+      json(res, 201, inbox.raise(wp, {
+        kind: 'decision', title: str(body['title']), body: str(body['body']), raisedBy: 'coo',
+        ...(options.length ? { options } : {}),
+        ...(typeof body['recommendation'] === 'string' && body['recommendation'].trim() ? { recommendation: body['recommendation'] } : {}),
+      } as never));
+    }),
     r('POST', '/api/coo/thread-reply', async (req, res) => {
       requireLocal(req);
       const body = await readJson(req);
