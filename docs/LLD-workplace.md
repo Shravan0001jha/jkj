@@ -974,6 +974,13 @@ again by `v2-api.test.ts`. Follow-ups for the relay owner (not required for v2 t
 4. Threads without `roomId` → `general`; the Releases thread is created.
 5. Returns and logs `{ items, epics, stories, byStatusBefore, byStatusAfter, parked, reviewersSet }`;
    nothing is deleted. Idempotent: a second boot does nothing.
+6. Every boot, idempotent (QA, 2 Oct): `normaliseAuthors` rewrites any author that is a charter id
+   (`chief-of-staff`, from `work.decompose`'s old default author) to the employee holding it, in
+   `activity`, `comments`, `messages`, `inbox_messages`, `updates` and each item's `history`
+   (verified on a scratch copy of the live db: 9 activity rows and 9 histories, then 0 on a second
+   run); `room.reopenChannels` reopens standing channels resolved before 19.4's rule. New writes are
+   normalised at the source (`authorId` in `work.create/transition/put`, `items.update`,
+   `trail.record/comment`, `room.post`), and `decompose` defaults to the Chief of Staff's employee id.
 
 Data clean-up done after deploy through the API (COO, owner rules once): areas (`POST /api/areas`,
 first pass Voice & audio, Character & greeting, Memory, Mac & mobile apps), epics into areas

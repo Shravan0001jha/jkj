@@ -4,7 +4,7 @@ import * as inbox from './inbox.js';
 import * as room from './room.js';
 import { newId, now, rowsJson } from './store.js';
 import { short } from './one-line.js';
-import { chiefOfStaffId, epicOf, levelOf, nameOf, rawGet } from './v2-map.js';
+import { authorId, chiefOfStaffId, epicOf, levelOf, nameOf, rawGet } from './v2-map.js';
 import { BadRequest } from '../util/errors.js';
 
 /**
@@ -18,7 +18,7 @@ import { BadRequest } from '../util/errors.js';
 
 export function record(wp: Workplace, spec: { itemId: string | null; by: string; kind: ActivityKind; text: string; from?: string; to?: string; link?: string; at?: string }): Activity {
   const a: Activity = {
-    id: newId('act'), at: spec.at ?? now(), itemId: spec.itemId, by: spec.by, kind: spec.kind, text: spec.text,
+    id: newId('act'), at: spec.at ?? now(), itemId: spec.itemId, by: authorId(wp, spec.by), kind: spec.kind, text: spec.text,
     ...(spec.from !== undefined ? { from: spec.from } : {}), ...(spec.to !== undefined ? { to: spec.to } : {}), ...(spec.link ? { link: spec.link } : {}),
   };
   wp.db.prepare('insert into activity (id, at, item_id, by, kind, json) values (?, ?, ?, ?, ?, ?)').run(a.id, a.at, a.itemId, a.by, a.kind, JSON.stringify(a));
@@ -46,7 +46,8 @@ export function activitySince(wp: Workplace, sinceIso: string, kind?: ActivityKi
 
 /* ---------- comments ---------- */
 
-export function comment(wp: Workplace, itemId: string, spec: { by: string; text: string; details?: string }): Comment {
+export function comment(wp: Workplace, itemId: string, given: { by: string; text: string; details?: string }): Comment {
+  const spec = { ...given, by: authorId(wp, given.by) };
   if (!rawGet(wp, itemId)) throw new BadRequest(`No item ${itemId}`);
   if (!spec.text.trim()) throw new BadRequest('An empty comment says nothing.');
   const authored = spec.by === 'owner' || spec.by === 'workplace' ? { text: spec.text.trim() } : short(spec.text);

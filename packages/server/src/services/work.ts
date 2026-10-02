@@ -5,7 +5,7 @@ import type { Workplace } from './workplace.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { route } from './ownership.js';
 import { BadRequest } from '../util/errors.js';
-import { defaultReviewer, levelOf, statusFromState } from './v2-map.js';
+import { authorId, chiefOfStaffId, defaultReviewer, levelOf, statusFromState } from './v2-map.js';
 import * as trail from './trail.js';
 
 /**
@@ -54,6 +54,7 @@ export interface CreateWork {
 export function create(wp: Workplace, spec: CreateWork): WorkItem {
   if (!spec.title.trim()) throw new BadRequest('Work needs a title.');
   const initial: WorkState = spec.kind === 'feature' ? 'stated' : 'proposed';
+  const by = authorId(wp, spec.by ?? 'workplace');
 
   let charterId = spec.charterId;
   let employeeId = spec.employeeId;
@@ -86,7 +87,7 @@ export function create(wp: Workplace, spec: CreateWork): WorkItem {
     createdAt: at,
     updatedAt: at,
     // Attributed to whoever asked; the Workplace's own creations never read as the owner's (HLD D22).
-    history: [{ at, from: null, to: initial, by: spec.by ?? 'workplace' }],
+    history: [{ at, from: null, to: initial, by }],
     ...spec.v2,
     level,
     ...(parentId ? { parentId } : {}),
@@ -95,7 +96,7 @@ export function create(wp: Workplace, spec: CreateWork): WorkItem {
     rank: spec.v2?.rank ?? nextRank(wp, level, parentId, spec.v2?.areaId),
   };
   save(wp, item, true);
-  trail.afterChange(wp, null, item, spec.by ?? 'workplace');
+  trail.afterChange(wp, null, item, by);
   return item;
 }
 
@@ -146,7 +147,8 @@ export interface TransitionOptions {
   cause?: 'workplace-shutdown';
 }
 
-export function transition(wp: Workplace, id: string, opts: TransitionOptions): WorkItem {
+export function transition(wp: Workplace, id: string, given: TransitionOptions): WorkItem {
+  const opts: TransitionOptions = { ...given, by: authorId(wp, given.by) };
   const item = require$(wp, id);
   const allowed = item.kind === 'feature'
     ? FEATURE_TRANSITIONS[item.state as FeatureState]
@@ -222,7 +224,8 @@ function bumpEpic(wp: Workplace, w: WorkItem): void {
 }
 
 /** A v2 write (items.ts): the row as given, saved and its trail recorded. */
-export function put(wp: Workplace, prev: WorkItem, next: WorkItem, by: string, note?: string): WorkItem {
+export function put(wp: Workplace, prev: WorkItem, next: WorkItem, given: string, note?: string): WorkItem {
+  const by = authorId(wp, given);
   save(wp, next);
   trail.afterChange(wp, prev, next, by, note);
   bumpEpic(wp, next);
@@ -287,7 +290,7 @@ export function routeFeature(wp: Workplace, feature: WorkItem, extra: FeatureThi
 }
 
 /** One assignment per charter the map says the feature touches. */
-export function decompose(wp: Workplace, featureId: string, extra: FeatureThings = {}, by = 'chief-of-staff'): { feature: WorkItem; assignments: WorkItem[]; route: RouteResult } {
+export function decompose(wp: Workplace, featureId: string, extra: FeatureThings = {}, by = chiefOfStaffId(wp) ?? 'workplace'): { feature: WorkItem; assignments: WorkItem[]; route: RouteResult } {
   let feature = require$(wp, featureId);
   if (feature.kind !== 'feature') throw new BadRequest(`${featureId} is not a feature`);
   if (feature.state === 'stated') throw new BadRequest('Write the spec before decomposing.');

@@ -6,6 +6,7 @@ import * as coo from './coo.js';
 import { readEmployeeFile } from './org.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { oneLine, short } from './one-line.js';
+import { authorId } from './v2-map.js';
 import { BadRequest, NotFound } from '../util/errors.js';
 
 /**
@@ -59,7 +60,8 @@ export function createThread(wp: Workplace, spec: { title: string; text: string;
   return { thread: getThread(wp, thread.id)!, message };
 }
 
-export function post(wp: Workplace, threadId: string, spec: { text: string; by: string; mentions?: string[]; at?: string; headline?: string; kind?: RoomMessage['kind']; about?: string; itemId?: string }): RoomMessage {
+export function post(wp: Workplace, threadId: string, given: { text: string; by: string; mentions?: string[]; at?: string; headline?: string; kind?: RoomMessage['kind']; about?: string; itemId?: string }): RoomMessage {
+  const spec = { ...given, by: authorId(wp, given.by) };
   const thread = getThread(wp, threadId);
   if (!thread) throw new BadRequest(`No thread ${threadId}`);
   if (!spec.text.trim()) throw new BadRequest('An empty message says nothing.');

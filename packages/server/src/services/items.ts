@@ -9,7 +9,7 @@ import * as areas from './areas.js';
 import * as room from './room.js';
 import * as watch from './watch.js';
 import { now, rowsJson } from './store.js';
-import { epicOf, humanDuration, isPerson, levelOf, projectItem, rawGet, stateFromStatus } from './v2-map.js';
+import { authorId, epicOf, humanDuration, isPerson, levelOf, projectItem, rawGet, stateFromStatus } from './v2-map.js';
 import { BadRequest, NotFound } from '../util/errors.js';
 
 /**
@@ -199,7 +199,8 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
   if (from === 'done' && !req.note?.trim()) throw new BadRequest('A reopen needs a note: what was wrong with "done"?');
 }
 
-export function update(wp: Workplace, id: string, req: UpdateItemRequest, by: string): Item {
+export function update(wp: Workplace, id: string, req: UpdateItemRequest, given: string): Item {
+  const by = authorId(wp, given);
   const prev = requireRow(wp, id);
   const level = levelOf(prev);
   const next: WorkItem = { ...prev };

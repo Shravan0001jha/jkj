@@ -3,7 +3,7 @@ import type { Workplace } from './workplace.js';
 import * as work from './work.js';
 import * as room from './room.js';
 import { newId, rowsJson } from './store.js';
-import { chiefOfStaffId, qaLead, statusFromState } from './v2-map.js';
+import { authorId, chiefOfStaffId, qaLead, statusFromState } from './v2-map.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -90,6 +90,9 @@ export function migrateV2(wp: Workplace): MigrationReport {
     throw err;
   }
   room.ensureReleases(wp);
+  // Every boot, idempotent (QA 2 Oct): authors are employee ids, never a charter id.
+  const authors = normaliseAuthors(wp);
+  if (authors) log.info('migrate', `rewrote ${authors} author(s) from a charter id to the employee id`);
   // Every boot, idempotent (QA 2 Oct): standing channels are never resolved (LLD §19.4).
   const reopened = room.reopenChannels(wp);
   if (reopened.length) log.info('migrate', `reopened ${reopened.length} standing channel thread(s): ${reopened.join(', ')}`);
@@ -98,4 +101,48 @@ export function migrateV2(wp: Workplace): MigrationReport {
     log.info('migrate', `v2: ${report.items} items (${report.epics} epics, ${report.stories} stories), ${report.parked} parked → Backlog, ${report.reviewersSet} reviewers set; before ${JSON.stringify(report.byStatusBefore)} after ${JSON.stringify(report.byStatusAfter)}`);
   }
   return report;
+}
+
+/**
+ * QA 2 Oct: rows authored by a charter id (`chief-of-staff`, from `work.decompose`'s old default)
+ * are rewritten to the employee who holds it (`authorId`) — activity, comments, room and Inbox
+ * messages, Updates, and each work item's history. Only those rows are touched; a second run finds
+ * none. Returns how many rows changed.
+ */
+export function normaliseAuthors(wp: Workplace): number {
+  const reserved = new Set(['owner', 'coo', 'workplace', ...wp.org.employees.map(e => e.id)]);
+  const charterIds = [...new Set(wp.org.employees.flatMap(e => e.charterIds))].filter(c => !reserved.has(c) && authorId(wp, c) !== c);
+  if (charterIds.length === 0) return 0;
+  const marks = charterIds.map(() => '?').join(', ');
+  let changed = 0;
+  wp.db.exec('begin');
+  try {
+    for (const table of ['activity', 'comments', 'messages', 'inbox_messages']) {
+      const rows = wp.db.prepare(`select rowid as r, json from ${table} where by in (${marks})`).all(...charterIds) as { r: number; json: string }[];
+      for (const row of rows) {
+        const obj = JSON.parse(row.json) as { by: string };
+        obj.by = authorId(wp, obj.by);
+        wp.db.prepare(`update ${table} set by = ?, json = ? where rowid = ?`).run(obj.by, JSON.stringify(obj), row.r);
+        changed += 1;
+      }
+    }
+    const ups = wp.db.prepare(`select rowid as r, json from updates where json_extract(json, '$.by') in (${marks})`).all(...charterIds) as { r: number; json: string }[];
+    for (const row of ups) {
+      const obj = JSON.parse(row.json) as { by: string };
+      obj.by = authorId(wp, obj.by);
+      wp.db.prepare('update updates set json = ? where rowid = ?').run(JSON.stringify(obj), row.r);
+      changed += 1;
+    }
+    for (const w of rowsJson<WorkItem>(wp.db.prepare('select json from work').all())) {
+      if (!w.history.some(h => charterIds.includes(h.by))) continue;
+      const next: WorkItem = { ...w, history: w.history.map(h => (charterIds.includes(h.by) ? { ...h, by: authorId(wp, h.by) } : h)) };
+      wp.db.prepare('update work set json = ? where id = ?').run(JSON.stringify(next), w.id);
+      changed += 1;
+    }
+    wp.db.exec('commit');
+  } catch (err) {
+    wp.db.exec('rollback');
+    throw err;
+  }
+  return changed;
 }

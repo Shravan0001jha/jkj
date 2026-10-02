@@ -138,3 +138,14 @@ export function humanDuration(ms: number): string {
   const days = Math.floor(hours / 24);
   return `${days} days`;
 }
+
+/**
+ * Authors are people (QA 2 Oct): an id that is a charter (`chief-of-staff`) rather than an employee
+ * becomes the employee who holds it, so the apps can show a name. `owner`, `coo`, `workplace` and
+ * employee ids are kept; anything else unknown is kept as given.
+ */
+export function authorId(wp: Workplace, by: string): string {
+  if (!by || by === 'owner' || by === 'workplace' || wp.org.employees.some(e => e.id === by)) return by;
+  const holder = wp.org.employees.find(e => !e.virtual && e.charterIds.includes(by)) ?? wp.org.employees.find(e => e.charterIds.includes(by));
+  return holder?.id ?? by;
+}
