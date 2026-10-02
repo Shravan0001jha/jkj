@@ -872,6 +872,27 @@ time in review wake the reviewer once, and a review session ending never starts 
 In review drops the record, re-entering (or a new reviewer) is a new episode. The 30-minute
 `unreviewed` stall stays as the fallback.
 
+### 19.6b Blocks and dependencies (`blocks.ts`, owner 2 Oct)
+
+Live: Nikhil's QA story for the P0 sat Blocked on Dev's story ~40 min, nobody told; Dev's story
+reaching In review woke nobody. `startBlockWatch` (boot) listens to `work.updated`:
+- **(a) Into Blocked, `waitingOn` ≠ owner** (the owner already gets the Inbox question): the COO gets a
+  bridge item at once (`coo.notifyStall`, title `Blocked: <title>`, unless `flag_stall` filed one for
+  this block in the same moment); the one waited on, if an agent, is told (`tell`: a message into its
+  open session, else a short autonomous session within budget/cap) to unblock or say why via
+  `item_comment`; while the COO is offline Asha is told too. An activity note names who heard. Once per
+  block episode: `block-notify:<id>` = `{ since: blockedSince, renotified }`.
+- **(b) Still the same block `WORKPLACE_STALL_BLOCKED_MIN` (15) later**: `Still blocked: <title>` to the
+  COO (Asha too while offline), once (`renotified`); a timer per block, re-armed at boot; `check(wp,
+  id, now)` is the deterministic core. Blocks that exist when the watch starts are recorded without
+  (a) (no deploy-time flood) and still get (b).
+- **(c) An item reaching In review or Done (resolution done)**: every Blocked item whose reason names
+  its id, or its title (` — <Charter>` suffix ignored, ≥ 12 chars), or that waits on its assignee
+  within the same epic, has its assignee told: "<X> is now In review … if this is what you were waiting
+  for, unblock it (item_update … in-progress)". Never auto-unblocked. Once per arrival
+  (`dep-wake:<id>` = `<status>:<statusSince>`).
+- **(d)** the reviewer wake is 19.6a.
+
 ### 19.7 Asha's rhythm (`rhythm.ts`)
 
 A one-minute timer calls `maybeRun(wp, now)`; each run is idempotent per IST day (settings

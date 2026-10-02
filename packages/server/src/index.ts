@@ -22,6 +22,7 @@ import { wireMentionReplies } from './services/mentions.js';
 import { migrateV2 } from './services/migrate-v2.js';
 import * as watch from './services/watch.js';
 import * as reviewWake from './services/review-wake.js';
+import * as blocks from './services/blocks.js';
 import * as rhythm from './services/rhythm.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
@@ -102,6 +103,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   const stopWatch = watch.startWatch(wp);
   // The reviewer is woken the moment an item enters In review (QA, 2 Oct), not 30 min later via the COO.
   const stopReviewWake = reviewWake.startReviewWake(wp);
+  // A block on a colleague tells the COO and that colleague at once; a dependency arriving wakes who waits on it.
+  const stopBlockWatch = blocks.startBlockWatch(wp);
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
@@ -183,6 +186,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       clearInterval(rhythmTimer);
       stopWatch();
       stopReviewWake();
+      stopBlockWatch();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
       telegram.stop();
