@@ -82,8 +82,12 @@ export const HOST_COMMANDS: { pattern: RegExp; why: string }[] = [
     why: 'this changes the owner\'s real Mac settings; use the test fakes, and a live check goes through the COO' },
   { pattern: /\bshortcuts\s+run\b/i,
     why: 'this runs a Shortcut on the owner\'s real Mac; use the test fakes, and a live check goes through the COO' },
-  { pattern: /(iris-agent|agent-svc|memory-svc|llm-gateway)\b|Iris(Workplace)?\.app/i,
+  // Only RUNNING a service counts: the binary as the command, or the live server entry point. A path
+  // that merely names the folder (`cd services/agent-svc && pytest`, `ls services/agent-svc`) is work.
+  { pattern: /(^|[;&|(]|&&|\|\|)\s*(\S*\/)?(iris-agent|agent-svc|memory-svc|llm-gateway)(\s|$|[;&|)])|Iris(Workplace)?\.app/i,
     why: 'this runs the Iris app or an agent binary directly on the owner\'s real Mac; use the test fakes, and a live check goes through the COO' },
+  { pattern: /\bpython[\d.]*\s+(-u\s+)?(\S*\/)?app\.py\b|(^|[\s;&|\/])uvicorn\b/i,
+    why: 'this starts a live Iris service on the owner\'s real Mac (its ports clash with the running Iris); run the tests instead, and a live check goes through the COO' },
 ];
 
 /** Commands that leave the worktree, the branch, or the machine. */

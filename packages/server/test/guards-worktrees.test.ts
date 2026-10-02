@@ -55,6 +55,7 @@ test('host commands that drive the owner\'s real Mac are denied, unless an appro
     'defaults write com.apple.dock autohide -bool true', 'killall Dock', 'launchctl list', 'tccutil reset All',
     'networksetup -listallhardwareports', 'shortcuts run "Good Morning"', 'automator -i x myworkflow.workflow',
     'security find-generic-password -s x', 'open -a /Applications/Iris.app', './agent-svc --once',
+    'dist-arm64/iris-agent', 'cd x && services/agent-svc/dist/agent-svc --port 9110', '.venv/bin/python app.py', 'python3 -u services/agent-svc/app.py', 'uvicorn app:app --port 9110',
   ];
   for (const c of denied) {
     const d = guardCommand(c, ctx);
@@ -63,6 +64,7 @@ test('host commands that drive the owner\'s real Mac are denied, unless an appro
   }
   // The allowed test commands (pytest, npm test, gradlew, xcodebuild on the simulator) are unaffected.
   const stillAllowed = [
+    'cd services/agent-svc && ../../.venv/bin/python -m pytest -q tests', 'ls services/agent-svc', 'echo agent-svc', 'git diff -- services/agent-svc/app.py', 'grep -n x services/memory-svc/store.py',
     'npm test', 'npm run test:unit', 'python3 -m pytest -q', '.venv/bin/python -m pytest tests/', 'cd mobile/android && ./gradlew test',
     'xcodebuild test -scheme Iris -destination "platform=iOS Simulator,name=iPhone 15"',
   ];
