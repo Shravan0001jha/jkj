@@ -470,7 +470,8 @@ struct UpdateLineRow: View {
         case .release: return "shippingbox"
         default:
             let t = message.text.lowercased()
-            if t.contains("blocked") && !t.contains("unblocked") { return "octagon.fill" }
+            if t.contains("unblocked") { return "arrow.uturn.forward.circle" }
+            if t.contains("blocked") { return "octagon.fill" }
             if t.contains("done") { return "checkmark.circle.fill" }
             if t.contains("started") { return "play.circle.fill" }
             return "info.circle"
@@ -488,10 +489,10 @@ struct UpdateLineRow: View {
             if message.itemId != nil { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
         }
         .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)   // every line the same width
         .padding(.horizontal, 12).padding(.vertical, 6)
         .background(Color(.tertiarySystemFill).opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 16)
         Group {
             if let id = message.itemId {
                 NavigationLink(value: ItemRoute(id: id)) { line }.buttonStyle(.plain)
