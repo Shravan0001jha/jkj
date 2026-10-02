@@ -1,0 +1,50 @@
+[
+  {
+    "id": "ar_muqhzr5khct7v",
+    "title": "Voice & audio",
+    "description": "Hearing, speaking and music on the Mac: STT, AEC, music controls, dance.",
+    "state": "active",
+    "rank": 1,
+    "ownerId": "owner",
+    "roomId": "area:ar_muqhzr5khct7v",
+    "threadId": "th_area_ar_muqhzr5khct7v",
+    "createdAt": "2026-10-02T05:03:42.392Z",
+    "updatedAt": "2026-10-02T05:03:42.392Z"
+  },
+  {
+    "id": "ar_muqhzr6q88hw4",
+    "title": "Character & greeting",
+    "description": "Iris's personality, the daily greeting and the context she greets with.",
+    "state": "active",
+    "rank": 2,
+    "ownerId": "owner",
+    "roomId": "area:ar_muqhzr6q88hw4",
+    "threadId": "th_area_ar_muqhzr6q88hw4",
+    "createdAt": "2026-10-02T05:03:42.434Z",
+    "updatedAt": "2026-10-02T05:03:42.434Z"
+  },
+  {
+    "id": "ar_muqhzr7lq5qxd",
+    "title": "Mac & mobile apps",
+    "description": "The desktop app and phone apps, and the errands that run between them.",
+    "state": "active",
+    "rank": 3,
+    "ownerId": "owner",
+    "roomId": "area:ar_muqhzr7lq5qxd",
+    "threadId": "th_area_ar_muqhzr7lq5qxd",
+    "createdAt": "2026-10-02T05:03:42.465Z",
+    "updatedAt": "2026-10-02T05:03:42.465Z"
+  },
+  {
+    "id": "ar_muqhzr8cy1akx",
+    "title": "Memory",
+    "description": "The one account memory Iris shares across devices.",
+    "state": "active",
+    "rank": 4,
+    "ownerId": "owner",
+    "roomId": "area:ar_muqhzr8cy1akx",
+    "threadId": "th_area_ar_muqhzr8cy1akx",
+    "createdAt": "2026-10-02T05:03:42.492Z",
+    "updatedAt": "2026-10-02T05:03:42.492Z"
+  }
+]

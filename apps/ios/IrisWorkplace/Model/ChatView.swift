@@ -12,8 +12,17 @@ import Foundation
 /// more* consecutive ones collapses into one `activity` entry; a single one is left as it is,
 /// since "worked · 1 step · 2s" reads worse than just showing the read. `system`/`error` entries
 /// are neither tool activity nor a chat message and are left in place, uncollapsed.
+///
+/// v2 chat hygiene (LLD §19.9, "a chat is a chat"): a `user` entry the Workplace sent
+/// (`from: workplace` — an assignment prompt, a moderation turn) and a `system` note are not
+/// messages either: they fold into the activity line too, even alone, so nothing appears under the
+/// owner's name that he did not write. Only a lone *tool* entry stays itself. Errors stay in place.
 enum ChatView {
     private static let toolKinds: Set<LogKind> = [.read, .edit, .bash, .search, .task, .tool]
+
+    static func isActivity(_ e: LogEntry) -> Bool {
+        toolKinds.contains(e.kind) || e.kind == .system || (e.kind == .user && e.from == .workplace)
+    }
 
     static func collapse(_ entries: [LogEntry]) -> [LogEntry] {
         var out: [LogEntry] = []
@@ -21,12 +30,12 @@ enum ChatView {
 
         func flush() {
             guard let first = run.first else { return }
-            if run.count == 1 { out.append(first) } else { out.append(activityEntry(run)) }
+            if run.count == 1 && toolKinds.contains(first.kind) { out.append(first) } else { out.append(activityEntry(run)) }
             run = []
         }
 
         for entry in entries {
-            if toolKinds.contains(entry.kind) {
+            if isActivity(entry) {
                 run.append(entry)
             } else {
                 flush()

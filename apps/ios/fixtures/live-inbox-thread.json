@@ -1,0 +1,34 @@
+{
+  "item": {
+    "id": "in_muqel76q1h1i1",
+    "kind": "decision",
+    "title": "2 Iris paths mis-owned; no proposal kind exists to fix them",
+    "body": "Ran lint() + resolve() against the live map (~/iris-workplace/map.yaml + org.yaml) for the 9 paths flagged by ft_mummakwyuew19.\n\nFindings:\n- 7/9 already resolve correctly, matching the suggested scheme: media.py, experts/media.py, experts/device.py → experts; stt_stream.py, speaker.py → conversation; desktop/character/driver.js, conversation.js → character. No change needed.\n- 2 are genuinely mis-owned: services/agent-svc/voice_native.py and wake_listen.py fall back to \"experts\" (the agent-svc directory default) instead of \"conversation\" (where stt/voice/wake/speaker belongs).\n- Full lint found nothing else unowned — only one unrelated warning (mobile-android has no holder).\n\nBlocker: propose_org_change's six kinds (hire/retire/split/merge/reassign/restructure) have no way to add or move a single path entry between two existing charters. \"reassign\" only moves which employee holds a charter; split/merge only operate on whole charters and split can't target an already-existing charter (throws \"already exists\"). I checked proposals.ts directly — this isn't a usage error, the capability isn't there. I also have no write path to map.yaml myself (it's outside my worktree's allowed paths), so I can't fix it by hand either.\n\nRecommendation: approve a one-off direct edit adding exactly 2 entries (voice_native.py, wake_listen.py → primary: conversation) — smallest possible fix, no new charter. Longer-term, proposals.ts could get a small \"remap-paths\" kind for cases like this, but that's jkj server code change, separate decision.",
+    "summary": "Ran lint() + resolve() against the live map (~/iris-workplace/map.yaml + org.yaml) for the 9 paths flagged by…",
+    "details": "Ran lint() + resolve() against the live map (~/iris-workplace/map.yaml + org.yaml) for the 9 paths flagged by ft_mummakwyuew19.\n\nFindings:\n- 7/9 already resolve correctly, matching the suggested scheme: media.py, experts/media.py, experts/device.py → experts; stt_stream.py, speaker.py → conversation; desktop/character/driver.js, conversation.js → character. No change needed.\n- 2 are genuinely mis-owned: services/agent-svc/voice_native.py and wake_listen.py fall back to \"experts\" (the agent-svc directory default) instead of \"conversation\" (where stt/voice/wake/speaker belongs).\n- Full lint found nothing else unowned — only one unrelated warning (mobile-android has no holder).\n\nBlocker: propose_org_change's six kinds (hire/retire/split/merge/reassign/restructure) have no way to add or move a single path entry between two existing charters. \"reassign\" only moves which employee holds a charter; split/merge only operate on whole charters and split can't target an already-existing charter (throws \"already exists\"). I checked proposals.ts directly — this isn't a usage error, the capability isn't there. I also have no write path to map.yaml myself (it's outside my worktree's allowed paths), so I can't fix it by hand either.\n\nRecommendation: approve a one-off direct edit adding exactly 2 entries (voice_native.py, wake_listen.py → primary: conversation) — smallest possible fix, no new charter. Longer-term, proposals.ts could get a small \"remap-paths\" kind for cases like this, but that's jkj server code change, separate decision.",
+    "context": {},
+    "options": [
+      {
+        "id": "approve-the-2-entry-manual-map-edit-now",
+        "label": "Approve the 2-entry manual map edit now"
+      },
+      {
+        "id": "add-a-remap-paths-proposal-kind-first-then-redo-this-properly",
+        "label": "Add a remap-paths proposal kind first, then redo this properly"
+      },
+      {
+        "id": "hold-for-now",
+        "label": "Hold for now"
+      }
+    ],
+    "state": "open",
+    "raisedBy": "asha",
+    "createdAt": "2026-10-02T03:28:24.482Z",
+    "affects": [
+      "asha"
+    ],
+    "onApprove": "the first option is taken and recorded",
+    "onDeny": "the other option is taken and recorded"
+  },
+  "messages": []
+}

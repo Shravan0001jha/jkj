@@ -102,6 +102,28 @@ final class RestClient {
     func cooMessage(_ text: String) async throws -> CooMessage { try await post(API.cooMessage, CooMessageRequest(text: text)) }
     func cooPresence() async throws -> CooPresence { try await get(API.cooPresence) }
 
+    // v2 (LLD §19.8)
+    func plan(board: Bool = false) async throws -> PlanResponse { try await get(API.plan(view: board ? "board" : nil)) }
+    func setFocus(_ epicIds: [String]) async throws -> Focus { try await post(API.focus, FocusRequest(epicIds: epicIds)) }
+    func items(level: ItemLevel? = nil, status: ItemStatus? = nil, assigneeId: String? = nil, areaId: String? = nil, parentId: String? = nil) async throws -> [Item] {
+        try await get(API.items(level: level, status: status, assigneeId: assigneeId, areaId: areaId, parentId: parentId))
+    }
+    func item(_ id: String) async throws -> ItemDetail { try await get(API.item(id)) }
+    func createItem(_ req: CreateItemRequest) async throws -> ItemDetail { try await post(API.items(), req) }
+    func updateItem(_ id: String, _ req: UpdateItemRequest) async throws -> ItemDetail { try await post(API.item(id), req) }
+    func comment(item id: String, text: String) async throws -> Comment { try await post(API.itemComments(id), CommentRequest(text: text)) }
+    func updates(limit: Int? = nil, before: String? = nil) async throws -> [Update] { try await get(API.updates(limit: limit, before: before)) }
+    func inboxThread(_ id: String) async throws -> InboxThread { try await get(API.inboxThread(id)) }
+    func inboxReply(_ id: String, text: String?, optionId: String?) async throws -> InboxThread {
+        try await post(API.inboxReply(id), InboxReplyRequest(text: text, optionId: optionId))
+    }
+    func status(_ q: String) async throws -> StatusAnswer { try await get(API.status(q)) }
+    func areas() async throws -> [Area] { try await get(API.areas) }
+    func rooms() async throws -> [Room] { try await get(API.rooms) }
+    func roomDetail(_ id: String) async throws -> RoomDetail { try await get(API.roomDetail(id)) }
+    func releasePosts() async throws -> [ReleasePost] { try await get(API.releasePosts) }
+    func releasePost(_ id: String) async throws -> ReleasePost { try await get(API.releasePost(id)) }
+
     // Relay-only routes (never proxied to the Mac).
     func relayHealth() async throws -> RelayHealth { try await get(API.relayHealth) }
     func registerPush(token: String, env: PushEnvironment, device: String?) async throws -> PushRegisterResponse {
@@ -148,6 +170,9 @@ final class RestClient {
         do {
             (data, response) = try await session.data(for: req)
         } catch {
+            // A view that went away (pull-to-refresh released, a `.task` torn down) cancels its
+            // request: that is not a failure and must never reach the screen as one.
+            if error.isCancellation { throw CancellationError() }
             throw WorkplaceError.transport(Self.describeTransport(error, host: req.url?.host ?? "the server"))
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -217,6 +242,18 @@ struct PushDevice: Codable, Equatable, Hashable {
 }
 struct PushDevicesResponse: Codable, Equatable { var devices: [PushDevice] }
 struct OkResponse: Decodable { var ok: Bool? }
+
+extension Error {
+    /// The task or its URL request was cancelled: never shown as an error.
+    var isCancellation: Bool {
+        if self is CancellationError { return true }
+        if let u = self as? URLError, u.code == .cancelled { return true }
+        return (self as NSError).domain == NSURLErrorDomain && (self as NSError).code == NSURLErrorCancelled
+    }
+
+    /// What a screen shows for this error; nil for a cancellation, which is never an error.
+    var userMessage: String? { isCancellation ? nil : localizedDescription }
+}
 
 func describe(_ error: Error) -> String {
     guard let e = error as? DecodingError else { return error.localizedDescription }

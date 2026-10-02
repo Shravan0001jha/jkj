@@ -50,7 +50,7 @@ struct SignInView: View {
         } catch WebAuthError.cancelled {
             // The owner closed the page: nothing to say.
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 }
@@ -73,7 +73,7 @@ struct ReauthView: View {
                     Task {
                         busy = true; error = nil
                         defer { busy = false }
-                        do { try await model.signIn() } catch WebAuthError.cancelled {} catch { self.error = error.localizedDescription }
+                        do { try await model.signIn() } catch WebAuthError.cancelled {} catch { if let m = error.userMessage { self.error = m } }
                     }
                 } label: { Text(busy ? "Signing in…" : "Sign in again").frame(minWidth: 160) }
                 .buttonStyle(.borderedProminent).disabled(busy)

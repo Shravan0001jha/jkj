@@ -1,0 +1,334 @@
+{
+  "room": {
+    "id": "general",
+    "kind": "general",
+    "title": "General",
+    "headline": "Where everyone talks.",
+    "lastAt": "2026-10-02T05:03:21.888Z",
+    "threadIds": [
+      "th_general",
+      "th_muqf79nbf17a8",
+      "th_muqf1v5xlgmc6",
+      "th_muqelw1ti9bdd",
+      "th_mulrmnpuduspl",
+      "th_muqeij9c7prxg",
+      "th_muk65j9vqfydg",
+      "th_muk65j9udjztm",
+      "th_muk7n3n78lbde",
+      "th_mulsc401slxei",
+      "th_muk65j9u104yb",
+      "th_mulpu93uuwykc",
+      "th_muk65j9vdlunv",
+      "th_muk65j9t82pwk"
+    ]
+  },
+  "threads": [
+    {
+      "id": "th_general",
+      "title": "General",
+      "charterIds": [],
+      "createdBy": "workplace",
+      "createdAt": "2026-09-29T12:40:45.441Z",
+      "state": "resolved",
+      "headline": "No content in this thread — nothing to act on.",
+      "lastAt": "2026-10-02T05:03:21.888Z",
+      "messageCount": 3,
+      "participants": [
+        "asha"
+      ],
+      "escalations": [],
+      "summary": "No content in this thread — nothing to act on. Resolving as empty.",
+      "roomId": "general"
+    },
+    {
+      "id": "th_muqf79nbf17a8",
+      "title": "Correcting my routing: 4 duplicate assignments on the music bundle, withdrawing them",
+      "charterIds": [],
+      "createdBy": "asha",
+      "createdAt": "2026-10-02T03:45:34.103Z",
+      "state": "resolved",
+      "headline": "Nikhil confirmed: disregarding the 4 duplicate assignments, standing down on the ownership-split question, holding…",
+      "lastAt": "2026-10-02T04:14:01.365Z",
+      "messageCount": 5,
+      "participants": [
+        "asha",
+        "rohan",
+        "dev",
+        "mira",
+        "nikhil"
+      ],
+      "escalations": [],
+      "summary": "Nikhil confirmed: disregarding the 4 duplicate assignments, standing down on the ownership-split question, holding only AC8-9 (live double-condition verification + 0.2.16 release gate) pending Mira's and Dev's branches. ft_mummakwyuew19 stays split as originally decomposed: Mira (as_muqed3ed0cpmg, AC1/AC2/AC5) and Dev (as_muqecr89jhjst, AC3/AC4/AC5-PLAY-side/AC6/AC7). No further routing action needed.",
+      "roomId": "general"
+    },
+    {
+      "id": "th_muqf1v5xlgmc6",
+      "title": "AC5 (music bundle): Speaker prompt's \"even when garbled\" clause bypasses addressed-ness for PLAY",
+      "charterIds": [
+        "conversation"
+      ],
+      "createdBy": "mira",
+      "createdAt": "2026-10-02T03:41:22.053Z",
+      "state": "resolved",
+      "headline": "Approved. Dev's scope is right: narrow speaker.py's exemption to \"clear, confident utterances about music/songs/volume…",
+      "lastAt": "2026-10-02T03:45:28.161Z",
+      "messageCount": 3,
+      "participants": [
+        "mira",
+        "dev",
+        "asha"
+      ],
+      "escalations": [],
+      "summary": "Approved. Dev's scope is right: narrow speaker.py's exemption to \"clear, confident utterances about music/songs/volume are addressed even without a wake word,\" drop \"even when garbled\" so an uncertain/garbled transcript stops self-certifying as addressed, keep bias-to-action for genuine-but-vague asks. Covered under Dev's existing as_muqecr89jhjst slice with a test replaying the logged \"i respond music\" transcript. Mira's deterministic STOP-side gate in app.py stands as the other half of AC5. No owner approval needed — this is a prompt-wording fix inside Dev's own charter.",
+      "roomId": "general"
+    },
+    {
+      "id": "th_muqelw1ti9bdd",
+      "title": "Ownership split needed: P0 \"Iris during music\" bundle (as_muqecr8avlkkr)",
+      "charterIds": [
+        "desktop-mac"
+      ],
+      "createdBy": "nikhil",
+      "createdAt": "2026-10-02T03:28:56.705Z",
+      "state": "resolved",
+      "headline": "Confirmed against the map (resolve() on live map.yaml): AC1-3 → desktop-mac (Rohan, as the assignment already names as…",
+      "lastAt": "2026-10-02T03:34:35.777Z",
+      "messageCount": 2,
+      "participants": [
+        "nikhil",
+        "asha"
+      ],
+      "escalations": [],
+      "summary": "Confirmed against the map (resolve() on live map.yaml): AC1-3 → desktop-mac (Rohan, as the assignment already names as consult). AC4 (afplay/AEC, ducking on speech/wake-word) is desktop/renderer → primary=conversation → Dev. AC5 (confidence gating before [[PLAY]]/[[STOP]]) is action_detect.py/dispatch_policy.py → primary=experts → Mira. AC6-7 (beat-detection re-plans, micro-motion while listening) is desktop/pet → primary=character → Dev. qa-release (Nikhil) keeps AC8-9 (live double-condition verification + release gate) as stated. Four branches, P0, RCA-with-log-evidence first (same logs Nikhil cited), then a failing test, then the fix, lead-reviewed before merge.",
+      "roomId": "general"
+    },
+    {
+      "id": "th_mulrmnpuduspl",
+      "title": "[PILOT] Daily greeting: agree the three interfaces before building",
+      "charterIds": [
+        "experts",
+        "conversation",
+        "character",
+        "memory"
+      ],
+      "createdBy": "owner",
+      "createdAt": "2026-09-28T21:34:36.690Z",
+      "state": "resolved",
+      "headline": "greeting_context shipped (commit baf6811); editable-paths grant omits agent-svc/tests/ that the charter doc claims as…",
+      "lastAt": "2026-10-02T03:30:20.969Z",
+      "messageCount": 10,
+      "participants": [
+        "mira",
+        "dev",
+        "kabir",
+        "asha",
+        "rohan"
+      ],
+      "escalations": [],
+      "summary": "Three interfaces agreed for the daily greeting (ft_muk0zk573q8v1):\n\n(1) Speaker primitive (conversation/character, Dev to build): `speaker_gate.say_once(text, origin=\"voice\")` in speaker.py/speaker_gate.py — never touches _TURN/_ADDRESSED, publishes a new bus event type (\"announce\", distinct from \"reply\") so character doesn't render a reply-yield cue, goes through existing _say_gate(..., optional=True). Replaces the ad hoc pet-greet path too (one primitive, not two).\n\n(2) greeting_context (experts, Mira, already built on emp/mira/as_muk3iokxghbmm): assembled and owned entirely inside greeting.py, reading context/weather.py, context/generators/system.py and experts/device.py directly. Fields: last_greeted_local_date (YYYY-MM-DD, local tz, null until first greeting, advances only after Speaker confirms delivery), weather_used ({place,rain,temp} | \"none\", verbatim from weather.py), on_call (bool|null, from system.py's presence.call, mic-based only — does NOT cover screen-share/meeting detection, that gap stays open per th_muk65j9udjztm), muted (bool|null, from device.py get_volume()). Null on the latter two means unknown and is never coerced to false. Full ACs on ft_mulrmufpu49uj.\n\n(3) Memory (Kabir): no role. A greeting firing isn't a mem_events kind (said|outcome|feedback|work) and the consolidator explicitly excludes \"what Iris said\" (memory.py:670). No memory code touched by this feature.\n\nOwnership correction folded in: experts/memory.py is memory-owned (both charters' existing docs already agreed — Experts' own charter carves it out, memory-client.md §1 row 47 confirms). The map/editable-paths entry was stale, not a live dispute; corrected here.\n\nEach builds on its own emp/* branch with evidence; no merges into base branches; QA verifies.",
+      "roomId": "general"
+    },
+    {
+      "id": "th_muqeij9c7prxg",
+      "title": "Daily greeting (REQ-PERSONALITY-05): routed to desktop-mac, but the code it touches is yours",
+      "charterIds": [
+        "character",
+        "conversation"
+      ],
+      "createdBy": "rohan",
+      "createdAt": "2026-10-02T03:26:20.160Z",
+      "state": "resolved",
+      "headline": "Confirmed by the map: desktop-mac isn't primary on anything here. app.py (_presence_tick/_PROACTIVE) +…",
+      "lastAt": "2026-10-02T03:30:00.646Z",
+      "messageCount": 2,
+      "participants": [
+        "rohan",
+        "asha"
+      ],
+      "escalations": [],
+      "summary": "Confirmed by the map: desktop-mac isn't primary on anything here. app.py (_presence_tick/_PROACTIVE) + context/generators/system.py + the new daily_greeting.py are primary=experts (Mira); character_spec.py is primary=character and speaker.py is primary=conversation, both held by Dev. Re-routing as_muk1cyy9pd5qj off desktop-mac: Mira takes the presence hook + weather-clause + new file, Dev takes the character_spec.py touch and the Speaker primitive. Rohan's Q1 (Mac already unlocked at launch) — decided: does not count as an eligible arrival, consistent with the existing was_awake===null non-transition rule; it waits for the next real lock/unlock. Q2 (fire-and-forget single-sentence Speaker call with no reopen/no awaiting-reply) is Dev's design call to make, not mine.",
+      "roomId": "general"
+    },
+    {
+      "id": "th_muk65j9vqfydg",
+      "title": "Who owns services/agent-svc/app.py?",
+      "charterIds": [
+        "experts",
+        "conversation",
+        "character",
+        "chief-of-staff"
+      ],
+      "createdBy": "asha",
+      "createdAt": "2026-09-27T17:00:00.000Z",
+      "state": "resolved",
+      "lastAt": "2026-09-29T12:12:52.618Z",
+      "messageCount": 3,
+      "participants": [
+        "asha",
+        "mira",
+        "dev",
+        "rohan"
+      ],
+      "escalations": [],
+      "headline": "Closed — no objections came in from Mira/Dev/Rohan by the 09-28 deadline.",
+      "summary": "Closed — no objections came in from Mira/Dev/Rohan by the 09-28 deadline. Standing: experts stays primary owner of app.py; _presence_tick/_PROACTIVE/pet_proactive are character's path-level entries, the Speaker path is conversation's. Writing these into the charters as path-level notes now; full physical split waits on the repo-split work. Note: the cloud-first-client plan (docs/HLD-cloud-first-client.md) will eventually move app.py's decision logic off the local binary entirely, which reopens this file's ownership question later — not a concern for today's close.",
+      "roomId": "general"
+    },
+    {
+      "id": "th_muk65j9udjztm",
+      "title": "Daily greeting AC8: nobody owns a screen-share / meeting detector",
+      "charterIds": [
+        "character",
+        "experts",
+        "desktop-mac",
+        "product-and-business"
+      ],
+      "createdBy": "rohan",
+      "createdAt": "2026-09-27T17:00:00.000Z",
+      "state": "resolved",
+      "lastAt": "2026-09-29T01:47:41.904Z",
+      "messageCount": 6,
+      "participants": [
+        "rohan",
+        "asha",
+        "mira",
+        "dev"
+      ],
+      "escalations": [
+        "in_muk6m6su2b94e"
+      ],
+      "headline": "Owner confirmed directly in-thread: screenshots/desktop capture and the rest of context-sensing belong under…",
+      "summary": "Owner confirmed directly in-thread: screenshots/desktop capture and the rest of context-sensing belong under context-provider, matching the scope already filed as op_mum0guxu46tvd. That proposal is still open in the Inbox for the remaining piece (who leads it) — once it's approved, AC8's screen-share detector moves there permanently. Until then, Rohan's interim minimal Mac-side screen-share check (scoped to just this feature, not a claim on the sensor layer) stands as the unblock so the greeting isn't stuck waiting.",
+      "roomId": "general"
+    },
+    {
+      "id": "th_muk7n3n78lbde",
+      "title": "as_muk1cyya6zx1f (Daily weather greeting) misrouted to Memory — needs conversation/character",
+      "charterIds": [],
+      "createdBy": "kabir",
+      "createdAt": "2026-09-27T19:27:18.835Z",
+      "state": "resolved",
+      "headline": "Agreed with both groundings. as_muk1cyya6zx1f's memory slice is dropped — every AC (1-3 app.py one-shot state, 4-5…",
+      "lastAt": "2026-09-28T22:22:56.844Z",
+      "messageCount": 4,
+      "participants": [
+        "kabir",
+        "dev",
+        "mira",
+        "asha"
+      ],
+      "escalations": [],
+      "summary": "Agreed with both groundings. as_muk1cyya6zx1f's memory slice is dropped — every AC (1-3 app.py one-shot state, 4-5 weather.py facts, 6-7 mute/call checks, 9 Speaker contract) reads conversation/character-owned files directly; nothing touches memory_client.py/memory_api.py/experts/memory.py or the mem_* stores. Kabir is released from this assignment; conversation/character (Dev) owns it whole, consistent with what he already scoped. AC8 (screen-share detector) stays out of this build — it's tracked separately in th_muk65j9udjztm, already escalated to the owner as a sensor-layer ownership gap.\n\nas_mulrsdzk7x4cm is misrouted/duplicate: no \"greeting expert\" exists in the repo (grep confirms), so there's nothing to publish or consume a greeting_context event — designing that contract now would wire together two things that don't exist for a feature whose real design doesn't need either. Not building it. If the experts/memory.py path-prefix line in the map is genuinely stale, that's a map correction I'll bring as a propose_org_change when I next touch the map — not urgent enough to file alone today.",
+      "roomId": "general"
+    },
+    {
+      "id": "th_mulsc401slxei",
+      "title": "Phone→Mac errand locality + durable queue (as_muk0srsaiu1gc) — needs decomposition, not conversation alone",
+      "charterIds": [],
+      "createdBy": "dev",
+      "createdAt": "2026-09-28T21:54:24.193Z",
+      "state": "resolved",
+      "headline": "Dev's scoping is right — as_muk0srsaiu1gc landed too broad via a keyword hit, not a real routing to one charter.",
+      "lastAt": "2026-09-28T21:58:18.949Z",
+      "messageCount": 2,
+      "participants": [
+        "dev",
+        "asha",
+        "mira",
+        "kabir"
+      ],
+      "escalations": [],
+      "summary": "Dev's scoping is right — as_muk0srsaiu1gc landed too broad via a keyword hit, not a real routing to one charter.\n\nSplit:\n- Conversation (Dev): keeps the spoken-delivery slice only (\"result comes back to the phone, one spoken sentence on the Mac when it lands\") — his own delivery-gate/task-lifecycle territory, reusing the no-reopen primitive already going into speaker_gate.say_once() for the daily greeting (th_mulrmnpuduspl). No objection, proceed on his branch.\n- The new part — task locality (portable vs machine-bound), and a durable queue for when the Mac is asleep — genuinely doesn't exist anywhere (confirmed: zero hits for locality/machine-bound/portable task/queued durably in agent-svc). It spans phone.py/task_registry.py (experts) and iris-api/cloud-agent routing (server/memory's cloud side). Per the build-order rule (same gate the greeting went through): HLD before any code. Routing to Mira and Kabir as a joint HLD deliverable — they scope the split between their paths themselves and bring the doc back here before either builds.\n\nNo owner decision needed here; this is ordinary decomposition-by-map.",
+      "roomId": "general"
+    },
+    {
+      "id": "th_muk65j9u104yb",
+      "title": "Daily greeting: greeting.py wiring and the spoken sentence need conversation/character sign-off",
+      "charterIds": [
+        "experts",
+        "conversation",
+        "character"
+      ],
+      "createdBy": "mira",
+      "createdAt": "2026-09-27T17:00:00.000Z",
+      "state": "resolved",
+      "lastAt": "2026-09-28T21:38:55.523Z",
+      "messageCount": 4,
+      "participants": [
+        "mira",
+        "dev",
+        "asha"
+      ],
+      "escalations": [],
+      "summary": "services/agent-svc/greeting.py assigned to experts (new file, no prior owner, pure decision module). The app.py _presence_tick hunk and the spoken sentence remain conversation/character's call — Dev signs off before merge.",
+      "headline": "Dev: nothing to review yet — Mira's branches have no commits; waiting on her push + interface (2)",
+      "roomId": "general"
+    },
+    {
+      "id": "th_mulpu93uuwykc",
+      "title": "[TEST] QA fixture thread — ignore, will be resolved by QA",
+      "charterIds": [
+        "qa-release"
+      ],
+      "createdBy": "owner",
+      "createdAt": "2026-09-28T20:44:31.770Z",
+      "state": "resolved",
+      "headline": "[TEST] QA fixture resolved by QA: phone posting verified (composer post reached the thread after the 02:11 web…",
+      "lastAt": "2026-09-28T20:59:29.331Z",
+      "messageCount": 7,
+      "participants": [
+        "asha"
+      ],
+      "escalations": [],
+      "summary": "[TEST] QA fixture resolved by QA: phone posting verified (composer post reached the thread after the 02:11 web rebuild; the earlier tap failed on CSRF, B10). No follow-ups.",
+      "roomId": "general"
+    },
+    {
+      "id": "th_muk65j9vdlunv",
+      "title": "Daily greeting AC9: a Speaker interface for \"one sentence, no reopening\"",
+      "charterIds": [
+        "conversation",
+        "character",
+        "desktop-mac"
+      ],
+      "createdBy": "rohan",
+      "createdAt": "2026-09-27T17:00:00.000Z",
+      "state": "resolved",
+      "lastAt": "2026-09-27T18:58:40.279Z",
+      "messageCount": 3,
+      "participants": [
+        "rohan",
+        "dev",
+        "asha"
+      ],
+      "escalations": [],
+      "summary": "Speaker gets a new primitive for \"say one sentence, don't mark awaiting-reply, don't reopen\" (AC9). Rohan proposes the interface; Dev implements. Desktop-mac's ticket on this feature is closed — no Electron/packaging work touches it.",
+      "roomId": "general",
+      "headline": "Daily greeting AC9: a Speaker interface for \"one sentence, no reopening\""
+    },
+    {
+      "id": "th_muk65j9t82pwk",
+      "title": "Daily greeting: the memory piece is misrouted",
+      "charterIds": [
+        "memory",
+        "character",
+        "conversation",
+        "chief-of-staff"
+      ],
+      "createdBy": "kabir",
+      "createdAt": "2026-09-27T17:00:00.000Z",
+      "state": "resolved",
+      "lastAt": "2026-09-27T18:58:28.256Z",
+      "messageCount": 3,
+      "participants": [
+        "kabir",
+        "asha",
+        "dev"
+      ],
+      "escalations": [],
+      "summary": "Mis-routed on a keyword match, not a charter decision — the greeting's \"memory\" piece is entirely app.py/weather.py/Speaker, owned by character/conversation. Reassigned to Dev; Kabir released.",
+      "roomId": "general",
+      "headline": "Daily greeting: the memory piece is misrouted"
+    }
+  ]
+}

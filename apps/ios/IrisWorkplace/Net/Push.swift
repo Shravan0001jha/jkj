@@ -9,6 +9,11 @@ enum AppLink: Equatable {
     case room(String)
     case employee(String)
     case office
+    // v2 update hrefs (LLD §19.8): item/<id>, plan, releases/<postId>
+    case item(String)
+    case plan
+    case updates
+    case releasePost(String)
 
     static func parse(_ raw: String, decide: Bool = false) -> AppLink? {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -24,6 +29,10 @@ enum AppLink: Equatable {
         case "room": return id.isEmpty ? nil : .room(id)
         case "employee": return id.isEmpty ? nil : .employee(id)
         case "office": return .office
+        case "item": return id.isEmpty ? nil : .item(id)
+        case "plan": return .plan
+        case "updates": return .updates
+        case "releases": return id.isEmpty ? nil : .releasePost(id)
         default: return nil
         }
     }
@@ -35,6 +44,8 @@ enum PushCategory {
     static let inbox = "WP_INBOX"
     static let room = "WP_ROOM"
     static let alert = "WP_ALERT"
+    /// v2: a pushed Update (started, blocked, the brief, the weekly review).
+    static let update = "WP_UPDATE"
     static let open = "OPEN"
     static let decide = "DECIDE"
 
@@ -45,6 +56,7 @@ enum PushCategory {
             UNNotificationCategory(identifier: inbox, actions: [open, decide], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: room, actions: [open], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: alert, actions: [open], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: update, actions: [open], intentIdentifiers: [], options: []),
         ]
     }
 }
@@ -57,6 +69,7 @@ enum AnswerGate {
         switch item.kind {
         case .approval, .release, .orgChange, .cap: return true
         case .decision, .question: return false
+        case .unknown: return true   // a kind this app does not know yet: ask, to be safe
         }
     }
 }

@@ -1,0 +1,30 @@
+{
+  "thread": {
+    "id": "th_epic_ft_mummakwyuew19",
+    "title": "P0 bug bundle: \"Iris during music\".",
+    "charterIds": [],
+    "createdBy": "workplace",
+    "createdAt": "2026-10-02T05:03:42.521Z",
+    "state": "open",
+    "headline": "P0 bug bundle: \"Iris during music\".",
+    "lastAt": "2026-10-02T05:04:09.629Z",
+    "messageCount": 1,
+    "participants": [],
+    "escalations": [],
+    "roomId": "area:ar_muqhzr5khct7v",
+    "epicId": "ft_mummakwyuew19"
+  },
+  "messages": [
+    {
+      "id": "msg_muqi0c65f83i3",
+      "threadId": "th_epic_ft_mummakwyuew19",
+      "at": "2026-10-02T05:04:09.629Z",
+      "by": "workplace",
+      "owner": false,
+      "text": "Story 'P0 bug bundle: \"Iris during music\". — Conversation' is blocked: waiting on Claude — COO",
+      "mentions": [],
+      "kind": "update",
+      "itemId": "as_muqecr89jhjst"
+    }
+  ]
+}

@@ -36,6 +36,8 @@ final class StubURLProtocol: URLProtocol {
     }
 
     static func reset() { handler = nil; recorded = [] }
+    /// A handler status that makes the stub fail the load with `URLError(.cancelled)`.
+    static let cancelledStatus = -999
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -55,6 +57,11 @@ final class StubURLProtocol: URLProtocol {
         }
         Self.recorded.append(Recorded(request: request, body: body))
         let (status, data) = Self.handler?(request) ?? (404, Data("{\"error\":\"no handler\"}".utf8))
+        // `cancelledStatus`: the load is cancelled, as when the view that started it goes away.
+        if status == Self.cancelledStatus {
+            client?.urlProtocol(self, didFailWithError: URLError(.cancelled))
+            return
+        }
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
                                        headerFields: ["content-type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

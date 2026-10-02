@@ -69,6 +69,6 @@ struct AssignView: View {
             let w = try await rest.createWork(req)
             if startNow { _ = try await rest.startWork(w.id) }
             created = w
-        } catch { self.error = error.localizedDescription }
+        } catch { if let m = error.userMessage { self.error = m } }
     }
 }

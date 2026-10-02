@@ -22,7 +22,7 @@ final class OfficeStore {
             error = nil
             loadedAt = Date()
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 
@@ -83,6 +83,11 @@ final class InboxStore {
     private(set) var loaded = false
     /// Ids whose answer is in flight; the buttons are disabled meanwhile.
     private(set) var answering: Set<String> = []
+    /// v2: each item's conversation (GET /api/inbox/:id), oldest first.
+    private(set) var messages: [String: [InboxMessage]] = [:]
+    private(set) var threadErrors: [String: String] = [:]
+    /// Ids whose free-text reply is in flight.
+    private(set) var replying: Set<String> = []
 
     var open: [InboxItem] { items.filter { $0.state == .open } }
     var closed: [InboxItem] { items.filter { $0.state != .open } }
@@ -95,12 +100,45 @@ final class InboxStore {
             error = nil
             loaded = true
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 
     func handle(_ event: ServerEvent) {
-        if case .inboxUpdated(let item) = event { upsert(item) }
+        switch event {
+        case .inboxUpdated(let item): upsert(item)
+        case .inboxMessage(let m): append(m)
+        default: break
+        }
+    }
+
+    /// v2: the item with its conversation.
+    func loadThread(_ rest: RestClient, id: String) async {
+        do {
+            let t = try await rest.inboxThread(id)
+            upsert(t.item)
+            messages[id] = t.messages.sorted { $0.at < $1.at }
+            threadErrors[id] = nil
+        } catch {
+            if let m = error.userMessage { threadErrors[id] = m }
+        }
+    }
+
+    /// v2: a free-text reply. Text alone leaves the item open; the asker answers in the thread.
+    func reply(_ rest: RestClient, id: String, text: String) async throws {
+        replying.insert(id)
+        defer { replying.remove(id) }
+        let t = try await rest.inboxReply(id, text: text, optionId: nil)
+        upsert(t.item)
+        let known = Set((messages[id] ?? []).map(\.id))
+        messages[id] = ((messages[id] ?? []) + t.messages.filter { !known.contains($0.id) }).sorted { $0.at < $1.at }
+    }
+
+    private func append(_ m: InboxMessage) {
+        var list = messages[m.inboxId] ?? []
+        guard !list.contains(where: { $0.id == m.id }) else { return }
+        list.append(m)
+        messages[m.inboxId] = list.sorted { $0.at < $1.at }
     }
 
     /// Act, then acknowledge: the item flips only when the server said so.
@@ -164,7 +202,7 @@ final class TalkStore {
             session = chosen
             if let chosen { log = try await rest.agentLog(chosen.id) }
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 
@@ -245,7 +283,7 @@ final class FeaturesStore {
             board = try await rest.features()
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 
@@ -254,7 +292,7 @@ final class FeaturesStore {
             pivots[rows] = try await rest.pivot(rows)
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 
@@ -263,7 +301,7 @@ final class FeaturesStore {
             details[id] = try await rest.feature(id)
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 
@@ -375,7 +413,7 @@ final class CooStore {
             error = nil
             loaded = true
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 

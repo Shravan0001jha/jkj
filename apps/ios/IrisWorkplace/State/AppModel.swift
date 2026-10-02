@@ -17,15 +17,25 @@ enum Connection: Equatable {
     case unauthorized
 }
 
+/// v2: Plan is home; Updates replaces the Office counters. Releases live in the Room (the
+/// Releases room), and the Office and Features open from the Plan's menu — six tabs would put
+/// half of them behind iOS's own "More".
 enum Tab: String, CaseIterable {
-    case office, inbox, talk, room, features
+    case plan, inbox, talk, room, updates
 }
 
 /// Cross-tab navigation: an alert opens its Inbox item, an Office card opens Talk.
 @MainActor @Observable
 final class Router {
-    var tab: Tab = .office
+    var tab: Tab = .plan
     var inboxItemId: String?
+    /// An epic/story/task page to open on the Plan (from a push, an Update, a release change).
+    var itemId: String?
+    var releasePostId: String?
+    var showOffice = false
+    var showFeatures = false
+    /// The Plan shows the board by state instead of the areas.
+    var planBoard = false
     var talkEmployeeId: String?
     var featureId: String?
     var pivot: PivotRows?
@@ -40,9 +50,14 @@ final class Router {
     var proposalId: String?
     var featuresSegment: String?
 
-    func openInbox(_ id: String) { inboxItemId = id; tab = .inbox }
-    func openThread(_ id: String) { roomThreadId = id; tab = .room }
-    func talk(to employeeId: String) { talkEmployeeId = employeeId; tab = .talk }
+    func openInbox(_ id: String) { closeSheets(); inboxItemId = id; tab = .inbox }
+    func openThread(_ id: String) { closeSheets(); roomThreadId = id; tab = .room }
+    func talk(to employeeId: String) { closeSheets(); talkEmployeeId = employeeId; tab = .talk }
+    func openItem(_ id: String) { closeSheets(); itemId = id; tab = .plan }
+    func openReleasePost(_ id: String) { closeSheets(); releasePostId = id; tab = .room }
+
+    /// A jump to another tab from a sheet (the Office's cards, an alert) closes the sheet first.
+    private func closeSheets() { showOffice = false; showFeatures = false; showAlerts = false }
 }
 
 /// Owns the mode, the credential, the clients and the stores. One per app.
@@ -62,6 +77,13 @@ final class AppModel {
     let room = RoomStore()
     let coo = CooStore()
     let requests = RequestsStore()
+    // v2
+    let plan = PlanStore()
+    let items = ItemsStore()
+    let updates = UpdatesStore()
+    let rooms = RoomsStore()
+    let releasePosts = ReleasePostsStore()
+    private var planReload: Task<Void, Never>?
     let alerts: AlertsStore
     /// Releases updated over the socket, and their streamed log lines.
     private(set) var releases: [String: Release] = [:]
@@ -115,6 +137,18 @@ final class AppModel {
         pathMonitor?.onChange = { [weak self] satisfied in self?.networkChanged(satisfied: satisfied) }
         pathMonitor?.start()
         alerts.suppressLocal = { [weak self] in self?.pushRegistered ?? false }
+        plan.onStale = { [weak self] in self?.reloadPlanSoon() }
+    }
+
+    /// A story moved: its epic card's progress and flags changed. One reload for a burst of moves.
+    private func reloadPlanSoon() {
+        planReload?.cancel()
+        planReload = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled, let self, let rest = self.rest else { return }
+            await self.plan.load(rest)
+            if self.plan.board != nil { await self.plan.loadBoard(rest) }
+        }
     }
 
     /// Wi-Fi ↔ cellular or airplane mode: reconnect now, or say there is no network.
@@ -159,16 +193,20 @@ final class AppModel {
         #if DEBUG
         // Scripted runs (screenshots) open a screen directly.
         if let t = env["WORKPLACE_TAB"], let tab = Tab(rawValue: t) { router.tab = tab }
+        if env["WORKPLACE_TAB"] == "office" { router.showOffice = true }
+        if let id = env["WORKPLACE_ITEM"] { router.openItem(id) }
+        if let id = env["WORKPLACE_RELEASE_POST"] { router.openReleasePost(id) }
+        if env["WORKPLACE_BOARD"] == "1" { router.planBoard = true }
         if let id = env["WORKPLACE_INBOX_ITEM"] { router.openInbox(id) }
         if let id = env["WORKPLACE_TALK"] { router.talk(to: id) }
-        if let id = env["WORKPLACE_FEATURE"] { router.featureId = id; router.tab = .features }
+        if let id = env["WORKPLACE_FEATURE"] { router.featureId = id; router.showFeatures = true }
         if let id = env["WORKPLACE_ROOM"] { if id == "list" { router.tab = .room } else { router.openThread(id) } }
         if env["WORKPLACE_SPEND"] == "1" { router.showSpend = true }
         if env["WORKPLACE_NEW_REQUEST"] == "1" { router.showNewRequest = true }
         if env["WORKPLACE_RELEASES"] == "1" { router.showReleases = true }
-        if env["WORKPLACE_FEATURES"] == "requests" { router.tab = .features; router.featuresSegment = "requests" }
+        if env["WORKPLACE_FEATURES"] == "requests" { router.showFeatures = true; router.featuresSegment = "requests" }
         if env["WORKPLACE_ALERTS"] == "1" { router.showAlerts = true }
-        if let p = env["WORKPLACE_PIVOT"], let rows = PivotRows(rawValue: p) { router.pivot = rows; router.tab = .features }
+        if let p = env["WORKPLACE_PIVOT"], let rows = PivotRows(rawValue: p) { router.pivot = rows; router.showFeatures = true }
         if env["WORKPLACE_SETTINGS"] == "1" { router.showSettings = true }
         #endif
     }
@@ -209,7 +247,11 @@ final class AppModel {
         case .inbox(let id, let decide): router.openInbox(id); router.decideItemId = decide ? id : nil
         case .room(let id): router.openThread(id)
         case .employee(let id): router.talk(to: id)
-        case .office: router.tab = .office
+        case .office: router.showOffice = true
+        case .item(let id): router.openItem(id)
+        case .plan: router.tab = .plan
+        case .updates: router.tab = .updates
+        case .releasePost(let id): router.openReleasePost(id)
         }
     }
 
@@ -383,6 +425,8 @@ final class AppModel {
             connection = .macOffline
         } catch WorkplaceError.accessOff {
             connection = .accessOff
+        } catch where error.isCancellation {
+            // A newer connect replaced this one: it owns the state now.
         } catch {
             connection = .offline(reason: error.localizedDescription, retryAt: nil)
         }
@@ -415,7 +459,8 @@ final class AppModel {
         // just fetched and assigned it. Fetching it again here doubled every /api/health call.
         async let o: Void = office.load(rest)
         async let i: Void = inbox.load(rest)
-        _ = await (o, i)
+        async let p: Void = plan.load(rest)
+        _ = await (o, i, p)
         syncNeedsYou()
         if inbox.loaded { housekeeping?(Set(inbox.open.map(\.id))) }
     }
@@ -483,6 +528,11 @@ final class AppModel {
         coo.handle(event)
         requests.handle(event)
         alerts.handle(event)
+        plan.handle(event)
+        items.handle(event)
+        updates.handle(event)
+        rooms.handle(event)
+        releasePosts.handle(event)
         switch event {
         case .hello(let version, _):
             connection = .online(version: version)
@@ -520,8 +570,19 @@ final class AppModel {
 
     /// The employee's name for an id, from whatever is loaded.
     func employeeName(_ id: String?) -> String {
-        guard let id else { return "—" }
-        return office.card(id)?.employee.name ?? id
+        guard let id, !id.isEmpty else { return "—" }
+        if let name = office.card(id)?.employee.name { return name }
+        switch id {
+        case "owner": return "You"
+        case "workplace": return "Workplace"
+        case "coo": return "Claude — COO"
+        default: return id
+        }
+    }
+
+    /// Who can be assigned or asked to review: the owner first, then everyone in the Office.
+    var assignees: [(id: String, name: String)] {
+        [("owner", "Me")] + office.cards.filter { $0.employee.virtual != true }.map { ($0.employee.id, $0.employee.name) }.sorted { $0.1 < $1.1 }
     }
 
     /// The charter title for an id, from whatever is loaded.

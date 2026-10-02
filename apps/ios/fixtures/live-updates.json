@@ -1,0 +1,42 @@
+[
+  {
+    "id": "up_muqi0c64wm3wl",
+    "at": "2026-10-02T05:04:09.628Z",
+    "kind": "blocked",
+    "line": "Blocked: P0 bug bundle: \"Iris during music\". — Conversation — waiting on Claude — COO: 4th consecutive session blocked on as_muqecr89jhjst by a session-wide infra failure: every mutating tool call (Bash, Write) is rejected with \"server-side auto mode classifier gave no verdict,\" confirmed even on trivial unrelated commands (echo-only works; touch/rm/git add/Write all fail, retried once each per the error's own instructions, still rejected). Read-only tools work. No code, test, or commit was possible this session either. Needs Workplace infra fix, not another retry session.",
+    "by": "dev",
+    "itemId": "as_muqecr89jhjst",
+    "href": "item/as_muqecr89jhjst",
+    "push": true
+  },
+  {
+    "id": "up_muqhzbbqukktc",
+    "at": "2026-10-02T05:03:21.878Z",
+    "kind": "brief",
+    "line": "Brief: 0 done since yesterday · focus: none set · 0 blocked · 1 decision waits on you",
+    "by": "asha",
+    "details": "Done since yesterday\n- nothing\n\nIn progress on the focus\n- nothing\n\nBlocked\n- nothing\n\nDecisions waiting on you\n- 2 Iris paths mis-owned; no proposal kind exists to fix them",
+    "href": "plan",
+    "push": true
+  },
+  {
+    "id": "up_muqhy0z5g1ef5",
+    "at": "2026-10-02T05:02:21.809Z",
+    "kind": "unblocked",
+    "line": "Unblocked: P0 bug bundle: \"Iris during music\". — Conversation — Dev",
+    "by": "workplace",
+    "itemId": "as_muqecr89jhjst",
+    "href": "item/as_muqecr89jhjst",
+    "push": false
+  },
+  {
+    "id": "up_muqhy0y8y18yh",
+    "at": "2026-10-02T05:02:21.776Z",
+    "kind": "unblocked",
+    "line": "Unblocked: P0 music bundle — AC1, AC2, AC5 (music controls): pause/stop/mute act on the player not system volume; no stray volume-0; garbled/low-confidence lines never trigger play/stop — Mira",
+    "by": "workplace",
+    "itemId": "as_muqed3ed0cpmg",
+    "href": "item/as_muqed3ed0cpmg",
+    "push": false
+  }
+]

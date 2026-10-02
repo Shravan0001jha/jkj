@@ -101,7 +101,7 @@ struct ConversationView: View {
         .sheet(isPresented: $showAssign) { AssignView(employeeId: talk.employeeId) }
         .confirmationDialog("End \(name)'s session?", isPresented: $confirmEnd, titleVisibility: .visible) {
             Button("End and write handoff", role: .destructive) {
-                Task { do { if let r = model.rest { try await model.talk.endSession(r) } } catch { self.error = error.localizedDescription } }
+                Task { do { if let r = model.rest { try await model.talk.endSession(r) } } catch { if let m = error.userMessage { self.error = m } } }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -116,7 +116,7 @@ struct ConversationView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         if let d = talk.detail, !d.needsYou.isEmpty {
-                            NeedsYouSection(items: d.needsYou, name: name)
+                            NeedsYouBanner(count: d.needsYou.count, name: name)
                         }
                         if talk.loading && talk.log.isEmpty {
                             HStack { Spacer(); ProgressView(); Spacer() }.padding()
@@ -138,7 +138,7 @@ struct ConversationView: View {
                             LogRow(entry: item).id(item.id)
                         }
                         if talk.isRunning {
-                            WorkingBubble(name: name).id("working")
+                            TypingIndicator(name: name).id("working")
                         }
                         if let a = talk.pendingApproval, let s = talk.session {
                             ApprovalCard(approval: a, agentId: s.id) { self.error = $0 }.id("approval")
@@ -176,7 +176,7 @@ struct ConversationView: View {
                     Button { showAssign = true } label: { Label("Assign work to \(name)", systemImage: "tray.and.arrow.down") }
                     if let s = talk.session {
                         Menu {
-                            ForEach(PermissionMode.allCases, id: \.self) { m in
+                            ForEach(PermissionMode.choices, id: \.self) { m in
                                 Button {
                                     Task { await send(.agentMode(agentId: s.id, mode: m)) }
                                 } label: {
@@ -216,7 +216,7 @@ struct ConversationView: View {
                 .focused($composing)
             if talk.isRunning {
                 Button {
-                    Task { do { if let r = model.rest { try await model.talk.interrupt(r) } } catch { self.error = error.localizedDescription } }
+                    Task { do { if let r = model.rest { try await model.talk.interrupt(r) } } catch { if let m = error.userMessage { self.error = m } } }
                 } label: { Image(systemName: "stop.circle.fill").font(.title) }
                 .foregroundStyle(.red)
                 .accessibilityLabel("Interrupt")
@@ -239,12 +239,12 @@ struct ConversationView: View {
             try await model.talk.send(rest, text: text)
             draft = ""
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 
     private func send(_ command: ClientCommand) async {
-        do { try await model.send(command) } catch { self.error = error.localizedDescription }
+        do { try await model.send(command) } catch { if let m = error.userMessage { self.error = m } }
     }
 }
 
@@ -339,7 +339,7 @@ struct CooTalkView: View {
             try await coo.send(rest, text: text)
             draft = ""
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 }
@@ -385,8 +385,9 @@ struct DateSeparator: View {
     }
 }
 
-/// A collapsed run of tool activity: `entry.text` is already "worked · N steps · Xs"
-/// (`ChatView.collapse`, mirroring `toChatView`); expand shows `entry.activity.entries`.
+/// What happened between messages, folded into one quiet line (`ChatView.collapse`, mirroring
+/// `toChatView`): tool runs, Workplace prompts and system notes. Not a message: small, grey,
+/// centred; tap to see the steps.
 struct ActivityRow: View {
     let entry: LogEntry
     @State private var expanded = false
@@ -396,16 +397,23 @@ struct ActivityRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button { withAnimation(.snappy) { expanded.toggle() } } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "wrench.and.screwdriver").font(.caption).foregroundStyle(.secondary)
-                    Text(entry.text).font(.caption).foregroundStyle(.secondary)
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.tertiary)
+                HStack(spacing: 4) {
+                    Rectangle().fill(Color(.separator)).frame(height: 0.5)
+                    Text(entry.text).font(.caption2).foregroundStyle(.tertiary).fixedSize()
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 8)).foregroundStyle(.tertiary)
+                    Rectangle().fill(Color(.separator)).frame(height: 0.5)
                 }
             }
             .buttonStyle(.plain)
             if expanded {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(steps) { e in StepRow(entry: e) }
+                    ForEach(steps) { e in
+                        if e.kind == .user || e.kind == .system {
+                            Text(e.text).font(.caption).foregroundStyle(.secondary).lineLimit(6)
+                        } else {
+                            StepRow(entry: e)
+                        }
+                    }
                 }
                 .padding(.leading, 4)
             }
@@ -446,21 +454,52 @@ struct StepRow: View {
     }
 }
 
-/// The employee is running: an iMessage-style "…is working" bubble until the next reply or idle.
-struct WorkingBubble: View {
+/// The employee is working on a reply: three dots, like iMessage, gone when the reply lands.
+struct TypingIndicator: View {
     let name: String
+    @State private var phase = 0
+    private let timer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
+
     var body: some View {
         HStack {
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.mini)
-                Text("\(name) is working…").font(.subheadline).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                ForEach(0..<3) { i in
+                    Circle().fill(Color.secondary).frame(width: 7, height: 7).opacity(phase == i ? 1 : 0.35)
+                }
             }
-            .padding(10)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .background(Color(.secondarySystemBackground), in: Capsule())
             Spacer(minLength: 48)
         }
         .padding(.horizontal, 12)
-        .accessibilityElement(children: .combine)
+        .onReceive(timer) { _ in phase = (phase + 1) % 3 }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(name) is typing")
+    }
+}
+
+/// What this employee is waiting on you for, as one line above the chat: the decisions live in the
+/// Inbox, the chat stays a chat.
+struct NeedsYouBanner: View {
+    @Environment(AppModel.self) private var model
+    let count: Int
+    let name: String
+
+    var body: some View {
+        Button { model.router.tab = .inbox } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+                Text("\(count) decision\(count == 1 ? "" : "s") from \(name) wait\(count == 1 ? "s" : "") on you").font(.caption.weight(.semibold))
+                Spacer()
+                Text("Inbox").font(.caption)
+                Image(systemName: "chevron.right").font(.caption2)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
     }
 }
 
@@ -469,11 +508,16 @@ struct LogRow: View {
 
     var body: some View {
         switch entry.kind {
+        case .user where entry.from == .workplace:
+            // Never under the owner's name: the Workplace wrote it (ChatView folds these; belt and braces).
+            ActivityRow(entry: LogEntry(id: entry.id, agentId: entry.agentId, at: entry.at, kind: .activity, label: "", text: "Workplace note",
+                                        activity: LogActivity(count: 1, durationMs: 0, entries: [entry])))
         case .user:
             HStack {
                 Spacer(minLength: 48)
                 Text(entry.text)
-                    .padding(10)
+                    .font(.subheadline)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
                     .background(Color.accentColor.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
                     .foregroundStyle(.white)
                     .textSelection(.enabled)
@@ -482,15 +526,15 @@ struct LogRow: View {
         case .assistant:
             HStack(alignment: .bottom) {
                 CompactRow(text: entry.text, summary: entry.summary, details: entry.details)
-                    .padding(10)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
                 Spacer(minLength: 48)
             }
             .padding(.horizontal, 12)
         case .error:
             Label(entry.text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline).padding(.horizontal, 16)
-        case .system:
-            Text(entry.text).font(.caption).italic().foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.horizontal, 16)
+        case .system, .unknown:
+            Text(entry.text).font(.caption2).foregroundStyle(.tertiary).lineLimit(2).frame(maxWidth: .infinity).padding(.horizontal, 16)
         case .image:
             HStack {
                 Label("Image", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
@@ -499,7 +543,10 @@ struct LogRow: View {
             }
             .padding(.horizontal, 12)
         case .read, .edit, .bash, .search, .task, .tool:
-            StepRow(entry: entry).padding(.horizontal, 16)
+            // A lone tool run is not a message either: the same quiet line, one step behind it.
+            ActivityRow(entry: LogEntry(id: entry.id, agentId: entry.agentId, at: entry.at, kind: .activity, label: "",
+                                        text: "worked · \(entry.label.isEmpty ? entry.kind.rawValue : entry.label)",
+                                        activity: LogActivity(count: 1, durationMs: 0, entries: [entry])))
         case .activity:
             ActivityRow(entry: entry)
         }
@@ -520,7 +567,7 @@ struct CompactRow: View {
                 if expanded {
                     Prose(text: c.details ?? text)
                 } else {
-                    Text(c.line).font(.body).lineLimit(1)
+                    Text(c.line).font(.subheadline).lineLimit(3)
                 }
                 if c.hasDetails {
                     Spacer(minLength: 0)
@@ -616,7 +663,7 @@ struct ApprovalCard: View {
         Task {
             defer { busy = false }
             do { try await model.send(.agentApprove(agentId: agentId, approvalId: approval.id, decision: d)) }
-            catch { onError(error.localizedDescription) }
+            catch { if let m = error.userMessage { onError(m) } }
         }
     }
 }
@@ -772,6 +819,6 @@ struct CharterView: View {
 
     private func load() async {
         guard let rest = model.rest else { return }
-        do { charter = try await rest.charter(summary.id); error = nil } catch { self.error = error.localizedDescription }
+        do { charter = try await rest.charter(summary.id); error = nil } catch { if let m = error.userMessage { self.error = m } }
     }
 }

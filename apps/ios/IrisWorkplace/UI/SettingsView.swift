@@ -119,7 +119,7 @@ struct SettingsView: View {
             .sheet(isPresented: $showDeveloper) { DeveloperOptionsView() }
             .task {
                 guard model.mode == .relay, let rest = model.rest else { return }
-                do { devices = try await rest.pushDevices().devices } catch { devicesError = error.localizedDescription }
+                do { devices = try await rest.pushDevices().devices } catch { if let m = error.userMessage { devicesError = m } }
             }
         }
     }

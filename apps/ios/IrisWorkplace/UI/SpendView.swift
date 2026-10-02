@@ -96,7 +96,7 @@ struct SpendView: View {
 
     private func load() async {
         guard let rest = model.rest else { return }
-        do { spend = try await rest.spend(); error = nil } catch { self.error = error.localizedDescription }
+        do { spend = try await rest.spend(); error = nil } catch { if let m = error.userMessage { self.error = m } }
     }
 
     private func sourceName(_ k: String) -> String {

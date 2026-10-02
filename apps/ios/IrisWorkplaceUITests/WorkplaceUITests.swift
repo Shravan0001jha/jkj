@@ -43,7 +43,7 @@ final class WorkplaceUITests: XCTestCase {
 
     func testDangerOptionAsksForConfirmationThenAnswers() {
         launch(["WORKPLACE_INBOX_ITEM": "ib-1"])
-        XCTAssertTrue(app.staticTexts["If you approve"].waitForExistence(timeout: 8), "the item loaded")
+        XCTAssertTrue(app.staticTexts["inbox.question"].waitForExistence(timeout: 8), "the item loaded")
         let release = app.buttons["Release 0.2.16"]
         XCTAssertTrue(reveal(release), "the danger option is a button on the item")
         let releaseY = release.frame.midY / app.frame.height   // before the dialog adds a second button with this label
@@ -71,7 +71,7 @@ final class WorkplaceUITests: XCTestCase {
 
     func testNeedsNoteOptionAsksForANote() {
         launch(["WORKPLACE_INBOX_ITEM": "ib-3"])
-        XCTAssertTrue(app.staticTexts["If you approve"].waitForExistence(timeout: 8), "the item loaded")
+        XCTAssertTrue(app.staticTexts["inbox.question"].waitForExistence(timeout: 8), "the item loaded")
         let raise = app.buttons["Raise for today"]
         XCTAssertTrue(reveal(raise))
         raise.tap()
@@ -93,8 +93,10 @@ final class WorkplaceUITests: XCTestCase {
         let allow = app.buttons["Allow once"]
         XCTAssertTrue(allow.waitForExistence(timeout: 8), "the pending tool approval is inline")
         allow.tap()
-        let approved = app.staticTexts["Bash approved (once)."]
-        XCTAssertTrue(approved.waitForExistence(timeout: 6), "the approval is acknowledged in the log over the socket")
+        // v2: the "Bash approved" system note folds into the quiet activity line; the card goes.
+        let cleared = NSPredicate { _, _ in !self.app.buttons["Allow once"].exists }
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: nil)], timeout: 6), .completed, "the approval is acknowledged over the socket")
+        XCTAssertFalse(app.staticTexts["Bash approved (once)."].exists, "a system note is not a chat message")
         let reply = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '48 passed, 0 failed'")).firstMatch
         XCTAssertTrue(reply.waitForExistence(timeout: 8), "the employee's next line streams in")
         shot("talk-after-approval")
@@ -111,7 +113,7 @@ final class WorkplaceUITests: XCTestCase {
     }
 
     func testOfficeCardOpensTalkAndProfileShowsCharter() {
-        launch()
+        launch(["WORKPLACE_TAB": "office"])
         let asha = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Asha' AND label CONTAINS 'Chief of Staff'")).firstMatch
         XCTAssertTrue(asha.waitForExistence(timeout: 8))
         asha.tap()
@@ -134,7 +136,7 @@ final class WorkplaceUITests: XCTestCase {
     }
 
     func testAlertBannerOpensTheInboxItem() {
-        launch(["WORKPLACE_TAB": "features"])
+        launch(["WORKPLACE_TAB": "updates"])
         // The mock's first scripted alert arrives ~25 s after connect.
         let banner = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Needs you: Mira needs an approval'")).firstMatch
         XCTAssertTrue(banner.waitForExistence(timeout: 40), "the socket alert becomes a banner")
@@ -156,25 +158,22 @@ final class WorkplaceUITests: XCTestCase {
         codeField.tap(); codeField.typeText(code)
         shot("real-pairing-filled")
         app.buttons["Pair this phone"].tap()
-        XCTAssertTrue(app.navigationBars["Office"].waitForExistence(timeout: 15), "a good code lands on the Office")
-        XCTAssertTrue(app.staticTexts["Spend today"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["Plan"].waitForExistence(timeout: 15), "a good code lands on the Plan")
         shot("real-office")
         app.tabBars.buttons["Inbox"].tap()
         XCTAssertTrue(app.staticTexts["Needs you"].waitForExistence(timeout: 10))
         shot("real-inbox")
         // Open a real decision, look, and cancel: the owner's items are never answered from a test.
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Decision,'")).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Your answer"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["inbox.question"].waitForExistence(timeout: 8))
         shot("real-inbox-item")
         XCTAssertTrue(app.navigationBars.buttons.firstMatch.exists)
         app.navigationBars.buttons.firstMatch.tap()
         app.tabBars.buttons["Talk"].tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Asha'")).firstMatch.waitForExistence(timeout: 8))
         shot("real-talk-picker")
-        app.tabBars.buttons["Features"].tap()
-        XCTAssertTrue(app.staticTexts["No features yet"].waitForExistence(timeout: 8) || app.cells.firstMatch.waitForExistence(timeout: 2))
-        shot("real-features")
-        app.tabBars.buttons["Office"].tap()
+        app.tabBars.buttons["Plan"].tap()
+        app.buttons["More"].tap()
         app.buttons["Settings"].tap()
         let online = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Online'")).firstMatch
         XCTAssertTrue(online.waitForExistence(timeout: 8), "socket open against the real server with the token")
@@ -227,9 +226,9 @@ final class WorkplaceUITests: XCTestCase {
         shot("real-talk-interrupted")
         XCTAssertFalse(app.buttons["Allow once"].exists, "no tool approval was requested by a no-tools prompt")
         app.swipeDown()   // the keyboard covers the tab bar until dismissed
-        app.tabBars.buttons["Office"].tap()
-        XCTAssertTrue(app.staticTexts["Spend today"].waitForExistence(timeout: 10))
-        shot("real-office-after-talk")
+        app.tabBars.buttons["Plan"].tap()
+        XCTAssertTrue(app.staticTexts["Assigned to you"].waitForExistence(timeout: 10))
+        shot("real-plan-after-talk")
     }
 
     func testPairingScreenRefusesABadCode() {
@@ -271,7 +270,11 @@ final class NewContractUITests: XCTestCase {
     func testRoomListThreadPostAndLiveReply() {
         app.launchEnvironment["WORKPLACE_ROOM"] = "list"
         app.launch()
-        XCTAssertTrue(app.navigationBars["Team Room"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.navigationBars["Room"].waitForExistence(timeout: 8))
+        // v2: topic threads live in General's room.
+        let generalRoom = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'General'")).firstMatch
+        XCTAssertTrue(generalRoom.waitForExistence(timeout: 6))
+        generalRoom.tap()
         let thread = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Mac socket contract'")).firstMatch
         XCTAssertTrue(thread.waitForExistence(timeout: 6), "threads list with the headline")
         XCTAssertTrue(app.staticTexts["Blocked on the socket shape; escalated to you as ib-5."].exists, "the headline is the one-line status")
@@ -297,8 +300,11 @@ final class NewContractUITests: XCTestCase {
     func testGeneralChannelIsPinnedAboveTopicsAndShowsTheWholeTeam() {
         app.launchEnvironment["WORKPLACE_ROOM"] = "list"
         app.launch()
-        XCTAssertTrue(app.navigationBars["Team Room"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["Channel"].waitForExistence(timeout: 6), "General sits in its own section, above the topic threads")
+        XCTAssertTrue(app.navigationBars["Room"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Everyone"].waitForExistence(timeout: 6), "General is its own room, above the area rooms")
+        XCTAssertTrue(app.staticTexts["Areas"].exists, "one room per area")
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'General'")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Channel"].waitForExistence(timeout: 6), "the General channel sits in its own section, above the topic threads")
         let general = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'General'")).firstMatch
         XCTAssertTrue(general.waitForExistence(timeout: 4))
         shot("room-list-general")
@@ -312,6 +318,7 @@ final class NewContractUITests: XCTestCase {
     }
 
     func testCooCardShowsPresenceAndOpensTalk() {
+        app.launchEnvironment["WORKPLACE_TAB"] = "office"
         app.launch()
         let coo = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude' AND label CONTAINS 'Chief Operating Officer' AND label CONTAINS 'online'")).firstMatch
         XCTAssertTrue(coo.waitForExistence(timeout: 8), "the COO card shows above the units with her presence")
@@ -354,41 +361,57 @@ final class NewContractUITests: XCTestCase {
         app.launchEnvironment["WORKPLACE_TALK"] = "kabir"
         app.launch()
         XCTAssertTrue(app.navigationBars["Kabir"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["Needs you · 1"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["Kabir: which socket contract for Mac errands?"].exists)
-        XCTAssertTrue(app.staticTexts["Kabir builds on the ask_mac shape today."].exists, "what approve does is shown")
+        // v2: Talk stays a chat; what the employee waits on is one line that opens the Inbox.
+        let banner = app.buttons.matching(NSPredicate(format: "label CONTAINS 'decision from Kabir waits on you'")).firstMatch
+        XCTAssertTrue(banner.waitForExistence(timeout: 8))
         shot("employee-needs-you")
-        app.buttons["Reuse ask_mac"].tap()
-        let gone = NSPredicate { _, _ in !self.app.staticTexts["Needs you · 1"].exists }
-        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: nil)], timeout: 8), .completed, "answered → gone from the page via inbox.updated")
+        banner.tap()
+        XCTAssertTrue(app.tabBars.buttons["Inbox"].isSelected || app.navigationBars["Inbox"].waitForExistence(timeout: 4))
+        let item = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Kabir: which socket contract'")).firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 6))
+        item.tap()
+        let reuse = app.buttons["Reuse ask_mac"]
+        XCTAssertTrue(reuse.waitForExistence(timeout: 6))
+        reuse.tap()
+        let done = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Reuse ask_mac ·'")).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 8), "answered from the Inbox thread")
         shot("employee-needs-you-answered")
     }
 
     func testOfficeCountsStalledAndStateReason() {
+        app.launchEnvironment["WORKPLACE_TAB"] = "office"
         app.launch()
         XCTAssertTrue(app.staticTexts["stalled"].waitForExistence(timeout: 8))
         let reason = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'waiting for your approval to run the errand tests'")).firstMatch
         var n = 0
         while !reason.exists && n < 5 { app.swipeUp(); n += 1; _ = reason.waitForExistence(timeout: 0.5) }
         XCTAssertTrue(reason.exists, "the state reason shows on the card")
-        while app.buttons["Alerts"].exists == false && n < 10 { app.swipeDown(); n += 1 }
-        app.buttons["Alerts"].tap()
-        XCTAssertTrue(app.navigationBars["Alerts"].waitForExistence(timeout: 4), "alerts open as a sheet from the bell")
-        app.buttons["Done"].tap()
         shot("office-counts")
+        app.buttons["Done"].tap()
+        // v2: alerts open from the Plan's menu.
+        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 4))
+        app.buttons["More"].tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Alerts'")).firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Alerts"].waitForExistence(timeout: 4), "alerts open as a sheet from the Plan's menu")
     }
 
     func testInboxItemShowsWhoWhatAndRoomLink() {
         app.launchEnvironment["WORKPLACE_INBOX_ITEM"] = "ib-1"
         app.launch()
-        XCTAssertTrue(app.staticTexts["If you approve"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["If you refuse"].exists)
+        XCTAssertTrue(app.staticTexts["inbox.question"].waitForExistence(timeout: 8))
+        let who = app.buttons["Who and what"]
+        var n = 0
+        while !(who.exists && who.isHittable) && n < 5 { app.swipeUp(); n += 1 }
+        who.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Nikhil, Rohan, Asha'")).firstMatch.waitForExistence(timeout: 8), "affects, with names once the Office loaded")
+        app.swipeDown(); app.swipeDown()
         app.buttons["Details"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'kills the running Iris'")).firstMatch.waitForExistence(timeout: 4), "details expand")
         shot("inbox-item-who-what")
-        app.swipeUp()
-        app.buttons["Team Room: release readiness"].tap()
+        let link = app.buttons["Team Room: release readiness"]
+        n = 0
+        while !(link.exists && link.isHittable) && n < 6 { app.swipeUp(); n += 1 }
+        link.tap()
         XCTAssertTrue(app.navigationBars["Release readiness 0.2.16"].waitForExistence(timeout: 6), "the #/room link opens the thread in the Room tab")
     }
 }

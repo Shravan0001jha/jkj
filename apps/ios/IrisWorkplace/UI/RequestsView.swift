@@ -57,7 +57,7 @@ struct NewRequestView: View {
         defer { busy = false }
         do {
             result = try await model.requests.create(rest, text: text.trimmingCharacters(in: .whitespacesAndNewlines), platformIds: platforms.isEmpty ? nil : Array(platforms).sorted())
-        } catch { self.error = error.localizedDescription }
+        } catch { if let m = error.userMessage { self.error = m } }
     }
 }
 

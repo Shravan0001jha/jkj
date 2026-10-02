@@ -18,9 +18,9 @@ struct RootView: View {
                     .sheet(isPresented: $router.showSettings) { SettingsView() }
             } else {
                 TabView(selection: $router.tab) {
-                    OfficeView()
-                        .tabItem { Label("Office", systemImage: "building.2") }
-                        .tag(Tab.office)
+                    PlanView()
+                        .tabItem { Label("Plan", systemImage: "list.bullet.rectangle.portrait") }
+                        .tag(Tab.plan)
                     InboxView()
                         .tabItem { Label("Inbox", systemImage: "tray") }
                         .badge(model.inbox.open.count)
@@ -32,9 +32,10 @@ struct RootView: View {
                         .tabItem { Label("Room", systemImage: "person.3") }
                         .badge(model.room.unread.count)
                         .tag(Tab.room)
-                    FeaturesView()
-                        .tabItem { Label("Features", systemImage: "square.grid.2x2") }
-                        .tag(Tab.features)
+                    UpdatesView()
+                        .tabItem { Label("Updates", systemImage: "bolt.horizontal") }
+                        .badge(model.updates.unseen)
+                        .tag(Tab.updates)
                 }
                 .overlay(alignment: .top) { AlertBanner() }
                 .sheet(isPresented: $router.showSettings) { SettingsView() }
@@ -42,6 +43,8 @@ struct RootView: View {
                 .sheet(isPresented: $router.showSpend) { SpendView() }
                 .sheet(isPresented: $router.showNewRequest) { NewRequestView() }
                 .sheet(isPresented: $router.showReleases) { ReleasesView() }
+                .sheet(isPresented: $router.showOffice) { OfficeView() }
+                .sheet(isPresented: $router.showFeatures) { FeaturesView() }
             }
         }
         .onOpenURL { url in model.handleOpenURL(url) }

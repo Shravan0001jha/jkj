@@ -5,10 +5,11 @@ import Foundation
 // An unknown type is kept, not dropped, so an announced addition never
 // breaks the client.
 
-enum AlertLevel: String, Codable, CaseIterable {
+enum AlertLevel: String, Codable, CaseIterable, LenientEnum {
     case info
     case needsYou = "needs-you"
     case blocked, cap
+    case unknown
 }
 
 struct AlertEvent: Codable, Equatable, Hashable {
@@ -51,6 +52,14 @@ enum ServerEvent: Equatable {
     /// A mentioned employee's reply turn: `started` (show "…is replying"), `done` (it posted, or
     /// chose not to), `skipped` (no `started` came first — it decided not to reply).
     case roomReplying(threadId: String, employeeId: String, state: ReplyingState)
+    // v2 (LLD §19.8)
+    case itemUpdated(Item)
+    case itemComment(Comment)
+    case activityRecorded(Activity)
+    case updatePosted(Update)
+    case areaUpdated(Area)
+    case inboxMessage(InboxMessage)
+    case releasePost(ReleasePost)
     case unknown(type: String)
 
     static let knownTypes: [String] = [
@@ -58,11 +67,13 @@ enum ServerEvent: Equatable {
         "office.snapshot", "office.updated", "inbox.updated", "work.updated", "proposal.updated", "release.updated", "release.log",
         "spend.updated", "signals.updated", "alert", "room.thread", "room.message", "coo.message", "coo.item", "coo.presence",
         "room.replying",
+        "item.updated", "item.comment", "activity.recorded", "update.posted", "area.updated", "inbox.message", "release.post",
     ]
 }
 
-enum ReplyingState: String, Codable, CaseIterable {
+enum ReplyingState: String, Codable, CaseIterable, LenientEnum {
     case started, done, skipped
+    case unknown
 }
 
 extension ServerEvent: Decodable {
@@ -70,6 +81,7 @@ extension ServerEvent: Decodable {
         case type, version, startedAt, agents, agent, agentId, entry, server, event, message
         case office, card, item, proposal, release, id, line, summary, signals, level, title, body, inboxId
         case thread, presence, threadId, employeeId, state
+        case comment, activity, update, area, post
     }
 
     init(from decoder: Decoder) throws {
@@ -130,6 +142,20 @@ extension ServerEvent: Decodable {
             self = .roomReplying(threadId: try c.decode(String.self, forKey: .threadId),
                                   employeeId: try c.decode(String.self, forKey: .employeeId),
                                   state: try c.decode(ReplyingState.self, forKey: .state))
+        case "item.updated":
+            self = .itemUpdated(try c.decode(Item.self, forKey: .item))
+        case "item.comment":
+            self = .itemComment(try c.decode(Comment.self, forKey: .comment))
+        case "activity.recorded":
+            self = .activityRecorded(try c.decode(Activity.self, forKey: .activity))
+        case "update.posted":
+            self = .updatePosted(try c.decode(Update.self, forKey: .update))
+        case "area.updated":
+            self = .areaUpdated(try c.decode(Area.self, forKey: .area))
+        case "inbox.message":
+            self = .inboxMessage(try c.decode(InboxMessage.self, forKey: .message))
+        case "release.post":
+            self = .releasePost(try c.decode(ReleasePost.self, forKey: .post))
         default:
             self = .unknown(type: type)
         }

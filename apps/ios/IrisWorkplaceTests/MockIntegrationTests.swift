@@ -94,3 +94,26 @@ final class MockIntegrationTests: XCTestCase {
         }
     }
 }
+
+/// v2 over real HTTP against the mock (live capture + mock additions).
+@MainActor
+final class V2MockIntegrationTests: XCTestCase {
+    private let config = ServerConfig(mode: .lan, baseURL: ServerConfig.parse("127.0.0.1:4399")!)
+
+    func testInboxReplyRoundTripAndEveryV2Route() async throws {
+        var health = URLRequest(url: config.url(API.health)); health.timeoutInterval = 1
+        guard let (d, _) = try? await URLSession.shared.data(for: health),
+              (try? JSONDecoder().decode(WorkplaceHealthResponse.self, from: d))?.version.hasSuffix("mock") == true else { throw XCTSkip("mock not running") }
+        var reset = URLRequest(url: config.url("/api/_reset")); reset.httpMethod = "POST"
+        _ = try? await URLSession.shared.data(for: reset)
+        let rest = RestClient(config: config, tokens: MemoryTokenStore(token: "mock-token-0123456789abcdef"))
+        let s = InboxStore()
+        await s.loadThread(rest, id: "in_muqel76q1h1i1")
+        XCTAssertEqual(s.messages["in_muqel76q1h1i1"]?.count, 2)
+        try await s.reply(rest, id: "in_muqel76q1h1i1", text: "probe")
+        XCTAssertEqual(s.messages["in_muqel76q1h1i1"]?.last?.text, "probe", "\(String(describing: s.messages["in_muqel76q1h1i1"]))")
+        _ = try await rest.plan(); _ = try await rest.plan(board: true); _ = try await rest.updates()
+        _ = try await rest.rooms(); _ = try await rest.roomDetail("general"); _ = try await rest.releasePosts()
+        _ = try await rest.item("ft_mummakwyuew19")
+    }
+}

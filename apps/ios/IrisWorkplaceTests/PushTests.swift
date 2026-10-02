@@ -47,7 +47,7 @@ final class AppLinkTests: XCTestCase {
                 XCTAssertFalse(a.options.contains(.destructive))
             }
         }
-        XCTAssertEqual(Set(PushCategory.all.map(\.identifier)), ["WP_INBOX", "WP_ROOM", "WP_ALERT"])
+        XCTAssertEqual(Set(PushCategory.all.map(\.identifier)), ["WP_INBOX", "WP_ROOM", "WP_ALERT", "WP_UPDATE"])
         XCTAssertEqual(PushCategory.all.first { $0.identifier == "WP_INBOX" }?.actions.map(\.identifier), ["OPEN", "DECIDE"])
     }
 }

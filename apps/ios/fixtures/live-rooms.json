@@ -1,0 +1,83 @@
+[
+  {
+    "id": "general",
+    "kind": "general",
+    "title": "General",
+    "headline": "Where everyone talks.",
+    "lastAt": "2026-10-02T05:03:21.888Z",
+    "threadIds": [
+      "th_general",
+      "th_muqf79nbf17a8",
+      "th_muqf1v5xlgmc6",
+      "th_muqelw1ti9bdd",
+      "th_mulrmnpuduspl",
+      "th_muqeij9c7prxg",
+      "th_muk65j9vqfydg",
+      "th_muk65j9udjztm",
+      "th_muk7n3n78lbde",
+      "th_mulsc401slxei",
+      "th_muk65j9u104yb",
+      "th_mulpu93uuwykc",
+      "th_muk65j9vdlunv",
+      "th_muk65j9t82pwk"
+    ]
+  },
+  {
+    "id": "area:ar_muqhzr5khct7v",
+    "kind": "area",
+    "title": "Voice & audio",
+    "areaId": "ar_muqhzr5khct7v",
+    "headline": "Hearing, speaking and music on the Mac: STT, AEC, music controls, dance.",
+    "lastAt": "2026-10-02T05:04:09.629Z",
+    "threadIds": [
+      "th_epic_ft_mummakwyuew19",
+      "th_area_ar_muqhzr5khct7v"
+    ]
+  },
+  {
+    "id": "area:ar_muqhzr6q88hw4",
+    "kind": "area",
+    "title": "Character & greeting",
+    "areaId": "ar_muqhzr6q88hw4",
+    "headline": "Iris's personality, the daily greeting and the context she greets with.",
+    "lastAt": "2026-10-02T05:03:42.573Z",
+    "threadIds": [
+      "th_epic_ft_mulrmufpu49uj",
+      "th_epic_ft_muk0zk573q8v1",
+      "th_area_ar_muqhzr6q88hw4"
+    ]
+  },
+  {
+    "id": "area:ar_muqhzr7lq5qxd",
+    "kind": "area",
+    "title": "Mac & mobile apps",
+    "areaId": "ar_muqhzr7lq5qxd",
+    "headline": "The desktop app and phone apps, and the errands that run between them.",
+    "lastAt": "2026-10-02T05:03:42.598Z",
+    "threadIds": [
+      "th_epic_ft_muk0srruh7dwv",
+      "th_area_ar_muqhzr7lq5qxd"
+    ]
+  },
+  {
+    "id": "area:ar_muqhzr8cy1akx",
+    "kind": "area",
+    "title": "Memory",
+    "areaId": "ar_muqhzr8cy1akx",
+    "headline": "The one account memory Iris shares across devices.",
+    "lastAt": "2026-10-02T05:03:42.492Z",
+    "threadIds": [
+      "th_area_ar_muqhzr8cy1akx"
+    ]
+  },
+  {
+    "id": "releases",
+    "kind": "releases",
+    "title": "Releases",
+    "headline": "Every release and what shipped in it.",
+    "lastAt": "2026-10-02T05:02:21.765Z",
+    "threadIds": [
+      "th_releases"
+    ]
+  }
+]

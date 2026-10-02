@@ -1,7 +1,11 @@
 import SwiftUI
 
+/// The employees, the COO, spend and coverage: opened from the Plan's menu as a sheet (v2:
+/// Plan is home and Updates replaces the counters). Alerts, Spend, Settings and New request open
+/// from the Plan's menu, not from here, so no sheet is ever asked to present over this one.
 struct OfficeView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -50,25 +54,11 @@ struct OfficeView: View {
             .refreshable { await reload() }
             .navigationTitle("Office")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { model.router.showAlerts = true } label: {
-                        Image(systemName: model.alerts.unread > 0 ? "bell.badge" : "bell")
-                    }
-                    .accessibilityLabel(model.alerts.unread > 0 ? "\(model.alerts.unread) new alerts" : "Alerts")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { model.router.showNewRequest = true } label: { Image(systemName: "plus.circle.fill") }
-                        .accessibilityLabel("New request")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button { model.router.showReleases = true } label: { Label("Releases", systemImage: "shippingbox") }
-                        Button { model.router.showSpend = true } label: { Label("Spend", systemImage: "indianrupeesign.circle") }
-                        Button { model.router.showSettings = true } label: { Label("Settings", systemImage: "gearshape") }
-                    } label: { Image(systemName: "ellipsis.circle") }
-                    .accessibilityLabel("More")
-                }
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
             }
+            // The spend meter and the Mac warning open these over the Office itself (a sheet).
+            .sheet(isPresented: Bindable(model.router).showSpend) { SpendView() }
+            .sheet(isPresented: Bindable(model.router).showSettings) { SettingsView() }
             .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
             .task { if model.office.data == nil { await reload() } }
         }

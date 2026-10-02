@@ -594,7 +594,17 @@ final class ReliabilityAndPushTests: XCTestCase {
         m.open(.employee("dev"))
         XCTAssertEqual(m.router.tab, .talk); XCTAssertEqual(m.router.talkEmployeeId, "dev")
         XCTAssertTrue(m.handleOpenURL(URL(string: "irisworkplace://office")!))
-        XCTAssertEqual(m.router.tab, .office)
+        XCTAssertTrue(m.router.showOffice, "the Office opens over the Plan")
+        // v2 update hrefs
+        m.open(.item("as_1"))
+        XCTAssertEqual(m.router.tab, .plan); XCTAssertEqual(m.router.itemId, "as_1")
+        XCTAssertFalse(m.router.showOffice, "a jump to another screen closes the Office sheet")
+        m.open(.releasePost("rp_1"))
+        XCTAssertEqual(m.router.tab, .room); XCTAssertEqual(m.router.releasePostId, "rp_1")
+        m.open(.updates)
+        XCTAssertEqual(m.router.tab, .updates)
+        m.open(.plan)
+        XCTAssertEqual(m.router.tab, .plan)
     }
 }
 

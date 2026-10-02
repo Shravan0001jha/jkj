@@ -71,6 +71,7 @@ extension EmployeeState {
         case .paused: return Glyph(symbol: "pause.circle.fill", tint: .yellow, label: "Paused")
         case .online: return Glyph(symbol: "circle.fill", tint: .green, label: "Online")
         case .offline: return Glyph(symbol: "circle", tint: .secondary, label: "Offline")
+        case .unknown: return Glyph(symbol: "questionmark.circle", tint: .secondary, label: "Other")
         }
     }
 }
@@ -84,6 +85,7 @@ extension InboxKind {
         case .cap: return Glyph(symbol: "indianrupeesign.circle", tint: .orange, label: "Spend cap")
         case .orgChange: return Glyph(symbol: "person.2.badge.gearshape", tint: .indigo, label: "Org change")
         case .release: return Glyph(symbol: "shippingbox", tint: .brown, label: "Release")
+        case .unknown: return Glyph(symbol: "questionmark.circle", tint: .secondary, label: "Other")
         }
     }
 }
@@ -104,6 +106,7 @@ extension WorkState {
         case .done: return Glyph(symbol: "checkmark.circle.fill", tint: .green, label: "Done")
         case .blocked: return Glyph(symbol: "octagon.fill", tint: .red, label: "Blocked")
         case .rejected: return Glyph(symbol: "xmark.circle", tint: .red, label: "Rejected")
+        case .unknown: return Glyph(symbol: "questionmark.circle", tint: .secondary, label: "Other")
         }
     }
 }
@@ -115,6 +118,7 @@ extension AlertLevel {
         case .needsYou: return Glyph(symbol: "exclamationmark.circle.fill", tint: .orange, label: "Needs you")
         case .blocked: return Glyph(symbol: "octagon.fill", tint: .red, label: "Blocked")
         case .cap: return Glyph(symbol: "indianrupeesign.circle.fill", tint: .red, label: "Spend cap")
+        case .unknown: return Glyph(symbol: "info.circle", tint: .secondary, label: "Notice")
         }
     }
 }
@@ -127,6 +131,7 @@ extension AgentStatus {
         case .waiting: return Glyph(symbol: "hand.raised.circle.fill", tint: .orange, label: "Waiting for you")
         case .done: return Glyph(symbol: "checkmark.circle", tint: .secondary, label: "Ended")
         case .error: return Glyph(symbol: "exclamationmark.triangle.fill", tint: .red, label: "Error")
+        case .unknown: return Glyph(symbol: "questionmark.circle", tint: .secondary, label: "Other")
         }
     }
 }
@@ -151,6 +156,90 @@ extension PermissionMode {
         case .acceptEdits: return "Edits run"
         case .plan: return "Plan only"
         case .dontAsk: return "Never ask"
+        case .unknown: return "Other"
+        }
+    }
+}
+
+// MARK: - v2 glyphs
+
+extension ItemStatus {
+    var glyph: Glyph {
+        switch self {
+        case .backlog: return Glyph(symbol: "tray", tint: .secondary, label: "Backlog")
+        case .ready: return Glyph(symbol: "circle", tint: .blue, label: "Ready")
+        case .inProgress: return Glyph(symbol: "play.circle.fill", tint: .green, label: "In progress")
+        case .inReview: return Glyph(symbol: "magnifyingglass.circle.fill", tint: .purple, label: "In review")
+        case .done: return Glyph(symbol: "checkmark.circle.fill", tint: .green, label: "Done")
+        case .blocked: return Glyph(symbol: "octagon.fill", tint: .red, label: "Blocked")
+        case .unknown: return Glyph(symbol: "questionmark.circle", tint: .secondary, label: "Other")
+        }
+    }
+}
+
+extension ItemLevel {
+    var label: String {
+        switch self {
+        case .epic: return "Epic"
+        case .story: return "Story"
+        case .task: return "Task"
+        case .unknown: return "Item"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .epic: return "flag.fill"
+        case .story: return "doc.text"
+        case .task: return "checklist"
+        case .unknown: return "square.dashed"
+        }
+    }
+}
+
+extension UpdateKind {
+    var glyph: Glyph {
+        switch self {
+        case .started: return Glyph(symbol: "play.circle.fill", tint: .green, label: "Started")
+        case .shipped: return Glyph(symbol: "checkmark.seal.fill", tint: .green, label: "Shipped")
+        case .blocked: return Glyph(symbol: "octagon.fill", tint: .red, label: "Blocked")
+        case .unblocked: return Glyph(symbol: "arrow.uturn.forward.circle", tint: .teal, label: "Unblocked")
+        case .decided: return Glyph(symbol: "arrow.triangle.branch", tint: .purple, label: "Decided")
+        case .brief: return Glyph(symbol: "sun.max.fill", tint: .orange, label: "Brief")
+        case .review: return Glyph(symbol: "chart.bar.fill", tint: .indigo, label: "Weekly review")
+        case .unknown: return Glyph(symbol: "circle.dashed", tint: .secondary, label: "Update")
+        }
+    }
+}
+
+extension InboxUrgency {
+    /// Colour and label, never wording (the doc's Inbox rule).
+    var glyph: Glyph {
+        switch self {
+        case .normal, .unknown: return Glyph(symbol: "circle", tint: .secondary, label: "Normal")
+        case .high: return Glyph(symbol: "exclamationmark.circle.fill", tint: .orange, label: "High")
+        case .urgent: return Glyph(symbol: "exclamationmark.2", tint: .red, label: "Urgent")
+        }
+    }
+}
+
+extension ItemActivityKind {
+    var symbol: String {
+        switch self {
+        case .created: return "plus.circle"
+        case .status: return "arrow.right.circle"
+        case .assigned: return "person.crop.circle"
+        case .reviewer: return "person.crop.circle.badge.checkmark"
+        case .points: return "number.circle"
+        case .field: return "pencil.circle"
+        case .comment: return "text.bubble"
+        case .commit: return "arrow.triangle.branch"
+        case .test: return "checkmark.diamond"
+        case .note: return "note.text"
+        case .stall: return "hourglass"
+        case .merged: return "arrow.triangle.merge"
+        case .reopen: return "arrow.counterclockwise.circle"
+        case .started: return "play.circle"
+        case .unknown: return "circle.dashed"
         }
     }
 }

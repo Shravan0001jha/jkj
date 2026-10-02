@@ -1,0 +1,45 @@
+{
+  "room": {
+    "id": "area:ar_muqhzr5khct7v",
+    "kind": "area",
+    "title": "Voice & audio",
+    "areaId": "ar_muqhzr5khct7v",
+    "headline": "Hearing, speaking and music on the Mac: STT, AEC, music controls, dance.",
+    "lastAt": "2026-10-02T05:04:09.629Z",
+    "threadIds": [
+      "th_epic_ft_mummakwyuew19",
+      "th_area_ar_muqhzr5khct7v"
+    ]
+  },
+  "threads": [
+    {
+      "id": "th_epic_ft_mummakwyuew19",
+      "title": "P0 bug bundle: \"Iris during music\".",
+      "charterIds": [],
+      "createdBy": "workplace",
+      "createdAt": "2026-10-02T05:03:42.521Z",
+      "state": "open",
+      "headline": "P0 bug bundle: \"Iris during music\".",
+      "lastAt": "2026-10-02T05:04:09.629Z",
+      "messageCount": 1,
+      "participants": [],
+      "escalations": [],
+      "roomId": "area:ar_muqhzr5khct7v",
+      "epicId": "ft_mummakwyuew19"
+    },
+    {
+      "id": "th_area_ar_muqhzr5khct7v",
+      "title": "Voice & audio",
+      "charterIds": [],
+      "createdBy": "workplace",
+      "createdAt": "2026-10-02T05:03:42.392Z",
+      "state": "open",
+      "headline": "Everything in Voice & audio.",
+      "lastAt": "2026-10-02T05:03:42.392Z",
+      "messageCount": 0,
+      "participants": [],
+      "escalations": [],
+      "roomId": "area:ar_muqhzr5khct7v"
+    }
+  ]
+}

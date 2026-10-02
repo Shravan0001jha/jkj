@@ -1,0 +1,820 @@
+[
+  {
+    "id": "ft_muk0srruh7dwv",
+    "level": "epic",
+    "title": "Phone→Mac errand flow",
+    "body": "The owner states an errand on the phone (\"tidy my Chrome tabs\", \"make me a doc about X\"); it runs on the Mac through the cloud agent when the Mac is awake, is queued durably when it is not, and the result comes back to the phone, with one spoken sentence on the Mac when it lands. Machine-bound tasks run on the Mac; portable tasks (documents, answers) run in iris-api with the laptop shut. Road doc move 2: every task carries a locality.",
+    "status": "in-progress",
+    "statusSince": "2026-09-27T16:15:46.090Z",
+    "epicId": "ft_muk0srruh7dwv",
+    "areaId": "ar_muqhzr7lq5qxd",
+    "rank": 1,
+    "acceptance": [],
+    "legacy": {
+      "kind": "feature",
+      "state": "in-progress"
+    },
+    "createdAt": "2026-09-27T16:15:46.074Z",
+    "updatedAt": "2026-10-02T05:03:42.596Z"
+  },
+  {
+    "id": "as_muk0srs9kx5vs",
+    "level": "story",
+    "title": "Phone→Mac errand flow — Mobile",
+    "body": "The owner states an errand on the phone (\"tidy my Chrome tabs\", \"make me a doc about X\"); it runs on the Mac through the cloud agent when the Mac is awake, is queued durably when it is not, and the result comes back to the phone, with one spoken sentence on the Mac when it lands. Machine-bound tasks run on the Mac; portable tasks (documents, answers) run in iris-api with the laptop shut. Road doc move 2: every task carries a locality.\n\nRouted to mobile because of: path:iris-mobile:mobile/ios, path:iris-mobile:mobile/android, platform:ios, platform:android, requirement:REQ-CROSSDEVICE-01, requirement:REQ-CROSSDEVICE-02, requirement:REQ-CROSSDEVICE-06, requirement:REQ-CROSSDEVICE-07, keyword:iphone, keyword:android.",
+    "status": "in-review",
+    "statusSince": "2026-09-29T01:54:04.661Z",
+    "parentId": "ft_muk0srruh7dwv",
+    "epicId": "ft_muk0srruh7dwv",
+    "areaId": "ar_muqhzr7lq5qxd",
+    "assigneeId": "tara",
+    "reviewerId": "nikhil",
+    "rank": 1,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "review",
+      "charterId": "mobile",
+      "featureId": "ft_muk0srruh7dwv"
+    },
+    "createdAt": "2026-09-27T16:15:46.089Z",
+    "updatedAt": "2026-09-29T01:54:04.661Z",
+    "stall": {
+      "rule": "unreviewed",
+      "since": "2026-09-29T01:54:04.661Z",
+      "minutes": 4511
+    }
+  },
+  {
+    "id": "as_muk1cyy841xrt",
+    "level": "story",
+    "title": "Daily greeting, weather-aware — Conversation",
+    "body": "Once a day, the first time the owner is at the Mac, Iris greets him with one spoken sentence that uses the weather facts she already has (context/weather.py), then stays quiet. Never twice a day, never when muted, never during a meeting or screen share. The definition lists this under Personality and it is one of the three spoken moments.\n\nRouted to conversation because of: requirement:REQ-PERSONALITY-05, keyword:speaks, keyword:spoken, keyword:speaker.",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.478Z",
+    "parentId": "ft_muk0zk573q8v1",
+    "epicId": "ft_muk0zk573q8v1",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "dev",
+    "rank": 1,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "conversation",
+      "featureId": "ft_muk0zk573q8v1"
+    },
+    "createdAt": "2026-09-27T16:31:28.496Z",
+    "updatedAt": "2026-10-02T04:22:03.478Z"
+  },
+  {
+    "id": "as_muk6m0bjliypd",
+    "level": "story",
+    "title": "Own the memory-labeled piece of Daily greeting (ft_muk0zk573q8v1)",
+    "body": "Kabir's assignment was mis-routed on a keyword match. Every AC touches app.py's proactive block, context/weather.py and the Speaker — yours. Please pick it up; Kabir is released from it.\n\nFrom the Team Room thread \"Daily greeting: the memory piece is misrouted\" (th_muk65j9t82pwk).",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.469Z",
+    "assigneeId": "dev",
+    "rank": 1,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "conversation"
+    },
+    "createdAt": "2026-09-27T18:58:28.255Z",
+    "updatedAt": "2026-10-02T04:22:03.469Z"
+  },
+  {
+    "id": "as_mulrsdzj2xqf3",
+    "level": "story",
+    "title": "Greeting context contract shared by memory and the greeting expert — Experts",
+    "body": "Define one event shape, greeting_context, that the memory store publishes and the greeting expert consumes: the fields (last greeted local date, the weather facts used, whether the owner was on a call or muted), who writes it, who reads it, and where it is persisted. Both the memory charter and the experts charter currently describe this differently (experts/memory.py sits under experts by path prefix but the experts charter says it belongs to memory), so the two must agree on the same shape and the map must say who owns experts/memory.py. Mac only.\n\nRouted to experts because of: path:iris:services/agent-svc/greeting.py, path:iris:services/agent-svc/experts/memory.py, keyword:expert, keyword:calendar.",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.465Z",
+    "parentId": "ft_mulrmufpu49uj",
+    "epicId": "ft_mulrmufpu49uj",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "mira",
+    "rank": 1,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "experts",
+      "featureId": "ft_mulrmufpu49uj"
+    },
+    "createdAt": "2026-09-28T21:39:04.015Z",
+    "updatedAt": "2026-10-02T04:22:03.465Z"
+  },
+  {
+    "id": "as_muqecr89jhjst",
+    "level": "story",
+    "title": "P0 bug bundle: \"Iris during music\". — Conversation",
+    "body": "P0 bug bundle: \"Iris during music\". The owner reported: \"it's vibrating almost all the time\", and \"when music is playing it's not able to hear me at all — not even when volume is 0\". Evidence is in the installed Iris 0.2.15 logs (~/Library/Application Support/Iris/agent.log and ~/Library/Logs/Iris/main.log, 29 Sep 17:10–17:17 IST; main.log timestamps are UTC, 11:40–11:47).\n\n1. \"Iris pause mute\" (17:13:06) → the DO lane set **system output volume to 0** (`device.set_volume 0`) instead of pausing the music. The music kept playing silently, and Iris's own voice was muted too. Pause, stop and mute must act on the music player; system volume only when the user explicitly says \"volume\".\n2. **The mic stream nearly stopped after the music started:** \"stt: streamed 0s of audio in the last minute\" at 17:14 and 17:15, and 8 s at 17:16, while the owner was speaking. It was 13–28 s during the music. Suspect the adaptive SendGate floor (the quietest-20-of-100 chunks × 2.5) staying high after loud music, or something else gating the mic. RCA with evidence.\n3. **While the music is audible, speech is garbled** (\"i disposed\", \"i just called you a bit\", \"i respond music\"). The music plays via a native player (afplay), outside the renderer's WebRTC AEC, so there's no echo reference. Options: play music through the renderer so AEC cancels it, and/or duck the music on speech onset or the wake word.\n4. **A garbled line restarted the music:** \"i respond music\" → [[PLAY]] a new track. Low-confidence or garbled utterances during music must never trigger play/stop.\n5. **\"Vibrating\":** the dance re-plans every 6–9 s from beat detection with confidence 0.35–0.54, tempo jumping 60–184 BPM. Also the listening micro-motion runs continuously while music keeps the mic busy. Require a confidence threshold (else gentle sway), smooth and clamp the tempo, and don't run the pending micro-motion while merely listening.\n\n**Rules:**\n- RCA first with log evidence per item;\n- tests that fail before each fix;\n- fixes on employee branches;\n- QA verifies with real music playing (audible, and at volume 0) on the Mac;\n- the lead reviews before merge, then a release as 0.2.16 with owner approval.\n\n**Priority P0:** keep other work paused (the weekly subscription window is at 80%).\n\nRouted to conversation because of: keyword:voice, keyword:stt, keyword:wake word, keyword:responsiveness, keyword:speaks.\nConsult: desktop-mac.",
+    "status": "blocked",
+    "statusSince": "2026-10-02T05:04:09.625Z",
+    "parentId": "ft_mummakwyuew19",
+    "epicId": "ft_mummakwyuew19",
+    "areaId": "ar_muqhzr5khct7v",
+    "assigneeId": "dev",
+    "rank": 1,
+    "acceptance": [],
+    "blocked": {
+      "reason": "4th consecutive session blocked on as_muqecr89jhjst by a session-wide infra failure: every mutating tool call (Bash, Write) is rejected with \"server-side auto mode classifier gave no verdict,\" confirmed even on trivial unrelated commands (echo-only works; touch/rm/git add/Write all fail, retried once each per the error's own instructions, still rejected). Read-only tools work. No code, test, or commit was possible this session either. Needs Workplace infra fix, not another retry session.",
+      "waitingOn": "coo",
+      "since": "2026-10-02T05:04:09.625Z"
+    },
+    "legacy": {
+      "kind": "assignment",
+      "state": "blocked",
+      "charterId": "conversation",
+      "featureId": "ft_mummakwyuew19"
+    },
+    "createdAt": "2026-10-02T03:21:50.553Z",
+    "updatedAt": "2026-10-02T05:04:22.657Z"
+  },
+  {
+    "id": "as_muk0srsacscc8",
+    "level": "story",
+    "title": "Phone→Mac errand flow — Server",
+    "body": "The owner states an errand on the phone (\"tidy my Chrome tabs\", \"make me a doc about X\"); it runs on the Mac through the cloud agent when the Mac is awake, is queued durably when it is not, and the result comes back to the phone, with one spoken sentence on the Mac when it lands. Machine-bound tasks run on the Mac; portable tasks (documents, answers) run in iris-api with the laptop shut. Road doc move 2: every task carries a locality.\n\nRouted to server because of: path:iris:services/cloud-agent/worker.py, platform:server, keyword:cloud agent, keyword:iris-api.",
+    "status": "in-review",
+    "statusSince": "2026-09-27T16:15:46.091Z",
+    "parentId": "ft_muk0srruh7dwv",
+    "epicId": "ft_muk0srruh7dwv",
+    "areaId": "ar_muqhzr7lq5qxd",
+    "assigneeId": "kabir",
+    "reviewerId": "nikhil",
+    "rank": 2,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "review",
+      "charterId": "server",
+      "featureId": "ft_muk0srruh7dwv"
+    },
+    "createdAt": "2026-09-27T16:15:46.090Z",
+    "updatedAt": "2026-09-27T16:15:46.091Z",
+    "stall": {
+      "rule": "unreviewed",
+      "since": "2026-09-27T16:15:46.091Z",
+      "minutes": 6529
+    }
+  },
+  {
+    "id": "ft_muk0zk573q8v1",
+    "level": "epic",
+    "title": "Daily greeting, weather-aware",
+    "body": "Once a day, the first time the owner is at the Mac, Iris greets him with one spoken sentence that uses the weather facts she already has (context/weather.py), then stays quiet. Never twice a day, never when muted, never during a meeting or screen share. The definition lists this under Personality and it is one of the three spoken moments.",
+    "status": "in-progress",
+    "statusSince": "2026-09-27T16:46:51.494Z",
+    "epicId": "ft_muk0zk573q8v1",
+    "areaId": "ar_muqhzr6q88hw4",
+    "rank": 2,
+    "acceptance": [],
+    "legacy": {
+      "kind": "feature",
+      "state": "in-progress"
+    },
+    "createdAt": "2026-09-27T16:21:02.779Z",
+    "updatedAt": "2026-10-02T05:03:42.545Z"
+  },
+  {
+    "id": "as_muk1cyy9y02m8",
+    "level": "story",
+    "title": "Daily greeting, weather-aware — Character",
+    "body": "Once a day, the first time the owner is at the Mac, Iris greets him with one spoken sentence that uses the weather facts she already has (context/weather.py), then stays quiet. Never twice a day, never when muted, never during a meeting or screen share. The definition lists this under Personality and it is one of the three spoken moments.\n\nRouted to character because of: keyword:character.",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.477Z",
+    "parentId": "ft_muk0zk573q8v1",
+    "epicId": "ft_muk0zk573q8v1",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "dev",
+    "rank": 2,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "character",
+      "featureId": "ft_muk0zk573q8v1"
+    },
+    "createdAt": "2026-09-27T16:31:28.497Z",
+    "updatedAt": "2026-10-02T04:22:03.477Z"
+  },
+  {
+    "id": "as_muk6m2h8ja0nl",
+    "level": "story",
+    "title": "Sign off on greeting.py's app.py hunk + spoken sentence",
+    "body": "Mira's greeting.py (experts) touches one hunk in app.py's _presence_tick and proposes the spoken sentence's wording. Both are conversation/character's territory — review and sign off before merge, alongside QA.\n\nFrom the Team Room thread \"Daily greeting: greeting.py wiring and the spoken sentence need conversation/character sign-off\" (th_muk65j9u104yb).",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.687Z",
+    "resolution": "wont-do",
+    "assigneeId": "dev",
+    "rank": 2,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "conversation"
+    },
+    "createdAt": "2026-09-27T18:58:31.052Z",
+    "updatedAt": "2026-10-02T04:20:39.687Z"
+  },
+  {
+    "id": "as_mulrsdzk7x4cm",
+    "level": "story",
+    "title": "Greeting context contract shared by memory and the greeting expert — Conversation",
+    "body": "Define one event shape, greeting_context, that the memory store publishes and the greeting expert consumes: the fields (last greeted local date, the weather facts used, whether the owner was on a call or muted), who writes it, who reads it, and where it is persisted. Both the memory charter and the experts charter currently describe this differently (experts/memory.py sits under experts by path prefix but the experts charter says it belongs to memory), so the two must agree on the same shape and the map must say who owns experts/memory.py. Mac only.\n\nRouted to conversation because of: requirement:REQ-PERSONALITY-05, keyword:spoken, keyword:speaker.",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.675Z",
+    "resolution": "wont-do",
+    "parentId": "ft_mulrmufpu49uj",
+    "epicId": "ft_mulrmufpu49uj",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "dev",
+    "rank": 2,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "conversation",
+      "featureId": "ft_mulrmufpu49uj"
+    },
+    "createdAt": "2026-09-28T21:39:04.016Z",
+    "updatedAt": "2026-10-02T04:20:39.675Z"
+  },
+  {
+    "id": "as_muqecr8avlkkr",
+    "level": "story",
+    "title": "P0 bug bundle: \"Iris during music\". — QA and Release",
+    "body": "P0 bug bundle: \"Iris during music\". The owner reported: \"it's vibrating almost all the time\", and \"when music is playing it's not able to hear me at all — not even when volume is 0\". Evidence is in the installed Iris 0.2.15 logs (~/Library/Application Support/Iris/agent.log and ~/Library/Logs/Iris/main.log, 29 Sep 17:10–17:17 IST; main.log timestamps are UTC, 11:40–11:47).\n\n1. \"Iris pause mute\" (17:13:06) → the DO lane set **system output volume to 0** (`device.set_volume 0`) instead of pausing the music. The music kept playing silently, and Iris's own voice was muted too. Pause, stop and mute must act on the music player; system volume only when the user explicitly says \"volume\".\n2. **The mic stream nearly stopped after the music started:** \"stt: streamed 0s of audio in the last minute\" at 17:14 and 17:15, and 8 s at 17:16, while the owner was speaking. It was 13–28 s during the music. Suspect the adaptive SendGate floor (the quietest-20-of-100 chunks × 2.5) staying high after loud music, or something else gating the mic. RCA with evidence.\n3. **While the music is audible, speech is garbled** (\"i disposed\", \"i just called you a bit\", \"i respond music\"). The music plays via a native player (afplay), outside the renderer's WebRTC AEC, so there's no echo reference. Options: play music through the renderer so AEC cancels it, and/or duck the music on speech onset or the wake word.\n4. **A garbled line restarted the music:** \"i respond music\" → [[PLAY]] a new track. Low-confidence or garbled utterances during music must never trigger play/stop.\n5. **\"Vibrating\":** the dance re-plans every 6–9 s from beat detection with confidence 0.35–0.54, tempo jumping 60–184 BPM. Also the listening micro-motion runs continuously while music keeps the mic busy. Require a confidence threshold (else gentle sway), smooth and clamp the tempo, and don't run the pending micro-motion while merely listening.\n\n**Rules:**\n- RCA first with log evidence per item;\n- tests that fail before each fix;\n- fixes on employee branches;\n- QA verifies with real music playing (audible, and at volume 0) on the Mac;\n- the lead reviews before merge, then a release as 0.2.16 with owner approval.\n\n**Priority P0:** keep other work paused (the weekly subscription window is at 80%).\n\nRouted to qa-release because of: keyword:release, keyword:regression.\nConsult: desktop-mac.",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.455Z",
+    "parentId": "ft_mummakwyuew19",
+    "epicId": "ft_mummakwyuew19",
+    "areaId": "ar_muqhzr5khct7v",
+    "assigneeId": "nikhil",
+    "rank": 2,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "qa-release",
+      "featureId": "ft_mummakwyuew19"
+    },
+    "createdAt": "2026-10-02T03:21:50.554Z",
+    "updatedAt": "2026-10-02T04:22:03.455Z"
+  },
+  {
+    "id": "as_muk0srsawvijt",
+    "level": "story",
+    "title": "Phone→Mac errand flow — Experts",
+    "body": "The owner states an errand on the phone (\"tidy my Chrome tabs\", \"make me a doc about X\"); it runs on the Mac through the cloud agent when the Mac is awake, is queued durably when it is not, and the result comes back to the phone, with one spoken sentence on the Mac when it lands. Machine-bound tasks run on the Mac; portable tasks (documents, answers) run in iris-api with the laptop shut. Road doc move 2: every task carries a locality.\n\nRouted to experts because of: path:iris:services/agent-svc/phone.py, keyword:expert, keyword:errand.",
+    "status": "in-review",
+    "statusSince": "2026-09-27T16:15:46.092Z",
+    "parentId": "ft_muk0srruh7dwv",
+    "epicId": "ft_muk0srruh7dwv",
+    "areaId": "ar_muqhzr7lq5qxd",
+    "assigneeId": "mira",
+    "reviewerId": "nikhil",
+    "rank": 3,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "review",
+      "charterId": "experts",
+      "featureId": "ft_muk0srruh7dwv"
+    },
+    "createdAt": "2026-09-27T16:15:46.090Z",
+    "updatedAt": "2026-09-27T16:15:46.092Z",
+    "stall": {
+      "rule": "unreviewed",
+      "since": "2026-09-27T16:15:46.092Z",
+      "minutes": 6529
+    }
+  },
+  {
+    "id": "as_muk1cyy9yz8dv",
+    "level": "story",
+    "title": "Daily greeting, weather-aware — Chief of Staff",
+    "body": "Once a day, the first time the owner is at the Mac, Iris greets him with one spoken sentence that uses the weather facts she already has (context/weather.py), then stays quiet. Never twice a day, never when muted, never during a meeting or screen share. The definition lists this under Personality and it is one of the three spoken moments.\n\nRouted to chief-of-staff because of: keyword:spec.",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.685Z",
+    "resolution": "wont-do",
+    "parentId": "ft_muk0zk573q8v1",
+    "epicId": "ft_muk0zk573q8v1",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "asha",
+    "rank": 3,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "chief-of-staff",
+      "featureId": "ft_muk0zk573q8v1"
+    },
+    "createdAt": "2026-09-27T16:31:28.497Z",
+    "updatedAt": "2026-10-02T04:20:39.685Z"
+  },
+  {
+    "id": "as_muk6m9ljau2t6",
+    "level": "story",
+    "title": "Implement the one-sentence, no-reopen Speaker interface (AC9)",
+    "body": "Rohan is proposing an interface shape for delivering one sentence without marking awaiting-reply or reopening the conversation. Once posted, you own the implementation.\n\nFrom the Team Room thread \"Daily greeting AC9: a Speaker interface for \"one sentence, no reopening\"\" (th_muk65j9vdlunv).",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.467Z",
+    "assigneeId": "dev",
+    "rank": 3,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "conversation"
+    },
+    "createdAt": "2026-09-27T18:58:40.279Z",
+    "updatedAt": "2026-10-02T04:22:03.467Z"
+  },
+  {
+    "id": "ft_mulrmufpu49uj",
+    "level": "epic",
+    "title": "Greeting context contract shared by memory and the greeting expert",
+    "body": "Define one event shape, greeting_context, that the memory store publishes and the greeting expert consumes: the fields (last greeted local date, the weather facts used, whether the owner was on a call or muted), who writes it, who reads it, and where it is persisted. Both the memory charter and the experts charter currently describe this differently (experts/memory.py sits under experts by path prefix but the experts charter says it belongs to memory), so the two must agree on the same shape and the map must say who owns experts/memory.py. Mac only.",
+    "status": "in-progress",
+    "statusSince": "2026-09-28T21:44:38.765Z",
+    "epicId": "ft_mulrmufpu49uj",
+    "areaId": "ar_muqhzr6q88hw4",
+    "rank": 3,
+    "acceptance": [],
+    "legacy": {
+      "kind": "feature",
+      "state": "in-progress"
+    },
+    "createdAt": "2026-09-28T21:34:45.397Z",
+    "updatedAt": "2026-10-02T05:03:42.571Z"
+  },
+  {
+    "id": "as_mulrsdzkl8w47",
+    "level": "story",
+    "title": "Greeting context contract shared by memory and the greeting expert — Memory",
+    "body": "Define one event shape, greeting_context, that the memory store publishes and the greeting expert consumes: the fields (last greeted local date, the weather facts used, whether the owner was on a call or muted), who writes it, who reads it, and where it is persisted. Both the memory charter and the experts charter currently describe this differently (experts/memory.py sits under experts by path prefix but the experts charter says it belongs to memory), so the two must agree on the same shape and the map must say who owns experts/memory.py. Mac only.\n\nRouted to memory because of: keyword:memory, keyword:belief.",
+    "status": "in-review",
+    "statusSince": "2026-10-02T03:30:36.189Z",
+    "parentId": "ft_mulrmufpu49uj",
+    "epicId": "ft_mulrmufpu49uj",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "kabir",
+    "reviewerId": "nikhil",
+    "rank": 3,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "review",
+      "charterId": "memory",
+      "featureId": "ft_mulrmufpu49uj"
+    },
+    "createdAt": "2026-09-28T21:39:04.016Z",
+    "updatedAt": "2026-10-02T03:30:36.189Z",
+    "stall": {
+      "rule": "unreviewed",
+      "since": "2026-10-02T03:30:36.189Z",
+      "minutes": 95
+    }
+  },
+  {
+    "id": "as_muqed3ed0cpmg",
+    "level": "story",
+    "title": "P0 music bundle — AC1, AC2, AC5 (music controls): pause/stop/mute act on the player not system volume; no stray volume-0; garbled/low-confidence lines never trigger play/stop",
+    "body": "Your part of ft_mummakwyuew19 (see its spec: AC1, AC2, AC5). Dev owns AC3/AC4/AC6/AC7, Nikhil QA (AC8). Coordinate interfaces with Dev in the Team Room. RCA first with the 29 Sep 17:10–17:17 log evidence, failing tests first, fix on your branch.",
+    "status": "in-progress",
+    "statusSince": "2026-10-02T05:02:21.776Z",
+    "parentId": "ft_mummakwyuew19",
+    "epicId": "ft_mummakwyuew19",
+    "areaId": "ar_muqhzr5khct7v",
+    "assigneeId": "mira",
+    "rank": 3,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "building",
+      "charterId": "experts",
+      "featureId": "ft_mummakwyuew19"
+    },
+    "createdAt": "2026-10-02T03:22:06.325Z",
+    "updatedAt": "2026-10-02T05:05:37.336Z"
+  },
+  {
+    "id": "as_muk0srsaiu1gc",
+    "level": "story",
+    "title": "Phone→Mac errand flow — Conversation",
+    "body": "The owner states an errand on the phone (\"tidy my Chrome tabs\", \"make me a doc about X\"); it runs on the Mac through the cloud agent when the Mac is awake, is queued durably when it is not, and the result comes back to the phone, with one spoken sentence on the Mac when it lands. Machine-bound tasks run on the Mac; portable tasks (documents, answers) run in iris-api with the laptop shut. Road doc move 2: every task carries a locality.\n\nRouted to conversation because of: keyword:spoken, keyword:speaker.",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.478Z",
+    "parentId": "ft_muk0srruh7dwv",
+    "epicId": "ft_muk0srruh7dwv",
+    "areaId": "ar_muqhzr7lq5qxd",
+    "assigneeId": "dev",
+    "rank": 4,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "conversation",
+      "featureId": "ft_muk0srruh7dwv"
+    },
+    "createdAt": "2026-09-27T16:15:46.090Z",
+    "updatedAt": "2026-10-02T04:22:03.478Z"
+  },
+  {
+    "id": "as_muk1cyy9pd5qj",
+    "level": "story",
+    "title": "Daily greeting, weather-aware — Desktop (Mac)",
+    "body": "Once a day, the first time the owner is at the Mac, Iris greets him with one spoken sentence that uses the weather facts she already has (context/weather.py), then stays quiet. Never twice a day, never when muted, never during a meeting or screen share. The definition lists this under Personality and it is one of the three spoken moments.\n\nRouted to desktop-mac because of: platform:mac.",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.475Z",
+    "parentId": "ft_muk0zk573q8v1",
+    "epicId": "ft_muk0zk573q8v1",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "rohan",
+    "rank": 4,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "desktop-mac",
+      "featureId": "ft_muk0zk573q8v1"
+    },
+    "createdAt": "2026-09-27T16:31:28.497Z",
+    "updatedAt": "2026-10-02T04:22:03.475Z"
+  },
+  {
+    "id": "as_mulrmwq1u7egh",
+    "level": "story",
+    "title": "\"the music stopped, play it again\" pauses the music",
+    "body": "Reproduction (29 Sep, current feat/iris-character): services/agent-svc/app.py _is_stop_music() matches a music noun plus a stop verb by substring, so \"stopped\" in \"the music stopped, play it again\" and \"the song stopped playing, resume it\" is read as a stop command; the negation guard only covers sentences that start with why/what/did/don't. The deterministic MUSIC-STOP intercept (app.py ~3745) then calls experts.call(\"media\",\"stop\") and Iris pauses the music the owner asked to resume. Noted as a separate CR in docs/experts/core.md (\"the deterministic _is_stop_music still uses substring verbs\"). Expected: a resume/play-again request never stops playback; a real stop (\"stop the music\", \"pause it\", \"gaana band karo\") still does. Work: RCA with the log line, a failing test in tests/test_music_stop.py first, then the fix on your emp/* branch, then report_done with counts; QA verifies. No merge, no release.",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.649Z",
+    "resolution": "wont-do",
+    "assigneeId": "mira",
+    "rank": 4,
+    "acceptance": [],
+    "legacy": {
+      "kind": "bug",
+      "state": "rejected",
+      "charterId": "experts"
+    },
+    "createdAt": "2026-09-28T21:34:48.361Z",
+    "updatedAt": "2026-10-02T04:20:39.649Z"
+  },
+  {
+    "id": "as_mulrsdzlbx56o",
+    "level": "story",
+    "title": "Greeting context contract shared by memory and the greeting expert — Character",
+    "body": "Define one event shape, greeting_context, that the memory store publishes and the greeting expert consumes: the fields (last greeted local date, the weather facts used, whether the owner was on a call or muted), who writes it, who reads it, and where it is persisted. Both the memory charter and the experts charter currently describe this differently (experts/memory.py sits under experts by path prefix but the experts charter says it belongs to memory), so the two must agree on the same shape and the map must say who owns experts/memory.py. Mac only.\n\nRouted to character because of: keyword:character.",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.671Z",
+    "resolution": "wont-do",
+    "parentId": "ft_mulrmufpu49uj",
+    "epicId": "ft_mulrmufpu49uj",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "dev",
+    "rank": 4,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "character",
+      "featureId": "ft_mulrmufpu49uj"
+    },
+    "createdAt": "2026-09-28T21:39:04.017Z",
+    "updatedAt": "2026-10-02T04:20:39.671Z"
+  },
+  {
+    "id": "ft_mummakwyuew19",
+    "level": "epic",
+    "title": "P0 bug bundle: \"Iris during music\".",
+    "body": "P0 bug bundle: \"Iris during music\". The owner reported: \"it's vibrating almost all the time\", and \"when music is playing it's not able to hear me at all — not even when volume is 0\". Evidence is in the installed Iris 0.2.15 logs (~/Library/Application Support/Iris/agent.log and ~/Library/Logs/Iris/main.log, 29 Sep 17:10–17:17 IST; main.log timestamps are UTC, 11:40–11:47).\n\n1. \"Iris pause mute\" (17:13:06) → the DO lane set **system output volume to 0** (`device.set_volume 0`) instead of pausing the music. The music kept playing silently, and Iris's own voice was muted too. Pause, stop and mute must act on the music player; system volume only when the user explicitly says \"volume\".\n2. **The mic stream nearly stopped after the music started:** \"stt: streamed 0s of audio in the last minute\" at 17:14 and 17:15, and 8 s at 17:16, while the owner was speaking. It was 13–28 s during the music. Suspect the adaptive SendGate floor (the quietest-20-of-100 chunks × 2.5) staying high after loud music, or something else gating the mic. RCA with evidence.\n3. **While the music is audible, speech is garbled** (\"i disposed\", \"i just called you a bit\", \"i respond music\"). The music plays via a native player (afplay), outside the renderer's WebRTC AEC, so there's no echo reference. Options: play music through the renderer so AEC cancels it, and/or duck the music on speech onset or the wake word.\n4. **A garbled line restarted the music:** \"i respond music\" → [[PLAY]] a new track. Low-confidence or garbled utterances during music must never trigger play/stop.\n5. **\"Vibrating\":** the dance re-plans every 6–9 s from beat detection with confidence 0.35–0.54, tempo jumping 60–184 BPM. Also the listening micro-motion runs continuously while music keeps the mic busy. Require a confidence threshold (else gentle sway), smooth and clamp the tempo, and don't run the pending micro-motion while merely listening.\n\n**Rules:**\n- RCA first with log evidence per item;\n- tests that fail before each fix;\n- fixes on employee branches;\n- QA verifies with real music playing (audible, and at volume 0) on the Mac;\n- the lead reviews before merge, then a release as 0.2.16 with owner approval.\n\n**Priority P0:** keep other work paused (the weekly subscription window is at 80%).",
+    "status": "in-progress",
+    "statusSince": "2026-10-02T03:27:26.410Z",
+    "epicId": "ft_mummakwyuew19",
+    "areaId": "ar_muqhzr5khct7v",
+    "rank": 4,
+    "acceptance": [],
+    "legacy": {
+      "kind": "feature",
+      "state": "in-progress"
+    },
+    "createdAt": "2026-09-29T11:53:01.282Z",
+    "updatedAt": "2026-10-02T05:03:42.519Z"
+  },
+  {
+    "id": "as_muk0srsaw3n4j",
+    "level": "story",
+    "title": "Phone→Mac errand flow — Desktop (Mac)",
+    "body": "The owner states an errand on the phone (\"tidy my Chrome tabs\", \"make me a doc about X\"); it runs on the Mac through the cloud agent when the Mac is awake, is queued durably when it is not, and the result comes back to the phone, with one spoken sentence on the Mac when it lands. Machine-bound tasks run on the Mac; portable tasks (documents, answers) run in iris-api with the laptop shut. Road doc move 2: every task carries a locality.\n\nRouted to desktop-mac because of: platform:mac.",
+    "status": "in-review",
+    "statusSince": "2026-09-27T19:14:14.614Z",
+    "parentId": "ft_muk0srruh7dwv",
+    "epicId": "ft_muk0srruh7dwv",
+    "areaId": "ar_muqhzr7lq5qxd",
+    "assigneeId": "rohan",
+    "reviewerId": "nikhil",
+    "rank": 5,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "review",
+      "charterId": "desktop-mac",
+      "featureId": "ft_muk0srruh7dwv"
+    },
+    "createdAt": "2026-09-27T16:15:46.090Z",
+    "updatedAt": "2026-09-27T19:14:14.614Z",
+    "stall": {
+      "rule": "unreviewed",
+      "since": "2026-09-27T19:14:14.614Z",
+      "minutes": 6351
+    }
+  },
+  {
+    "id": "as_muk1cyyahy9ka",
+    "level": "story",
+    "title": "Daily greeting, weather-aware — Experts",
+    "body": "Once a day, the first time the owner is at the Mac, Iris greets him with one spoken sentence that uses the weather facts she already has (context/weather.py), then stays quiet. Never twice a day, never when muted, never during a meeting or screen share. The definition lists this under Personality and it is one of the three spoken moments.\n\nRouted to experts because of: keyword:calendar.",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.473Z",
+    "parentId": "ft_muk0zk573q8v1",
+    "epicId": "ft_muk0zk573q8v1",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "mira",
+    "rank": 5,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "experts",
+      "featureId": "ft_muk0zk573q8v1"
+    },
+    "createdAt": "2026-09-27T16:31:28.498Z",
+    "updatedAt": "2026-10-02T04:22:03.473Z"
+  },
+  {
+    "id": "as_mulrsdzlsqnsl",
+    "level": "story",
+    "title": "Greeting context contract shared by memory and the greeting expert — Desktop (Mac)",
+    "body": "Define one event shape, greeting_context, that the memory store publishes and the greeting expert consumes: the fields (last greeted local date, the weather facts used, whether the owner was on a call or muted), who writes it, who reads it, and where it is persisted. Both the memory charter and the experts charter currently describe this differently (experts/memory.py sits under experts by path prefix but the experts charter says it belongs to memory), so the two must agree on the same shape and the map must say who owns experts/memory.py. Mac only.\n\nRouted to desktop-mac because of: platform:mac.",
+    "status": "in-review",
+    "statusSince": "2026-09-28T22:58:15.621Z",
+    "parentId": "ft_mulrmufpu49uj",
+    "epicId": "ft_mulrmufpu49uj",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "rohan",
+    "reviewerId": "nikhil",
+    "rank": 5,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "review",
+      "charterId": "desktop-mac",
+      "featureId": "ft_mulrmufpu49uj"
+    },
+    "createdAt": "2026-09-28T21:39:04.017Z",
+    "updatedAt": "2026-09-28T22:58:15.621Z",
+    "stall": {
+      "rule": "unreviewed",
+      "since": "2026-09-28T22:58:15.621Z",
+      "minutes": 4687
+    }
+  },
+  {
+    "id": "as_mulrzyde39q1c",
+    "level": "story",
+    "title": "Resume greeting.py against the agreed contract",
+    "body": "Interfaces are settled (see resolution). Resume building on as_mulrsdzj2xqf3 / your emp/mira branch: greeting_context stays self-contained in greeting.py (no memory routing), on_call/muted are bool|null (null never coerced to false, decision policy is yours). Bring evidence (tests + counts) when done.\n\nFrom the Team Room thread \"[PILOT] Daily greeting: agree the three interfaces before building\" (th_mulrmnpuduspl).",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.677Z",
+    "resolution": "wont-do",
+    "assigneeId": "mira",
+    "rank": 5,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "experts"
+    },
+    "createdAt": "2026-09-28T21:44:57.026Z",
+    "updatedAt": "2026-10-02T04:20:39.677Z"
+  },
+  {
+    "id": "as_muk1cyya6zx1f",
+    "level": "story",
+    "title": "Daily greeting, weather-aware — Memory",
+    "body": "Once a day, the first time the owner is at the Mac, Iris greets him with one spoken sentence that uses the weather facts she already has (context/weather.py), then stays quiet. Never twice a day, never when muted, never during a meeting or screen share. The definition lists this under Personality and it is one of the three spoken moments.\n\nRouted to memory because of: keyword:memory.",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.470Z",
+    "parentId": "ft_muk0zk573q8v1",
+    "epicId": "ft_muk0zk573q8v1",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "kabir",
+    "rank": 6,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "memory",
+      "featureId": "ft_muk0zk573q8v1"
+    },
+    "createdAt": "2026-09-27T16:31:28.498Z",
+    "updatedAt": "2026-10-02T04:22:03.470Z"
+  },
+  {
+    "id": "as_mulrzydfmxf8s",
+    "level": "story",
+    "title": "Build the Speaker primitive as proposed",
+    "body": "No objections landed on speaker_gate.say_once(). Proceed on your own branch per your posted plan: new bus event type distinct from \"reply\", no _TURN/_ADDRESSED writes, _turn_awaiting_reply() false immediately after, bus-shape test for the new event type. Bring evidence when done.\n\nFrom the Team Room thread \"[PILOT] Daily greeting: agree the three interfaces before building\" (th_mulrmnpuduspl).",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.463Z",
+    "assigneeId": "dev",
+    "rank": 6,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "conversation"
+    },
+    "createdAt": "2026-09-28T21:44:57.027Z",
+    "updatedAt": "2026-10-02T04:22:03.463Z"
+  },
+  {
+    "id": "as_muk1cyyafmvt7",
+    "level": "story",
+    "title": "Daily greeting, weather-aware — Product and Business",
+    "body": "Once a day, the first time the owner is at the Mac, Iris greets him with one spoken sentence that uses the weather facts she already has (context/weather.py), then stays quiet. Never twice a day, never when muted, never during a meeting or screen share. The definition lists this under Personality and it is one of the three spoken moments.\n\nRouted to product-and-business because of: keyword:screen share.",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.682Z",
+    "resolution": "wont-do",
+    "parentId": "ft_muk0zk573q8v1",
+    "epicId": "ft_muk0zk573q8v1",
+    "areaId": "ar_muqhzr6q88hw4",
+    "assigneeId": "asha",
+    "rank": 7,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "product-and-business",
+      "featureId": "ft_muk0zk573q8v1"
+    },
+    "createdAt": "2026-09-27T16:31:28.498Z",
+    "updatedAt": "2026-10-02T04:20:39.682Z"
+  },
+  {
+    "id": "as_mulsh54zkwtpt",
+    "level": "story",
+    "title": "HLD: task locality (portable vs machine-bound) for the phone→Mac errand flow",
+    "body": "Dev flagged (th_mulsc401slxei) that no locality concept exists anywhere in agent-svc — grep confirms zero hits for locality/machine-bound/portable task. This is genuinely new architecture in phone.py/task_registry.py, part of ft_muk0srruh7dwv. Per build order (HLD -> LLD -> TDD -> code), bring an HLD before any code — coordinate with Kabir on the split between your paths and iris-api/cloud-agent routing (his side). Post the HLD in th_mulsc401slxei or a new thread when ready; I'll gate further build the same way the greeting's interfaces were gated.\n\nFrom the Team Room thread \"Phone→Mac errand locality + durable queue (as_muk0srsaiu1gc) — needs decomposition, not conversation alone\" (th_mulsc401slxei).",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.461Z",
+    "assigneeId": "mira",
+    "rank": 7,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "experts"
+    },
+    "createdAt": "2026-09-28T21:58:18.947Z",
+    "updatedAt": "2026-10-02T04:22:03.461Z"
+  },
+  {
+    "id": "as_mulsh5508wj56",
+    "level": "story",
+    "title": "HLD: durable queue for phone->Mac errands when the Mac is asleep",
+    "body": "Dev flagged (th_mulsc401slxei) that no durable-queue path exists for errands landing while the Mac is offline/asleep. This is new architecture spanning iris-api and cloud-agent routing (your server-side paths) plus task locality in phone.py/task_registry.py (Mira's side, experts). Per build order, bring an HLD before any code -- coordinate with Mira on the split. Post the HLD in th_mulsc401slxei or a new thread when ready.\n\nFrom the Team Room thread \"Phone→Mac errand locality + durable queue (as_muk0srsaiu1gc) — needs decomposition, not conversation alone\" (th_mulsc401slxei).",
+    "status": "backlog",
+    "statusSince": "2026-10-02T04:22:03.459Z",
+    "assigneeId": "kabir",
+    "rank": 8,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "proposed",
+      "charterId": "memory"
+    },
+    "createdAt": "2026-09-28T21:58:18.948Z",
+    "updatedAt": "2026-10-02T04:22:03.459Z"
+  },
+  {
+    "id": "as_muqen9dy0cqbz",
+    "level": "story",
+    "title": "Daily greeting: presence hook + weather clause (REQ-PERSONALITY-05)",
+    "body": "Re-routed from desktop-mac. Build on_arrival(now) in a new daily_greeting.py, called from app.py's _presence_tick arrival branch (elif awake and not was_awake). Persist today's date only after an actual spoken greeting; suppressed-by-mute/call arrivals don't persist, so the day retries on the next arrival. Include the weather clause only if a (\"weather\",\"sky\") fact is still servable() at fire time; otherwise greet with no weather clause. Mac-already-unlocked-at-launch (was_awake is None) does NOT count as an eligible arrival — waits for the next real lock/unlock. Coordinate with Dev on the character_spec.py touch and the Speaker call. Full context in th_muqeij9c7prxg and Rohan's design notes on as_muk1cyy9pd5qj.\n\nFrom the Team Room thread \"Daily greeting (REQ-PERSONALITY-05): routed to desktop-mac, but the code it touches is yours\" (th_muqeij9c7prxg).",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.688Z",
+    "resolution": "wont-do",
+    "assigneeId": "mira",
+    "rank": 9,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "experts"
+    },
+    "createdAt": "2026-10-02T03:30:00.646Z",
+    "updatedAt": "2026-10-02T04:20:39.688Z"
+  },
+  {
+    "id": "as_muqen9dyr3885",
+    "level": "story",
+    "title": "Daily greeting: character_spec.py touch + Speaker primitive for a one-off proactive line",
+    "body": "Re-routed from desktop-mac (you hold both character and conversation, which are the actual primaries here). Two pieces: (1) whatever character_spec.py needs for the greeting's tone/expression; (2) AC9 needs a Speaker primitive that speaks one sentence, doesn't reopen, and doesn't mark the turn as awaiting-reply — no existing primitive does this per Rohan's check of speaker.py, so the call shape is your design decision. Coordinate with Mira, who owns the on_arrival() hook that will call into this. Full context in th_muqeij9c7prxg.\n\nFrom the Team Room thread \"Daily greeting (REQ-PERSONALITY-05): routed to desktop-mac, but the code it touches is yours\" (th_muqeij9c7prxg).",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.687Z",
+    "resolution": "wont-do",
+    "assigneeId": "dev",
+    "rank": 10,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "conversation"
+    },
+    "createdAt": "2026-10-02T03:30:00.646Z",
+    "updatedAt": "2026-10-02T04:20:39.687Z"
+  },
+  {
+    "id": "as_muqet5oe2c48w",
+    "level": "story",
+    "title": "P0 as_muqecr8avlkkr AC1-3: volume-vs-pause + mic floor RCA",
+    "body": "AC1-2: DO lane sends device.set_volume 0 instead of pausing the music player — fix so it pauses/resumes the player, not the system volume. AC3: mic/SendGate floor RCA — stt streamed only 0s/8s during music vs a 13-28s baseline; find why and fix. Logs: ~/Library/Application Support/Iris/agent.log + ~/Library/Logs/Iris/main.log, 29 Sep 17:10-17:17 IST / 11:40-11:47 UTC. RCA with log evidence, then a failing test, then the fix on your branch, lead-reviewed before merge. P0 — Nikhil is holding AC8-9 release verification on this. Thread: th_muqelw1ti9bdd.\n\nFrom the Team Room thread \"Ownership split needed: P0 \"Iris during music\" bundle (as_muqecr8avlkkr)\" (th_muqelw1ti9bdd).",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.647Z",
+    "resolution": "wont-do",
+    "assigneeId": "rohan",
+    "rank": 11,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "desktop-mac"
+    },
+    "createdAt": "2026-10-02T03:34:35.774Z",
+    "updatedAt": "2026-10-02T04:20:39.647Z"
+  },
+  {
+    "id": "as_muqet5ofu3pn9",
+    "level": "story",
+    "title": "P0 as_muqecr8avlkkr AC4: AEC-less afplay causes garbled speech",
+    "body": "afplay has no AEC reference, so Iris's own voice during music comes out garbled. Fix is renderer-routed playback and/or ducking on speech/wake-word (desktop/renderer, yours). RCA with log evidence first (same logs as AC1-3, see Rohan's parallel assignment), then a failing test, then the fix, lead-reviewed before merge. Coordinate with Rohan — his AC3 mic-floor fix and your AC4 ducking touch the same speech-during-music window. P0. Thread: th_muqelw1ti9bdd.\n\nFrom the Team Room thread \"Ownership split needed: P0 \"Iris during music\" bundle (as_muqecr8avlkkr)\" (th_muqelw1ti9bdd).",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.636Z",
+    "resolution": "wont-do",
+    "assigneeId": "dev",
+    "rank": 12,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "conversation"
+    },
+    "createdAt": "2026-10-02T03:34:35.775Z",
+    "updatedAt": "2026-10-02T04:20:39.636Z"
+  },
+  {
+    "id": "as_muqet5ofarg7n",
+    "level": "story",
+    "title": "P0 as_muqecr8avlkkr AC5: low-confidence utterances firing [[PLAY]]/[[STOP]]",
+    "body": "Low-confidence utterances during music must not fire [[PLAY]]/[[STOP]] action tags — this is action_detect.py/dispatch_policy.py (yours). RCA with log evidence first (29 Sep 17:10-17:17 IST window, same logs as the rest of this bundle), then a failing test, then the fix, lead-reviewed before merge. P0. Thread: th_muqelw1ti9bdd.\n\nFrom the Team Room thread \"Ownership split needed: P0 \"Iris during music\" bundle (as_muqecr8avlkkr)\" (th_muqelw1ti9bdd).",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.642Z",
+    "resolution": "wont-do",
+    "assigneeId": "mira",
+    "rank": 13,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "experts"
+    },
+    "createdAt": "2026-10-02T03:34:35.775Z",
+    "updatedAt": "2026-10-02T04:20:39.642Z"
+  },
+  {
+    "id": "as_muqet5oguz6oy",
+    "level": "story",
+    "title": "P0 as_muqecr8avlkkr AC6-7: beat-detection re-plans and micro-motion while listening",
+    "body": "AC6: beat-detection confidence in the 0.35-0.54 band causes 6-9s re-plans (\"vibrating\"). AC7: micro-motion runs while merely listening, not just when pending. Both are desktop/pet (yours, character charter). RCA with log evidence first, then a failing test, then the fix, lead-reviewed before merge. P0. Thread: th_muqelw1ti9bdd.\n\nFrom the Team Room thread \"Ownership split needed: P0 \"Iris during music\" bundle (as_muqecr8avlkkr)\" (th_muqelw1ti9bdd).",
+    "status": "done",
+    "statusSince": "2026-10-02T04:20:39.633Z",
+    "resolution": "wont-do",
+    "assigneeId": "dev",
+    "rank": 14,
+    "acceptance": [],
+    "legacy": {
+      "kind": "assignment",
+      "state": "rejected",
+      "charterId": "conversation"
+    },
+    "createdAt": "2026-10-02T03:34:35.776Z",
+    "updatedAt": "2026-10-02T04:20:39.633Z"
+  }
+]

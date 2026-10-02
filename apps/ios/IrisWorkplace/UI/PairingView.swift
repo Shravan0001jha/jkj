@@ -84,7 +84,7 @@ struct PairingView: View {
             try await model.pair(urlText: urlText, code: code)
             if embedded { dismiss() }
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 }

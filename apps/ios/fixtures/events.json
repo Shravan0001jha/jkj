@@ -2435,6 +2435,142 @@
     }
   },
   {
+    "type": "item.updated",
+    "item": {
+      "id": "as_muqed3ed0cpmg",
+      "level": "story",
+      "title": "P0 music bundle — AC1, AC2, AC5 (music controls): pause/stop/mute act on the player not system volume; no stray volume-0; garbled/low-confidence lines never trigger play/stop",
+      "body": "Your part of ft_mummakwyuew19 (see its spec: AC1, AC2, AC5). Dev owns AC3/AC4/AC6/AC7, Nikhil QA (AC8). Coordinate interfaces with Dev in the Team Room. RCA first with the 29 Sep 17:10–17:17 log evidence, failing tests first, fix on your branch.",
+      "status": "in-progress",
+      "statusSince": "2026-10-02T05:02:21.776Z",
+      "parentId": "ft_mummakwyuew19",
+      "epicId": "ft_mummakwyuew19",
+      "areaId": "ar_muqhzr5khct7v",
+      "assigneeId": "mira",
+      "rank": 3,
+      "acceptance": [],
+      "legacy": {
+        "kind": "assignment",
+        "state": "building",
+        "charterId": "experts",
+        "featureId": "ft_mummakwyuew19"
+      },
+      "createdAt": "2026-10-02T03:22:06.325Z",
+      "updatedAt": "2026-10-02T05:05:37.336Z",
+      "points": 3,
+      "reviewerId": "nikhil"
+    }
+  },
+  {
+    "type": "item.comment",
+    "comment": {
+      "id": "com_mock_2",
+      "itemId": "ft_mummakwyuew19",
+      "at": "2026-10-02T05:25:00.000Z",
+      "by": "owner",
+      "text": "@coo can you unblock Dev today?",
+      "mentions": [
+        "coo"
+      ]
+    }
+  },
+  {
+    "type": "activity.recorded",
+    "activity": {
+      "id": "act_muqi0c6389n3q",
+      "at": "2026-10-02T05:04:09.627Z",
+      "itemId": "as_muqecr89jhjst",
+      "by": "dev",
+      "kind": "status",
+      "text": "in-progress → blocked",
+      "from": "in-progress",
+      "to": "blocked"
+    }
+  },
+  {
+    "type": "update.posted",
+    "update": {
+      "id": "up_muqi0c64wm3wl",
+      "at": "2026-10-02T05:04:09.628Z",
+      "kind": "blocked",
+      "line": "Blocked: P0 bug bundle: \"Iris during music\". — Conversation — waiting on Claude — COO: 4th consecutive session blocked on as_muqecr89jhjst by a session-wide infra failure: every mutating tool call (Bash, Write) is rejected with \"server-side auto mode classifier gave no verdict,\" confirmed even on trivial unrelated commands (echo-only works; touch/rm/git add/Write all fail, retried once each per the error's own instructions, still rejected). Read-only tools work. No code, test, or commit was possible this session either. Needs Workplace infra fix, not another retry session.",
+      "by": "dev",
+      "itemId": "as_muqecr89jhjst",
+      "href": "item/as_muqecr89jhjst",
+      "push": true
+    }
+  },
+  {
+    "type": "area.updated",
+    "area": {
+      "id": "ar_muqhzr5khct7v",
+      "title": "Voice & audio",
+      "description": "Hearing, speaking and music on the Mac: STT, AEC, music controls, dance.",
+      "state": "active",
+      "rank": 1,
+      "ownerId": "owner",
+      "roomId": "area:ar_muqhzr5khct7v",
+      "threadId": "th_area_ar_muqhzr5khct7v",
+      "createdAt": "2026-10-02T05:03:42.392Z",
+      "updatedAt": "2026-10-02T05:03:42.392Z"
+    }
+  },
+  {
+    "type": "inbox.message",
+    "message": {
+      "id": "im_mock_2",
+      "inboxId": "in_muqel76q1h1i1",
+      "at": "2026-10-02T05:31:00.000Z",
+      "by": "asha",
+      "text": "It is a server change and the P0 has priority. The 2-entry edit unblocks routing today; the kind can follow."
+    }
+  },
+  {
+    "type": "release.post",
+    "post": {
+      "id": "rp_mock_0215",
+      "at": "2026-10-01T12:00:00.000Z",
+      "title": "Iris 0.2.15 (Mac arm64)",
+      "version": "0.2.15",
+      "shippable": "desktop-mac",
+      "by": "nikhil",
+      "groups": [
+        {
+          "areaId": "ar_muqhzr5khct7v",
+          "areaTitle": "Voice & audio",
+          "items": [
+            {
+              "id": "as_muqed3ed0cpmg",
+              "title": "Music controls act on the player, not the system volume",
+              "level": "story",
+              "kind": "story"
+            }
+          ]
+        },
+        {
+          "areaId": "ar_muqhzr7lq5qxd",
+          "areaTitle": "Mac & mobile apps",
+          "items": [
+            {
+              "id": "as_muk0srs9kx5vs",
+              "title": "Phone actions on the Mac: no false Done",
+              "level": "story",
+              "kind": "story"
+            },
+            {
+              "id": "as_muk0srsaw3n4j",
+              "title": "A busy Mac shows as online",
+              "level": "story",
+              "kind": "fix"
+            }
+          ]
+        }
+      ],
+      "text": "Iris 0.2.15 shipped: 3 changes.",
+      "threadId": "th_releases"
+    }
+  },
+  {
     "type": "future.event",
     "anything": 1
   }

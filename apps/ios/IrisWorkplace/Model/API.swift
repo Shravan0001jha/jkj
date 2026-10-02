@@ -72,6 +72,32 @@ enum API {
     static let cooForward = "/api/coo/forward"
     static let cooPresence = "/api/coo/presence"
 
+    // v2 (LLD §19.8)
+    static func plan(view: String? = nil) -> String { view.map { "/api/plan?view=\($0)" } ?? "/api/plan" }
+    static let focus = "/api/focus"
+    static func items(level: ItemLevel? = nil, status: ItemStatus? = nil, assigneeId: String? = nil,
+                      areaId: String? = nil, parentId: String? = nil) -> String {
+        withQuery("/api/items", [
+            ("level", level?.rawValue), ("status", status?.rawValue), ("assigneeId", assigneeId),
+            ("areaId", areaId), ("parentId", parentId),
+        ])
+    }
+    static func item(_ id: String) -> String { "/api/items/\(enc(id))" }
+    static func itemComments(_ id: String) -> String { "/api/items/\(enc(id))/comments" }
+    static func itemMerge(_ id: String) -> String { "/api/items/\(enc(id))/merge" }
+    static func updates(limit: Int? = nil, before: String? = nil) -> String {
+        withQuery("/api/updates", [("limit", limit.map(String.init)), ("before", before)])
+    }
+    static func inboxThread(_ id: String) -> String { "/api/inbox/\(enc(id))" }
+    static func inboxReply(_ id: String) -> String { "/api/inbox/\(enc(id))/reply" }
+    static func status(_ q: String) -> String { withQuery("/api/status", [("q", q)]) }
+    static let areas = "/api/areas"
+    static func area(_ id: String) -> String { "/api/areas/\(enc(id))" }
+    static let rooms = "/api/rooms"
+    static func roomDetail(_ id: String) -> String { "/api/rooms/\(enc(id))" }
+    static let releasePosts = "/api/releases/posts"
+    static func releasePost(_ id: String) -> String { "/api/releases/posts/\(enc(id))" }
+
     static let socket = "/ws"
 
     // Relay-only (LLD-workplace-push §2, relay LLD): answered by the relay, never proxied.

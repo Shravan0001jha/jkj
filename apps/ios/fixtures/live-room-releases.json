@@ -1,0 +1,28 @@
+{
+  "room": {
+    "id": "releases",
+    "kind": "releases",
+    "title": "Releases",
+    "headline": "Every release and what shipped in it.",
+    "lastAt": "2026-10-02T05:02:21.765Z",
+    "threadIds": [
+      "th_releases"
+    ]
+  },
+  "threads": [
+    {
+      "id": "th_releases",
+      "title": "Releases",
+      "charterIds": [],
+      "createdBy": "workplace",
+      "createdAt": "2026-10-02T05:02:21.765Z",
+      "state": "open",
+      "headline": "Every release and what shipped in it.",
+      "lastAt": "2026-10-02T05:02:21.765Z",
+      "messageCount": 0,
+      "participants": [],
+      "escalations": [],
+      "roomId": "releases"
+    }
+  ]
+}

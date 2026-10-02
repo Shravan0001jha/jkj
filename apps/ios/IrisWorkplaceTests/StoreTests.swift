@@ -196,8 +196,8 @@ final class StoreTests: XCTestCase {
         await s.select(rest, employeeId: "mira")
         XCTAssertEqual(s.log.count, 7)
         let items = s.chatLog
-        XCTAssertEqual(items.count, 5, "user, assistant, activity(read+edit+search), assistant, bash")
-        XCTAssertEqual(items[0].kind, .user)
+        XCTAssertEqual(items.count, 5, "activity(the Workplace's prompt), assistant, activity(read+edit+search), assistant, bash")
+        XCTAssertEqual(items[0].kind, .activity, "the assignment prompt is the Workplace's (from: workplace), never shown as the owner's")
         XCTAssertEqual(items[1].kind, .assistant)
         XCTAssertEqual(items[2].kind, .activity)
         XCTAssertEqual(items[2].activity?.entries.map(\.kind), [.read, .edit, .search])

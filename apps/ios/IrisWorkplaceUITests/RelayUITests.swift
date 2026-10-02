@@ -54,9 +54,9 @@ final class RelayUITests: XCTestCase {
         shot("relay-web-page")
         (pageButton.exists ? pageButton : pageButtonLoose).tap()
 
-        XCTAssertTrue(app.navigationBars["Office"].waitForExistence(timeout: 20), "the callback's token signs the app in")
-        XCTAssertTrue(app.staticTexts["Spend today"].waitForExistence(timeout: 10))
-        shot("relay-office")
+        XCTAssertTrue(app.navigationBars["Plan"].waitForExistence(timeout: 20), "the callback's token signs the app in")
+        XCTAssertTrue(app.staticTexts["Assigned to you"].waitForExistence(timeout: 10))
+        shot("relay-plan")
 
         app.buttons["More"].firstMatch.tap()
         app.buttons["Settings"].firstMatch.tap()
@@ -64,8 +64,10 @@ final class RelayUITests: XCTestCase {
         XCTAssertTrue(reached.waitForExistence(timeout: 6))
         let online = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Online'")).firstMatch
         XCTAssertTrue(online.waitForExistence(timeout: 8), "the socket is open with the session token")
-        XCTAssertTrue(app.buttons["Sign out"].exists)
         shot("relay-settings")
+        var s = 0
+        while !app.buttons["Sign out"].exists && s < 5 { app.swipeUp(); s += 1 }
+        XCTAssertTrue(app.buttons["Sign out"].exists)
         var n = 0
         while !app.buttons["Developer options"].isHittable && n < 5 { app.swipeUp(); n += 1 }
         app.buttons["Developer options"].tap()
@@ -82,7 +84,7 @@ final class RelayUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Check now"].exists)
         shot("relay-mac-offline")
         await setOffline(false)
-        XCTAssertTrue(app.navigationBars["Office"].waitForExistence(timeout: 30), "the app re-probes and connects when the Mac is back")
+        XCTAssertTrue(app.navigationBars["Plan"].waitForExistence(timeout: 30), "the app re-probes and connects when the Mac is back")
         shot("relay-recovered")
     }
 

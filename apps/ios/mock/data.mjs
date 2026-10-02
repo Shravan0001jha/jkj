@@ -2,6 +2,8 @@
 // features and sessions. It feeds the unit-test fixtures (scripts/write-fixtures.mjs) and the
 // mock server (mock/server.mjs). Test and preview data only; never shipped in the app.
 
+import { sampleV2Events } from './v2.mjs';
+
 const T0 = '2026-09-27T09:00:00.000Z';
 const iso = (minutesAfter) => new Date(Date.parse(T0) + minutesAfter * 60_000).toISOString();
 
@@ -379,7 +381,7 @@ export const employeeDetail = (id) => {
 
 export const logs = {
   's-mira-1': [
-    { id: 'l-1', agentId: 's-mira-1', at: iso(-25), kind: 'user', label: '', text: 'Assignment a-1: Errand receiver on the Mac. Reply with ## Plan first.' },
+    { id: 'l-1', agentId: 's-mira-1', at: iso(-25), kind: 'user', label: '', text: 'Assignment a-1: Errand receiver on the Mac. Reply with ## Plan first.', from: 'workplace' },
     { id: 'l-2', agentId: 's-mira-1', at: iso(-24), kind: 'assistant', label: '', text: '## Plan\n1. Add an `errand` expert that validates the instruction.\n2. Run it through the existing act-then-ack path.\n3. Tests for a busy Mac.' },
     { id: 'l-3', agentId: 's-mira-1', at: iso(-20), kind: 'read', label: 'Read', text: 'services/agent-svc/experts/whatsapp.py' },
     { id: 'l-4', agentId: 's-mira-1', at: iso(-18), kind: 'edit', label: 'Edit', text: 'services/agent-svc/experts/errand.py' },
@@ -388,7 +390,7 @@ export const logs = {
     { id: 'l-7', agentId: 's-mira-1', at: iso(-1), kind: 'bash', label: 'Bash', text: 'cd services/agent-svc && ../../.venv/bin/python -m pytest -q tests/test_errands.py' },
   ],
   's-asha-1': [
-    { id: 'l-a1', agentId: 's-asha-1', at: iso(-40), kind: 'user', label: '', text: 'Feature f-errands stated. Write the spec.' },
+    { id: 'l-a1', agentId: 's-asha-1', at: iso(-40), kind: 'user', label: '', text: 'Feature f-errands stated. Write the spec.', from: 'workplace' },
     { id: 'l-a2', agentId: 's-asha-1', at: iso(-38), kind: 'assistant', label: '', text: 'Spec written with two acceptance criteria. Decomposing through the map: experts, server, desktop-mac, mobile, conversation.' },
     { id: 'l-a3', agentId: 's-asha-1', at: iso(-37), kind: 'tool', label: 'write_spec', text: 'f-errands' },
     { id: 'l-a4', agentId: 's-asha-1', at: iso(-36), kind: 'system', label: '', text: 'Decomposed into 5 assignments.' },
@@ -585,6 +587,7 @@ export const sampleEvents = [
   { type: 'coo.message', message: cooLog[1] },
   { type: 'coo.item', item: { id: 'coi-1', at: T0, kind: 'mention', title: 'Mentioned in "General"', body: 'ask the COO', options: [], raisedBy: 'asha', state: 'open' } },
   { type: 'coo.presence', presence: { online: true, lastHeartbeat: T0 } },
+  ...sampleV2Events(),
   { type: 'future.event', anything: 1 },
 ];
 

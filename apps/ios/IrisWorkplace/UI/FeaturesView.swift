@@ -1,7 +1,9 @@
 import SwiftUI
 
+/// The v1 Features board, pivot and requests: opened from the Plan's menu as a sheet.
 struct FeaturesView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     @State private var mode: Mode = .board
     @State private var pivotRows: PivotRows = .charter
     @State private var path: [String] = []
@@ -32,7 +34,7 @@ struct FeaturesView: View {
             .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { model.router.showNewRequest = true } label: { Image(systemName: "plus.circle.fill") }.accessibilityLabel("New request")
+                    Button("Done") { dismiss() }
                 }
             }
             .task { if model.features.board == nil { await reload() } }

@@ -85,7 +85,7 @@ struct ReleasesView: View {
 
     private func load() async {
         guard let rest = model.rest else { return }
-        do { ready = try await rest.releasesReady(); error = nil; loaded = true } catch { self.error = error.localizedDescription }
+        do { ready = try await rest.releasesReady(); error = nil; loaded = true } catch { if let m = error.userMessage { self.error = m } }
     }
 
     private func run(_ rel: Release) async {
@@ -94,7 +94,7 @@ struct ReleasesView: View {
         guard ok else { error = "Not confirmed on this phone."; return }
         running.insert(rel.id)
         defer { running.remove(rel.id) }
-        do { try await rest.runRelease(rel.id); error = nil } catch { self.error = error.localizedDescription }
+        do { try await rest.runRelease(rel.id); error = nil } catch { if let m = error.userMessage { self.error = m } }
     }
 }
 
@@ -164,7 +164,7 @@ struct ProposalDetailView: View {
 
     private func load() async {
         guard let rest = model.rest else { return }
-        do { detail = try await rest.proposal(id); error = nil } catch { self.error = error.localizedDescription }
+        do { detail = try await rest.proposal(id); error = nil } catch { if let m = error.userMessage { self.error = m } }
     }
 }
 

@@ -1,61 +1,167 @@
 import SwiftUI
 
-/// The Team Room: threads with a one-line status, a thread's messages one line each with details on
-/// demand, posting as the owner with @mentions, live updates.
+/// The Room (v2): General, one room per product area (a thread per epic inside it, plus the
+/// area's own channel), and the Releases room. Agents discuss, hand off and review here; each
+/// area room also carries named update lines ("Story 'X' is done").
 struct RoomView: View {
     @Environment(AppModel.self) private var model
-    @State private var path: [String] = []
+    @State private var path = NavigationPath()
     @State private var showNew = false
 
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                if let e = model.room.error, !model.room.loaded {
+                if let e = model.rooms.error, !model.rooms.loaded {
                     ErrorRow(message: e) { Task { await reload() } }
+                } else if !model.rooms.loaded {
+                    HStack { Spacer(); ProgressView(); Spacer() }
                 }
-                if model.room.loaded && model.room.threads.isEmpty {
-                    EmptyState(symbol: "person.3", title: "No threads yet",
-                               text: "Employees open threads when their work crosses charters. You can start one too.")
+                let rooms = model.rooms.rooms
+                if let general = rooms.first(where: { $0.kind == .general }) {
+                    Section { roomLink(general) } header: { SectionHeader(text: "Everyone") }
                 }
-                if let general = model.room.general {
-                    Section {
-                        NavigationLink(value: general.id) { ThreadRow(thread: general, isChannel: true) }
-                    } header: { SectionHeader(text: "Channel") }
+                let areas = rooms.filter { $0.kind == .area || $0.kind == .unknown }
+                if !areas.isEmpty {
+                    Section { ForEach(areas) { roomLink($0) } } header: { SectionHeader(text: "Areas") }
                 }
-                if !model.room.open.isEmpty {
-                    Section {
-                        ForEach(model.room.open) { t in NavigationLink(value: t.id) { ThreadRow(thread: t) } }
-                    } header: { SectionHeader(text: "Open") }
-                }
-                if !model.room.resolved.isEmpty {
-                    Section {
-                        ForEach(model.room.resolved) { t in NavigationLink(value: t.id) { ThreadRow(thread: t) } }
-                    } header: { SectionHeader(text: "Resolved") }
+                if let releases = rooms.first(where: { $0.kind == .releases }) {
+                    Section { roomLink(releases) } header: { SectionHeader(text: "Releases") }
                 }
             }
             .listStyle(.insetGrouped)
             .refreshable { await reload() }
-            .navigationTitle("Team Room")
+            .navigationTitle("Room")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showNew = true } label: { Image(systemName: "square.and.pencil") }.accessibilityLabel("New thread")
                 }
             }
             .navigationDestination(for: String.self) { id in ThreadView(id: id) }
+            .navigationDestination(for: ReleasesRoomRoute.self) { _ in ReleasePostsView() }
+            .v2Destinations()
             .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
-            .sheet(isPresented: $showNew) { NewThreadView { id in path = [id] } }
-            .task { if !model.room.loaded { await reload() } }
+            .sheet(isPresented: $showNew) { NewThreadView { id in path.append(ThreadRoute(id: id)) } }
+            .task { if !model.rooms.loaded { await reload() } }
             .onChange(of: model.router.roomThreadId, initial: true) { _, id in
                 guard let id else { return }
-                path = [id]
+                path = NavigationPath([ThreadRoute(id: id)])
                 model.router.roomThreadId = nil
             }
+            .onChange(of: model.router.releasePostId, initial: true) { _, id in
+                guard let id else { return }
+                var p = NavigationPath()
+                p.append(ReleasesRoomRoute())
+                p.append(ReleasePostRoute(id: id))
+                path = p
+                model.router.releasePostId = nil
+            }
+        }
+    }
+
+    @ViewBuilder private func roomLink(_ room: Room) -> some View {
+        if room.kind == .releases {
+            NavigationLink(value: ReleasesRoomRoute()) { RoomRow(room: room) }
+        } else {
+            NavigationLink(value: RoomRoute(id: room.id)) { RoomRow(room: room) }
         }
     }
 
     private func reload() async {
         guard let rest = model.rest else { return }
-        await model.room.load(rest)
+        async let r: Void = model.rooms.load(rest)
+        async let t: Void = model.room.load(rest)
+        _ = await (r, t)
+    }
+}
+
+struct ReleasesRoomRoute: Hashable {}
+
+struct RoomRow: View {
+    @Environment(AppModel.self) private var model
+    let room: Room
+
+    private var symbol: String {
+        switch room.kind {
+        case .general: return "number"
+        case .area: return "square.stack.3d.up"
+        case .releases: return "shippingbox"
+        case .unknown: return "bubble.left.and.bubble.right"
+        }
+    }
+
+    var body: some View {
+        let unread = room.threadIds.filter { model.room.unread.contains($0) }.count
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol).foregroundStyle(.white).font(.subheadline.weight(.semibold))
+                .frame(width: 32, height: 32).background(room.kind == .releases ? Color.brown : Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(room.title).font(.subheadline.weight(unread > 0 ? .bold : .semibold))
+                    if unread > 0 { Circle().fill(Color.accentColor).frame(width: 8, height: 8).accessibilityLabel("\(unread) unread") }
+                    Spacer()
+                    Text(Format.ago(room.lastAt)).font(.caption2).foregroundStyle(.tertiary)
+                }
+                if !room.headline.isEmpty { Text(room.headline).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                if room.kind == .area {
+                    let epics = room.threadIds.filter { $0.hasPrefix("th_epic_") }.count
+                    Text("\(epics) epic thread\(epics == 1 ? "" : "s")").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// One room's threads: an area's epic threads and its own channel, or General's threads.
+struct RoomDetailView: View {
+    @Environment(AppModel.self) private var model
+    let id: String
+
+    private var detail: RoomDetail? { model.rooms.details[id] }
+
+    var body: some View {
+        List {
+            if let d = detail {
+                let pinned = d.threads.filter { $0.id == RoomStore.generalId || $0.id.hasPrefix("th_area_") }
+                let epics = d.threads.filter { $0.epicId != nil && $0.state != .resolved }
+                let others = d.threads.filter { !pinned.contains($0) && !epics.contains($0) }
+                if !pinned.isEmpty {
+                    Section { ForEach(pinned) { t in NavigationLink(value: ThreadRoute(id: t.id)) { ThreadRow(thread: t, isChannel: true) } } }
+                        header: { SectionHeader(text: "Channel") }
+                }
+                if !epics.isEmpty {
+                    Section { ForEach(epics) { t in NavigationLink(value: ThreadRoute(id: t.id)) { ThreadRow(thread: t, isEpic: true) } } }
+                        header: { SectionHeader(text: "Epics") }
+                }
+                let open = others.filter { $0.state != .resolved }
+                let resolved = others.filter { $0.state == .resolved }
+                if !open.isEmpty {
+                    Section { ForEach(open) { t in NavigationLink(value: ThreadRoute(id: t.id)) { ThreadRow(thread: t) } } }
+                        header: { SectionHeader(text: "Open") }
+                }
+                if !resolved.isEmpty {
+                    Section { ForEach(resolved) { t in NavigationLink(value: ThreadRoute(id: t.id)) { ThreadRow(thread: t) } } }
+                        header: { SectionHeader(text: "Resolved") }
+                }
+                if d.threads.isEmpty {
+                    EmptyState(symbol: "person.3", title: "Quiet so far", text: "Threads open here when work in this room needs discussing.")
+                }
+            } else if let e = model.rooms.error {
+                ErrorRow(message: e) { Task { await load() } }
+            } else {
+                HStack { Spacer(); ProgressView(); Spacer() }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .refreshable { await load() }
+        .navigationTitle(detail?.room.title ?? model.rooms.rooms.first { $0.id == id }?.title ?? "Room")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: id) { await load() }
+    }
+
+    private func load() async {
+        guard let rest = model.rest else { return }
+        await model.rooms.loadRoom(rest, id: id)
     }
 }
 
@@ -63,10 +169,13 @@ struct ThreadRow: View {
     @Environment(AppModel.self) private var model
     let thread: RoomThread
     var isChannel = false
+    var isEpic = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            if isChannel {
+            if isEpic {
+                Image(systemName: "flag.fill").foregroundStyle(Color.accentColor).font(.title3).frame(width: 26)
+            } else if isChannel {
                 Image(systemName: "number").foregroundStyle(.white).font(.headline)
                     .frame(width: 32, height: 32).background(Color.accentColor, in: Circle())
             } else {
@@ -108,7 +217,8 @@ struct ThreadView: View {
 
     private var thread: RoomThread? { model.room.thread(id) }
     private var messages: [RoomMessage] { model.room.messages[id] ?? [] }
-    private var isChannel: Bool { id == "general" }
+    /// General and each area's own channel: everyone's, never resolved from here.
+    private var isChannel: Bool { id == RoomStore.generalId || id.hasPrefix("th_area_") }
     /// Who can be @mentioned: everyone in the Office, plus the thread's participants (the Office may not be loaded yet).
     private var knownIds: [String] {
         Array(Set(model.office.cards.map(\.employee.id) + (thread?.participants ?? []) + messages.map(\.by))).filter { $0 != "owner" && $0 != "workplace" }
@@ -141,7 +251,7 @@ struct ThreadView: View {
                             }
                         }
                     }
-                    if !t.headline.isEmpty { Text(t.headline).font(.caption).foregroundStyle(.secondary) }
+                    if !t.headline.isEmpty && t.headline != t.title { Text(t.headline).font(.caption).foregroundStyle(.secondary) }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,7 +260,13 @@ struct ThreadView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        if messages.isEmpty { HStack { Spacer(); ProgressView(); Spacer() }.padding() }
+                        // Spinner only until the thread has loaded: an empty channel says so instead of
+                        // spinning forever (an area's own channel starts with no messages).
+                        if model.room.messages[id] == nil {
+                            HStack { Spacer(); ProgressView(); Spacer() }.padding()
+                        } else if messages.isEmpty {
+                            Text("No messages yet. Say something, or @mention someone.").font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding()
+                        }
                         ForEach(messages) { m in
                             RoomMessageRow(message: m).id(m.id)
                         }
@@ -263,13 +379,13 @@ struct ThreadView: View {
         do {
             try await model.room.post(rest, threadId: id, text: text, mentions: RoomStore.mentions(in: text, known: knownIds))
             draft = ""
-        } catch { self.error = error.localizedDescription }
+        } catch { if let m = error.userMessage { self.error = m } }
     }
 
     private func resolve() async {
         guard let rest = model.rest else { return }
         do { try await model.room.resolve(rest, threadId: id, summary: summary.trimmingCharacters(in: .whitespaces)); summary = "" }
-        catch { self.error = error.localizedDescription }
+        catch { if let m = error.userMessage { self.error = m } }
     }
 }
 
@@ -284,8 +400,12 @@ struct RoomMessageRow: View {
     }
 
     var body: some View {
-        let c = CompactText(text: message.text)
-        HStack(alignment: .top, spacing: 8) {
+        if let kind = message.kind, kind != .message { UpdateLineRow(message: message) } else { bubble }
+    }
+
+    private var bubble: some View {
+        let c = CompactText(text: message.text, details: message.details)
+        return HStack(alignment: .top, spacing: 8) {
             if message.owner { Spacer(minLength: 40) }
             if !message.owner { InitialsAvatar(name: senderName, tint: message.by == "workplace" ? .secondary : .accentColor) }
             VStack(alignment: message.owner ? .trailing : .leading, spacing: 3) {
@@ -294,7 +414,7 @@ struct RoomMessageRow: View {
                     Text(Format.ago(message.at)).font(.caption2).foregroundStyle(.tertiary)
                     if c.hasDetails { Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.secondary) }
                 }
-                Text(highlighted(expanded ? message.text : c.line))
+                Text(highlighted(expanded ? (message.details ?? message.text) : c.line))
                     .font(.subheadline)
                     .lineLimit(expanded ? nil : 1)
                     .multilineTextAlignment(message.owner ? .trailing : .leading)
@@ -323,6 +443,52 @@ struct RoomMessageRow: View {
             }
         }
         return a
+    }
+}
+
+/// A named update the room posts ("Story 'X' is done"), a stand-up or a release line: a quiet
+/// centred line, not a chat bubble; tapping it opens the item it is about.
+struct UpdateLineRow: View {
+    @Environment(AppModel.self) private var model
+    let message: RoomMessage
+    @State private var expanded = false
+
+    private var symbol: String {
+        switch message.kind {
+        case .standup: return "sunrise"
+        case .release: return "shippingbox"
+        default:
+            let t = message.text.lowercased()
+            if t.contains("blocked") && !t.contains("unblocked") { return "octagon.fill" }
+            if t.contains("done") { return "checkmark.circle.fill" }
+            if t.contains("started") { return "play.circle.fill" }
+            return "info.circle"
+        }
+    }
+
+    var body: some View {
+        let line = HStack(alignment: .top, spacing: 6) {
+            Image(systemName: symbol).foregroundStyle(symbol == "octagon.fill" ? Color.red : symbol == "checkmark.circle.fill" || symbol == "play.circle.fill" ? Color.green : Color.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                if message.kind == .standup, let who = message.about { Text("Stand-up · \(model.employeeName(who))").font(.caption.weight(.semibold)) }
+                Text(expanded ? (message.details ?? message.text) : message.text).font(.caption).lineLimit(expanded ? nil : 3)
+                Text(Format.ago(message.at)).font(.caption2).foregroundStyle(.tertiary)
+            }
+            if message.itemId != nil { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Color(.tertiarySystemFill).opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
+        Group {
+            if let id = message.itemId {
+                NavigationLink(value: ItemRoute(id: id)) { line }.buttonStyle(.plain)
+            } else {
+                line.onTapGesture { if message.details != nil { withAnimation(.snappy) { expanded.toggle() } } }
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -388,6 +554,6 @@ struct NewThreadView: View {
                                                 mentions: RoomStore.mentions(in: text, known: model.office.cards.map(\.employee.id)))
             dismiss()
             onCreated(t.id)
-        } catch { self.error = error.localizedDescription }
+        } catch { if let m = error.userMessage { self.error = m } }
     }
 }

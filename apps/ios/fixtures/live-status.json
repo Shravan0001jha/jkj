@@ -1,0 +1,134 @@
+{
+  "q": "music",
+  "line": "Epic 'P0 bug bundle: \"Iris during music\".' — In progress · 0% (0/3 stories)",
+  "matches": [
+    {
+      "item": {
+        "id": "ft_mummakwyuew19",
+        "level": "epic",
+        "title": "P0 bug bundle: \"Iris during music\".",
+        "body": "P0 bug bundle: \"Iris during music\". The owner reported: \"it's vibrating almost all the time\", and \"when music is playing it's not able to hear me at all — not even when volume is 0\". Evidence is in the installed Iris 0.2.15 logs (~/Library/Application Support/Iris/agent.log and ~/Library/Logs/Iris/main.log, 29 Sep 17:10–17:17 IST; main.log timestamps are UTC, 11:40–11:47).\n\n1. \"Iris pause mute\" (17:13:06) → the DO lane set **system output volume to 0** (`device.set_volume 0`) instead of pausing the music. The music kept playing silently, and Iris's own voice was muted too. Pause, stop and mute must act on the music player; system volume only when the user explicitly says \"volume\".\n2. **The mic stream nearly stopped after the music started:** \"stt: streamed 0s of audio in the last minute\" at 17:14 and 17:15, and 8 s at 17:16, while the owner was speaking. It was 13–28 s during the music. Suspect the adaptive SendGate floor (the quietest-20-of-100 chunks × 2.5) staying high after loud music, or something else gating the mic. RCA with evidence.\n3. **While the music is audible, speech is garbled** (\"i disposed\", \"i just called you a bit\", \"i respond music\"). The music plays via a native player (afplay), outside the renderer's WebRTC AEC, so there's no echo reference. Options: play music through the renderer so AEC cancels it, and/or duck the music on speech onset or the wake word.\n4. **A garbled line restarted the music:** \"i respond music\" → [[PLAY]] a new track. Low-confidence or garbled utterances during music must never trigger play/stop.\n5. **\"Vibrating\":** the dance re-plans every 6–9 s from beat detection with confidence 0.35–0.54, tempo jumping 60–184 BPM. Also the listening micro-motion runs continuously while music keeps the mic busy. Require a confidence threshold (else gentle sway), smooth and clamp the tempo, and don't run the pending micro-motion while merely listening.\n\n**Rules:**\n- RCA first with log evidence per item;\n- tests that fail before each fix;\n- fixes on employee branches;\n- QA verifies with real music playing (audible, and at volume 0) on the Mac;\n- the lead reviews before merge, then a release as 0.2.16 with owner approval.\n\n**Priority P0:** keep other work paused (the weekly subscription window is at 80%).",
+        "status": "in-progress",
+        "statusSince": "2026-10-02T03:27:26.410Z",
+        "epicId": "ft_mummakwyuew19",
+        "areaId": "ar_muqhzr5khct7v",
+        "rank": 4,
+        "acceptance": [],
+        "legacy": {
+          "kind": "feature",
+          "state": "in-progress"
+        },
+        "createdAt": "2026-09-29T11:53:01.282Z",
+        "updatedAt": "2026-10-02T05:03:42.519Z"
+      },
+      "line": "Epic 'P0 bug bundle: \"Iris during music\".' — In progress · 0% (0/3 stories)",
+      "href": "item/ft_mummakwyuew19"
+    },
+    {
+      "item": {
+        "id": "as_muqecr89jhjst",
+        "level": "story",
+        "title": "P0 bug bundle: \"Iris during music\". — Conversation",
+        "body": "P0 bug bundle: \"Iris during music\". The owner reported: \"it's vibrating almost all the time\", and \"when music is playing it's not able to hear me at all — not even when volume is 0\". Evidence is in the installed Iris 0.2.15 logs (~/Library/Application Support/Iris/agent.log and ~/Library/Logs/Iris/main.log, 29 Sep 17:10–17:17 IST; main.log timestamps are UTC, 11:40–11:47).\n\n1. \"Iris pause mute\" (17:13:06) → the DO lane set **system output volume to 0** (`device.set_volume 0`) instead of pausing the music. The music kept playing silently, and Iris's own voice was muted too. Pause, stop and mute must act on the music player; system volume only when the user explicitly says \"volume\".\n2. **The mic stream nearly stopped after the music started:** \"stt: streamed 0s of audio in the last minute\" at 17:14 and 17:15, and 8 s at 17:16, while the owner was speaking. It was 13–28 s during the music. Suspect the adaptive SendGate floor (the quietest-20-of-100 chunks × 2.5) staying high after loud music, or something else gating the mic. RCA with evidence.\n3. **While the music is audible, speech is garbled** (\"i disposed\", \"i just called you a bit\", \"i respond music\"). The music plays via a native player (afplay), outside the renderer's WebRTC AEC, so there's no echo reference. Options: play music through the renderer so AEC cancels it, and/or duck the music on speech onset or the wake word.\n4. **A garbled line restarted the music:** \"i respond music\" → [[PLAY]] a new track. Low-confidence or garbled utterances during music must never trigger play/stop.\n5. **\"Vibrating\":** the dance re-plans every 6–9 s from beat detection with confidence 0.35–0.54, tempo jumping 60–184 BPM. Also the listening micro-motion runs continuously while music keeps the mic busy. Require a confidence threshold (else gentle sway), smooth and clamp the tempo, and don't run the pending micro-motion while merely listening.\n\n**Rules:**\n- RCA first with log evidence per item;\n- tests that fail before each fix;\n- fixes on employee branches;\n- QA verifies with real music playing (audible, and at volume 0) on the Mac;\n- the lead reviews before merge, then a release as 0.2.16 with owner approval.\n\n**Priority P0:** keep other work paused (the weekly subscription window is at 80%).\n\nRouted to conversation because of: keyword:voice, keyword:stt, keyword:wake word, keyword:responsiveness, keyword:speaks.\nConsult: desktop-mac.",
+        "status": "blocked",
+        "statusSince": "2026-10-02T05:04:09.625Z",
+        "parentId": "ft_mummakwyuew19",
+        "epicId": "ft_mummakwyuew19",
+        "areaId": "ar_muqhzr5khct7v",
+        "assigneeId": "dev",
+        "rank": 1,
+        "acceptance": [],
+        "blocked": {
+          "reason": "4th consecutive session blocked on as_muqecr89jhjst by a session-wide infra failure: every mutating tool call (Bash, Write) is rejected with \"server-side auto mode classifier gave no verdict,\" confirmed even on trivial unrelated commands (echo-only works; touch/rm/git add/Write all fail, retried once each per the error's own instructions, still rejected). Read-only tools work. No code, test, or commit was possible this session either. Needs Workplace infra fix, not another retry session.",
+          "waitingOn": "coo",
+          "since": "2026-10-02T05:04:09.625Z"
+        },
+        "legacy": {
+          "kind": "assignment",
+          "state": "blocked",
+          "charterId": "conversation",
+          "featureId": "ft_mummakwyuew19"
+        },
+        "createdAt": "2026-10-02T03:21:50.553Z",
+        "updatedAt": "2026-10-02T05:04:22.657Z"
+      },
+      "line": "Story 'P0 bug bundle: \"Iris during music\". — Conversation' — Blocked · Dev · waiting on Claude — COO: 4th consecutive session blocked on as_muqecr89jhjst by a session-wide infra failure: every mutating tool call (Bash, Write) is rejected with \"server-side auto mode classifier gave no verdict,\" confirmed even on trivial unrelated commands (echo-only works; touch/rm/git add/Write all fail, retried once each per the error's own instructions, still rejected). Read-only tools work. No code, test, or commit was possible this session either. Needs Workplace infra fix, not another retry session.",
+      "href": "item/as_muqecr89jhjst"
+    },
+    {
+      "item": {
+        "id": "as_muqecr8avlkkr",
+        "level": "story",
+        "title": "P0 bug bundle: \"Iris during music\". — QA and Release",
+        "body": "P0 bug bundle: \"Iris during music\". The owner reported: \"it's vibrating almost all the time\", and \"when music is playing it's not able to hear me at all — not even when volume is 0\". Evidence is in the installed Iris 0.2.15 logs (~/Library/Application Support/Iris/agent.log and ~/Library/Logs/Iris/main.log, 29 Sep 17:10–17:17 IST; main.log timestamps are UTC, 11:40–11:47).\n\n1. \"Iris pause mute\" (17:13:06) → the DO lane set **system output volume to 0** (`device.set_volume 0`) instead of pausing the music. The music kept playing silently, and Iris's own voice was muted too. Pause, stop and mute must act on the music player; system volume only when the user explicitly says \"volume\".\n2. **The mic stream nearly stopped after the music started:** \"stt: streamed 0s of audio in the last minute\" at 17:14 and 17:15, and 8 s at 17:16, while the owner was speaking. It was 13–28 s during the music. Suspect the adaptive SendGate floor (the quietest-20-of-100 chunks × 2.5) staying high after loud music, or something else gating the mic. RCA with evidence.\n3. **While the music is audible, speech is garbled** (\"i disposed\", \"i just called you a bit\", \"i respond music\"). The music plays via a native player (afplay), outside the renderer's WebRTC AEC, so there's no echo reference. Options: play music through the renderer so AEC cancels it, and/or duck the music on speech onset or the wake word.\n4. **A garbled line restarted the music:** \"i respond music\" → [[PLAY]] a new track. Low-confidence or garbled utterances during music must never trigger play/stop.\n5. **\"Vibrating\":** the dance re-plans every 6–9 s from beat detection with confidence 0.35–0.54, tempo jumping 60–184 BPM. Also the listening micro-motion runs continuously while music keeps the mic busy. Require a confidence threshold (else gentle sway), smooth and clamp the tempo, and don't run the pending micro-motion while merely listening.\n\n**Rules:**\n- RCA first with log evidence per item;\n- tests that fail before each fix;\n- fixes on employee branches;\n- QA verifies with real music playing (audible, and at volume 0) on the Mac;\n- the lead reviews before merge, then a release as 0.2.16 with owner approval.\n\n**Priority P0:** keep other work paused (the weekly subscription window is at 80%).\n\nRouted to qa-release because of: keyword:release, keyword:regression.\nConsult: desktop-mac.",
+        "status": "backlog",
+        "statusSince": "2026-10-02T04:22:03.455Z",
+        "parentId": "ft_mummakwyuew19",
+        "epicId": "ft_mummakwyuew19",
+        "areaId": "ar_muqhzr5khct7v",
+        "assigneeId": "nikhil",
+        "rank": 2,
+        "acceptance": [],
+        "legacy": {
+          "kind": "assignment",
+          "state": "proposed",
+          "charterId": "qa-release",
+          "featureId": "ft_mummakwyuew19"
+        },
+        "createdAt": "2026-10-02T03:21:50.554Z",
+        "updatedAt": "2026-10-02T04:22:03.455Z"
+      },
+      "line": "Story 'P0 bug bundle: \"Iris during music\". — QA and Release' — Backlog · Nikhil",
+      "href": "item/as_muqecr8avlkkr"
+    },
+    {
+      "item": {
+        "id": "as_muqed3ed0cpmg",
+        "level": "story",
+        "title": "P0 music bundle — AC1, AC2, AC5 (music controls): pause/stop/mute act on the player not system volume; no stray volume-0; garbled/low-confidence lines never trigger play/stop",
+        "body": "Your part of ft_mummakwyuew19 (see its spec: AC1, AC2, AC5). Dev owns AC3/AC4/AC6/AC7, Nikhil QA (AC8). Coordinate interfaces with Dev in the Team Room. RCA first with the 29 Sep 17:10–17:17 log evidence, failing tests first, fix on your branch.",
+        "status": "in-progress",
+        "statusSince": "2026-10-02T05:02:21.776Z",
+        "parentId": "ft_mummakwyuew19",
+        "epicId": "ft_mummakwyuew19",
+        "areaId": "ar_muqhzr5khct7v",
+        "assigneeId": "mira",
+        "rank": 3,
+        "acceptance": [],
+        "legacy": {
+          "kind": "assignment",
+          "state": "building",
+          "charterId": "experts",
+          "featureId": "ft_mummakwyuew19"
+        },
+        "createdAt": "2026-10-02T03:22:06.325Z",
+        "updatedAt": "2026-10-02T05:05:37.336Z"
+      },
+      "line": "Story 'P0 music bundle — AC1, AC2, AC5 (music controls): pause/stop/mute act on the player not system volume; no stray volume-0; garbled/low-confidence lines never trigger play/stop' — In progress · Mira",
+      "href": "item/as_muqed3ed0cpmg"
+    },
+    {
+      "item": {
+        "id": "as_mulrmwq1u7egh",
+        "level": "story",
+        "title": "\"the music stopped, play it again\" pauses the music",
+        "body": "Reproduction (29 Sep, current feat/iris-character): services/agent-svc/app.py _is_stop_music() matches a music noun plus a stop verb by substring, so \"stopped\" in \"the music stopped, play it again\" and \"the song stopped playing, resume it\" is read as a stop command; the negation guard only covers sentences that start with why/what/did/don't. The deterministic MUSIC-STOP intercept (app.py ~3745) then calls experts.call(\"media\",\"stop\") and Iris pauses the music the owner asked to resume. Noted as a separate CR in docs/experts/core.md (\"the deterministic _is_stop_music still uses substring verbs\"). Expected: a resume/play-again request never stops playback; a real stop (\"stop the music\", \"pause it\", \"gaana band karo\") still does. Work: RCA with the log line, a failing test in tests/test_music_stop.py first, then the fix on your emp/* branch, then report_done with counts; QA verifies. No merge, no release.",
+        "status": "done",
+        "statusSince": "2026-10-02T04:20:39.649Z",
+        "resolution": "wont-do",
+        "assigneeId": "mira",
+        "rank": 4,
+        "acceptance": [],
+        "legacy": {
+          "kind": "bug",
+          "state": "rejected",
+          "charterId": "experts"
+        },
+        "createdAt": "2026-09-28T21:34:48.361Z",
+        "updatedAt": "2026-10-02T04:20:39.649Z"
+      },
+      "line": "Story '\"the music stopped, play it again\" pauses the music' — Done · Mira",
+      "href": "item/as_mulrmwq1u7egh"
+    }
+  ]
+}

@@ -117,7 +117,7 @@ final class ContractTests: XCTestCase {
         // online/offline is the COO bridge's presence, not a work state: only a virtual employee
         // ever has it, and a single snapshot can only show her one way at a time (see
         // OfficeStoreTests for the online↔offline flip itself).
-        let workStates = Set(EmployeeState.allCases).subtracting([.online, .offline])
+        let workStates = Set(EmployeeState.known).subtracting([.online, .offline])
         let states = Set(cards.map(\.employee.state)).subtracting([.online, .offline])
         XCTAssertEqual(states, workStates, "the office fixture must exercise every work state")
         XCTAssertTrue(cards.contains { $0.employee.virtual == true && $0.employee.state == .online }, "the COO's card is there too")
@@ -126,8 +126,8 @@ final class ContractTests: XCTestCase {
 
     func testInboxFixtureHasEveryKindAndState() throws {
         let items = try Fixtures.decode("inbox", as: [InboxItem].self)
-        XCTAssertEqual(Set(items.map(\.kind)), Set(InboxKind.allCases))
-        XCTAssertEqual(Set(items.map(\.state)), Set(InboxState.allCases))
+        XCTAssertEqual(Set(items.map(\.kind)), Set(InboxKind.known))
+        XCTAssertEqual(Set(items.map(\.state)), Set(InboxState.known))
         XCTAssertTrue(items.contains { $0.options.contains { $0.danger == true } })
         XCTAssertTrue(items.contains { $0.options.contains { $0.needsNote == true } })
         XCTAssertEqual(items.first { $0.id == "ib-6" }?.answer?.via, .telegram)
@@ -146,7 +146,7 @@ final class ContractTests: XCTestCase {
     }
 
     func testWorkStateIsTheUnionOfFeatureAndAssignmentStates() {
-        XCTAssertEqual(Set(WorkState.featureStates + WorkState.assignmentStates), Set(WorkState.allCases))
+        XCTAssertEqual(Set(WorkState.featureStates + WorkState.assignmentStates), Set(WorkState.known))
         XCTAssertEqual(WorkState.inProgress.rawValue, "in-progress")
     }
 
@@ -201,8 +201,13 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(types, Set(ClientCommand.knownTypes))
     }
 
-    func testUnknownEnumValueIsADecodingError() {
-        let bad = Data(#"{"id":"x","kind":"bribe","title":"","body":"","context":{},"options":[],"state":"open","raisedBy":"","createdAt":""}"#.utf8)
-        XCTAssertThrowsError(try JSONDecoder().decode(InboxItem.self, from: bad))
+    func testUnknownEnumValueFallsBackInsteadOfFailing() throws {
+        // Was: a decoding error. RCA (v2): one new kind on the server failed the whole `[InboxItem]`
+        // decode and blanked the Inbox. An unknown value now decodes as `.unknown`; a missing
+        // required field is still an error.
+        let unknown = Data(#"{"id":"x","kind":"bribe","title":"","body":"","context":{},"options":[],"state":"open","raisedBy":"","createdAt":"","affects":[],"summary":""}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(InboxItem.self, from: unknown).kind, .unknown)
+        let missing = Data(#"{"id":"x","kind":"decision","title":"","body":"","context":{},"options":[],"state":"open","raisedBy":"","createdAt":""}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(InboxItem.self, from: missing))
     }
 }

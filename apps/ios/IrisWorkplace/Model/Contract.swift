@@ -7,20 +7,32 @@ import Foundation
 
 // MARK: - types.ts
 
-enum AgentStatus: String, Codable, CaseIterable {
+enum AgentStatus: String, Codable, CaseIterable, LenientEnum {
     case idle, running, waiting, done, error
+    case unknown
 }
 
-enum PermissionMode: String, Codable, CaseIterable {
+enum PermissionMode: String, Codable, CaseIterable, LenientEnum {
     case ask, auto, acceptEdits, plan, dontAsk
+    case unknown
+
+    /// What the owner can pick (never `unknown`).
+    static var choices: [PermissionMode] { allCases.filter { $0 != .unknown } }
 }
 
 enum WorkspaceMode: String, Codable, CaseIterable {
     case worktree, branch, readonly
 }
 
-enum LogKind: String, Codable, CaseIterable {
+enum LogKind: String, Codable, CaseIterable, LenientEnum {
     case assistant, user, image, read, edit, bash, search, task, tool, error, system, activity
+    case unknown
+}
+
+/// v2 chat hygiene: who wrote a `user` entry. Absent reads as the owner.
+enum LogFrom: String, Codable, CaseIterable, LenientEnum {
+    case owner, workplace
+    case unknown
 }
 
 struct LogImage: Codable, Equatable, Hashable {
@@ -48,6 +60,7 @@ struct LogEntry: Codable, Equatable, Hashable, Identifiable {
     var summary: String?
     var details: String?
     var activity: LogActivity?
+    var from: LogFrom?
 }
 
 struct PendingApproval: Codable, Equatable, Hashable {
@@ -251,12 +264,13 @@ struct Role: Codable, Equatable, Hashable, Identifiable {
     var budgetClass: BudgetClass
 }
 
-enum EmployeeState: String, Codable, CaseIterable {
+enum EmployeeState: String, Codable, CaseIterable, LenientEnum {
     case idle, working, blocked
     case needsOwner = "needs-owner"
     case paused
     /// The COO bridge's presence (a virtual employee's card), from the lead's heartbeat — not a session.
     case online, offline
+    case unknown
 }
 
 struct Workspace: Codable, Equatable, Hashable {
@@ -388,18 +402,20 @@ struct Coverage: Codable, Equatable, Hashable {
 
 // MARK: - workplace.ts · work
 
-enum WorkKind: String, Codable, CaseIterable {
+enum WorkKind: String, Codable, CaseIterable, LenientEnum {
     case feature, assignment, bug, question
+    case unknown
 }
 
 /// FeatureState | AssignmentState, one enum because the TypeScript `WorkState` is their union.
-enum WorkState: String, Codable, CaseIterable {
+enum WorkState: String, Codable, CaseIterable, LenientEnum {
     // FeatureState
     case stated, specced, decomposed
     case inProgress = "in-progress"
     case built, released
     // AssignmentState
     case proposed, planned, building, review, done, blocked, rejected
+    case unknown
 
     static let featureStates: [WorkState] = [.stated, .specced, .decomposed, .inProgress, .built, .released]
     static let assignmentStates: [WorkState] = [.proposed, .planned, .building, .review, .done, .blocked, .rejected]
@@ -425,6 +441,7 @@ struct WorkHistoryEntry: Codable, Equatable, Hashable {
     var to: WorkState
     var by: String
     var note: String?
+    var cause: String?
 }
 
 struct WorkItem: Codable, Equatable, Hashable, Identifiable {
@@ -447,6 +464,26 @@ struct WorkItem: Codable, Equatable, Hashable, Identifiable {
     var updatedAt: String
     var history: [WorkHistoryEntry]
     var stalledSince: String?
+
+    // v2 (LLD §19.2): all optional and additive; the client shape is `Item`.
+    var level: ItemLevel?
+    var status: ItemStatus?
+    var statusSince: String?
+    var parentId: String?
+    var areaId: String?
+    var rank: Double?
+    var points: Int?
+    var reviewerId: String?
+    var ownerId: String?
+    var targetDate: String?
+    var acceptance: [String]?
+    var blockedReason: String?
+    var waitingOn: String?
+    var blockedSince: String?
+    var blockedRecommendation: String?
+    var resolution: ItemResolution?
+    var mergedInto: String?
+    var releasedIn: String?
 }
 
 // MARK: - workplace.ts · inbox
@@ -459,21 +496,25 @@ struct OwnerLine: Codable, Equatable, Hashable {
     static let ownerLineMax = 120
 }
 
-enum InboxKind: String, Codable, CaseIterable {
+enum InboxKind: String, Codable, CaseIterable, LenientEnum {
     case approval, decision, question, cap
     case orgChange = "org-change"
     case release
+    case unknown
 }
 
 struct InboxOption: Codable, Equatable, Hashable, Identifiable {
     var id: String
     var label: String
     var danger: Bool?
+    /// v2: the option the asker recommends (marked on the button).
+    var recommended: Bool?
     var needsNote: Bool?
 }
 
-enum AnswerVia: String, Codable, CaseIterable {
+enum AnswerVia: String, Codable, CaseIterable, LenientEnum {
     case web, phone, telegram, workplace
+    case unknown
 }
 
 struct InboxAnswer: Codable, Equatable, Hashable {
@@ -483,8 +524,15 @@ struct InboxAnswer: Codable, Equatable, Hashable {
     var via: AnswerVia
 }
 
-enum InboxState: String, Codable, CaseIterable {
+enum InboxState: String, Codable, CaseIterable, LenientEnum {
     case open, answered, expired
+    case unknown
+}
+
+/// v2: shown by colour and label, not wording. Absent = normal.
+enum InboxUrgency: String, Codable, CaseIterable, LenientEnum {
+    case normal, high, urgent
+    case unknown
 }
 
 struct InboxItem: Codable, Equatable, Hashable, Identifiable {
@@ -508,6 +556,10 @@ struct InboxItem: Codable, Equatable, Hashable, Identifiable {
     /// no-op session, a non-owner review) — only the affected employees' pages show it. Absent or
     /// true means the owner decides it. The server decides this; clients never set it.
     var ownerFacing: Bool?
+    /// v2: replies in the item's thread (GET /api/inbox/:id has them).
+    var messageCount: Int?
+    var lastMessageAt: String?
+    var urgency: InboxUrgency?
 }
 
 struct InboxLink: Codable, Equatable, Hashable {
@@ -712,8 +764,15 @@ struct Release: Codable, Equatable, Hashable, Identifiable {
 
 // MARK: - workplace.ts · the Team Room
 
-enum RoomThreadState: String, Codable, CaseIterable {
+enum RoomThreadState: String, Codable, CaseIterable, LenientEnum {
     case open, resolved
+    case unknown
+}
+
+/// v2: what a Room message is. Absent = an authored message.
+enum RoomMessageKind: String, Codable, CaseIterable, LenientEnum {
+    case message, update, standup, release
+    case unknown
 }
 
 struct RoomThread: Codable, Equatable, Hashable, Identifiable {
@@ -729,6 +788,10 @@ struct RoomThread: Codable, Equatable, Hashable, Identifiable {
     var participants: [String]
     var escalations: [String]
     var headline: String
+    /// v2: 'general' | 'area:<id>' | 'releases'. Absent reads as 'general'.
+    var roomId: String?
+    /// v2: the epic this thread is about, inside its area room.
+    var epicId: String?
 }
 
 struct RoomMessage: Codable, Equatable, Hashable, Identifiable {
@@ -739,6 +802,13 @@ struct RoomMessage: Codable, Equatable, Hashable, Identifiable {
     var owner: Bool
     var text: String
     var mentions: [String]
+    var kind: RoomMessageKind?
+    /// v2: who a stand-up is about.
+    var about: String?
+    /// v2: the rest of a long agent message; `text` stays short.
+    var details: String?
+    /// v2: the item an update line is about.
+    var itemId: String?
 }
 
 // MARK: - workplace.ts · views
@@ -1179,8 +1249,9 @@ enum JSONValue: Codable, Equatable, Hashable {
 
 // MARK: - workplace.ts · the COO bridge
 
-enum CooSpeaker: String, Codable, CaseIterable {
+enum CooSpeaker: String, Codable, CaseIterable, LenientEnum {
     case owner, coo
+    case unknown
 }
 
 struct CooMessage: Codable, Equatable, Hashable, Identifiable {
@@ -1195,11 +1266,13 @@ struct CooMessage: Codable, Equatable, Hashable, Identifiable {
     var inReplyTo: String?
 }
 
-enum CooItemKind: String, Codable, CaseIterable {
-    case escalation, mention
+enum CooItemKind: String, Codable, CaseIterable, LenientEnum {
+    case escalation, mention, stall
+    case unknown
 }
-enum CooItemState: String, Codable, CaseIterable {
+enum CooItemState: String, Codable, CaseIterable, LenientEnum {
     case open, answered, forwarded
+    case unknown
 }
 
 struct CooItemAnswer: Codable, Equatable, Hashable {
@@ -1227,6 +1300,7 @@ struct CooItem: Codable, Equatable, Hashable, Identifiable {
     var options: [InboxOption]
     var raisedBy: String
     var threadId: String?
+    var itemId: String?
     var state: CooItemState
     var answer: CooItemAnswer?
     var forward: CooItemForward?

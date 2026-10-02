@@ -54,113 +54,217 @@ struct InboxView: View {
     }
 }
 
+/// One decision: urgency by colour and label, the question in bold on one line, a short context
+/// line, then kind · who · when · replies.
 struct InboxRow: View {
     @Environment(AppModel.self) private var model
     let item: InboxItem
 
     var body: some View {
         let g = item.kind.glyph
+        let u = (item.urgency ?? .normal).glyph
+        let open = item.state == .open
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: g.symbol).foregroundStyle(g.tint).font(.title3).frame(width: 26)
-                .accessibilityLabel(g.label)
+            RoundedRectangle(cornerRadius: 2).fill(open && item.urgency.isRaised ? u.tint : Color.clear).frame(width: 4)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.summary.isEmpty ? item.title : item.summary).font(.subheadline.weight(item.state == .open ? .semibold : .regular)).lineLimit(2)
                 HStack(spacing: 6) {
-                    Text(g.label)
-                    Text("·")
+                    if open && item.urgency.isRaised { Pill(text: u.label, symbol: u.symbol, tint: u.tint) }
+                    Label(g.label, systemImage: g.symbol).font(.caption).foregroundStyle(g.tint).labelStyle(.titleAndIcon)
+                    Spacer()
+                    Text(Format.ago(item.lastMessageAt ?? item.createdAt)).font(.caption2).foregroundStyle(.tertiary)
+                }
+                Text(item.title).font(.subheadline.weight(open ? .bold : .regular)).lineLimit(1)
+                if !item.summary.isEmpty && item.summary != item.title {
+                    Text(item.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                HStack(spacing: 6) {
                     Text(model.employeeName(item.raisedBy))
-                    Text("·")
-                    Text(Format.ago(item.createdAt))
+                    if let n = item.messageCount, n > 0 { Label("\(n)", systemImage: "bubble.left.and.bubble.right").labelStyle(.titleAndIcon) }
+                    if let a = item.answer, let opt = item.options.first(where: { $0.id == a.optionId }) {
+                        Label(opt.label, systemImage: "checkmark").lineLimit(1)
+                    } else if item.state == .expired {
+                        Label("Expired", systemImage: "clock.badge.xmark")
+                    }
                 }
                 .font(.caption).foregroundStyle(.secondary)
-                if let a = item.answer, let opt = item.options.first(where: { $0.id == a.optionId }) {
-                    Label("\(opt.label) · via \(a.via.rawValue)", systemImage: "checkmark").font(.caption).foregroundStyle(.secondary)
-                } else if item.state == .expired {
-                    Label("Expired", systemImage: "clock.badge.xmark").font(.caption).foregroundStyle(.secondary)
-                }
             }
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(open && item.urgency.isRaised ? u.label + " urgency. " : "")\(g.label): \(item.title)")
     }
 }
 
-/// The item with who raised it, who it concerns, what each answer does, its links, and one
-/// button per option. `danger` confirms; `needsNote` asks for a note.
+extension Optional where Wrapped == InboxUrgency {
+    /// High or urgent: shown by colour and label. Normal, absent or unknown: no mark.
+    var isRaised: Bool { self == .high || self == .urgent }
+}
+
+/// One decision as a thread: the question in bold, a short context, the options as buttons with
+/// the recommended one marked, then the conversation as chat bubbles and a free-text reply box
+/// (reply, ask back, or suggest something else). `danger` confirms; `needsNote` asks for a note.
 struct InboxItemView: View {
     @Environment(AppModel.self) private var model
     let id: String
+    @State private var draft = ""
+    @State private var error: String?
+    @FocusState private var composing: Bool
 
     private var item: InboxItem? { model.inbox.item(id) }
+    private var messages: [InboxMessage] { model.inbox.messages[id] ?? [] }
 
     var body: some View {
         Group {
             if let item {
-                List {
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                StateLabel(glyph: item.kind.glyph)
-                                Spacer()
-                                Text(Format.ago(item.createdAt)).font(.caption).foregroundStyle(.secondary)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            question(item)
+                            VStack(alignment: .leading, spacing: 8) {
+                                AnswerOptions(item: item)
                             }
-                            Text(item.title).font(.title3.weight(.semibold))
-                            OwnerLineView(summary: item.summary.isEmpty ? item.body : item.summary,
-                                          details: item.details ?? (item.body == item.summary ? nil : item.body))
+                            .id("answer")
+                            .scrollToAnswerWhenDeciding(item.id)
+                            more(item)
+                            conversation(item)
+                            Color.clear.frame(height: 1).id("bottom")
                         }
-                        .padding(.vertical, 4)
+                        .padding(16)
                     }
-                    Section {
-                        LabeledContent("Raised by", value: model.employeeName(item.raisedBy))
-                        if !item.affects.isEmpty {
-                            LabeledContent("Affects", value: item.affects.map { model.employeeName($0) }.joined(separator: ", "))
-                        }
-                        if let a = item.onApprove, !a.isEmpty {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Label("If you approve", systemImage: "checkmark.circle").font(.caption.weight(.semibold)).foregroundStyle(.green)
-                                Text(a).font(.subheadline)
-                            }
-                        }
-                        if let d = item.onDeny, !d.isEmpty {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Label("If you refuse", systemImage: "xmark.circle").font(.caption.weight(.semibold)).foregroundStyle(.red)
-                                Text(d).font(.subheadline)
-                            }
-                        }
-                    } header: { SectionHeader(text: "Who and what") }
-                    if item.kind == .orgChange, let pid = item.context["proposalId"]?.stringValue {
-                        Section {
-                            NavigationLink { ProposalDetailView(id: pid) } label: {
-                                Label("Read the change as a diff", systemImage: "doc.text.magnifyingglass")
-                            }
-                        } header: { SectionHeader(text: "Org change") }
-                    }
-                    if let links = item.links, !links.isEmpty {
-                        Section {
-                            ForEach(Array(links.enumerated()), id: \.offset) { _, link in
-                                InboxLinkRow(link: link)
-                            }
-                        } header: { SectionHeader(text: "Links") }
-                    }
-                    if !item.context.isEmpty {
-                        Section {
-                            ForEach(item.context.keys.sorted(), id: \.self) { key in
-                                ContextRow(key: key, value: item.context[key]!)
-                            }
-                        } header: { SectionHeader(text: "Context") }
-                    }
-                    Section {
-                        AnswerOptions(item: item)
-                    } header: { SectionHeader(text: item.state == .open ? "Your answer" : "Answered") }
-                    .id("answer")
+                    .scrollDismissesKeyboard(.interactively)
+                    .onChange(of: messages.count) { _, _ in withAnimation { proxy.scrollTo("bottom") } }
                 }
-                .listStyle(.insetGrouped)
-                .scrollToAnswerWhenDeciding(item.id)
+                .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+            } else if let e = model.inbox.threadErrors[id] {
+                List { ErrorRow(message: e) { Task { await load() } } }
             } else {
-                EmptyState(symbol: "tray", title: "Not in the inbox", text: "This item is not loaded. Pull to refresh the Inbox.")
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .navigationTitle(item?.kind.glyph.label ?? "Inbox item")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: id) { await load() }
+    }
+
+    private func question(_ item: InboxItem) -> some View {
+        let u = (item.urgency ?? .normal).glyph
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                if item.state == .open && item.urgency.isRaised { Pill(text: u.label, symbol: u.symbol, tint: u.tint) }
+                StateLabel(glyph: item.kind.glyph, compact: true)
+                Spacer()
+                Text("\(model.employeeName(item.raisedBy)) · \(Format.ago(item.createdAt))").font(.caption).foregroundStyle(.secondary)
+            }
+            Text(item.title).font(.headline.weight(.bold)).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("inbox.question")
+            OwnerLineView(summary: item.summary.isEmpty ? item.body : item.summary,
+                          details: item.details ?? (item.body == item.summary ? nil : item.body))
+                .font(.subheadline)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(item.state == .open && item.urgency.isRaised ? u.tint.opacity(0.7) : .clear, lineWidth: 1.5))
+    }
+
+    /// Who raised it, what each answer does, links, context: behind one disclosure.
+    @ViewBuilder private func more(_ item: InboxItem) -> some View {
+        let hasMore = !item.affects.isEmpty || item.onApprove?.isEmpty == false || item.onDeny?.isEmpty == false
+            || item.links?.isEmpty == false || !item.context.isEmpty || item.kind == .orgChange
+        if hasMore {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !item.affects.isEmpty {
+                        LabeledContent("Affects", value: item.affects.map { model.employeeName($0) }.joined(separator: ", ")).font(.subheadline)
+                    }
+                    if let a = item.onApprove, !a.isEmpty {
+                        Label { Text(a) } icon: { Image(systemName: "checkmark.circle").foregroundStyle(.green) }.font(.subheadline)
+                    }
+                    if let d = item.onDeny, !d.isEmpty {
+                        Label { Text(d) } icon: { Image(systemName: "xmark.circle").foregroundStyle(.red) }.font(.subheadline)
+                    }
+                    if item.kind == .orgChange, let pid = item.context["proposalId"]?.stringValue {
+                        NavigationLink { ProposalDetailView(id: pid) } label: { Label("Read the change as a diff", systemImage: "doc.text.magnifyingglass") }
+                    }
+                    ForEach(Array((item.links ?? []).enumerated()), id: \.offset) { _, link in InboxLinkRow(link: link) }
+                    ForEach(item.context.keys.sorted(), id: \.self) { key in ContextRow(key: key, value: item.context[key]!) }
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Who and what").font(.subheadline.weight(.semibold))
+            }
+        }
+    }
+
+    @ViewBuilder private func conversation(_ item: InboxItem) -> some View {
+        if !messages.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Conversation").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(messages) { m in InboxBubble(message: m) }
+            }
+        }
+        if model.inbox.replying.contains(id) {
+            HStack { Spacer(); ProgressView().controlSize(.small); Text("Sending…").font(.caption).foregroundStyle(.secondary) }
+        }
+        if let error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline) }
+    }
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField("Reply, ask, or suggest something else", text: $draft, axis: .vertical)
+                .lineLimit(1...5)
+                .textFieldStyle(.roundedBorder)
+                .focused($composing)
+                .accessibilityIdentifier("inbox.reply")
+            Button { Task { await send() } } label: {
+                if model.inbox.replying.contains(id) { ProgressView().frame(width: 28, height: 28) } else { Image(systemName: "arrow.up.circle.fill").font(.title) }
+            }
+            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.inbox.replying.contains(id))
+            .accessibilityLabel("Send reply")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private func load() async {
+        guard let rest = model.rest else { return }
+        await model.inbox.loadThread(rest, id: id)
+    }
+
+    private func send() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let rest = model.rest else { return }
+        error = nil
+        do { try await model.inbox.reply(rest, id: id, text: text); draft = ""; composing = false }
+        catch { if let m = error.userMessage { self.error = m } }
+    }
+}
+
+/// A message in an Inbox thread: the owner's on the right, the asker's on the left.
+struct InboxBubble: View {
+    @Environment(AppModel.self) private var model
+    let message: InboxMessage
+    @State private var expanded = false
+
+    var body: some View {
+        let mine = message.by == "owner"
+        HStack(alignment: .bottom, spacing: 8) {
+            if mine { Spacer(minLength: 48) }
+            VStack(alignment: mine ? .trailing : .leading, spacing: 2) {
+                if !mine { Text(model.employeeName(message.by)).font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
+                Text(expanded ? (message.details ?? message.text) : message.text)
+                    .font(.subheadline)
+                    .foregroundStyle(mine ? .white : .primary)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(mine ? Color.accentColor.opacity(0.9) : Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                    .textSelection(.enabled)
+                    .onTapGesture { if message.details != nil { withAnimation(.snappy) { expanded.toggle() } } }
+                Text(Format.time(message.at)).font(.caption2).foregroundStyle(.tertiary)
+            }
+            if !mine { Spacer(minLength: 48) }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -237,16 +341,22 @@ struct AnswerOptions: View {
         Group {
             if item.state == .open {
                 ForEach(item.options) { opt in
+                    let rec = opt.recommended == true
                     Button(role: opt.danger == true ? .destructive : nil) { tap(opt) } label: {
                         HStack {
-                            Image(systemName: opt.danger == true ? "exclamationmark.triangle" : opt.needsNote == true ? "text.bubble" : "checkmark.circle")
-                            Text(opt.label).fontWeight(.semibold)
-                            Spacer()
+                            Image(systemName: opt.danger == true ? "exclamationmark.triangle" : opt.needsNote == true ? "text.bubble" : rec ? "star.circle.fill" : "checkmark.circle")
+                            Text(opt.label).fontWeight(.semibold).multilineTextAlignment(.leading)
+                            Spacer(minLength: 4)
+                            if rec { Text("Recommended").font(.caption2.weight(.bold)).padding(.horizontal, 6).padding(.vertical, 2).background(.white.opacity(0.25), in: Capsule()) }
                             if model.inbox.answering.contains(item.id) { ProgressView() }
                         }
                         .font(compact ? .subheadline : .body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, compact ? 0 : 4)
                     }
+                    .modifier(OptionStyle(recommended: rec, compact: compact))
                     .disabled(model.inbox.answering.contains(item.id))
+                    .accessibilityLabel(rec ? "\(opt.label), recommended" : opt.label)
                 }
             } else if let a = item.answer {
                 let label = item.options.first { $0.id == a.optionId }?.label ?? a.optionId
@@ -288,7 +398,22 @@ struct AnswerOptions: View {
         do {
             try await model.answer(item: item, option: opt, note: note)
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
+        }
+    }
+}
+
+/// The recommended option is the prominent one; the others are plain bordered buttons.
+private struct OptionStyle: ViewModifier {
+    let recommended: Bool
+    let compact: Bool
+    func body(content: Content) -> some View {
+        if compact {
+            content
+        } else if recommended {
+            content.buttonStyle(.borderedProminent)
+        } else {
+            content.buttonStyle(.bordered)
         }
     }
 }

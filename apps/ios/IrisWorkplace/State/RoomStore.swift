@@ -32,7 +32,7 @@ final class RoomStore {
             error = nil
             loaded = true
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 
@@ -44,7 +44,7 @@ final class RoomStore {
             unread.remove(id)
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            if let m = error.userMessage { self.error = m }
         }
     }
 
@@ -78,7 +78,7 @@ final class RoomStore {
         case .roomReplying(let threadId, let employeeId, let state):
             switch state {
             case .started: replying[threadId] = employeeId
-            case .done, .skipped: replying.removeValue(forKey: threadId)
+            case .done, .skipped, .unknown: replying.removeValue(forKey: threadId)
             }
         default:
             break
@@ -181,7 +181,7 @@ final class RequestsStore {
             for r in items { statuses[r.feature.id] = r.status }
             error = nil
             loaded = true
-        } catch { self.error = error.localizedDescription }
+        } catch { if let m = error.userMessage { self.error = m } }
     }
 
     func create(_ rest: RestClient, text: String, platformIds: [String]?) async throws -> RequestResponse {

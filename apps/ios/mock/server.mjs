@@ -15,6 +15,7 @@ import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 import * as D from './data.mjs';
+import * as V2 from './v2.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : def; };
@@ -28,7 +29,7 @@ let macOffline = args.includes('--mac-offline');
 let powerSource = args.includes('--on-ac') ? 'ac' : 'battery';
 
 // Mutable state: a fresh copy of the data on every start, and on POST /api/_reset (tests).
-const fresh = () => ({
+const fresh = () => withV2({
   inbox: structuredClone(D.inbox),
   cards: structuredClone(D.cards),
   agents: Object.fromEntries(Object.values(structuredClone(D.agents)).map(a => [a.id, a])),
@@ -38,10 +39,20 @@ const fresh = () => ({
   spend: structuredClone(D.spend),
   threads: structuredClone(D.roomThreads),
   messages: structuredClone(D.roomMessages),
+  v2: V2.v2State(),
   cooLog: structuredClone(D.cooLog),
   cooOnline: true,
   usedCodes: new Set(),
 });
+/** v2: the open decision joins the Inbox, and the live area/release threads join the Room. */
+function withV2(st) {
+  st.inbox.push(st.v2.inboxThread.item);
+  for (const d of Object.values(st.v2.roomDetails)) for (const t of d.threads) if (!st.threads.some(x => x.id === t.id)) st.threads.push(t);
+  st.messages[st.v2.epicThread.thread.id] = st.v2.epicThread.messages;
+  // General is whatever the Room has outside an area (computed on request from st.threads).
+  delete st.v2.roomDetails.general;
+  return st;
+}
 let msgSeq = 100;
 let cooSeq = 100;
 let state = fresh();
@@ -123,6 +134,80 @@ const server = createServer(async (req, res) => {
   const seg = p.split('/').filter(Boolean); // ['api', ...]
   const id = seg[2] ? decodeURIComponent(seg[2]) : undefined;
 
+  // ---- v2 (LLD §19.8), from the live capture plus mock additions (mock/v2.mjs) ----
+  const v2 = state.v2;
+  if (m === 'GET' && p === '/api/plan') return json(res, 200, V2.plan(v2, url.searchParams.get('view') === 'board'));
+  if (m === 'GET' && p === '/api/focus') return json(res, 200, v2.focus);
+  if (m === 'POST' && p === '/api/focus') {
+    const body = await readJson(req);
+    v2.focus = { epicIds: body?.epicIds ?? [], setBy: 'owner', at: new Date().toISOString() };
+    return json(res, 200, v2.focus);
+  }
+  if (m === 'GET' && p === '/api/items') return json(res, 200, v2.items.filter(i => ['level', 'status', 'assigneeId', 'areaId', 'parentId'].every(k => !url.searchParams.get(k) || i[k] === url.searchParams.get(k))));
+  if (m === 'POST' && p === '/api/items') {
+    const r = V2.create(v2, await readJson(req));
+    if (r.item) broadcast({ type: 'item.updated', item: r.item });
+    return json(res, r.status, r.body);
+  }
+  if (seg[1] === 'items' && id && !seg[3]) {
+    if (m === 'GET') { const d = V2.detail(v2, id); return d ? json(res, 200, d) : json(res, 404, { error: 'no such item' }); }
+    if (m === 'POST') {
+      const r = V2.update(v2, id, (await readJson(req)) ?? {});
+      if (r.item) { broadcast({ type: 'item.updated', item: r.item }); broadcast({ type: 'activity.recorded', activity: v2.activity[id].at(-1) }); }
+      return json(res, r.status, r.body);
+    }
+  }
+  if (m === 'POST' && seg[1] === 'items' && seg[3] === 'comments') {
+    const body = await readJson(req);
+    if (!body?.text?.trim()) return json(res, 400, { error: 'text required' });
+    const c = { id: `com_mock_${v2.seq++}`, itemId: id, at: new Date().toISOString(), by: 'owner', text: body.text.trim(), mentions: [...body.text.matchAll(/@([a-z0-9_-]+)/gi)].map(x => x[1].toLowerCase()) };
+    (v2.comments[id] ??= []).push(c);
+    broadcast({ type: 'item.comment', comment: c });
+    if (c.mentions[0]) setTimeout(() => {
+      const r = { id: `com_mock_${v2.seq++}`, itemId: id, at: new Date().toISOString(), by: c.mentions[0], text: 'On it — I will post what I find here.', mentions: ['owner'] };
+      v2.comments[id].push(r); broadcast({ type: 'item.comment', comment: r });
+    }, 1200);
+    return json(res, 201, c);
+  }
+  if (m === 'GET' && p === '/api/updates') return json(res, 200, v2.updates.slice(0, Number(url.searchParams.get('limit') ?? 50)));
+  if (m === 'GET' && seg[1] === 'inbox' && id && !seg[3]) {
+    if (id === v2.inboxThread.item.id) return json(res, 200, v2.inboxThread);
+    const item = state.inbox.find(i => i.id === id);
+    return item ? json(res, 200, { item, messages: [] }) : json(res, 404, { error: 'no such item' });
+  }
+  if (m === 'POST' && seg[1] === 'inbox' && seg[3] === 'reply') {
+    const body = await readJson(req);
+    const thread = id === v2.inboxThread.item.id ? v2.inboxThread : (() => { const item = state.inbox.find(i => i.id === id); return item ? { item, messages: [] } : null; })();
+    if (!thread) return json(res, 404, { error: 'no such item' });
+    if (!body?.text?.trim() && !body?.optionId) return json(res, 400, { error: 'text or optionId required' });
+    const now = new Date().toISOString();
+    if (body.text?.trim()) {
+      const msg = { id: `im_mock_${v2.seq++}`, inboxId: id, at: now, by: 'owner', text: body.text.trim() };
+      thread.messages.push(msg); broadcast({ type: 'inbox.message', message: msg });
+      setTimeout(() => {
+        const r = { id: `im_mock_${v2.seq++}`, inboxId: id, at: new Date().toISOString(), by: thread.item.raisedBy, text: 'Understood — I will hold until you pick an option.' };
+        thread.messages.push(r); thread.item.messageCount = thread.messages.length; broadcast({ type: 'inbox.message', message: r });
+      }, 1200);
+    }
+    if (body.optionId) { thread.item.state = 'answered'; thread.item.answer = { optionId: body.optionId, ...(body.text ? { note: body.text } : {}), at: now, via: 'phone' }; broadcast({ type: 'inbox.updated', item: thread.item }); }
+    thread.item.messageCount = thread.messages.length; thread.item.lastMessageAt = now;
+    return json(res, 200, thread);
+  }
+  if (m === 'GET' && p === '/api/areas') return json(res, 200, v2.areas);
+  if (m === 'GET' && p === '/api/rooms') return json(res, 200, v2.rooms);
+  if (m === 'GET' && seg[1] === 'rooms' && id) {
+    if (id === 'general') {
+      const room = v2.rooms.find(r => r.id === 'general');
+      return json(res, 200, { room, threads: state.threads.filter(t => !t.roomId || t.roomId === 'general').sort((a, b) => b.lastAt.localeCompare(a.lastAt)) });
+    }
+    const d = v2.roomDetails[id] ?? (() => { const room = v2.rooms.find(r => r.id === id); return room ? { room, threads: room.threadIds.map(t => ({ id: t, title: t.startsWith('th_epic_') ? (v2.items.find(i => `th_epic_${i.id}` === t)?.title ?? t) : room.title, charterIds: [], createdBy: 'workplace', createdAt: room.lastAt, state: 'open', headline: room.headline, lastAt: room.lastAt, messageCount: 0, participants: [], escalations: [], roomId: room.id, ...(t.startsWith('th_epic_') ? { epicId: t.slice(8) } : {}) })) } : null; })();
+    return d ? json(res, 200, d) : json(res, 404, { error: 'no such room' });
+  }
+  if (m === 'GET' && p === '/api/releases/posts') return json(res, 200, v2.releasePosts);
+  if (m === 'GET' && seg[1] === 'releases' && seg[2] === 'posts' && seg[3]) {
+    const post = v2.releasePosts.find(r => r.id === decodeURIComponent(seg[3]));
+    return post ? json(res, 200, post) : json(res, 404, { error: 'no such post' });
+  }
   if (m === 'GET' && p === '/api/health') return json(res, 200, { ...D.health, uptimeSeconds: Math.round(process.uptime()), resilience: { ...D.health.resilience, power: { ...D.health.resilience.power, source: powerSource } } });
   if (m === 'POST' && p === '/api/_power') { const body = await readJson(req); powerSource = body?.source ?? 'ac'; return json(res, 200, { ok: true, powerSource }); }
   if (m === 'POST' && p === '/api/_presence') {

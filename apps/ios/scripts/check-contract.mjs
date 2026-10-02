@@ -14,8 +14,8 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const shared = join(here, '..', '..', '..', 'packages', 'shared', 'src');
-const ts = ['types.ts', 'protocol.ts', 'context.ts', 'workplace.ts', 'workplace-api.ts'].map(f => readFileSync(join(shared, f), 'utf8')).join('\n');
-const swift = ['Model/Contract.swift', 'Model/Events.swift', 'Model/API.swift'].map(f => readFileSync(join(here, '..', 'IrisWorkplace', f), 'utf8')).join('\n');
+const ts = ['types.ts', 'protocol.ts', 'context.ts', 'workplace.ts', 'workplace-api.ts', 'workplace-v2.ts'].map(f => readFileSync(join(shared, f), 'utf8')).join('\n');
+const swift = ['Model/Contract.swift', 'Model/ContractV2.swift', 'Model/Events.swift', 'Model/API.swift'].map(f => readFileSync(join(here, '..', 'IrisWorkplace', f), 'utf8')).join('\n');
 
 const problems = [];
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
@@ -71,6 +71,12 @@ for (const [name, def] of Object.entries(tsInterfaces)) {
   if (def.extends && tsInterfaces[def.extends]) def.fields = { ...tsInterfaces[def.extends].fields, ...def.fields };
 }
 
+// v2's `ActivityKind` (item activity) shares its name with protocol.ts's inline `ActivityEvent.kind`
+// (Swift `ActivityKind`): compare it with the Swift `ItemActivityKind`.
+{
+  const v2 = strip(readFileSync(join(shared, 'workplace-v2.ts'), 'utf8')).match(/export type ActivityKind =([^;]+);/)?.[1] ?? '';
+  tsUnions.ItemActivityKind = [...v2.matchAll(/'([^']+)'/g)].map(x => x[1]);
+}
 // Inline unions on fields become named Swift enums.
 const inlineUnions = {
   'Unit.kind': 'UnitKind', 'InboxItem.state': 'InboxState', 'InboxAnswer.via': 'AnswerVia', 'OrgProposal.state': 'ProposalState',
@@ -78,6 +84,8 @@ const inlineUnions = {
   'McpServer.transport': 'McpTransport', 'ActivityEvent.kind': 'ActivityKind',
   'SpendEntry.tag': 'SpendTag', 'RateLimitWindow.window': 'RateLimitWindowKind', 'RateLimitWindow.status': 'RateLimitStatus',
   'RoomThread.state': 'RoomThreadState',
+  'InboxItem.urgency': 'InboxUrgency', 'RoomMessage.kind': 'RoomMessageKind', 'LogEntry.from': 'LogFrom',
+  'Area.state': 'AreaState', 'PlanFlag.kind': 'PlanFlagKind', 'ReleasePostItem.kind': 'ReleaseItemKind',
 };
 for (const [key, swiftName] of Object.entries(inlineUnions)) {
   const [iface, field] = key.split('.');
@@ -98,14 +106,15 @@ for (const [name, members] of Object.entries(tsUnions)) {
   if (!sw) { problems.push(`union ${name}: no Swift enum`); continue; }
   const a = new Set(members.map(String)), b = new Set(sw.map(String));
   for (const x of a) if (!b.has(x)) problems.push(`union ${name}: '${x}' missing from Swift`);
-  for (const x of b) if (!a.has(x)) problems.push(`union ${name}: Swift has extra '${x}'`);
+  // `unknown` is the client's own fallback for a value it does not know (LenientEnum), never sent.
+  for (const x of b) if (!a.has(x) && x !== 'unknown') problems.push(`union ${name}: Swift has extra '${x}'`);
 }
 // WorkState = FeatureState | AssignmentState
 {
   const want = new Set([...(tsUnions.FeatureState ?? []), ...(tsUnions.AssignmentState ?? [])]);
   const have = new Set(swiftEnums.WorkState ?? []);
   for (const x of want) if (!have.has(x)) problems.push(`union WorkState: '${x}' missing from Swift`);
-  for (const x of have) if (!want.has(x)) problems.push(`union WorkState: Swift has extra '${x}'`);
+  for (const x of have) if (!want.has(x) && x !== 'unknown') problems.push(`union WorkState: Swift has extra '${x}'`);
 }
 {
   const have = new Set(swiftEnums.PivotRows ?? []);
