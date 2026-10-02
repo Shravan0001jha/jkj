@@ -124,7 +124,7 @@ test('repeated identical transitions inside the window post one feed line and on
   try {
     const { story, thread } = setup(wp);
     items.update(wp, story.id, { status: 'in-progress' }, 'dev');
-    const block = { status: 'blocked' as const, blockedReason: 'needs the Speaker API', waitingOn: 'rohan' };
+    const block = { status: 'blocked' as const, blockedReason: 'needs the Speaker API', waitingOn: 'external' };
     for (let i = 0; i < 3; i++) {
       items.update(wp, story.id, block, 'dev');
       items.update(wp, story.id, { status: 'in-progress' }, 'dev');
@@ -132,7 +132,7 @@ test('repeated identical transitions inside the window post one feed line and on
     assert.deepEqual(lines(wp, story.id), ['started', 'blocked', 'unblocked']);
     assert.deepEqual(roomLines(wp, thread.id), [
       "Story 'Mic stays live at volume 0' started — Dev",
-      "Story 'Mic stays live at volume 0' is blocked: waiting on Rohan",
+      "Story 'Mic stays live at volume 0' is blocked: waiting on someone outside the team",
       "Story 'Mic stays live at volume 0' is unblocked",
     ]);
     // Every transition is still in the activity log: only the announcements are deduplicated.
@@ -148,7 +148,7 @@ test('repeated identical transitions inside the window post one feed line and on
     wp.db.prepare('update updates set at = ? where item_id = ?').run(old, story.id);
     items.update(wp, story.id, block, 'dev');
     assert.equal(trail.updates(wp)[0]!.kind, 'blocked');
-    assert.equal(trail.updates(wp)[0]!.line, 'Blocked: Mic stays live at volume 0 — waiting on Rohan: needs the Speaker API');
+    assert.equal(trail.updates(wp)[0]!.line, 'Blocked: Mic stays live at volume 0 — waiting on someone outside the team: needs the Speaker API');
   } finally {
     tmp.cleanup();
   }

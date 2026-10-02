@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import type { Agent, Attachment, Employee, EmployeeCard, EmployeeState, Evidence, WorkItem } from '@jkj/shared';
+import type { Agent, Attachment, Employee, EmployeeCard, EmployeeState, Evidence, Item, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { RunResult } from '../runtime/claude-agent.js';
 import * as runs from './runs.js';
@@ -20,7 +20,7 @@ import * as items from './items.js';
 import * as trail from './trail.js';
 import * as watch from './watch.js';
 import * as statusAnswers from './status.js';
-import { isPerson, rawGet } from './v2-map.js';
+import { isWaitable, nameOf, rawGet } from './v2-map.js';
 import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
 import { humanizeIds } from './id-names.js';
 import { now } from './store.js';
@@ -62,7 +62,7 @@ export const OWNER_TALK_TURN_INR = 100;
 /** The owner saying, in a talk, that paused work may go on. */
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'inbox_reply', 'status_of'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -978,12 +978,16 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
             return ok(`Created ${it.id} (${it.level}, ${it.status}).`);
           } catch (err) { return ok(`Not created: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('item_update', 'Move one of your items (start, block with a reason and who you wait on, send to review with a reviewer), or set its points. You never mark your own work done; the reviewer does.',
-        { itemId: z.string(), status: z.enum(['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked']).optional(), blockedReason: z.string().optional(), waitingOn: z.string().optional(), recommendation: z.string().optional(), reviewerId: z.string().optional(), points: z.number().int().optional(), note: z.string().optional() },
-        async ({ itemId, status, blockedReason, waitingOn, recommendation, reviewerId, points, note }) => {
+      tool('item_update', 'Move one of your items (start, block with a reason and who you wait on, send to review with a reviewer), or set its points. You never mark your own work done; the reviewer does. ' +
+        'Blocked is only for a wait on the owner (waitingOn owner, with your recommendation), the COO (coo) or someone outside the team (external). ' +
+        'Waiting on a teammate is never Blocked: status blocked with waitingOn a teammate becomes In review with them reviewing when it is a review or sign-off (kind review), ' +
+        'or hands the item to them when it is their work (kind work): they work on it and give it back with item_handback.',
+        { itemId: z.string(), status: z.enum(['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked']).optional(), blockedReason: z.string().optional(), waitingOn: z.string().optional(), kind: z.enum(['review', 'work']).optional(), recommendation: z.string().optional(), reviewerId: z.string().optional(), points: z.number().int().optional(), note: z.string().optional() },
+        async ({ itemId, status, blockedReason, waitingOn, kind, recommendation, reviewerId, points, note }) => {
           if (status === 'blocked' && waitingOn === 'owner' && !recommendation?.trim()) return ok('Not changed: blocked on the owner raises a decision in his Inbox; give your recommendation.');
           try {
-            const it = items.update(wp, itemId, { ...(status ? { status } : {}), ...(blockedReason ? { blockedReason } : {}), ...(waitingOn ? { waitingOn } : {}), ...(recommendation ? { recommendation } : {}), ...(reviewerId ? { reviewerId } : {}), ...(points ? { points: points as never } : {}), ...(note ? { note } : {}) }, employeeId);
+            const it = items.update(wp, itemId, { ...(status ? { status } : {}), ...(blockedReason ? { blockedReason } : {}), ...(waitingOn ? { waitingOn } : {}), ...(kind ? { kind } : {}), ...(recommendation ? { recommendation } : {}), ...(reviewerId ? { reviewerId } : {}), ...(points ? { points: points as never } : {}), ...(note ? { note } : {}) }, employeeId);
+            if (status === 'blocked' && it.status !== 'blocked') return ok(notBlocked(wp, it));
             return ok(`${it.id} is ${it.status}.`);
           } catch (err) { return ok(`Not changed: ${err instanceof Error ? err.message : String(err)}`); }
         }),
@@ -993,15 +997,28 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           try { const c = trail.comment(wp, itemId, { by: employeeId, text }); return ok(`Commented ${c.id}.`); }
           catch (err) { return ok(`Not commented: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('flag_stall', 'Flag your own stall the moment it happens: why you are stuck, and who you are waiting on if anyone (that also marks the item Blocked). The COO hears at once.',
-        { itemId: z.string().optional(), reason: z.string(), waitingOn: z.string().optional(), recommendation: z.string().optional() },
-        async ({ itemId, reason, waitingOn, recommendation }) => {
+      tool('flag_stall', 'Flag your own stall the moment it happens: why you are stuck, and who you are waiting on if anyone. Waiting on the owner, the COO (coo) or someone outside the team (external) marks the item Blocked and the COO hears at once. ' +
+        'Waiting on a teammate is not a stall: a review or sign-off puts it In review with them (kind review); their work hands the item to them (kind work) until they give it back with item_handback.',
+        { itemId: z.string().optional(), reason: z.string(), waitingOn: z.string().optional(), kind: z.enum(['review', 'work']).optional(), recommendation: z.string().optional() },
+        async ({ itemId, reason, waitingOn, kind, recommendation }) => {
           const id = itemId ?? session().assignmentId;
           if (!id) return ok('Name the item: no item is attached to this session.');
-          if (waitingOn && !isPerson(wp, waitingOn)) return ok(`waitingOn must be an employee id, coo or owner; "${waitingOn}" is none.`);
+          if (waitingOn && !isWaitable(wp, waitingOn)) return ok(`waitingOn must be an employee id, coo, owner or external; "${waitingOn}" is none.`);
           if (waitingOn === 'owner' && !recommendation?.trim()) return ok('Not flagged: waiting on the owner raises a decision in his Inbox; give your recommendation.');
-          try { watch.flag(wp, id, { by: employeeId, reason, ...(waitingOn ? { waitingOn } : {}), ...(recommendation ? { recommendation } : {}) }); return ok(`Flagged ${id}; the COO has it.`); }
-          catch (err) { return ok(`Not flagged: ${err instanceof Error ? err.message : String(err)}`); }
+          try {
+            const before = rawGet(wp, id)?.status;
+            const w = watch.flag(wp, id, { by: employeeId, reason, ...(waitingOn ? { waitingOn } : {}), ...(recommendation ? { recommendation } : {}), ...(kind ? { kind } : {}) });
+            if (waitingOn && before !== 'blocked' && w.status !== 'blocked') return ok(notBlocked(wp, items.require$(wp, id)));
+            return ok(`Flagged ${id}; the COO has it.`);
+          } catch (err) { return ok(`Not flagged: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('item_handback', 'Give back an item a teammate handed you (because they were waiting on your work), with a short note of what you did. It goes back to them, In progress, and they are woken.',
+        { itemId: z.string().optional(), note: z.string() },
+        async ({ itemId, note }) => {
+          const id = itemId ?? session().assignmentId;
+          if (!id) return ok('Name the item: no item is attached to this session.');
+          try { const it = items.handback(wp, id, note, employeeId); return ok(`Handed ${it.id} back to ${nameOf(wp, it.assigneeId)}.`); }
+          catch (err) { return ok(`Not handed back: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('inbox_reply', 'Answer in an Inbox item\'s thread (when the owner replied to something you raised). Keep it to a few short lines.',
         { inboxId: z.string(), text: z.string() },
@@ -1035,6 +1052,15 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         }),
     ],
   });
+}
+
+/** The reply when a block on a teammate became a review or a handoff (LLD §19.6c). */
+function notBlocked(wp: Workplace, it: Item): string {
+  return it.status === 'in-review'
+    ? `Not blocked: waiting on a teammate's review is a review. ${it.id} is In review with ${nameOf(wp, it.reviewerId)}, who has been asked to review it.`
+    : it.handoff
+      ? `Not blocked: ${it.id} is handed to ${nameOf(wp, it.assigneeId)}, who works on it now; it comes back to ${nameOf(wp, it.handoff.fromId)} when they call item_handback.`
+      : `Not blocked: ${it.id} is with ${nameOf(wp, it.assigneeId)} now.`;
 }
 
 /* ---------- v2 wiring ---------- */

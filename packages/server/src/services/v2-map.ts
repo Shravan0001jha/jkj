@@ -83,6 +83,7 @@ export function nameOf(wp: Workplace, id: string | undefined): string {
   if (!id) return 'nobody';
   if (id === 'owner') return 'you';
   if (id === 'workplace') return 'the Workplace';
+  if (id === 'external') return 'someone outside the team';
   return wp.org.employees.find(e => e.id === id)?.name ?? id;
 }
 
@@ -92,6 +93,9 @@ export const isAgent = (wp: Workplace, id: string | undefined): boolean =>
 /** Who may be waited on: an employee (the COO included), or the owner. */
 export const isPerson = (wp: Workplace, id: string | undefined): boolean =>
   !!id && (id === 'owner' || wp.org.employees.some(e => e.id === id));
+
+/** Who a Blocked item may wait on: a person, or someone outside the team (`external`, LLD §19.6c). */
+export const isWaitable = (wp: Workplace, id: string | undefined): boolean => id === 'external' || isPerson(wp, id);
 
 export const STATUS_LABEL: Record<ItemStatus, string> = {
   backlog: 'Backlog', ready: 'Ready', 'in-progress': 'In progress', 'in-review': 'In review', done: 'Done', blocked: 'Blocked',
@@ -121,6 +125,7 @@ export function projectItem(wp: Workplace, w: WorkItem): Item {
     ...(w.targetDate ? { targetDate: w.targetDate } : {}),
     acceptance: w.acceptance ?? [],
     ...(blocked ? { blocked } : {}),
+    ...(w.handoff && status !== 'done' ? { handoff: { fromId: w.handoff.fromId, reason: w.handoff.reason, at: w.handoff.at } } : {}),
     ...(w.mergedInto ? { mergedInto: w.mergedInto } : {}),
     ...(w.releasedIn ? { releasedIn: w.releasedIn } : {}),
     legacy: { kind: w.kind, state: w.state, ...(w.charterId ? { charterId: w.charterId } : {}), ...(w.featureId ? { featureId: w.featureId } : {}) },

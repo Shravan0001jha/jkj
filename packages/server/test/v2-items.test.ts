@@ -83,8 +83,8 @@ test('the six states: reviewer to enter review, reason and waiting-on to block, 
     assert.throws(() => items.update(wp, story.id, { status: 'blocked' }, 'dev'), /reason/i);
     assert.throws(() => items.update(wp, story.id, { status: 'blocked', blockedReason: 'needs the Speaker API' }, 'dev'), /waiting/i);
     assert.throws(() => items.update(wp, story.id, { status: 'blocked', blockedReason: 'x', waitingOn: 'nobody' }, 'dev'), /waiting/i);
-    s = items.update(wp, story.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'rohan' }, 'dev');
-    assert.deepEqual({ reason: s.blocked?.reason, waitingOn: s.blocked?.waitingOn }, { reason: 'needs the Speaker API', waitingOn: 'rohan' });
+    s = items.update(wp, story.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'external' }, 'dev');
+    assert.deepEqual({ reason: s.blocked?.reason, waitingOn: s.blocked?.waitingOn }, { reason: 'needs the Speaker API', waitingOn: 'external' });
     assert.equal(s.legacy.state, 'blocked');
     s = items.update(wp, story.id, { status: 'in-progress' }, 'dev');
     assert.equal(s.blocked, undefined, 'leaving blocked clears the reason');
@@ -202,11 +202,11 @@ test('start, block, unblock and ship are one-line updates with names, and named 
     assert.equal(last.kind, 'update');
     assert.equal(last.text, "Story 'Mic stays live at volume 0' started — Dev");
 
-    items.update(wp, story.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'rohan' }, 'dev');
+    items.update(wp, story.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'external' }, 'dev');
     feed = trail.updates(wp);
-    assert.equal(feed[0]!.line, 'Blocked: Mic stays live at volume 0 — waiting on Rohan: needs the Speaker API');
+    assert.equal(feed[0]!.line, 'Blocked: Mic stays live at volume 0 — waiting on someone outside the team: needs the Speaker API');
     assert.equal(feed[0]!.push, true);
-    assert.equal(room.messages(wp, thread.id).at(-1)!.text, "Story 'Mic stays live at volume 0' is blocked: waiting on Rohan");
+    assert.equal(room.messages(wp, thread.id).at(-1)!.text, "Story 'Mic stays live at volume 0' is blocked: waiting on someone outside the team");
     items.update(wp, story.id, { status: 'in-progress' }, 'dev');
     assert.equal(trail.updates(wp)[0]!.line, 'Unblocked: Mic stays live at volume 0 — Dev');
     items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
@@ -239,7 +239,7 @@ test('epic progress is points done over points total; the plan groups epics by a
     items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
     items.update(wp, story.id, { status: 'done' }, 'nikhil');
     items.update(wp, s5.id, { status: 'in-progress' }, 'mira');
-    items.update(wp, s5.id, { status: 'blocked', blockedReason: 'no ducking API on macOS 15', waitingOn: 'rohan' }, 'mira');
+    items.update(wp, s5.id, { status: 'blocked', blockedReason: 'no ducking API on macOS 15', waitingOn: 'external' }, 'mira');
     const loose = items.create(wp, { level: 'epic', title: 'Unfiled epic' }, 'owner');
     const mine = items.create(wp, { level: 'story', parentId: loose.id, title: 'Approve the 0.2.16 release', assigneeId: 'owner' }, 'asha');
 
@@ -254,7 +254,7 @@ test('epic progress is points done over points total; the plan groups epics by a
     assert.equal(card.inFocus, true);
     assert.equal(card.progress.pct, 38);
     assert.deepEqual(card.next, { id: s5.id, title: 'Duck music under speech' });
-    assert.deepEqual(card.flags.map(f => [f.kind, f.title, f.reason, f.waitingOn]), [['blocked', 'Duck music under speech', 'no ducking API on macOS 15', 'rohan']]);
+    assert.deepEqual(card.flags.map(f => [f.kind, f.title, f.reason, f.waitingOn]), [['blocked', 'Duck music under speech', 'no ducking API on macOS 15', 'external']]);
     assert.deepEqual(plan.unfiled.map(c => c.epic.id), [loose.id]);
     assert.deepEqual(plan.mine.map(i => i.id), [mine.id]);
     assert.deepEqual(plan.focus.epicIds, [epic.id]);

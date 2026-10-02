@@ -265,7 +265,7 @@ export interface WorkItem {
   targetDate?: string;
   acceptance?: string[];
   blockedReason?: string;
-  /** An employee id, 'owner' or 'coo'. */
+  /** 'owner', 'coo' or 'external' (a wait on a teammate is a review or a handoff, LLD §19.6c). */
   waitingOn?: string;
   blockedSince?: string;
   /** Blocked on the owner: what the asker recommends (it goes into his Inbox item). */
@@ -273,6 +273,10 @@ export interface WorkItem {
   resolution?: ItemResolution;
   mergedInto?: string;
   releasedIn?: string;
+  /** Handed to a teammate (LLD §19.6c); `prev` is an earlier handoff still open (it unwinds in order). */
+  handoff?: { fromId: string; reason: string; at: string; prev?: WorkItem['handoff'] };
+  /** The last handback (internal, not projected): whom it went to, by whom, the note. */
+  handedBack?: { toId: string; byId: string; note: string; at: string };
 }
 
 /* ---------- inbox ---------- */

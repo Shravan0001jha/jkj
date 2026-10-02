@@ -195,12 +195,12 @@ test('an agent flags its own stall the moment it happens', async () => {
     await server.instance.connect(st);
     const client = new Client({ name: 't', version: '1' });
     await client.connect(ct);
-    const out = await client.callTool({ name: 'flag_stall', arguments: { reason: 'the Speaker has no one-sentence primitive', waitingOn: 'rohan' } });
+    const out = await client.callTool({ name: 'flag_stall', arguments: { reason: 'the Speaker has no one-sentence primitive', waitingOn: 'external' } });
     assert.match(JSON.stringify(out.content), /Flagged/);
     assert.ok(coo.listItems(wp).some(i => i.kind === 'stall' && i.itemId === s.id && /one-sentence/.test(i.body)));
     const b = items.require$(wp, s.id);
     assert.equal(b.status, 'blocked');
-    assert.equal(b.blocked?.waitingOn, 'rohan');
+    assert.equal(b.blocked?.waitingOn, 'external');
     await client.close();
   } finally {
     tmp.cleanup();

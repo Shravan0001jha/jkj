@@ -25,7 +25,7 @@ function seed(wp: ReturnType<typeof testWorkplace>['wp']) {
   items.update(wp, doing.id, { status: 'in-progress' }, 'mira');
   const stuck = items.create(wp, { level: 'story', parentId: epic.id, title: 'Speaker one-sentence API', assigneeId: 'rohan', points: 2 }, 'asha');
   items.update(wp, stuck.id, { status: 'in-progress' }, 'rohan');
-  items.update(wp, stuck.id, { status: 'blocked', blockedReason: 'needs a decision on the API', waitingOn: 'dev' }, 'rohan');
+  items.update(wp, stuck.id, { status: 'blocked', blockedReason: 'needs a decision on the API', waitingOn: 'external' }, 'rohan');
   items.setFocus(wp, [epic.id], 'owner');
   inbox.raise(wp, { kind: 'decision', title: 'Which TTS voice ships?', body: 'x', raisedBy: 'mira' });
   return { epic, done, doing, stuck };
@@ -38,7 +38,7 @@ test('the 09:30 brief names what was done, the focus, the blockers and the decis
     const brief = rhythm.buildBrief(wp, Date.now() + 60_000);
     assert.equal(brief.line, 'Brief: 1 done since yesterday · focus: Iris works while music plays · 1 blocked · 1 decision waits on you');
     assert.match(brief.details, /Mic stays live at volume 0 — Dev/);
-    assert.match(brief.details, /Speaker one-sentence API — waiting on Dev: needs a decision on the API/);
+    assert.match(brief.details, /Speaker one-sentence API — waiting on someone outside the team: needs a decision on the API/);
     assert.match(brief.details, /Which TTS voice ships\?/);
   } finally {
     tmp.cleanup();
@@ -51,7 +51,7 @@ test('the stand-up is one message per lead in General, done / next / blocked, au
     room.ensureGeneral(wp);
     seed(wp);
     assert.equal(rhythm.buildStandup(wp, 'dev', Date.now() + 60_000), 'Done: Mic stays live at volume 0\nNext: nothing in progress\nBlocked: nothing');
-    assert.equal(rhythm.buildStandup(wp, 'rohan', Date.now() + 60_000), 'Done: nothing\nNext: nothing in progress\nBlocked: Speaker one-sentence API (waiting on Dev)');
+    assert.equal(rhythm.buildStandup(wp, 'rohan', Date.now() + 60_000), 'Done: nothing\nNext: nothing in progress\nBlocked: Speaker one-sentence API (waiting on someone outside the team)');
     assert.equal(rhythm.buildStandup(wp, 'tara', Date.now() + 60_000), null, 'nothing to report, nothing posted');
   } finally {
     tmp.cleanup();
@@ -106,7 +106,7 @@ test('on-demand status answers from the plan, by item, by person or by area, wit
     const { stuck, doing } = seed(wp);
     const byTitle = status.answer(wp, 'speaker api');
     assert.equal(byTitle.matches[0]!.item.id, stuck.id);
-    assert.equal(byTitle.matches[0]!.line, "Story 'Speaker one-sentence API' — Blocked · Rohan · 2 pts · waiting on Dev: needs a decision on the API");
+    assert.equal(byTitle.matches[0]!.line, "Story 'Speaker one-sentence API' — Blocked · Rohan · 2 pts · waiting on someone outside the team: needs a decision on the API");
     assert.equal(byTitle.matches[0]!.href, `item/${stuck.id}`);
     assert.equal(byTitle.line, byTitle.matches[0]!.line);
     const byPerson = status.answer(wp, 'what is Mira doing?');

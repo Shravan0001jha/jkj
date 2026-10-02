@@ -44,7 +44,16 @@ export interface Item {
   /** YYYY-MM-DD. */
   targetDate?: string;
   acceptance: string[];
+  /**
+   * Blocked: who it waits on — 'owner', 'coo' or 'external' (someone outside the team; the reason
+   * says who). A wait on a teammate is never Blocked (LLD §19.6c): it is a review or a `handoff`.
+   */
   blocked?: { reason: string; waitingOn: string; since: string };
+  /**
+   * Handed to a teammate (LLD §19.6c, owner 2 Oct): `assigneeId` has it now and works on it; it
+   * returns to `fromId` when they call item_handback. Show it as "with <assignee> (handed by <fromId>)".
+   */
+  handoff?: ItemHandoff;
   /** Derived, never stored: set while the item is past one of the stall deadlines (LLD §19.6). */
   stall?: { rule: StallRule; since: string; minutes: number };
   mergedInto?: string;
@@ -54,6 +63,15 @@ export interface Item {
   legacy: { kind: WorkKind; state: string; charterId?: string; featureId?: string };
   createdAt: string;
   updatedAt: string;
+}
+
+/** A handoff on an item (LLD §19.6c). */
+export interface ItemHandoff {
+  /** Who handed it over (and gets it back): an employee id or 'owner'. */
+  fromId: string;
+  /** What the assignee is to do before handing it back. */
+  reason: string;
+  at: string;
 }
 
 export interface Area {
@@ -87,6 +105,20 @@ export interface PlanFlag {
   reason: string;
   waitingOn?: string;
   since: string;
+  /** The flagged item is handed over (LLD §19.6c): "with <withId> (handed by <fromId>)". */
+  handoff?: { withId: string; fromId: string };
+}
+
+/** An item of an epic handed to a teammate (LLD §19.6c): the Plan shows "with <withId> (handed by <fromId>)". */
+export interface PlanHandoff {
+  itemId: string;
+  title: string;
+  /** Who has it now (its assignee). */
+  withId: string;
+  /** Who handed it over and gets it back. */
+  fromId: string;
+  reason: string;
+  at: string;
 }
 
 export interface EpicCard {
@@ -95,6 +127,8 @@ export interface EpicCard {
   /** The next milestone: the highest-ranked story not yet done. */
   next?: { id: string; title: string };
   flags: PlanFlag[];
+  /** Present when items of this epic are handed to a teammate (LLD §19.6c). Not flags: nothing is wrong. */
+  handoffs?: PlanHandoff[];
   inFocus: boolean;
 }
 
@@ -269,7 +303,10 @@ export interface UpdateItemRequest {
   status?: ItemStatus;
   resolution?: ItemResolution;
   blockedReason?: string;
+  /** An employee id, 'owner', 'coo' or 'external'. A teammate turns Blocked into In review or a handoff (LLD §19.6c). */
   waitingOn?: string;
+  /** With status blocked on a teammate: 'review' (→ In review, them reviewing) or 'work' (→ handed to them). Guessed from the reason when absent. */
+  kind?: 'review' | 'work';
   /** Why (a reopen needs one; recorded on the activity row). */
   note?: string;
   /** Blocked on the owner: what the asker recommends (goes into the Inbox item). */
@@ -280,6 +317,8 @@ export interface UpdateItemRequest {
 
 export interface CommentRequest { text: string }
 export interface MergeRequest { intoId: string }
+/** POST /api/items/:id/handback (LLD §19.6c). */
+export interface HandbackRequest { note: string }
 export interface InboxReplyRequest { text?: string; optionId?: string }
 export interface CreateAreaRequest { title: string; description?: string; ownerId?: string }
 export interface UpdateAreaRequest { title?: string; description?: string; state?: 'active' | 'archived'; rank?: number }

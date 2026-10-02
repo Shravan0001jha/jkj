@@ -56,9 +56,9 @@ test('(2) a Blocked feed line carries one sentence of the reason (about 100 char
     items.update(wp, s.id, { status: 'in-progress' }, 'nikhil');
     const reason = 'Dev\'s ducking build is not on the branch yet, so there is nothing to run the AC5 checks against on the real Mac. ' +
       'I also need the low-confidence fixtures from Mira. Once both land I can finish in about an hour.';
-    items.update(wp, s.id, { status: 'blocked', blockedReason: reason, waitingOn: 'dev' }, 'nikhil');
+    items.update(wp, s.id, { status: 'blocked', blockedReason: reason, waitingOn: 'external' }, 'nikhil');
     const line = trail.updates(wp).find(u => u.kind === 'blocked' && u.itemId === s.id)!;
-    const said = line.line.replace(/^Blocked: QA the music bundle — waiting on Dev: /, '');
+    const said = line.line.replace(/^Blocked: QA the music bundle — waiting on someone outside the team: /, '');
     assert.ok(said.length <= 101, `short: ${said}`);
     assert.ok(!said.includes('fixtures from Mira'), 'one sentence only');
     assert.ok(reason.startsWith(said.replace(/…$/, '')), 'the start of the reason, cut at a word');
@@ -67,8 +67,8 @@ test('(2) a Blocked feed line carries one sentence of the reason (about 100 char
 
     const brief = items.create(wp, { level: 'story', parentId: epic.id, title: 'Short one', assigneeId: 'mira' }, 'asha');
     items.update(wp, brief.id, { status: 'in-progress' }, 'mira');
-    items.update(wp, brief.id, { status: 'blocked', blockedReason: 'needs the API key', waitingOn: 'kabir' }, 'mira');
-    assert.equal(trail.updates(wp).find(u => u.kind === 'blocked' && u.itemId === brief.id)!.line, 'Blocked: Short one — waiting on Kabir: needs the API key');
+    items.update(wp, brief.id, { status: 'blocked', blockedReason: 'needs the API key', waitingOn: 'external' }, 'mira');
+    assert.equal(trail.updates(wp).find(u => u.kind === 'blocked' && u.itemId === brief.id)!.line, 'Blocked: Short one — waiting on someone outside the team: needs the API key');
   } finally {
     tmp.cleanup();
   }

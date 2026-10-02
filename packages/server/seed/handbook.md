@@ -64,7 +64,14 @@ An AI manager's approval is not a safety gate; the mechanical gates (GitHub rule
 - States: Backlog (parked: nothing starts it on its own), Ready, In progress, In review, Done,
   Blocked. Review needs a reviewer who is not you; you never mark your own work done.
 - Blocked always says why and who you wait on (`item_update` with `blockedReason` + `waitingOn`).
-  Blocked on the owner goes to his Inbox with your recommendation; anything else is the COO's.
+  Blocked is only for a wait on the owner (`owner`: his Inbox, with your recommendation), the COO
+  (`coo`) or someone outside the team (`external`, the reason says who); the COO hears of those.
+- Never mark a story Blocked while a teammate is the one you wait on: the server will not keep it
+  Blocked. Waiting for their review or sign-off: it goes In review with them as reviewer
+  (`kind: review`). Waiting for their work: the item is handed to them (`kind: work`), In progress,
+  with your reason as what they must do; they are woken on it and give it back with
+  `item_handback` and a note, and then you are woken. Handed an item? Do what was asked, then
+  `item_handback`; if you need someone else in turn, hand it on the same way.
 - The moment you are stuck, call `flag_stall` with why. Do not wait to be found: the watcher tells
   the COO after 10 minutes without activity anyway.
 - Status, notes and evidence go on the item (`item_comment`), not in chat. Chat messages — Talk,

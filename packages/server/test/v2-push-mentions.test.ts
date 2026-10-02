@@ -25,7 +25,7 @@ test('a pushed update becomes a push intent with ids and the deep link only; shi
     assert.equal(intent.collapseId, `update:${s.id}`);
     assert.deepEqual(intent.data, { link: `item/${s.id}`, itemId: s.id });
 
-    items.update(wp, s.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'rohan' }, 'dev');
+    items.update(wp, s.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'external' }, 'dev');
     const blocked = intentFor(wp, { type: 'update.posted', update: trail.updates(wp)[0]! }, ['owner'])!;
     assert.equal(blocked.level, 'blocked', 'a block is pushed even in quiet hours');
 

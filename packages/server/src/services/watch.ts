@@ -4,6 +4,7 @@ import * as runs from './runs.js';
 import * as employees from './employees.js';
 import * as trail from './trail.js';
 import * as items from './items.js';
+import * as waits from './waits.js';
 import * as coo from './coo.js';
 import * as cos from './cos.js';
 import * as spend from './spend.js';
@@ -158,18 +159,24 @@ function unreviewed(wp: Workplace, w: WorkItem, ev: Evaluation, nowMs: number): 
   return 'coo-notified';
 }
 
-/** An agent flags its own stall (tool `flag_stall`): the COO hears at once; Blocked when it names who it waits on. */
-export function flag(wp: Workplace, id: string, spec: { by: string; reason: string; waitingOn?: string; recommendation?: string }): void {
+/**
+ * An agent flags its own stall (tool `flag_stall`): the COO hears at once; Blocked when it names who
+ * it waits on — unless that is a teammate (LLD §19.6c): then it is a review or a handoff, someone's
+ * work rather than a stall, and the COO is not told. Returns the item as it now stands.
+ */
+export function flag(wp: Workplace, id: string, spec: { by: string; reason: string; waitingOn?: string; recommendation?: string; kind?: 'review' | 'work' }): WorkItem {
   const w = rawGet(wp, id);
   if (!w) throw new Error(`No item ${id}`);
-  trail.record(wp, { itemId: id, by: spec.by, kind: 'stall', text: `Flagged by ${nameOf(wp, spec.by)}: ${spec.reason}` });
-  coo.notifyStall(wp, { itemId: id, title: `Flagged: ${w.title}`, body: `${nameOf(wp, spec.by)} is stuck: ${spec.reason}${spec.waitingOn ? ` (waiting on ${nameOf(wp, spec.waitingOn)})` : ''}.`, by: spec.by });
+  const teammate = !!spec.waitingOn && levelOf(w) !== 'epic' && waits.classify(wp, { assigneeId: w.employeeId, waitingOn: spec.waitingOn, reason: spec.reason, kind: spec.kind }) !== 'block';
+  trail.record(wp, { itemId: id, by: spec.by, kind: teammate ? 'note' : 'stall', text: `Flagged by ${nameOf(wp, spec.by)}: ${spec.reason}` });
+  if (!teammate) coo.notifyStall(wp, { itemId: id, title: `Flagged: ${w.title}`, body: `${nameOf(wp, spec.by)} is stuck: ${spec.reason}${spec.waitingOn ? ` (waiting on ${nameOf(wp, spec.waitingOn)})` : ''}.`, by: spec.by });
   if (spec.waitingOn && w.status !== 'blocked') {
     const status = w.status ?? 'ready';
     if (status === 'ready' || status === 'in-progress' || status === 'in-review') {
-      items.update(wp, id, { status: 'blocked', blockedReason: spec.reason, waitingOn: spec.waitingOn, ...(spec.recommendation ? { recommendation: spec.recommendation } : {}) }, spec.by);
+      items.update(wp, id, { status: 'blocked', blockedReason: spec.reason, waitingOn: spec.waitingOn, ...(spec.recommendation ? { recommendation: spec.recommendation } : {}), ...(spec.kind ? { kind: spec.kind } : {}) }, spec.by);
     }
   }
+  return rawGet(wp, id)!;
 }
 
 /* ---------- the timers ---------- */

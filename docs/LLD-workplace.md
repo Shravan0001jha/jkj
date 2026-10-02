@@ -895,6 +895,66 @@ reaching In review woke nobody. `startBlockWatch` (boot) listens to `work.update
   (`dep-wake:<id>` = `<status>:<statusSince>`).
 - **(d)** the reviewer wake is 19.6a.
 
+### 19.6c Waits on a teammate are handoffs, not blocks (`waits.ts`, `items.ts`, `handoff.ts`, owner 2 Oct)
+
+Owner: "any story which has an agent working on it should not be marked blocked; they can be rather
+assigned to the person working on it", and "any blocked or stalled issue is always addressed unless
+it's blocked on me". A Blocked item waiting on a teammate parks two agents: the one who blocked it
+stops, and the one waited on gets a message at best. So a move into Blocked is **classified** before
+it is applied, wherever it comes from (`POST /api/items/:id`, `item_update`, `flag_stall`; all go
+through `items.update`):
+
+| `waitingOn` | reason / `kind` | becomes |
+|---|---|---|
+| an agent employee (not virtual, not the assignee) | `kind: 'review'`, or the reason says review / sign-off / approve | **In review**, `reviewerId` = that employee |
+| an agent employee (not virtual, not the assignee) | anything else (`kind: 'work'` forces this) | **handoff** (below) |
+| `owner` | — | **Blocked** + the owner's Inbox question (19.3, unchanged) |
+| `coo`, `external`, or the assignee itself | — | **Blocked** + the COO (19.6b, unchanged: at once, again after 15 min) |
+
+`classify(wp, { assigneeId, waitingOn, reason, kind })` in `waits.ts` is pure. The review keyword
+heuristic is deliberately narrow (word-bounded `review*`, `sign-off`/`sign off`/`signoff`,
+`approve*`/`approval`); `kind` wins over it either way. `external` is a new reserved `waitingOn` value
+(someone outside the team; the reason says who), shown as "someone outside the team".
+
+**Review wait.** The move is rewritten to `status: in-review, reviewerId: X` (allowed from ready,
+in-progress, in-review and blocked: the conversion is the server's rule, so the transition table is
+not consulted; the 19.3 in-review checks still hold). The reason is the activity note. 19.6a then wakes
+X (a new reviewer is a new review episode, so an item already In review with someone else wakes X too).
+
+**Work wait = handoff.** The move is rewritten to: assignee = X (charter follows, as for any
+reassign), status In progress (unchanged if already), and `handoff = { fromId: <previous assignee>,
+reason, at, prev? }` on the item (`prev` keeps an earlier handoff, so X → Z → X → Y unwinds; X
+"blocking" on the person who handed it to them is a handback). Activity (`note`):
+"Handed to X: <reason>; returns to Y". `startHandoffWatch` (boot) sees the new handoff on
+`work.updated` and wakes X once per handoff (`handoff-wake:<id>` = `handoff.at`): X's open session gets
+a message; with none, a session is started **on that item** (`employees.spawn` with the assignment,
+within budget and the concurrency cap); if neither is possible the activity says so and the stall
+watcher (19.6, idle) is the fallback. The prompt says what Y needs and to call `item_handback` with a
+note when done. At boot the watch wakes any handoff it has no record for (a restart, the migration).
+
+**Handback.** Agent tool `item_handback { itemId?, note }` / `POST /api/items/:id/handback { note }`
+(→ `ItemDetail`): by the current assignee, the owner, the COO or the Chief of Staff; needs a handoff
+on the item. Assignee = `handoff.fromId`, `handoff` = `handoff.prev` (or removed), status In progress
+(unless Done), `handedBack = { toId, byId, note, at }` (internal, not projected). Activity: "Handed back
+to Y by X: <note>". The watch wakes Y once per handback (`handback-wake:<id>` = `handedBack.at`) the
+same way (message, or a session on the item). A handback to the owner wakes nobody (it is his item).
+
+**Not news to the COO.** `flag_stall` with an agent `waitingOn` no longer files the "Flagged" bridge
+item (the wait is now someone's work, not a stall); with `owner`, `coo` or `external` it does as before.
+
+**Contract (additive; `workplace-v2.ts`).** `Item.handoff?: { fromId, reason, at }` (the assignee is
+who has it now): the apps show "with <assignee> (handed by <fromId>)". `PlanFlag.handoff?: { withId,
+fromId }` when a flagged (stalled) item is handed. `EpicCard.handoffs?: PlanHandoff[]` with
+`PlanHandoff = { itemId, title, withId, fromId, reason, at }`, present when the epic has handed items,
+so the Plan shows them without a new flag kind (decoders with closed enums are not broken).
+`UpdateItemRequest.kind?: 'review' | 'work'`; `waitingOn` may be `external`. `status_of` lines read
+"Story 'X' — In progress · Dev (handed by Nikhil)".
+
+**Migration (`handoff.migrateBlockedWaits`, every boot, after the watches start).** Every Blocked item
+whose `waitingOn` is an agent other than its assignee is re-applied through the same classification
+(`by: workplace`): review waits → In review, the rest → handoffs; their wakes follow from the watches.
+Idempotent: a converted item is no longer Blocked, and owner/COO/external blocks are left alone.
+
 ### 19.7 Asha's rhythm (`rhythm.ts`)
 
 A one-minute timer calls `maybeRun(wp, now)`; each run is idempotent per IST day (settings
@@ -920,6 +980,7 @@ A one-minute timer calls `maybeRun(wp, now)`; each run is idempotent per IST day
 | POST `/api/items/:id` | `UpdateItemRequest` → `ItemDetail` (any subset; status rules 19.3) |
 | POST `/api/items/:id/comments` | `{ text }` → 201 `Comment` |
 | POST `/api/items/:id/merge` | `{ intoId }` → `ItemDetail` (the survivor) |
+| POST `/api/items/:id/handback` | `{ note }` → `ItemDetail` (19.6c: back to who handed it) |
 | GET `/api/updates?limit=&before=` | → `Update[]` newest first (limit ≤ 200, default 50; `before` = an update id) |
 | GET `/api/inbox?state=&limit=&before=` | → `InboxItem[]`; no params = every owner-facing item as before; `state` open/answered/expired; `before` an item id (the page starts after it); `limit` ≤ 200 (iOS QA 2 Oct) |
 | GET `/api/inbox/:id` | → `InboxThread` |
@@ -1085,6 +1146,7 @@ an open item with the same normalised title under the same parent is returned in
 duplicate), `item_update { itemId, status?, blockedReason?, waitingOn?, reviewerId?, points?, note? }`
 (19.3 rules; an agent can never set done on its own work), `item_comment { itemId, text }`,
 `flag_stall { itemId?, reason, waitingOn?, recommendation? }`, `inbox_reply { inboxId, text }`,
-`status_of { q }`; `ask_owner` and `escalate` gain a required `recommendation`, and `item_update` gains
+`status_of { q }`, `item_handback { itemId?, note }` (19.6c; `item_update` and `flag_stall` gain
+`kind?: review | work`); `ask_owner` and `escalate` gain a required `recommendation`, and `item_update` gains
 `recommendation` (required with `waitingOn: owner`, as is `flag_stall`'s) — 19.5.
 The handbook gains: one story per outcome; flag your own stall the moment it happens; short messages.

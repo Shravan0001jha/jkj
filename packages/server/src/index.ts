@@ -27,6 +27,7 @@ import * as rhythm from './services/rhythm.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
 import * as employees from './services/employees.js';
+import * as handoff from './services/handoff.js';
 import * as spend from './services/spend.js';
 import * as health from './services/health.js';
 import * as inbox from './services/inbox.js';
@@ -105,6 +106,10 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   const stopReviewWake = reviewWake.startReviewWake(wp);
   // A block on a colleague tells the COO and that colleague at once; a dependency arriving wakes who waits on it.
   const stopBlockWatch = blocks.startBlockWatch(wp);
+  // A wait on a teammate is a handoff, not a block (owner, 2 Oct): the one handed it, or handed it back, is woken.
+  const stopHandoffWatch = handoff.startHandoffWatch(wp);
+  // Blocked-on-a-teammate items from before that rule become reviews or handoffs; the watches above wake them.
+  try { handoff.migrateBlockedWaits(wp); } catch (err) { log.warn('boot', `blocked waits: ${err instanceof Error ? err.message : err}`); }
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
@@ -187,6 +192,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       stopWatch();
       stopReviewWake();
       stopBlockWatch();
+      stopHandoffWatch();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
       telegram.stop();

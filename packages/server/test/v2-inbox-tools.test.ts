@@ -109,7 +109,7 @@ test('the agents\' v2 tools: one story per outcome, tasks by the story owner, no
 });
 
 test('the new tools are in the always-allowed list', () => {
-  for (const name of ['item_create', 'item_update', 'item_comment', 'flag_stall', 'inbox_reply', 'status_of']) {
+  for (const name of ['item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of']) {
     assert.ok((WORKPLACE_TOOLS as readonly string[]).includes(name), name);
   }
 });

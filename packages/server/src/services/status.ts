@@ -26,7 +26,8 @@ export function lineFor(wp: Workplace, it: Item): string {
     parts.push(`${p.pct}% (${p.storiesDone}/${p.storiesTotal} stories)`);
   } else if (it.assigneeId) {
     const who = nameOf(wp, it.assigneeId);
-    parts.push(who === 'you' ? 'You' : who);
+    // Handed to a teammate (LLD §19.6c): "Dev (handed by Nikhil)".
+    parts.push(`${who === 'you' ? 'You' : who}${it.handoff ? ` (handed by ${nameOf(wp, it.handoff.fromId)})` : ''}`);
   }
   if (it.points) parts.push(`${it.points} pts`);
   if (it.blocked) parts.push(`waiting on ${nameOf(wp, it.blocked.waitingOn)}: ${it.blocked.reason}`);

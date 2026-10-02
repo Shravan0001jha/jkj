@@ -441,6 +441,11 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       items.require$(wp, dec(id));
       json(res, 201, trail.comment(wp, dec(id), { by: actorOf(req), text: str((await readJson(req))['text']) }));
     }),
+    r('POST', '/api/items/:id/handback', async (req, res, _url, [id]) => {
+      const note = (await readJson(req))['note'];
+      items.handback(wp, dec(id), typeof note === 'string' ? note : '', actorOf(req));
+      json(res, 200, items.detail(wp, dec(id)));
+    }),
     r('POST', '/api/items/:id/merge', async (req, res, _url, [id]) => {
       const survivor = items.merge(wp, dec(id), str((await readJson(req))['intoId']), actorOf(req));
       json(res, 200, items.detail(wp, survivor.id));

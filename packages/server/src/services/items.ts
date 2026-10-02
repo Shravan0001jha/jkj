@@ -1,5 +1,5 @@
 import type {
-  CreateItemRequest, EpicCard, EpicProgress, Focus, Item, ItemDetail, ItemStatus, PlanFlag, PlanResponse, Points, UpdateItemRequest, WorkItem,
+  CreateItemRequest, EpicCard, EpicProgress, Focus, Item, ItemDetail, ItemStatus, PlanFlag, PlanHandoff, PlanResponse, Points, UpdateItemRequest, WorkItem,
 } from '@jkj/shared';
 import { ITEM_STATUSES, POINTS } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
@@ -9,7 +9,8 @@ import * as areas from './areas.js';
 import * as room from './room.js';
 import * as watch from './watch.js';
 import { now, rowsJson } from './store.js';
-import { authorId, epicOf, humanDuration, isPerson, levelOf, projectItem, rawGet, stateFromStatus } from './v2-map.js';
+import * as waits from './waits.js';
+import { authorId, chiefOfStaffId, epicOf, humanDuration, isPerson, isWaitable, levelOf, nameOf, projectItem, rawGet, stateFromStatus } from './v2-map.js';
 import { BadRequest, NotFound } from '../util/errors.js';
 
 /**
@@ -173,8 +174,12 @@ const TRANSITIONS: Record<ItemStatus, ItemStatus[]> = {
   done: ['in-progress'],
 };
 
-function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus, req: UpdateItemRequest, by: string, next: WorkItem): void {
-  if (!TRANSITIONS[from].includes(to)) throw new BadRequest(`${levelOf(w)} ${w.id} cannot go from ${from} to ${to}`);
+/**
+ * `converted`: the move is the server's own rewrite of a block on a teammate (LLD §19.6c), so the
+ * transition table is not consulted (ready → in-review is allowed there); the other rules still hold.
+ */
+function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus, req: UpdateItemRequest, by: string, next: WorkItem, converted = false): void {
+  if (!converted && from !== to && !TRANSITIONS[from].includes(to)) throw new BadRequest(`${levelOf(w)} ${w.id} cannot go from ${from} to ${to}`);
   const level = levelOf(w);
   if (to === 'in-review') {
     if (!next.reviewerId) throw new BadRequest('Name a reviewer before review: nothing sits in review with nobody reviewing.');
@@ -182,7 +187,7 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
   }
   if (to === 'blocked') {
     if (!req.blockedReason?.trim()) throw new BadRequest('Blocked needs a reason.');
-    if (!req.waitingOn || !isPerson(wp, req.waitingOn)) throw new BadRequest('Blocked needs who it is waiting on: an employee, coo or owner.');
+    if (!req.waitingOn || !isWaitable(wp, req.waitingOn)) throw new BadRequest('Blocked needs who it is waiting on: an employee, coo, owner or external.');
   }
   if (to === 'done') {
     if (from === 'backlog' || from === 'ready') {
@@ -199,7 +204,29 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
   if (from === 'done' && !req.note?.trim()) throw new BadRequest('A reopen needs a note: what was wrong with "done"?');
 }
 
-export function update(wp: Workplace, id: string, req: UpdateItemRequest, given: string): Item {
+/** The assignee, and the charter that follows it (as any reassign does). */
+function setAssignee(wp: Workplace, next: WorkItem, employeeId: string): void {
+  next.employeeId = employeeId;
+  const charter = wp.org.employees.find(e => e.id === employeeId)?.charterIds[0];
+  if (charter) next.charterId = charter; else delete next.charterId;
+}
+
+const clause = (t: string): string => t.trim().replace(/[.\s]+$/, '');
+
+/** Back to whoever handed it (LLD §19.6c): the earlier handoff, if any, is open again. */
+function applyHandback(wp: Workplace, prev: WorkItem, next: WorkItem, byId: string, note: string, at: string): string {
+  const toId = prev.handoff!.fromId;
+  setAssignee(wp, next, toId);
+  if (prev.handoff!.prev) next.handoff = prev.handoff!.prev; else delete next.handoff;
+  next.handedBack = { toId, byId, note: note.trim(), at };
+  return `Handed back to ${nameOf(wp, toId)} by ${nameOf(wp, byId)}: ${clause(note)}`;
+}
+
+/**
+ * `rewait` (the boot migration, LLD §19.6c): re-apply an existing Blocked item's wait through the
+ * classification; a block that is still a block is left exactly as it is.
+ */
+export function update(wp: Workplace, id: string, req: UpdateItemRequest, given: string, opts: { rewait?: boolean } = {}): Item {
   const by = authorId(wp, given);
   const prev = requireRow(wp, id);
   const level = levelOf(prev);
@@ -211,6 +238,7 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
   }
   if (req.acceptance !== undefined && (!Array.isArray(req.acceptance) || req.acceptance.some(a => typeof a !== 'string'))) throw new BadRequest('acceptance must be a list of strings');
   if (req.resolution !== undefined && !['done', 'wont-do', 'duplicate'].includes(req.resolution)) throw new BadRequest('resolution must be done, wont-do or duplicate');
+  if (req.kind !== undefined && req.kind !== 'review' && req.kind !== 'work') throw new BadRequest('kind must be review or work');
   if (req.title !== undefined) { if (!req.title.trim()) throw new BadRequest('An item needs a title.'); next.title = req.title.trim(); }
   if (req.body !== undefined) next.body = req.body;
   if (req.assigneeId !== undefined && req.assigneeId !== prev.employeeId) {
@@ -240,10 +268,42 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
   }
 
   const from = prev.status ?? 'ready';
-  const to = req.status && req.status !== from ? req.status : undefined;
+  let to = req.status && (req.status !== from || (opts.rewait && from === 'blocked')) ? req.status : undefined;
   if (req.status && !ITEM_STATUSES.includes(req.status)) throw new BadRequest(`Unknown status ${req.status}`);
+
+  // A wait on a teammate is never Blocked (owner, 2 Oct; LLD §19.6c): a review, or a handoff.
+  let converted = false;
+  let line: string | undefined;
+  if (to === 'blocked') {
+    checkMove(wp, prev, from, 'blocked', req, by, next);
+    const waitingOn = req.waitingOn!;
+    const reason = req.blockedReason!.trim();
+    const wait = level === 'epic' ? 'block' : waits.classify(wp, { assigneeId: next.employeeId, waitingOn, reason, kind: req.kind });
+    if (wait === 'block' && opts.rewait && from === 'blocked') return toItem(wp, prev);
+    if (wait === 'review') {
+      converted = true;
+      next.reviewerId = waitingOn;
+      to = from === 'in-review' ? undefined : 'in-review';
+      line = `In review with ${nameOf(wp, waitingOn)}: ${clause(reason)} (a wait on a teammate's review is a review, not a block)`;
+    } else if (wait === 'handoff') {
+      converted = true;
+      to = from === 'in-progress' ? undefined : 'in-progress';
+      if (prev.handoff && prev.handoff.fromId === waitingOn) {
+        line = applyHandback(wp, prev, next, next.employeeId ?? by, reason, at);
+      } else {
+        const fromId = next.employeeId ?? (isPerson(wp, by) ? by : undefined);
+        setAssignee(wp, next, waitingOn);
+        if (fromId) {
+          next.handoff = { fromId, reason, at, ...(prev.handoff ? { prev: prev.handoff } : {}) };
+          line = `Handed to ${nameOf(wp, waitingOn)}: ${clause(reason)}; returns to ${nameOf(wp, fromId)}`;
+        } else {
+          line = `Assigned to ${nameOf(wp, waitingOn)}: ${clause(reason)}`;
+        }
+      }
+    }
+  }
   if (to) {
-    checkMove(wp, prev, from, to, req, by, next);
+    checkMove(wp, prev, from, to, req, by, next, converted);
     next.status = to;
     next.statusSince = at;
     if (to === 'done') next.resolution = req.resolution ?? (from === 'backlog' || from === 'ready' ? 'wont-do' : 'done');
@@ -265,11 +325,43 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
   } else if (from === 'in-review' && next.reviewerId === next.employeeId) {
     throw new BadRequest('The reviewer cannot be the assignee.');
   }
+  if (next.status === 'done') delete next.handoff;
   next.updatedAt = at;
   const saved = work.put(wp, prev, next, by, req.note);
+  if (line) trail.record(wp, { itemId: id, by, kind: 'note', text: line });
   if (level === 'epic' && saved.areaId && saved.areaId !== prev.areaId) room.epicThread(wp, saved);
   // `start: true` (hand it to the assignee's session) is the route's to act on: POST /api/items/:id.
   return toItem(wp, saved);
+}
+
+/**
+ * Hand an item back to whoever handed it over (LLD §19.6c; tool `item_handback`, POST
+ * /api/items/:id/handback): by the one who has it, the owner, the COO or the Chief of Staff.
+ */
+export function handback(wp: Workplace, id: string, note: string, given: string): Item {
+  const by = authorId(wp, given);
+  const prev = requireRow(wp, id);
+  if (!prev.handoff) throw new BadRequest(`${id} is not handed over: there is nothing to hand back.`);
+  if (typeof note !== 'string' || !note.trim()) throw new BadRequest('A handback needs a note: what you did, and what is left.');
+  if (by !== prev.employeeId && by !== 'owner' && by !== 'coo' && by !== chiefOfStaffId(wp)) {
+    throw new BadRequest(`Only ${nameOf(wp, prev.employeeId)} (who has it), the owner, the COO or the Chief of Staff hands it back.`);
+  }
+  const at = now();
+  const next: WorkItem = { ...prev };
+  const line = applyHandback(wp, prev, next, by, note, at);
+  const from = prev.status ?? 'ready';
+  if (from !== 'in-progress' && from !== 'done') {
+    next.status = 'in-progress';
+    next.statusSince = at;
+    delete next.resolution;
+    if (from === 'blocked') { delete next.blockedReason; delete next.waitingOn; delete next.blockedSince; delete next.blockedRecommendation; }
+    const state = stateFromStatus(prev, 'in-progress');
+    if (state !== prev.state) { next.history = [...prev.history, { at, from: prev.state, to: state, by, note: 'Handed back' }]; next.state = state; }
+  }
+  next.updatedAt = at;
+  work.put(wp, prev, next, by, 'Handed back');
+  trail.record(wp, { itemId: id, by, kind: 'note', text: line });
+  return require$(wp, id);
 }
 
 /** A session started on a Ready/Backlog item: it is in progress now (and that is a "Started" line). */
@@ -342,13 +434,27 @@ function flagsFor(wp: Workplace, epicId: string, nowMs: number): PlanFlag[] {
   const visit = (rows: WorkItem[]): void => {
     for (const r of rows) {
       const it = toItem(wp, r, nowMs);
-      if (it.blocked) flags.push({ kind: 'blocked', itemId: it.id, title: it.title, reason: it.blocked.reason, waitingOn: it.blocked.waitingOn, since: it.blocked.since });
-      else if (it.stall) flags.push({ kind: 'stalled', itemId: it.id, title: it.title, reason: stallReason(it.stall.rule, nowMs - Date.parse(it.stall.since)), waitingOn: stallActor(wp, r, it.stall.since), since: it.stall.since });
+      const handed = it.handoff && it.assigneeId ? { handoff: { withId: it.assigneeId, fromId: it.handoff.fromId } } : {};
+      if (it.blocked) flags.push({ kind: 'blocked', itemId: it.id, title: it.title, reason: it.blocked.reason, waitingOn: it.blocked.waitingOn, since: it.blocked.since, ...handed });
+      else if (it.stall) flags.push({ kind: 'stalled', itemId: it.id, title: it.title, reason: stallReason(it.stall.rule, nowMs - Date.parse(it.stall.since)), waitingOn: stallActor(wp, r, it.stall.since), since: it.stall.since, ...handed });
       if (levelOf(r) === 'story') visit(childrenRows(wp, r.id));
     }
   };
   visit(childrenRows(wp, epicId));
   return flags;
+}
+
+/** Items of an epic handed to a teammate (LLD §19.6c): "with <withId> (handed by <fromId>)". */
+function handoffsFor(wp: Workplace, epicId: string): PlanHandoff[] {
+  const out: PlanHandoff[] = [];
+  const visit = (rows: WorkItem[]): void => {
+    for (const r of rows) {
+      if (r.handoff && r.employeeId && r.status !== 'done') out.push({ itemId: r.id, title: r.title, withId: r.employeeId, fromId: r.handoff.fromId, reason: r.handoff.reason, at: r.handoff.at });
+      if (levelOf(r) === 'story') visit(childrenRows(wp, r.id));
+    }
+  };
+  visit(childrenRows(wp, epicId));
+  return out;
 }
 
 /** "In review 4 days, untouched" (QA 2 Oct: it read "In review for 5760 min, untouched"). */
@@ -368,11 +474,13 @@ function stallActor(wp: Workplace, w: WorkItem, since: string): string {
 
 function card(wp: Workplace, epic: WorkItem, focus: Focus, nowMs: number): EpicCard {
   const next = childrenRows(wp, epic.id).find(s => levelOf(s) === 'story' && s.status !== 'done');
+  const handoffs = handoffsFor(wp, epic.id);
   return {
     epic: toItem(wp, epic, nowMs),
     progress: progress(wp, epic.id),
     ...(next ? { next: { id: next.id, title: next.title } } : {}),
     flags: flagsFor(wp, epic.id, nowMs),
+    ...(handoffs.length ? { handoffs } : {}),
     inFocus: focus.epicIds.includes(epic.id),
   };
 }
