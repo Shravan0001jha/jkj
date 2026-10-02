@@ -218,7 +218,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
         ...(typeof body['employeeId'] === 'string' ? { employeeId: body['employeeId'] } : {}),
         ...(featureId ? { featureId } : {}),
         requirementIds: strs(body['requirementIds']), platformIds: strs(body['platformIds']),
-        by: 'owner',
+        by: actorOf(req),
       });
       // An assignment with an assignee starts its session unless asked not to.
       if (item.kind === 'assignment' && item.employeeId && body['start'] !== false) {
@@ -232,7 +232,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const to = str(body['to']) as WorkState;
       const evidence = body['evidence'] && typeof body['evidence'] === 'object' ? body['evidence'] as Evidence : undefined;
       json(res, 200, work.transition(wp, dec(id), {
-        to, by: typeof body['by'] === 'string' ? body['by'] : 'owner',
+        to, by: byOf(req, body['by']),
         ...(typeof body['note'] === 'string' ? { note: body['note'] } : {}),
         ...(evidence ? { evidence } : {}),
         ...(typeof body['plan'] === 'string' ? { plan: body['plan'] } : {}),
@@ -262,7 +262,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
         requirementIds: strs(body['requirementIds']), platformIds: strs(body['platformIds']),
         ...(typeof body['spec'] === 'string' && body['spec'].trim() ? { spec: body['spec'] } : {}),
       });
-      if (item.spec) work.transition(wp, item.id, { to: 'specced', by: 'owner', spec: item.spec });
+      if (item.spec) work.transition(wp, item.id, { to: 'specced', by: actorOf(req), spec: item.spec });
       else if (body['askSpec'] !== false) features.requestSpec(wp, item);
       json(res, 201, work.get(wp, item.id));
     }),
@@ -306,7 +306,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       json(res, 201, proposals.propose(wp, {
         kind, reason: str(body['reason']),
         params: body['params'] && typeof body['params'] === 'object' ? body['params'] as Record<string, unknown> : {},
-        proposedBy: typeof body['proposedBy'] === 'string' ? body['proposedBy'] : 'owner',
+        proposedBy: byOf(req, body['proposedBy']),
       }));
     }),
     r('GET', '/api/proposals/:id', (_req, res, _url, [id]) => {
@@ -324,7 +324,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     r('POST', '/api/releases', async (req, res) => {
       const body = await readJson(req);
       const shippable = str(body['shippable']) as Shippable;
-      json(res, 201, releases.propose(wp, shippable, str(body['version']), typeof body['by'] === 'string' ? body['by'] : 'owner'));
+      json(res, 201, releases.propose(wp, shippable, str(body['version']), byOf(req, body['by'])));
     }),
     // 202: the script runs on; a release takes minutes and the relay's request timeout would drop a 200.
     r('POST', '/api/releases/:id/run', async (_req, res, _url, [id]) => { const { release, done } = releases.start(wp, dec(id)); done.catch(err => log.warn('releases', String(err))); json(res, 202, release); }),
@@ -382,7 +382,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     /* ---------- published access: the emergency off switch ---------- */
     r('POST', '/api/relay/off', (req, res) => {
       // A relay request arrives on loopback too (the tunnel forwards it); the header the tunnel sets keeps the phone out (as for pairing).
-      if (!isLoopback(req.socket.remoteAddress) || req.headers['x-via-tunnel']) throw new BadRequest('The off switch is pressed from this Mac (or Telegram: "off").');
+      if (!isLocal(req)) throw new BadRequest('The off switch is pressed from this Mac (or Telegram: "off").');
       if (!tunnel) return json(res, 200, { published: 'not-configured' });
       tunnel.off();
       json(res, 200, { published: tunnel.status });
@@ -392,7 +392,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     r('GET', '/api/room', (_req, res) => json(res, 200, { threads: room.listThreads(wp) })),
     r('POST', '/api/room', async (req, res) => {
       const body = await readJson(req);
-      const { thread } = room.createThread(wp, { title: str(body['title']), text: str(body['text']), by: 'owner', charterIds: strs(body['charterIds']), mentions: strs(body['mentions']) });
+      const { thread } = room.createThread(wp, { title: str(body['title']), text: str(body['text']), by: actorOf(req), charterIds: strs(body['charterIds']), mentions: strs(body['mentions']) });
       json(res, 201, { thread, messages: room.messages(wp, thread.id) });
     }),
     r('GET', '/api/room/:id', (_req, res, _url, [id]) => {
@@ -402,11 +402,11 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     }),
     r('POST', '/api/room/:id/messages', async (req, res, _url, [id]) => {
       const body = await readJson(req);
-      json(res, 201, room.post(wp, dec(id), { text: str(body['text']), by: 'owner', mentions: strs(body['mentions']) }));
+      json(res, 201, room.post(wp, dec(id), { text: str(body['text']), by: actorOf(req), mentions: strs(body['mentions']) }));
     }),
     r('POST', '/api/room/:id/resolve', async (req, res, _url, [id]) => {
       const body = await readJson(req);
-      json(res, 200, room.resolve(wp, dec(id), { summary: str(body['summary']), by: 'owner' }));
+      json(res, 200, room.resolve(wp, dec(id), { summary: str(body['summary']), by: actorOf(req) }));
     }),
 
     /* ---------- digest ---------- */
@@ -419,30 +419,30 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     /* ---------- v2: the plan (LLD §19.8) — owner-facing, ordinary auth, relay allowed ---------- */
     r('GET', '/api/plan', (_req, res, url) => json(res, 200, items.plan(wp, url.searchParams.get('view') === 'board' ? 'board' : undefined))),
     r('GET', '/api/focus', (_req, res) => json(res, 200, items.getFocus(wp))),
-    r('POST', '/api/focus', async (req, res) => json(res, 200, items.setFocus(wp, strs((await readJson(req))['epicIds']), 'owner'))),
+    r('POST', '/api/focus', async (req, res) => json(res, 200, items.setFocus(wp, strs((await readJson(req))['epicIds']), actorOf(req)))),
     r('GET', '/api/items', (_req, res, url) => {
       const q = (k: string) => url.searchParams.get(k) ?? undefined;
       json(res, 200, items.list(wp, { level: q('level'), status: q('status'), assigneeId: q('assigneeId'), areaId: q('areaId'), parentId: q('parentId') }));
     }),
     r('POST', '/api/items', async (req, res) => {
       const body = await readJson(req);
-      const item = items.create(wp, body as never, 'owner');
+      const item = items.create(wp, body as never, actorOf(req));
       json(res, 201, items.detail(wp, item.id));
     }),
     r('GET', '/api/items/:id', (_req, res, _url, [id]) => json(res, 200, items.detail(wp, dec(id)))),
     r('POST', '/api/items/:id', async (req, res, _url, [id]) => {
       const body = await readJson(req);
-      const item = items.update(wp, dec(id), body as never, 'owner');
+      const item = items.update(wp, dec(id), body as never, actorOf(req));
       // start: true on a move to in-progress hands the item to its assignee's session.
       if (body['start'] === true && item.status === 'in-progress' && item.assigneeId && item.assigneeId !== 'owner') employees.assign(wp, item.id);
       json(res, 200, items.detail(wp, dec(id)));
     }),
     r('POST', '/api/items/:id/comments', async (req, res, _url, [id]) => {
       items.require$(wp, dec(id));
-      json(res, 201, trail.comment(wp, dec(id), { by: 'owner', text: str((await readJson(req))['text']) }));
+      json(res, 201, trail.comment(wp, dec(id), { by: actorOf(req), text: str((await readJson(req))['text']) }));
     }),
     r('POST', '/api/items/:id/merge', async (req, res, _url, [id]) => {
-      const survivor = items.merge(wp, dec(id), str((await readJson(req))['intoId']), 'owner');
+      const survivor = items.merge(wp, dec(id), str((await readJson(req))['intoId']), actorOf(req));
       json(res, 200, items.detail(wp, survivor.id));
     }),
     r('GET', '/api/updates', (_req, res, url) => {
@@ -453,9 +453,9 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     r('GET', '/api/areas', (_req, res) => json(res, 200, areas.list(wp))),
     r('POST', '/api/areas', async (req, res) => {
       const body = await readJson(req);
-      json(res, 201, areas.create(wp, { title: str(body['title'], ''), ...(typeof body['description'] === 'string' ? { description: body['description'] } : {}), ...(typeof body['ownerId'] === 'string' ? { ownerId: body['ownerId'] } : {}) }, 'owner'));
+      json(res, 201, areas.create(wp, { title: str(body['title'], ''), ...(typeof body['description'] === 'string' ? { description: body['description'] } : {}), ...(typeof body['ownerId'] === 'string' ? { ownerId: body['ownerId'] } : {}) }, actorOf(req)));
     }),
-    r('POST', '/api/areas/:id', async (req, res, _url, [id]) => json(res, 200, areas.update(wp, dec(id), await readJson(req) as never))),
+    r('POST', '/api/areas/:id', async (req, res, _url, [id]) => json(res, 200, areas.update(wp, dec(id), await readJson(req) as never, actorOf(req)))),
     r('GET', '/api/rooms', (_req, res) => json(res, 200, room.listRooms(wp))),
     r('GET', '/api/rooms/:id', (_req, res, _url, [id]) => json(res, 200, room.roomDetail(wp, dec(id)))),
     r('GET', '/api/releases/posts', (_req, res) => json(res, 200, releasePosts.list(wp))),
@@ -464,7 +464,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       json(res, 201, releasePosts.create(wp, {
         version: str(body['version'], ''), ...(typeof body['shippable'] === 'string' ? { shippable: body['shippable'] } : {}),
         ...(Array.isArray(body['itemIds']) ? { itemIds: strs(body['itemIds']) } : {}), ...(typeof body['title'] === 'string' ? { title: body['title'] } : {}),
-      }, 'owner'));
+      }, actorOf(req)));
     }),
     r('GET', '/api/releases/posts/:id', (_req, res, _url, [id]) => {
       const post = releasePosts.get(wp, dec(id));
@@ -522,10 +522,30 @@ export function json(res: ServerResponse, status: number, body: unknown): void {
 
 const dec = (s: string | undefined): string => decodeURIComponent(s ?? '');
 
+/** From this Mac itself: loopback, and not a relayed request (the tunnel arrives on loopback too and sets x-via-tunnel). */
+const isLocal = (req: IncomingMessage): boolean => isLoopback(req.socket.remoteAddress) && !req.headers['x-via-tunnel'];
+
 /** The COO bridge, pairing and the off switch: this Mac only, never through the tunnel. */
 function requireLocal(req: IncomingMessage): void {
-  if (!isLoopback(req.socket.remoteAddress) || req.headers['x-via-tunnel']) throw new BadRequest('This is reached from this Mac only.');
+  if (!isLocal(req)) throw new BadRequest('This is reached from this Mac only.');
 }
+
+/**
+ * Who an owner-facing write is attributed to (LLD §19.8 "Actor"). The COO drives the same API from
+ * this Mac and says so with `x-workplace-actor: coo`; that header counts only on a local request
+ * (requireLocal's test). A relayed request is always the owner, whatever it carries.
+ */
+export function actorOf(req: IncomingMessage): 'owner' | 'coo' {
+  const raw = req.headers['x-workplace-actor'];
+  if (raw === undefined || !isLocal(req)) return 'owner';
+  const v = String(raw).trim().toLowerCase();
+  if (v === 'coo' || v === 'owner') return v;
+  throw new BadRequest(`x-workplace-actor must be coo or owner, not "${String(raw)}".`);
+}
+
+/** A `by` named in the body (old engine routes) counts only from this Mac; otherwise the actor. */
+const byOf = (req: IncomingMessage, value: unknown): string =>
+  isLocal(req) && typeof value === 'string' && value.trim() ? value : actorOf(req);
 
 const viaOf = (req: IncomingMessage): 'web' | 'phone' => {
   const ua = String(req.headers['user-agent'] ?? '');

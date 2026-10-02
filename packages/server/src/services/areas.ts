@@ -2,6 +2,7 @@ import type { Area, CreateAreaRequest, UpdateAreaRequest } from '@jkj/shared';
 import { MAX_ACTIVE_AREAS } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as room from './room.js';
+import * as trail from './trail.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { BadRequest, Conflict, NotFound } from '../util/errors.js';
 
@@ -44,11 +45,11 @@ export function create(wp: Workplace, req: CreateAreaRequest, by: string): Area 
   wp.db.prepare('insert into areas (id, title, state, rank, created_at, json) values (?, ?, ?, ?, ?, ?)').run(id, title, 'active', area.rank, at, JSON.stringify(area));
   room.ensureThread(wp, { id: area.threadId, title, roomId: area.roomId, headline: `Everything in ${title}.` });
   wp.emit({ type: 'area.updated', area });
-  void by;
+  trail.record(wp, { itemId: null, by, kind: 'note', text: `Area created: ${title}` });
   return area;
 }
 
-export function update(wp: Workplace, id: string, patch: UpdateAreaRequest): Area {
+export function update(wp: Workplace, id: string, patch: UpdateAreaRequest, by = 'owner'): Area {
   const area = require$(wp, id);
   if (patch.state && patch.state !== 'active' && patch.state !== 'archived') throw new BadRequest('state must be active or archived');
   if (patch.state === 'active' && area.state !== 'active') refuseSixth(wp);
@@ -64,5 +65,7 @@ export function update(wp: Workplace, id: string, patch: UpdateAreaRequest): Are
   wp.db.prepare('update areas set title = ?, state = ?, rank = ?, json = ? where id = ?').run(next.title, next.state, next.rank, JSON.stringify(next), id);
   if (next.title !== area.title) room.ensureThread(wp, { id: next.threadId, title: next.title, roomId: next.roomId });
   wp.emit({ type: 'area.updated', area: next });
+  const changed = (['title', 'description', 'state', 'rank'] as const).filter(k => next[k] !== area[k]);
+  if (changed.length) trail.record(wp, { itemId: null, by, kind: 'note', text: `Area ${next.title}: ${changed.map(k => `${k} ${String(next[k] ?? '')}`).join(', ')}` });
   return next;
 }

@@ -352,7 +352,7 @@ export class Tunnel {
   private async proxyHttp(frame: Extract<Frame, { type: 'http' }>): Promise<void> {
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(frame.headers)) {
-      if (!HOP_BY_HOP.has(k.toLowerCase()) && k.toLowerCase() !== 'x-via-tunnel') headers[k] = v;
+      if (!HOP_BY_HOP.has(k.toLowerCase()) && !MAC_ONLY.has(k.toLowerCase())) headers[k] = v;
     }
     // Set by the Mac, never by a client: the loopback listener uses it to refuse pairing (review M5).
     headers['x-via-tunnel'] = '1';
@@ -413,6 +413,8 @@ export function safePath(path: string): boolean {
 
 const MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
 
+/** Headers only this Mac may set: a relayed client never names the tunnel flag or its own author (LLD §19.8 Actor). */
+const MAC_ONLY = new Set(['x-via-tunnel', 'x-workplace-actor']);
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'host', 'content-length', 'te', 'trailer', 'proxy-authorization', 'proxy-authenticate']);
 
 function notifyViaScript(text: string): Promise<boolean> {

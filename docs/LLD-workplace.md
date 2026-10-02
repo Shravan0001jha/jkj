@@ -882,6 +882,18 @@ title match. The `status_of` tool prints each match with its id (`… [as_…]`)
 
 Owner actions are attributed `by: 'owner'`. Old routes unchanged (adapters).
 
+**Actor (QA, 2 Oct).** The COO drives this same API from the Mac; its writes must read as the COO's.
+`actorOf(req)` (`routes.ts`): an `x-workplace-actor: coo` header on a **local** request (loopback and no
+`x-via-tunnel` — the same test as `requireLocal`) attributes the write to `coo`; `owner` (or no header)
+is the owner; any other value from loopback is 400. A relayed request is always `owner`: the header is
+ignored behind `x-via-tunnel`, and the tunnel strips it before forwarding (`MAC_ONLY` headers in
+`tunnel.ts`, defence in depth). Used by focus (`setBy`), item create/update/merge/comments, areas
+(create/update now record a `note` activity by the actor), Room posts/threads/resolve, release posts,
+`POST /api/work` and the feature spec transition. The old routes that take a `by`/`proposedBy` in the
+body (`/api/work/:id/transition`, `/api/releases`, `/api/proposals`) honour it only on a local request;
+through the tunnel it is ignored and the actor (`owner`) is used. The COO adds the header to every
+API call it makes: `curl -H 'x-workplace-actor: coo' http://127.0.0.1:4317/api/…`.
+
 **JSON shapes for the app teams** (exact; optional fields absent, never null unless stated):
 
 ```ts
