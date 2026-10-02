@@ -312,3 +312,20 @@ test('comments carry mentions; an agent comment is kept short with the rest in d
     tmp.cleanup();
   }
 });
+
+test('an epic is in progress once any of its stories is, by either engine', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const { epic, story } = tree(wp);
+    assert.equal(items.require$(wp, epic.id).status, 'ready');
+    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    assert.equal(items.require$(wp, epic.id).status, 'in-progress');
+    assert.ok(trail.activityFor(wp, epic.id).some(a => a.kind === 'status' && a.to === 'in-progress'));
+    const other = items.create(wp, { level: 'epic', title: 'Old-path epic' }, 'owner');
+    const a = work.create(wp, { kind: 'assignment', title: 'Old path', body: 'x', employeeId: 'mira', featureId: other.id });
+    work.attachPlan(wp, a.id, 'plan', 'mira');
+    assert.equal(items.require$(wp, other.id).status, 'in-progress');
+  } finally {
+    tmp.cleanup();
+  }
+});

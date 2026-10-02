@@ -708,6 +708,8 @@ The client shape is a projection, `Item` (19.8): `toItem(workItem)`.
 - **Into done**: `by` is the reviewer or `owner`; never the assignee unless the assignee is `owner`.
   Epics: `owner` or the epic owner. From backlog/ready only by `owner`, with `resolution: wont-do`.
 - **done → in-progress** (reopen) needs a note; recorded as activity `reopen`.
+- An epic moves Ready/Backlog → In progress when any of its stories does (either engine); it is
+  closed by the owner or its owner, never by a roll-up of v2 stories.
 - An agent's own report (`report_done`) still goes through the old engine (evidence required) into
   `review`; the server fills `reviewerId` with the default reviewer: a task's story assignee (if not
   the assignee), else the `qa-release` holder (if not the assignee), else the Chief of Staff.

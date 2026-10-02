@@ -205,14 +205,27 @@ export function transition(wp: Workplace, id: string, opts: TransitionOptions): 
   }
   save(wp, updated);
   trail.afterChange(wp, item, updated, opts.by, opts.note);
+  bumpEpic(wp, updated);
   if (updated.featureId) rollUpFeature(wp, updated.featureId);
   return updated;
+}
+
+/** An epic is in progress once any of its stories is (v2 status only; the feature state is the roll-up's). */
+function bumpEpic(wp: Workplace, w: WorkItem): void {
+  if (w.kind === 'feature' || w.status !== 'in-progress' || !w.featureId) return;
+  const epic = get(wp, w.featureId);
+  if (!epic || (epic.status !== 'ready' && epic.status !== 'backlog')) return;
+  const at = now();
+  const next: WorkItem = { ...epic, status: 'in-progress', statusSince: at, updatedAt: at };
+  save(wp, next);
+  trail.afterChange(wp, epic, next, 'workplace', `Started: ${w.title}`);
 }
 
 /** A v2 write (items.ts): the row as given, saved and its trail recorded. */
 export function put(wp: Workplace, prev: WorkItem, next: WorkItem, by: string, note?: string): WorkItem {
   save(wp, next);
   trail.afterChange(wp, prev, next, by, note);
+  bumpEpic(wp, next);
   if (next.featureId && next.kind !== 'feature') rollUpFeature(wp, next.featureId);
   return next;
 }
