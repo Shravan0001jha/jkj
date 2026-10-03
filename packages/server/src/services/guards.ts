@@ -92,7 +92,10 @@ export const HOST_COMMANDS: { pattern: RegExp; why: string }[] = [
 
 /** Commands that leave the worktree, the branch, or the machine. */
 export const FORBIDDEN_COMMANDS: { pattern: RegExp; why: string }[] = [
-  { pattern: /\bgit\s+(push|merge|rebase|filter-repo|remote|worktree|reflog\s+expire|gc\s+--prune)\b/i, why: 'employees never push, merge, rebase or rewrite; the lead merges' },
+  // Bringing the trunk INTO your own emp/ branch is allowed (3 Oct: a branch cut before a trunk merge
+  // could not catch up, and that stalled a story). Checking out a trunk is forbidden below, so the
+  // branch being merged into is always the employee's own. merge-base is read-only.
+  { pattern: /\bgit\s+(push|merge(?!-base)(?!(\s+--?[\w=-]+)*\s+feat\/[\w.\/-]+\s*($|[;&|]))(?!\s+--abort\b)|rebase|filter-repo|remote|worktree|reflog\s+expire|gc\s+--prune)\b/i, why: 'employees never push, rebase or rewrite, and merge only the trunk (feat/...) into their own branch; the lead merges into the trunk' },
   { pattern: /\bgit\s+reset\s+--hard\b/i, why: 'no history rewrite' },
   { pattern: /\bgit\s+branch\s+(-D|-d|--delete)\b/i, why: 'no branch deletion' },
   { pattern: /\bgit\s+(checkout|switch)\s+(feat\/|main\b|deploy\/|site\/|local\/)/i, why: 'stay on your own emp/ branch' },
