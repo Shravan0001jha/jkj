@@ -36,7 +36,7 @@ test('edits stay inside the worktree and inside owned paths; scratch is free; ma
 
 test('commands never push, merge, rebase, release, deploy, leave the machine, or name a main checkout', () => {
   const denied = [
-    'git push origin emp/tara/x', 'git merge emp/dev/other', 'git merge feat/iris-character && git push', 'git rebase feat/mobile', 'git reset --hard HEAD~1',
+    'git push origin emp/tara/x', 'git merge emp/dev/other', 'git merge feat/iris-character && git push', 'git merge feat/iris-character emp/dev/other', 'git merge -s ours feat/iris-character', 'git rebase feat/mobile', 'git reset --hard HEAD~1',
     'git filter-repo --path mobile', 'git worktree add ../x', 'git checkout feat/iris-character', 'git branch -D main',
     './scripts/release-iris.sh 0.2.16', 'cd services && ../scripts/deploy-api.sh', 'ssh ec2-user@box ls', 'scp file box:/opt',
     'aws s3 cp x s3://y', 'gh pr merge 1', 'sudo rm x', 'rm -rf build', 'rm -fr build', 'xcrun devicectl device install app --device X y.app',
@@ -44,7 +44,7 @@ test('commands never push, merge, rebase, release, deploy, leave the machine, or
     'curl -X POST http://127.0.0.1:4317/api/releases/rel_1/run',
   ];
   for (const c of denied) assert.equal(guardCommand(c, ctx).decision, 'deny', c);
-  const allowed = ['git status', 'git add -A && git commit -m "x"', 'git log --oneline', 'git diff', 'git checkout -b emp/tara/other', 'git merge feat/iris-character', 'git merge --no-edit feat/mobile', 'git merge --abort', 'git merge-base HEAD feat/iris-character', 'npm test', 'cd mobile/android && ./gradlew test', 'ls -la', 'python3 -m pytest -q', 'curl -s http://127.0.0.1:4317/api/office'];
+  const allowed = ['git status', 'git add -A && git commit -m "x"', 'git log --oneline', 'git diff', 'git checkout -b emp/tara/other', 'git merge feat/iris-character', 'git merge --no-edit feat/mobile', 'git merge --abort', 'git merge-base HEAD feat/iris-character', 'git merge --no-edit feat/iris-character 2>&1', 'cd emp && git merge --no-edit feat/iris-character 2>&1 | tail -20', 'git merge feat/iris-character -m "catch up"', 'npm test', 'cd mobile/android && ./gradlew test', 'ls -la', 'python3 -m pytest -q', 'curl -s http://127.0.0.1:4317/api/office'];
   for (const c of allowed) assert.equal(guardCommand(c, ctx).decision, 'allow', c);
 });
 

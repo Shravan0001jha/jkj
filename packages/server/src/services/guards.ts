@@ -92,10 +92,7 @@ export const HOST_COMMANDS: { pattern: RegExp; why: string }[] = [
 
 /** Commands that leave the worktree, the branch, or the machine. */
 export const FORBIDDEN_COMMANDS: { pattern: RegExp; why: string }[] = [
-  // Bringing the trunk INTO your own emp/ branch is allowed (3 Oct: a branch cut before a trunk merge
-  // could not catch up, and that stalled a story). Checking out a trunk is forbidden below, so the
-  // branch being merged into is always the employee's own. merge-base is read-only.
-  { pattern: /\bgit\s+(push|merge(?!-base)(?!(\s+--?[\w=-]+)*\s+feat\/[\w.\/-]+\s*($|[;&|]))(?!\s+--abort\b)|rebase|filter-repo|remote|worktree|reflog\s+expire|gc\s+--prune)\b/i, why: 'employees never push, rebase or rewrite, and merge only the trunk (feat/...) into their own branch; the lead merges into the trunk' },
+  { pattern: /\bgit\s+(push|merge|rebase|filter-repo|remote|worktree|reflog\s+expire|gc\s+--prune)\b/i, why: 'employees never push, rebase or rewrite, and merge only the trunk (feat/...) into their own branch; the lead merges into the trunk' },
   { pattern: /\bgit\s+reset\s+--hard\b/i, why: 'no history rewrite' },
   { pattern: /\bgit\s+branch\s+(-D|-d|--delete)\b/i, why: 'no branch deletion' },
   { pattern: /\bgit\s+(checkout|switch)\s+(feat\/|main\b|deploy\/|site\/|local\/)/i, why: 'stay on your own emp/ branch' },
@@ -136,12 +133,26 @@ export function guardEdit(filePath: string, ctx: GuardContext): GuardDecision {
   return { decision: 'allow' };
 }
 
+/**
+ * Bringing the trunk INTO your own emp/ branch is allowed (3 Oct: a branch cut before a trunk merge
+ * could not catch up, and that stalled a story). Checking out a trunk is forbidden, so the branch
+ * merged into is always the employee's own. Those merges (with ordinary flags, -m, a 2>&1), --abort,
+ * --continue and the read-only merge-base are blanked out before the forbidden rules run, so
+ * anything else in the same command is still judged.
+ */
+const TRUNK_MERGE = /\bgit\s+(-C\s+\S+\s+)?merge(\s+(--no-edit|--no-ff|--ff-only|--ff|--no-commit|--stat|-q|--quiet|-m\s+("[^"]*"|'[^']*'|\S+)))*\s+feat\/[\w.\/-]+(\s+(--no-edit|--no-ff|--no-commit|-m\s+("[^"]*"|'[^']*'|\S+)))*(?=\s*(\d?>&?\d|\d?>\s*\S+)?\s*($|[;&|)]))/gi;
+const MERGE_SAFE = /\bgit\s+(-C\s+\S+\s+)?merge(-base\b|\s+--(abort|continue)\b)/gi;
+export function withoutTrunkMerges(command: string): string {
+  return command.replace(TRUNK_MERGE, 'true').replace(MERGE_SAFE, 'true');
+}
+
 export function guardCommand(command: string, ctx: GuardContext): GuardDecision {
   if (PROTECTED_COMMAND_PATTERN.test(command)) {
     return { decision: 'deny', reason: `"${command.slice(0, 80)}": a protected folder; off limits to the Workplace even to read` };
   }
+  const judged = withoutTrunkMerges(command);
   for (const rule of FORBIDDEN_COMMANDS) {
-    if (rule.pattern.test(command)) return { decision: 'deny', reason: `"${command.slice(0, 80)}": ${rule.why}` };
+    if (rule.pattern.test(judged)) return { decision: 'deny', reason: `"${command.slice(0, 80)}": ${rule.why}` };
   }
   for (const rule of HOST_COMMANDS) {
     if (!rule.pattern.test(command)) continue;
