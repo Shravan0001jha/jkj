@@ -26,6 +26,7 @@ import * as trail from '../services/trail.js';
 import * as areas from '../services/areas.js';
 import * as releasePosts from '../services/release-posts.js';
 import * as statusAnswers from '../services/status.js';
+import * as pace from '../services/pace.js';
 import type { Telegram } from '../services/telegram.js';
 import type { Tunnel } from '../services/tunnel.js';
 import type { Push } from '../services/push.js';
@@ -389,6 +390,14 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const window = coo.openLiveWindow(wp, employeeId, Number(body['minutes']));
       employees.refreshLiveWindow(wp, employeeId, Date.parse(window.until));
       json(res, 200, window);
+    }),
+
+    // Weekly pacing on/off (owner's call, relayed by the COO): off lifts any hold at once.
+    r('POST', '/api/coo/pace', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      pace.setDisabled(wp, body['disabled'] === true);
+      json(res, 200, { disabled: pace.disabled(wp), holdUntil: pace.holdUntil(wp) });
     }),
 
     /* ---------- published access: the emergency off switch ---------- */

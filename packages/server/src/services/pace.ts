@@ -39,6 +39,7 @@ export function holdUntil(wp: Workplace, nowMs = Date.now()): string | null {
 export function apply(wp: Workplace, r: Reading, nowMs = Date.now()): Verdict {
   const v = evaluate(r, nowMs);
   wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run('pace:last', JSON.stringify({ ...r, ...v, at: new Date(nowMs).toISOString() }));
+  if (disabled(wp)) { lift(wp, v); return { ...v, over: false }; }
   const held = holdUntil(wp, nowMs);
   if (v.over && !held) {
     const until = new Date(v.nextDayMs).toISOString();
@@ -53,6 +54,26 @@ export function apply(wp: Workplace, r: Reading, nowMs = Date.now()): Verdict {
     employees.unpauseAll(wp);
   }
   return v;
+}
+
+/** Owner switch (`pace:disabled` setting): pacing off, any hold lifted at once. */
+export function disabled(wp: Workplace): boolean {
+  return Boolean(wp.db.prepare('select 1 from settings where key = ?').get('pace:disabled'));
+}
+
+export function setDisabled(wp: Workplace, off: boolean): void {
+  if (off) {
+    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run('pace:disabled', new Date().toISOString());
+    lift(wp, null);
+  } else wp.db.prepare('delete from settings where key = ?').run('pace:disabled');
+}
+
+function lift(wp: Workplace, v: Verdict | null): void {
+  if (!wp.db.prepare('select 1 from settings where key = ?').get(KEY)) return;
+  wp.db.prepare('delete from settings where key = ?').run(KEY);
+  wp.db.prepare('insert into events (at, kind, subject, json) values (?, ?, ?, ?)').run(now(), 'pace-lifted', 'weekly-pace', JSON.stringify(v ?? { disabled: true }));
+  log.info('pace', 'pacing disabled by the owner: work resumes');
+  employees.unpauseAll(wp);
 }
 
 /** Read the plan's 7-day utilization from its rate-limit headers. Null on any failure. */

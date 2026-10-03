@@ -67,3 +67,37 @@ test('under the allowance nothing is held', () => {
     tmp.cleanup();
   }
 });
+
+test('under a pace hold, idle/stall alerts (and the "spend" cap note) are not raised to Asha or the COO', async () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const manager = await import('../src/services/manager.js');
+    const coo = await import('../src/services/coo.js');
+    const nowMs = Date.now();
+    pace.apply(wp, { utilization: 0.30, resetsAtMs: nowMs - 1.5 * DAY + 7 * DAY }, nowMs);
+    const r = manager.alert(wp, { key: 'idle:x:1', itemId: 'as_none', title: 'Dev idle with 1 queued item', body: 'paused by the weekly-pace spend cap', decision: 'spend' }, nowMs);
+    assert.equal(r, 'dropped');
+    assert.equal(coo.listItems(wp).filter(i => /idle with/.test(i.title)).length, 0);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test('owner switch: pacing off lifts a hold at once and later readings never re-impose it', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const nowMs = Date.now();
+    const resetsAtMs = nowMs - 1.5 * DAY + 7 * DAY;
+    pace.apply(wp, { utilization: 0.30, resetsAtMs }, nowMs);
+    assert.notEqual(pace.holdUntil(wp, nowMs), null);
+    pace.setDisabled(wp, true);
+    assert.equal(pace.holdUntil(wp, nowMs), null);
+    assert.equal(spend.canSpend(wp, 'mira').ok, true);
+    assert.equal(pace.apply(wp, { utilization: 0.90, resetsAtMs }, nowMs + 60_000).over, false);
+    assert.equal(pace.holdUntil(wp, nowMs + 60_000), null, 'a reading while off never holds');
+    pace.setDisabled(wp, false);
+    assert.equal(pace.apply(wp, { utilization: 0.90, resetsAtMs }, nowMs + 120_000).over, true, 'back on: pacing applies again');
+  } finally {
+    tmp.cleanup();
+  }
+});
