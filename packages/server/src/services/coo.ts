@@ -199,9 +199,16 @@ export function notifyStall(wp: Workplace, spec: { itemId: string; title: string
   return item;
 }
 
-/** The owner replied in the thread of an Inbox item the COO forwarded: the lead's watcher gets it. */
-export function relayInboxReply(wp: Workplace, spec: { inboxId: string; title: string; text: string }): void {
-  appendInboxFile(wp, { kind: 'inbox-reply', inboxId: spec.inboxId, title: spec.title, text: spec.text });
+/**
+ * The owner replied in an Inbox thread the COO must hear (LLD §19.14): an item the COO raised or
+ * forwarded (the COO answers it), or — `copy: true` — any decision, so the timeline owner knows what
+ * the owner said even though the raiser answers it.
+ */
+export function relayInboxReply(wp: Workplace, spec: { inboxId: string; title: string; text: string; messageId?: string; copy?: boolean; raisedBy?: string }): void {
+  appendInboxFile(wp, {
+    kind: 'inbox-reply', inboxId: spec.inboxId, title: spec.title, text: spec.text,
+    ...(spec.messageId ? { messageId: spec.messageId } : {}), ...(spec.copy ? { copy: true } : {}), ...(spec.raisedBy ? { raisedBy: spec.raisedBy } : {}),
+  });
 }
 
 /** `@coo` in a Room thread: routed the same way as one of Asha's escalations. */

@@ -832,7 +832,7 @@ and `escalate` take `recommendation` and refuse without one; `item_update` to bl
 recommendation). `reply(wp, id, { by,
 text?, optionId? })`: an `optionId` answers the item (the text is the note) and appends the text
 as a message; text alone appends a message and leaves the item open. A message by `owner` is
-delivered to the asker (`inbox.onReply` listener wired at boot): the raiser's session gets
+delivered to the asker durably (§19.14; `reply-delivery.ts`): the raiser's session gets
 `The owner replied on "<title>" (<id>): "<text>" — answer in the thread with inbox_reply, briefly.`
 (from `workplace`, autonomous; at a cap it is logged as activity instead), the COO bridge for COO
 items (`coo/inbox.jsonl` kind `inbox-reply`), and the Chief of Staff when the raiser is
@@ -1376,3 +1376,71 @@ still never answer the owner's decisions (`inbox_reply` only talks in a thread t
 - no `itemId`: a list — `state` `open` | `answered` | `expired` | `all`; default: every open item
   plus those answered in the last 7 days; newest first, at most 25 lines, one line each (id, state,
   kind, title, the answer's option).
+
+### 19.14 Durable delivery of the owner's Inbox replies (`reply-delivery.ts`, owner 3 Oct)
+
+**Incident (3 Oct, 01:05 UTC).** The owner replied in free text on Rohan's decision
+`in_murcydnf3mohb` ("Shipping Iris on Windows…"; message `im_murowtchdfmnt`). The `inbox.onReply`
+listener called `employees.talk(rohan, prompt, { autonomous: true })`, which found Rohan's open
+assignment session `run_in5uyesw` mid-turn and `runs.sendMessage`d into it. The SDK put the prompt
+in its in-memory input queue (transcript: `queue-operation enqueue` at 01:05:08.760, never dequeued:
+the turn was still running). At 01:06:40 the Workplace restarted for an org change, shut the
+session down (`status = shutdown`), and the queue died with the process. The resumed session
+`run_corlxx07` started from the assignment prompt and the handoff, which knew nothing of the reply.
+Nothing had recorded that the reply still needed an answer, so nothing retried: no acknowledgement in
+the thread from Rohan, and the work did not change because of it (Rohan heard the decision only
+second-hand, from the COO's status note at 01:07 and Asha's Room mention at 01:09). Root cause:
+delivery was fire-and-forget into a volatile per-process queue, with no durable record and no
+acknowledgement.
+
+**Record.** Table `inbox_deliveries` (additive; one row per owner text reply):
+`message_id` (pk, the `im_…` id), `inbox_id`, `target`, `at` (the reply's time), `acked_at`, `json`
+(`ReplyDelivery`: `text`, `deliveredAt`, `agentId` = the run it was last handed to, `attempts`,
+`lastError`, `ackedAt`, `ackedBy` `thread | activity | bridge`, `ashaAt`, `cooAt`).
+
+**Target** (`targetOf`): the raiser when it is an agent the Workplace runs; `coo` when the COO raised
+it; otherwise the Chief of Staff (then the COO when there is none).
+
+**Deliver** (on the reply, and again when needed):
+- employee target: `employees.talk(target, prompt, { autonomous: true })` — the open session (even
+  mid-turn: the queued message is tracked now), else a short session. The prompt is the Workplace's
+  (HLD D22): `The owner replied on "<title>" (<id>): "<text>" — answer in the thread with inbox_reply`,
+  plus "Sent again: …" on a re-delivery. `deliveredAt`, `agentId`, `attempts + 1` are stored. A refusal
+  (spend cap, concurrency) keeps the row undelivered with `lastError`; the next sweep tries again.
+- `coo` target: a line in `coo/inbox.jsonl`, kind `inbox-reply` (`messageId` included). The bridge
+  file is durable and the COO's watcher consumes it, so the row is acknowledged at once (`bridge`).
+
+**COO copy on decisions.** When the owner replies on a `decision` (or an item the COO forwarded,
+`context.cooItemId`) whose target is not the COO, the bridge also gets `kind: inbox-reply`,
+`copy: true`, `raisedBy`, `messageId` — the timeline owner always knows what the owner said. Other
+kinds get no copy.
+
+**Acknowledge.** A row is acknowledged when, after the reply: the target writes in the same thread
+(`inbox_reply`; an `inbox.onReply` listener acks every open row of that item for that target at once),
+or the target records any activity other than `stall` on a work item the Inbox item is about
+(`context.itemId` / `assignmentId`, or an existing item id named in the title or body), checked on
+each sweep. A Workplace note or a teammate's activity is not an acknowledgement.
+
+**Re-deliver** (`sweep`, run first in every `dispatch.sweep`; the dispatcher's first sweep, after
+`dispatchBootDelaySeconds`, is the boot pass, so it lands after the staggered resumes): an
+unacknowledged row is delivered again when it never got through, or the run it went to is no longer
+live (closed, shut down, or gone with a restart — the in-memory run registry is empty after a boot).
+While that run is live it is not re-sent. At most `MAX_ATTEMPTS` (5) deliveries to sessions that then
+vanished; past that only the escalations act.
+
+**Escalate**, once each, measured from the reply:
+- 10 min unacknowledged: `manager.alert` (Asha first, LLD §19.6e) with key `inbox-reply:<messageId>`,
+  `subjectId` = the target (an alert about Asha herself goes to the COO by the manager's own rule),
+  `itemId` = the Inbox id — not a work item, so `manager.escalate`'s 15-minute step treats it as acted
+  on and never doubles the COO alert. The text asks Asha to make sure the target answers with
+  `inbox_reply`, or to answer herself. An acknowledgement `manager.resolve`s it.
+- 20 min unacknowledged: `coo.notifyStall` (a `coo_items` row + a bridge line), "Owner's reply not
+  answered: <title>", with the reply, the attempts and the last error; `itemId` = the linked work item,
+  else the Inbox id.
+
+**Tests** (`v2-reply-delivery.test.ts`): delivery into an open session; a short session when there is
+none; the incident — delivered into a busy session, `closeAll('shutdown')`, re-delivered on the next
+`dispatch.sweep`, not again while the new run is live; acknowledgement by `inbox_reply` and by activity
+on the linked item stops re-delivery and escalation (a Workplace `stall` row does not count); Asha at
+10 min, the COO at 20, once each, and `manager.escalate` does not double it; the COO copy on a decision,
+none on a question, and a COO-raised item delivered to the bridge only and acknowledged.

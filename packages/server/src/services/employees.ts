@@ -21,6 +21,8 @@ import * as trail from './trail.js';
 import * as watch from './watch.js';
 import * as statusAnswers from './status.js';
 import * as readTools from './read-tools.js';
+// The owner's Inbox replies reach the asker durably (HLD D23, LLD §19.14); the module wires itself.
+import './reply-delivery.js';
 import { isWaitable, nameOf, rawGet } from './v2-map.js';
 import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
 import { humanizeIds } from './id-names.js';
@@ -1154,26 +1156,3 @@ function notBlocked(wp: Workplace, it: Item): string {
       ? `Not blocked: ${it.id} is handed to ${nameOf(wp, it.assigneeId)}, who works on it now; it comes back to ${nameOf(wp, it.handoff.fromId)} when they call item_handback.`
       : `Not blocked: ${it.id} is with ${nameOf(wp, it.assigneeId)} now.`;
 }
-
-/* ---------- v2 wiring ---------- */
-
-/**
- * The owner replied in an Inbox thread (HLD D23): the asker hears it in its session and answers in
- * the same thread. The prompt is the Workplace's, not the owner's words (HLD D22).
- */
-inbox.onReply((wp, item, message) => {
-  if (message.by !== 'owner') return;
-  const prompt = `The owner replied on "${item.title}" (${item.id}): "${message.text}"\n\nAnswer in the same thread with inbox_reply, in a few short lines. The item is still open${item.options.length ? `; its options are ${item.options.map(o => o.label).join(', ')}` : ''}.`;
-  const coiId = typeof item.context['cooItemId'] === 'string' ? item.context['cooItemId'] : undefined;
-  let target = item.raisedBy;
-  if (!wp.org.employees.some(e => e.id === target && !e.virtual)) target = wp.org.employees.find(e => e.charterIds.includes('chief-of-staff'))?.id ?? '';
-  if (coiId || item.raisedBy === 'coo') {
-    try { coo.relayInboxReply(wp, { inboxId: item.id, title: item.title, text: message.text }); } catch (err) { log.warn('inbox', String(err)); }
-    if (item.raisedBy === 'coo') return;
-  }
-  if (!target) return;
-  try { talk(wp, target, prompt, [], { autonomous: true }); }
-  catch (err) { log.warn('inbox', `reply to ${target}: ${err instanceof Error ? err.message : err}`); }
-});
-
-

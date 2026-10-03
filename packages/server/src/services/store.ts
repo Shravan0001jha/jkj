@@ -184,6 +184,16 @@ create table if not exists inbox_messages (
   json text not null
 );
 create index if not exists inbox_messages_item on inbox_messages(inbox_id, at);
+-- One row per owner reply in an Inbox thread: its delivery to whoever must answer it (LLD §19.14).
+create table if not exists inbox_deliveries (
+  message_id text primary key,
+  inbox_id text not null,
+  target text not null,
+  at text not null,
+  acked_at text,
+  json text not null
+);
+create index if not exists inbox_deliveries_open on inbox_deliveries(acked_at, at);
 create table if not exists release_posts (
   id text primary key,
   at text not null,

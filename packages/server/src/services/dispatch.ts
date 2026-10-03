@@ -7,6 +7,7 @@ import * as spend from './spend.js';
 import * as trail from './trail.js';
 import * as manager from './manager.js';
 import * as reviewWake from './review-wake.js';
+import * as replyDelivery from './reply-delivery.js';
 import { epicOf, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { rowJson, rowsJson } from './store.js';
 import { log } from '../util/logger.js';
@@ -218,8 +219,13 @@ export function idleAlerts(wp: Workplace, nowMs = Date.now()): string[] {
   return out;
 }
 
-/** One pass: stale reviews, every free employee, then the idle alerts. */
+/**
+ * One pass: the owner's unacknowledged Inbox replies (re-delivered, escalated; LLD §19.14), stale
+ * reviews, every free employee, then the idle alerts. The first pass after boot is the replies' boot
+ * re-delivery: it runs after the staggered resumes, so a reply lands in the resumed session.
+ */
 export function sweep(wp: Workplace, nowMs = Date.now()): { reviews: string[]; started: DispatchResult[]; alerts: string[] } {
+  try { replyDelivery.sweep(wp, nowMs); } catch (err) { log.warn('dispatch', `inbox replies: ${err instanceof Error ? err.message : err}`); }
   const reviews = wakeStaleReviews(wp);
   const started: DispatchResult[] = [];
   for (const id of agents(wp)) {
