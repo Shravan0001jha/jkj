@@ -114,6 +114,13 @@ export function ashaStuck(wp: Workplace, nowMs = Date.now()): string | null {
 /** Raise an operational alert: Asha first; the COO for decisions above her, or when she is stuck. */
 export function alert(wp: Workplace, spec: AlertSpec, nowMs = Date.now()): AlertResult {
   if (read(wp, spec.key)) return 'duplicate';
+  // A weekly-pace hold is a deliberate stop (pace.ts, owner 3 Oct): idle and stalled work under it is
+  // expected, not news. Nothing is raised until the hold lifts; real decisions still go through.
+  const pace = wp.db.prepare("select value from settings where key = 'pace:until'").get() as { value: string } | undefined;
+  if (pace && Date.parse(pace.value) > nowMs && (!spec.decision || spec.decision === 'spend')) {
+    log.info('manager', `${spec.key}: held (weekly-pace hold until ${pace.value})`);
+    return 'dropped';
+  }
   const w = rawGet(wp, spec.itemId);
   const asha = ashaId(wp);
   const rec: AlertRecord = {

@@ -74,7 +74,7 @@ export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done',
  */
 /** Never, whatever the mode: the branch, the remotes and the release path are not the employee's. */
 export const FORBIDDEN_TOOLS = [
-  'Bash(git push:*)', 'Bash(git merge:*)', 'Bash(git rebase:*)', 'Bash(git reset --hard:*)', 'Bash(git filter-repo:*)',
+  'Bash(git push:*)', 'Bash(git rebase:*)', 'Bash(git reset --hard:*)', 'Bash(git filter-repo:*)',
   'Bash(git worktree:*)', 'Bash(git remote:*)', 'Bash(ssh:*)', 'Bash(scp:*)', 'Bash(aws:*)', 'Bash(gh:*)', 'Bash(sudo:*)',
   'Bash(scripts/release-iris.sh:*)', 'Bash(scripts/release-iris-x64.sh:*)', 'Bash(scripts/deploy-api.sh:*)', 'Bash(scripts/deploy-agent.sh:*)', 'Bash(scripts/deploy-web.sh:*)',
 ];
@@ -83,6 +83,8 @@ export const FREE_TOOLS = [
   'Read', 'Grep', 'Glob', 'LS', 'WebFetch', 'WebSearch', 'ToolSearch', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
   'mcp__travsr__*', 'mcp__prior__prior_recall',
   'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git branch:*)', 'Bash(git show:*)', 'Bash(git worktree list:*)',
+  // The PreToolUse guard (guards.ts) narrows this to merging the trunk into the employee's own branch.
+  'Bash(git merge:*)', 'Bash(git merge-base:*)',
   'Bash(ls:*)', 'Bash(cat:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(wc:*)', 'Bash(find:*)', 'Bash(grep:*)', 'Bash(rg:*)', 'Bash(pwd)',
   'Bash(npm test:*)', 'Bash(npm run test:*)', 'Bash(node --test:*)', 'Bash(../../.venv/bin/python -m pytest:*)', 'Bash(.venv/bin/python -m pytest:*)', 'Bash(python3 -m pytest:*)', 'Bash(pytest:*)',
 ];
