@@ -83,6 +83,10 @@ test('the agents\' v2 tools: one story per outcome, tasks by the story owner, no
 
     const mira = await toolsFor(wp, 'mira');
     assert.match(await mira.call('item_create', { level: 'story', parentId: epic.id, title: 'Mira\'s own story' }), /Only the Chief of Staff or the epic owner/);
+    const epicMade = await asha.call('item_create', { level: 'epic', title: 'Alpha testers site', targetDate: '2026-10-07' });
+    assert.match(epicMade, /Created ft_\w+ \(epic\)/);
+    assert.match(await mira.call('item_create', { level: 'epic', title: 'Mira\'s epic' }), /Only the Chief of Staff creates epics/);
+    assert.match(await asha.call('item_create', { level: 'story', title: 'No parent' }), /needs its epic/);
     assert.match(await mira.call('item_create', { level: 'task', parentId: storyId, title: 'A task' }), /Only the story's assignee/);
     const dev = await toolsFor(wp, 'dev', storyId);
     const t = await dev.call('item_create', { level: 'task', parentId: storyId, title: 'Write the schema', assigneeId: 'mira' });

@@ -1056,13 +1056,23 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           catch (err) { return ok(`Not escalated: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       /* ---------- v2: the plan (LLD §19.12) ---------- */
-      tool('item_create', 'Create a story under an epic (Chief of Staff or the epic owner) or a task under a story (the story\'s assignee). One story per outcome: an open item with the same title under the same parent is returned instead of a copy.',
-        { level: z.enum(['story', 'task']), parentId: z.string(), title: z.string(), body: z.string().optional(), assigneeId: z.string().optional(), points: z.number().int().optional(), acceptance: z.array(z.string()).optional() },
-        async ({ level, parentId, title, body, assigneeId, points, acceptance }) => {
-          const parent = rawGet(wp, parentId);
-          if (!parent) return ok(`No item ${parentId}.`);
+      tool('item_create', 'Create an epic (Chief of Staff only; no parentId, optional targetDate YYYY-MM-DD; the COO decides focus), a story under an epic (Chief of Staff or the epic owner) or a task under a story (the story\'s assignee). One item per outcome: an open item with the same title under the same parent is returned instead of a copy.',
+        { level: z.enum(['epic', 'story', 'task']), parentId: z.string().optional(), title: z.string(), body: z.string().optional(), assigneeId: z.string().optional(), points: z.number().int().optional(), acceptance: z.array(z.string()).optional(), targetDate: z.string().optional() },
+        async ({ level, parentId, title, body, assigneeId, points, acceptance, targetDate }) => {
           const emp = employee(wp, employeeId);
           const isCos = emp.charterIds.includes('chief-of-staff') || (emp.level === 0 && !emp.virtual);
+          // Epics (owner, 3 Oct: the team does creation, the COO decides): the Chief of Staff files
+          // them directly; focus stays the COO's call.
+          if (level === 'epic') {
+            if (!isCos) return ok('Only the Chief of Staff creates epics; ask Asha in the Room.');
+            try {
+              const it = items.create(wp, { level: 'epic', title, ...(body ? { body } : {}), ...(targetDate ? { targetDate } : {}) } as never, employeeId);
+              return ok(`Created ${it.id} (epic). Ask the COO to put it in focus if it is launch work.`);
+            } catch (err) { return ok(`Not created: ${err instanceof Error ? err.message : String(err)}`); }
+          }
+          if (!parentId) return ok('A story needs its epic (parentId) and a task its story.');
+          const parent = rawGet(wp, parentId);
+          if (!parent) return ok(`No item ${parentId}.`);
           if (level === 'story' && !isCos && parent.ownerId !== employeeId) return ok('Only the Chief of Staff or the epic owner creates stories; ask Asha in the Room.');
           if (level === 'task' && !isCos && parent.employeeId !== employeeId) return ok('Only the story\'s assignee (or the Chief of Staff) splits it into tasks.');
           const twin = items.duplicateOf(wp, parentId, title);
