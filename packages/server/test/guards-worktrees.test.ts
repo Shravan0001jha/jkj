@@ -204,3 +204,12 @@ test('a session never runs in a main checkout, gets the guard hook and the forbi
     rmSync(workDir, { recursive: true, force: true });
   }
 });
+
+test('a contributor charter may edit a shared file; consulted may not; others still go through the primary', () => {
+  const shared: MapEntry = { kind: 'path', key: 'iris:services/agent-svc/app.py', primary: 'experts', contributors: ['conversation', 'character'], consulted: ['memory'] };
+  const base = { ...ctx, worktree: '/Users/o/iris-work/dev/claude-dev', map: [entry('iris:services/agent-svc', 'experts'), shared] };
+  assert.equal(guardEdit('services/agent-svc/app.py', { ...base, charterIds: ['conversation', 'character'] }).decision, 'allow');
+  assert.equal(guardEdit('services/agent-svc/app.py', { ...base, charterIds: ['memory'] }).decision, 'deny', 'consulted reviews, does not edit');
+  assert.equal(guardEdit('services/agent-svc/app.py', { ...base, charterIds: ['mobile'] }).decision, 'deny');
+  assert.equal(guardEdit('services/agent-svc/phone.py', { ...base, charterIds: ['conversation'] }).decision, 'deny', 'the rest of agent-svc stays experts-only');
+});

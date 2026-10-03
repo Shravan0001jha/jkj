@@ -370,3 +370,20 @@ test('orphan: an In-progress story with no session behind it (after a restart) i
     done();
   }
 });
+
+test('busy includes In-progress work with no session: the watcher queues a Ready story, never starts a second one', async () => {
+  const { wp, fake, story, done } = setup();
+  try {
+    const a = story('DND toggle expert', 'mira');
+    items.update(wp, a.id, { status: 'in-progress' }, 'mira');   // In progress, no session behind it
+    assert.equal(employees.openSession('mira'), undefined);
+    const b = story('Decline counter', 'mira');
+    const r = watch.check(wp, b.id, Date.now() + 16 * MIN)!;
+    assert.equal(r.action, 'queued');
+    assert.equal(items.require$(wp, b.id).status, 'ready');
+    assert.equal(items.require$(wp, b.id).queuedFor, 'mira');
+    assert.equal(of(fake, 'mira').length, 0, 'no session started for the second story');
+  } finally {
+    done();
+  }
+});

@@ -125,7 +125,9 @@ export function guardEdit(filePath: string, ctx: GuardContext): GuardDecision {
   if (!inside) return isScratch(abs) ? { decision: 'allow' } : { decision: 'deny', reason: `${abs} is outside your worktree ${ctx.worktree}` };
   const owner = resolveOwner(ctx.map, { kind: 'path', key: `${ctx.repoId}:${rel}` });
   if (!owner) return { decision: 'deny', reason: `${rel} is owned by nobody in the map; ask the Chief of Staff to add it before changing it` };
-  if (!ctx.charterIds.includes(owner.primary)) {
+  // Contributors edit too (3 Oct: app.py is a shared hub; four stories in a day needed a hand-off
+  // only because edit rights stopped at the primary). Consulted charters still only review.
+  if (!ctx.charterIds.includes(owner.primary) && !owner.contributors.some(c => ctx.charterIds.includes(c))) {
     return { decision: 'deny', reason: `${rel} is owned by ${owner.primary}; changes go through that charter's holder (your charters: ${ctx.charterIds.join(', ')})` };
   }
   return { decision: 'allow' };

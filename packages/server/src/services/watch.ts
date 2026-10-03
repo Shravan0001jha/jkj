@@ -106,8 +106,12 @@ function notStarted(wp: Workplace, w: WorkItem, nowMs: number): StallAction {
   let capped = false;
   let failed = false;
   const ready = mins(wp, 'not-started');
-  if (items.inFocus(wp, w) && open) {
-    const on = open.assignmentId ? rawGet(wp, open.assignmentId)?.title ?? open.assignmentId : 'another session';
+  // Busy is an open session OR other work already In progress (3 Oct: an In-progress story with no
+  // session behind it read as "free", so a second story started on top of it, three times in 20 min).
+  const wip = wp.db.prepare("select id from work where employee_id = ? and status = 'in-progress' and id != ? limit 1").get(w.employeeId!, w.id) as { id: string } | undefined;
+  if (items.inFocus(wp, w) && (open || wip)) {
+    const onId = open?.assignmentId ?? wip?.id;
+    const on = onId ? rawGet(wp, onId)?.title ?? onId : 'another session';
     items.markQueued(wp, w.id, asha(wp));
     trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: `Queued for ${name}: busy on ${on}; starts when ${name} is free (Ready for ${ready} min)` });
     manager.alert(wp, { key: `queued:${w.id}:${w.statusSince ?? w.updatedAt}`, itemId: w.id, title: `Queued: ${w.title}`, body: `Ready for ${ready} min; ${name} is busy on ${on}, so it is queued for ${name} and starts when ${name} is free.`, by: asha(wp), subjectId: w.employeeId, notice: true }, nowMs);
