@@ -31,6 +31,7 @@ import * as handoff from './services/handoff.js';
 import * as dispatch from './services/dispatch.js';
 import * as manager from './services/manager.js';
 import * as spend from './services/spend.js';
+import * as pace from './services/pace.js';
 import * as health from './services/health.js';
 import * as inbox from './services/inbox.js';
 import { OPEN_DECISIONS } from './seed-data/checklist.js';
@@ -183,6 +184,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   // AWS actuals once a day, after the digest hour.
   const awsTimer = setInterval(() => { if (config.awsCost) void awsCost.reconcileYesterday(wp).catch(err => log.warn('aws-cost', String(err))); }, 60 * 60_000);
   const digestTimer = setInterval(() => void digestService.maybeSend(wp, telegram, config.digestHour), 60_000);
+  // Weekly pacing (owner, 3 Oct): day N of the week may use at most N × 14% of the weekly limit.
+  const stopPace = process.env['WORKPLACE_TEST_GUARD'] === '1' ? () => {} : pace.start(wp);
 
   if (config.host !== '127.0.0.1' && config.host !== 'localhost') {
     log.warn('boot', `bound to ${config.host}: off-loopback requests need the bearer token in ${auth.path}`);
@@ -207,6 +210,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       stopManager();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
+      stopPace();
       telegram.stop();
       employees.closeAll(wp);
       hub.close();

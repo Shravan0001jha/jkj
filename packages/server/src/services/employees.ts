@@ -579,7 +579,9 @@ export function close(wp: Workplace, agentId: string, reason: string): void {
 export function pauseScope(wp: Workplace, scope: string): void {
   for (const s of allSessions()) {
     if (!spend.scopesOf(wp, s.employeeId).includes(scope)) continue;
-    runs.note(s.agentId, 'Paused', `The ${scope} spend cap for today is reached.`);
+    runs.note(s.agentId, 'Paused', scope === 'weekly-pace'
+      ? "Today's share of the weekly usage limit is used; unattended work resumes on the next pace day."
+      : `The ${scope} spend cap for today is reached.`);
     void runs.interruptRun(s.agentId).catch(() => {});
     setState(wp, s.employeeId, 'paused');
   }
@@ -835,6 +837,11 @@ export function stateWithReason(wp: Workplace, employeeId: string): { state: Emp
 
 /** "Paused — daily budget reached (₹151/₹150). You can still talk to Mira." */
 export function pausedReason(wp: Workplace, e: Employee, scope: string): string {
+  if (scope === 'weekly-pace') {
+    const until = (wp.db.prepare("select value from settings where key = 'pace:until'").get() as { value: string } | undefined)?.value;
+    const at = until ? new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(until)) : 'the next pace day';
+    return `Paused — today's share of the weekly limit is used; resumes ${at} IST. You can still talk to ${e.name}.`;
+  }
   const s = spend.summary(wp);
   const [kind, id] = scope.split(':');
   const spent = kind === 'company' ? s.companyInr : kind === 'unit' ? (s.byUnit[id ?? ''] ?? 0) : (s.byEmployee[e.id] ?? 0);

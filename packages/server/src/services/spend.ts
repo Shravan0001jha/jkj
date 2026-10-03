@@ -151,7 +151,7 @@ export function raiseCapForToday(wp: Workplace, day: string, inr: number): void 
 
 export function scopesOf(wp: Workplace, employeeId: string): string[] {
   const e = wp.org.employees.find(x => x.id === employeeId);
-  return ['company', ...(e ? [`unit:${e.unitId}`, `employee:${e.id}`] : [])];
+  return ['company', 'weekly-pace', ...(e ? [`unit:${e.unitId}`, `employee:${e.id}`] : [])];
 }
 
 /** Compare every scope's real spend against its cap; pause the ones at it and file one Inbox item per scope. */
@@ -208,6 +208,9 @@ export function pausedScopes(wp: Workplace, day: string): string[] {
 
 /** True when this employee may run paid actions or unattended work right now. */
 export function canSpend(wp: Workplace, employeeId: string, day = dayOf()): { ok: boolean; scope?: string } {
+  // The weekly pace hold (pace.ts) stops unattended work for everyone until the next pace day.
+  const pace = wp.db.prepare("select value from settings where key = 'pace:until'").get() as { value: string } | undefined;
+  if (pace && Date.parse(pace.value) > Date.now()) return { ok: false, scope: 'weekly-pace' };
   for (const scope of scopesOf(wp, employeeId)) if (isPaused(wp, day, scope)) return { ok: false, scope };
   return { ok: true };
 }
