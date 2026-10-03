@@ -112,9 +112,38 @@ function skipped(wp: Workplace, employeeId: string, reason: string): DispatchRes
   return { action: 'skipped', reason };
 }
 
+/**
+ * In-progress work with no session behind it (3 Oct: every restart left 3-4 people idle on their
+ * In-progress story, because only sessions bound to an assignment get a resume marker, and
+ * busyReason then skips them forever). Start it again, at most once per item per ORPHAN_RESUME_H,
+ * so a story that genuinely waits (and should have been put on hold) cannot loop a session.
+ */
+const ORPHAN_RESUME_H = 3;
+function resumeOrphan(wp: Workplace, employeeId: string, nowMs: number): DispatchResult | null {
+  if (employees.openSession(employeeId)) return null;
+  const wip = inProgress(wp, employeeId).find(w => !w.hold && levelOf(w) !== 'epic');
+  if (!wip) return null;
+  const key = `orphan-resumed:${wip.id}`;
+  const last = wp.db.prepare('select value from settings where key = ?').get(key) as { value: string } | undefined;
+  if (last && nowMs - Date.parse(last.value) < ORPHAN_RESUME_H * 3_600_000) return null;
+  if (!spend.canSpend(wp, employeeId, spend.dayOf(new Date(nowMs))).ok) return null;
+  try {
+    employees.assign(wp, wip.id);
+  } catch (err) {
+    log.warn('dispatch', `${wip.id}: could not resume for ${nameOf(wp, employeeId)}: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+  wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(key, new Date(nowMs).toISOString());
+  trail.record(wp, { itemId: wip.id, by: 'workplace', kind: 'note', text: `Resumed: In progress with no session behind it` });
+  log.info('dispatch', `${wip.id}: resumed for ${nameOf(wp, employeeId)} (in progress, no session)`);
+  return { action: 'story', itemId: wip.id };
+}
+
 /** Give one employee their next work if they are free: a queued review first, else the next focus story. */
 export function dispatch(wp: Workplace, employeeId: string, nowMs = Date.now()): DispatchResult {
   if (!isAgent(wp, employeeId)) return { action: 'none' };
+  const resumed = resumeOrphan(wp, employeeId, nowMs);
+  if (resumed) return resumed;
   const busy = busyReason(wp, employeeId, nowMs);
   if (busy) return skipped(wp, employeeId, busy);
   const name = nameOf(wp, employeeId);

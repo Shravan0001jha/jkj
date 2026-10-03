@@ -250,6 +250,8 @@ test('the idle alert for any other reason goes to Asha first; the COO hears only
     items.update(wp, x.id, { status: 'in-progress' }, 'dev'); // In progress, but no session on it
     const y = story('Dance tempo', 'dev');
     const t0 = Date.now();
+    // Its one automatic resume was already spent (the orphan rule), so it stays idle and is reported.
+    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`orphan-resumed:${x.id}`, new Date(t0).toISOString());
     dispatch.sweep(wp, t0);
     assert.deepEqual(dispatch.sweep(wp, t0 + 11 * MIN).alerts, ['dev']);
     await tick();
@@ -338,5 +340,33 @@ test('wired at boot: the first sweep wakes the seeded In review items nobody was
     assert.ok(wp.db.prepare("select 1 from settings where key = 'hold-migration'").get(), 'the hold migration ran');
   } finally {
     await b.stop();
+  }
+});
+
+test('orphan: an In-progress story with no session behind it (after a restart) is resumed once, not left idle', async () => {
+  const { wp, fake, story, done } = setup();
+  try {
+    const a = story('Presence facts', 'mira');
+    employees.assign(wp, a.id);
+    await tick();
+    assert.equal(rawGet(wp, a.id)!.status, 'in-progress');
+    employees.closeAll(wp, 'shutdown');            // the session is gone, the story stays In progress
+    await tick();
+    assert.equal(employees.openSession('mira'), undefined);
+    const before = of(fake, 'mira').length;
+
+    const r = dispatch.dispatch(wp, 'mira');
+    await tick();
+    assert.equal(r.action, 'story');
+    assert.equal(r.itemId, a.id);
+    assert.ok(of(fake, 'mira').length > before, 'a new session started for the In-progress story');
+
+    // Throttled: the same story is not resumed again within the window, so a waiting story cannot loop.
+    employees.closeAll(wp, 'shutdown');
+    await tick();
+    const again = dispatch.dispatch(wp, 'mira');
+    assert.notEqual(again.action, 'story');
+  } finally {
+    done();
   }
 });
