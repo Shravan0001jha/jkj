@@ -387,3 +387,26 @@ test('busy includes In-progress work with no session: the watcher queues a Ready
     done();
   }
 });
+
+test('orphan: an idle session left on a finished story does not hide the person\'s In-progress story', async () => {
+  const { wp, fake, story, done } = setup();
+  try {
+    const a = story('Wi-Fi toggle', 'mira');
+    employees.assign(wp, a.id);
+    await tick();
+    const s = fake.last();
+    s.result({ costUsd: 0 });                                      // the turn ends; the session stays open, idle
+    await tick();
+    items.update(wp, a.id, { status: 'in-review', reviewerId: 'nikhil' }, 'mira');
+    const b = story('Bluetooth toggle', 'mira');
+    items.update(wp, b.id, { status: 'in-progress' }, 'mira');     // In progress, nothing behind it
+    assert.equal(employees.openSession('mira')!.assignmentId, a.id);
+
+    const r = dispatch.dispatch(wp, 'mira');
+    await tick();
+    assert.equal(r.action, 'story');
+    assert.equal(r.itemId, b.id);
+  } finally {
+    done();
+  }
+});

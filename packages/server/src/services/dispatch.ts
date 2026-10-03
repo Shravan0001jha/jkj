@@ -120,9 +120,20 @@ function skipped(wp: Workplace, employeeId: string, reason: string): DispatchRes
  */
 const ORPHAN_RESUME_H = 3;
 function resumeOrphan(wp: Workplace, employeeId: string, nowMs: number): DispatchResult | null {
-  if (employees.openSession(employeeId)) return null;
   const wip = inProgress(wp, employeeId).find(w => !w.hold && levelOf(w) !== 'epic');
   if (!wip) return null;
+  // An open session counts only if it is actually doing something, or is already on this story.
+  // 3 Oct: sessions sat idle ("waiting") on a finished or held story while the person's In-progress
+  // story had nothing behind it; 10 people showed "working" with 3 stories In progress.
+  const open = employees.openSession(employeeId);
+  if (open) {
+    const a = runs.getRunAgent(open.agentId);
+    if (!a || a.status === 'running' || a.approval || employees.hasPendingSwitch(open.agentId) || open.assignmentId === wip.id) return null;
+    if (open.ownerTalk) {
+      const idle = runs.idleMs(open.agentId, nowMs);
+      if (idle !== null && idle < wp.config.dispatchTalkGraceMinutes * MIN) return null;
+    }
+  }
   const key = `orphan-resumed:${wip.id}`;
   const last = wp.db.prepare('select value from settings where key = ?').get(key) as { value: string } | undefined;
   if (last && nowMs - Date.parse(last.value) < ORPHAN_RESUME_H * 3_600_000) return null;
