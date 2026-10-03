@@ -329,3 +329,30 @@ test('an epic is in progress once any of its stories is, by either engine', () =
     tmp.cleanup();
   }
 });
+
+test('Plan order: needs the owner, then live work, then focus not started, then the rest, finished last', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const mk = (title: string) => items.create(wp, { level: 'epic', title }, 'owner');
+    const idle = mk('Idle, not in focus');
+    const done = mk('Finished');
+    const fin = items.create(wp, { level: 'story', parentId: done.id, title: 'only story', assigneeId: 'kabir' }, 'asha');
+    items.update(wp, fin.id, { status: 'in-progress' }, 'kabir');
+    items.update(wp, fin.id, { status: 'in-review', reviewerId: 'nikhil' }, 'kabir');
+    items.update(wp, fin.id, { status: 'done' }, 'nikhil');
+    const focused = mk('In focus, not started');
+    items.create(wp, { level: 'story', parentId: focused.id, title: 'ready story', assigneeId: 'mira' }, 'asha');
+    const live = mk('In progress');
+    const s = items.create(wp, { level: 'story', parentId: live.id, title: 'working', assigneeId: 'dev' }, 'asha');
+    items.update(wp, s.id, { status: 'in-progress' }, 'dev');
+    const needs = mk('Needs the owner');
+    const b = items.create(wp, { level: 'story', parentId: needs.id, title: 'waiting on owner', assigneeId: 'tara' }, 'asha');
+    items.update(wp, b.id, { status: 'in-progress' }, 'tara');
+    items.update(wp, b.id, { status: 'blocked', blockedReason: 'needs the Samsung', waitingOn: 'owner' }, 'tara');
+    items.setFocus(wp, [focused.id], 'owner');
+    assert.deepEqual(items.plan(wp).unfiled.map(c => c.epic.title).filter(t => t !== 'Iris works while music plays'),
+      ['Needs the owner', 'In progress', 'In focus, not started', 'Idle, not in focus', 'Finished']);
+  } finally {
+    tmp.cleanup();
+  }
+});

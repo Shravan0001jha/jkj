@@ -530,6 +530,24 @@ function card(wp: Workplace, epic: WorkItem, focus: Focus, nowMs: number): EpicC
   };
 }
 
+/**
+ * Plan order (owner, 3 Oct: "things which need me or things which are in progress at the top"):
+ * needs the owner, then live work (in progress / in review / blocked / stalled), then focus epics
+ * not yet started, then the rest, and finished epics last. Rank order holds within a tier.
+ */
+export function planTier(wp: Workplace, c: EpicCard): number {
+  if (c.flags.some(f => f.waitingOn === 'owner')) return 0;
+  const finished = c.epic.status === 'done' || (c.progress.storiesTotal > 0 && c.progress.storiesDone === c.progress.storiesTotal);
+  if (finished) return 4;
+  const live = c.flags.length > 0 || childrenRows(wp, c.epic.id).some(s => s.status === 'in-progress' || s.status === 'in-review');
+  if (live) return 1;
+  return c.inFocus ? 2 : 3;
+}
+
+function sortCards(wp: Workplace, cards: EpicCard[]): EpicCard[] {
+  return cards.map((c, i) => ({ c, i, t: planTier(wp, c) })).sort((a, b) => a.t - b.t || a.i - b.i).map(x => x.c);
+}
+
 export function plan(wp: Workplace, view?: 'board', nowMs = Date.now()): PlanResponse {
   const focus = getFocus(wp);
   const epics = rowsJson<WorkItem>(wp.db.prepare("select json from work where coalesce(level, case kind when 'feature' then 'epic' else 'story' end) = 'epic' order by coalesce(rank, 0), created_at").all())
@@ -540,8 +558,8 @@ export function plan(wp: Workplace, view?: 'board', nowMs = Date.now()): PlanRes
   const counts = Object.fromEntries(ITEM_STATUSES.map(s => [s, 0])) as Record<ItemStatus, number>;
   for (const w of work$) counts[w.status ?? 'ready'] += 1;
   const response: PlanResponse = {
-    areas: active.map(area => ({ area, epics: epics.filter(e => e.areaId === area.id).map(e => card(wp, e, focus, nowMs)) })),
-    unfiled: epics.filter(e => !e.areaId || !activeIds.has(e.areaId)).map(e => card(wp, e, focus, nowMs)),
+    areas: active.map(area => ({ area, epics: sortCards(wp, epics.filter(e => e.areaId === area.id).map(e => card(wp, e, focus, nowMs))) })),
+    unfiled: sortCards(wp, epics.filter(e => !e.areaId || !activeIds.has(e.areaId)).map(e => card(wp, e, focus, nowMs))),
     mine: work$.filter(w => w.employeeId === 'owner' && w.status !== 'done').map(w => toItem(wp, w, nowMs)),
     focus,
     counts,
