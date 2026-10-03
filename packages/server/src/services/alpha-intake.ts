@@ -15,9 +15,15 @@ import { log } from '../util/logger.js';
  * Config: <workplace dir>/alpha.json {apiBase, token}. No file means intake is off.
  */
 
+// The shape GET /workplace/bugs returns (iris-alpha backend bug_view + evidence; dry run 4 Oct found
+// the intake reading `id` and `urls`, which the backend never sends).
+export interface AlphaEvidence {
+  report_id: string; title?: string; what_happened?: string; steps?: string; expected?: string;
+  platform?: string; app_version?: string; happened_at?: string; files?: { url: string; type?: string }[];
+}
 export interface AlphaBug {
-  id: string; title: string; summary?: string; priority: 'P0' | 'P1' | 'P2' | 'P3'; severity?: string;
-  platforms?: string[]; affected_testers?: string[]; evidence?: { report_id: string; urls?: string[] }[];
+  bug_id: string; title: string; summary?: string; priority: 'P0' | 'P1' | 'P2' | 'P3'; severity?: string;
+  platforms?: string[]; affected_testers?: string[]; affected_count?: number; evidence?: AlphaEvidence[];
 }
 interface Config { apiBase: string; token: string }
 type Fetch = typeof fetch;
@@ -46,13 +52,19 @@ function bugBashEpicId(wp: Workplace): string | undefined {
 
 export function storyBody(b: AlphaBug): string {
   const lines = [
-    `Found by alpha testers (alpha bug ${b.id}, ${b.priority}${b.severity ? `, ${b.severity}` : ''}).`,
+    `Found by alpha testers (alpha bug ${b.bug_id}, ${b.priority}${b.severity ? `, ${b.severity}` : ''}).`,
     '',
     b.summary ?? '',
     '',
-    `Platforms: ${(b.platforms ?? []).join(', ') || 'unknown'}. Testers affected: ${(b.affected_testers ?? []).length || 1}.`,
+    `Platforms: ${(b.platforms ?? []).join(', ') || 'unknown'}. Testers affected: ${b.affected_count ?? ((b.affected_testers ?? []).length || 1)}.`,
   ];
-  const ev = (b.evidence ?? []).flatMap(e => [`Report ${e.report_id}`, ...(e.urls ?? []).map(u => `  ${u}`)]);
+  const ev = (b.evidence ?? []).flatMap(e => [
+    `Report ${e.report_id} (${e.platform ?? '?'} ${e.app_version ?? ''}, ${e.happened_at ?? ''})`,
+    ...(e.what_happened ? [`  What happened: ${e.what_happened}`] : []),
+    ...(e.steps ? [`  Steps: ${e.steps}`] : []),
+    ...(e.expected ? [`  Expected: ${e.expected}`] : []),
+    ...(e.files ?? []).map(f => `  ${f.url}`),
+  ]);
   if (ev.length) lines.push('', 'Evidence (links valid 7 days):', ...ev);
   lines.push('', 'Reproduce on the latest build first. When this story is done, the testers are told it is fixed in the next build.');
   return lines.join('\n');
@@ -70,9 +82,10 @@ export async function tick(wp: Workplace, cfg: Config, fetchFn: Fetch = fetch): 
   const body = await res.json() as { bugs?: AlphaBug[] } | AlphaBug[];
   const bugs = Array.isArray(body) ? body : body.bugs ?? [];
   for (const b of bugs) {
+    if (!b.bug_id) { log.warn('alpha', `bug without bug_id skipped: ${JSON.stringify(b).slice(0, 120)}`); continue; }
     // A story already filed for this bug (a crash between create and the backend's ack) is not
     // filed twice: the backend is told the story we already have.
-    let storyId = setting(wp, `alpha:bug:${b.id}`);
+    let storyId = setting(wp, `alpha:bug:${b.bug_id}`);
     if (!storyId) {
       const it = items.create(wp, {
         level: 'story', parentId: epicId, title: `[Alpha ${b.priority}] ${b.title}`.slice(0, 160),
@@ -80,17 +93,17 @@ export async function tick(wp: Workplace, cfg: Config, fetchFn: Fetch = fetch): 
         acceptance: ['Reproduced on the latest build, or shown not reproducible with evidence', 'Fixed with a test that fails before the fix'],
       } as never, 'workplace');
       storyId = it.id;
-      setSetting(wp, `alpha:bug:${b.id}`, storyId);
-      setSetting(wp, `alpha:story:${storyId}`, b.id);
+      setSetting(wp, `alpha:bug:${b.bug_id}`, storyId);
+      setSetting(wp, `alpha:story:${storyId}`, b.bug_id);
       manager.alert(wp, {
-        key: `alpha:${b.id}`, itemId: storyId,
+        key: `alpha:${b.bug_id}`, itemId: storyId,
         title: `Alpha ${b.priority}: ${b.title}`,
         body: `${(b.affected_testers ?? []).length || 1} tester(s) on ${(b.platforms ?? []).join(', ') || 'unknown'}. Assign it to the owning charter${b.priority === 'P0' ? ' now: P0 blocks testers' : ''}.`,
         ...(b.priority === 'P0' ? { decision: 'scope' as const } : {}),
       });
     }
-    const ack = await fetchFn(`${cfg.apiBase}/workplace/bugs/${encodeURIComponent(b.id)}/filed`, { method: 'POST', headers, body: JSON.stringify({ story_id: storyId }), signal: AbortSignal.timeout(20_000) });
-    if (ack.ok) out.filed.push(b.id);
+    const ack = await fetchFn(`${cfg.apiBase}/workplace/bugs/${encodeURIComponent(b.bug_id)}/filed`, { method: 'POST', headers, body: JSON.stringify({ story_id: storyId }), signal: AbortSignal.timeout(20_000) });
+    if (ack.ok) out.filed.push(b.bug_id);
   }
 
   // Fixes: every filed alpha story that reached done and has not been reported yet.
@@ -100,7 +113,7 @@ export async function tick(wp: Workplace, cfg: Config, fetchFn: Fetch = fetch): 
     if (setting(wp, `alpha:fixed:${storyId}`)) continue;
     const s = items.get(wp, storyId);
     if (!s || s.status !== 'done') continue;
-    const version = (s as { resolution?: string }).resolution && (s as { resolution?: string }).resolution !== 'done' ? null : 'the next build';
+    const version = (s as { resolution?: string }).resolution && (s as { resolution?: string }).resolution !== 'done' ? null : 'next-build';
     if (!version) continue;   // closed as won't-do or duplicate: not a fix
     const ack = await fetchFn(`${cfg.apiBase}/workplace/bugs/${encodeURIComponent(r.value)}/fixed`, { method: 'POST', headers, body: JSON.stringify({ version }), signal: AbortSignal.timeout(20_000) });
     if (ack.ok) { setSetting(wp, `alpha:fixed:${storyId}`, new Date().toISOString()); out.fixed.push(r.value); }

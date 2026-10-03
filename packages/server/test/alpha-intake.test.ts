@@ -20,7 +20,8 @@ test('a triaged bug becomes one ranked story under Bug bash, its id goes back, a
   const { wp, tmp } = testWorkplace();
   try {
     const epic = items.create(wp, { level: 'epic', title: 'Bug bash: zero known bugs' }, 'owner');
-    const bug: alpha.AlphaBug = { id: 'B1', title: 'Windows app does not open', summary: 'Crashes on launch', priority: 'P0', platforms: ['windows'], affected_testers: ['a@x.com', 'b@x.com'], evidence: [{ report_id: 'R1', urls: ['https://example/s.png'] }] };
+    // Exactly what the iris-alpha backend sends (bug_view + evidence), so the test cannot drift from it.
+    const bug: alpha.AlphaBug = { bug_id: 'B1', title: 'Windows app does not open', summary: 'Crashes on launch', priority: 'P0', platforms: ['windows'], affected_testers: ['a@x.com', 'b@x.com'], affected_count: 2, evidence: [{ report_id: 'R1', what_happened: 'Double-click, nothing', platform: 'windows', app_version: '0.2.17', files: [{ url: 'https://example/s.png', type: 'image/png' }] }] };
     const cfg = { apiBase: 'https://alpha.example', token: 't' };
     const be = fakeBackend([bug]);
     const r1 = await alpha.tick(wp, cfg, be.fn);
@@ -32,6 +33,9 @@ test('a triaged bug becomes one ranked story under Bug bash, its id goes back, a
     const s = items.get(wp, storyId)!;
     assert.match(s.title, /^\[Alpha P0\] Windows app does not open/);
     assert.match(String((s as { body?: string }).body), /Testers affected: 2/);
+    assert.match(String((s as { body?: string }).body), /alpha bug B1/);
+    assert.match(String((s as { body?: string }).body), /https:\/\/example\/s\.png/);
+    assert.match(String((s as { body?: string }).body), /What happened: Double-click, nothing/);
 
     // Same bug offered again (backend missed the ack): no second story.
     await alpha.tick(wp, cfg, be.fn);
@@ -44,7 +48,7 @@ test('a triaged bug becomes one ranked story under Bug bash, its id goes back, a
     const be2 = fakeBackend([]);
     const r2 = await alpha.tick(wp, cfg, be2.fn);
     assert.deepEqual(r2.fixed, ['B1']);
-    assert.deepEqual(be2.calls.find(c => c.url.endsWith('/workplace/bugs/B1/fixed'))!.body, { version: 'the next build' });
+    assert.deepEqual(be2.calls.find(c => c.url.endsWith('/workplace/bugs/B1/fixed'))!.body, { version: 'next-build' });
     const r3 = await alpha.tick(wp, cfg, fakeBackend([]).fn);
     assert.deepEqual(r3.fixed, []);
   } finally {
