@@ -64,3 +64,24 @@ test('#19: item_handback is refused while the story is In review (or its PR wait
     assert.match(await dev('item_handback', { itemId: story.id, note: 'Built the footer' }), /Handed .* back to Nikhil/);
   } finally { tmp.cleanup(); }
 });
+
+test('#17: a story assigned to the Chief of Staff starts a routing session, not the builder prompt; she routes it with item_update', async () => {
+  const { wp, tmp } = testWorkplace();
+  withOauth(tmp.dir);
+  try {
+    const epic = items.create(wp, { level: 'epic', title: 'Practice' }, 'owner');
+    const story = items.create(wp, { level: 'story', parentId: epic.id, title: 'About screen version', assigneeId: 'asha' }, 'owner');
+    employees.assign(wp, story.id);
+    const prompt = runtime.last().options.prompt;
+    assert.match(prompt, /^Route this: assign it to the right developer by the ownership map/);
+    assert.doesNotMatch(prompt, /Take assignment|## Plan/);
+
+    const built = items.create(wp, { level: 'story', parentId: epic.id, title: 'Footer', assigneeId: 'tara' }, 'owner');
+    employees.assign(wp, built.id);
+    assert.match(runtime.last().options.prompt, /Take assignment .*## Plan/s, 'a developer still gets the builder prompt');
+
+    assert.match(await (await toolsFor(wp, 'dev'))('item_update', { itemId: story.id, assigneeId: 'tara' }), /only the Chief of Staff routes/);
+    assert.match(await (await toolsFor(wp, 'asha', story.id))('item_update', { itemId: story.id, assigneeId: 'tara' }), /is /);
+    assert.equal(rawGet(wp, story.id)!.employeeId, 'tara');
+  } finally { tmp.cleanup(); }
+});
