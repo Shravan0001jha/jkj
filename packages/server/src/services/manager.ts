@@ -5,6 +5,7 @@ import * as employees from './employees.js';
 import * as spend from './spend.js';
 import * as trail from './trail.js';
 import * as coo from './coo.js';
+import * as floor from './floor.js';
 import * as reviewWake from './review-wake.js';
 import * as dispatch from './dispatch.js';
 import { chiefOfStaffId, humanDuration, isAgent, nameOf, rawGet } from './v2-map.js';
@@ -188,6 +189,8 @@ export function deliver(wp: Workplace, nowMs = Date.now()): number {
       runs.sendMessage(open.agentId, text, [], { from: 'workplace' });
     } else {
       // Notices never start a session of their own: they ride along with the next alert or digest.
+      // "Pause all": nothing starts a session for Asha; what waits goes to her after the resume.
+      if (floor.paused(wp)) return 0;
       if (!queued.some(r => !r.notice || r.key.startsWith('digest:'))) return 0;
       if (ashaStuck(wp, nowMs)) return 0;
       employees.talk(wp, asha, text, [], { autonomous: true });

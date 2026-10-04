@@ -39,6 +39,12 @@ interface Run {
   silenceTimer?: ReturnType<typeof setTimeout>;
   /** Set when a message got no model output within SILENT_MS; cleared by the next output. */
   silentSince?: string;
+  /** Talk messages (owner/COO) the model has not finished acting on, oldest first. */
+  unanswered: Unanswered[];
+  /** Talk messages whose turn ended without success (interrupted, a turn or budget cap): the CLI will not run them again. */
+  dropped: Unanswered[];
+  /** The owner pressed Stop: the interrupted turn's messages are his to drop, not to deliver again. */
+  discardOnStop?: boolean;
   /** Messages handed to the CLI and not yet consumed by a turn, oldest first (read receipts). */
   unread: { uuid: string; entryId: string; talkId?: string }[];
   /** Between a turn's first reply frame and its result. */
@@ -51,6 +57,45 @@ export interface TurnEvent { agentId: string; state: 'start' | 'end'; consumed: 
 /** How a sender id reads in the transcript; the Workplace installs one that knows employee names. */
 let senderNameOf: (from: string) => string = from => senderName(from);
 export function setSenderNames(fn: ((from: string) => string) | null): void { senderNameOf = fn ?? (from => senderName(from)); }
+
+/**
+ * Whether a talk message has reached the model (4 Oct: the COO's message to Asha died with her
+ * session and nobody noticed). A message sent between turns starts the next turn, so the next model
+ * frame has seen it ('next'). One sent mid-turn waits in the CLI's queue and is injected after the
+ * next tool result, so it is seen only by a frame that follows a tool call made after it
+ * ('after-tool'); if the turn ends first it starts the following turn ('next' again). A message is
+ * answered when a turn that saw it ends in success.
+ */
+export interface Unanswered { text: string; /** Who sent it (owner, coo, …): the redelivery keeps the sender. */ from: string; at: string; stage: 'after-tool' | 'next' | 'heard' }
+
+/** Only explicit talk (the owner, the COO, …) is tracked; the Workplace's own prompts are not. */
+function track(run: Run, text: string, from: string, opening = false): void {
+  if (from === 'workplace') return;
+  run.unanswered.push({ text, from, at: new Date().toISOString(), stage: !opening && run.agent.status === 'running' ? 'after-tool' : 'next' });
+}
+
+/** A model frame arrived (text or a tool call). */
+function sawFrame(run: Run, toolUse: boolean): void {
+  for (const m of run.unanswered) if (m.stage === 'next') m.stage = 'heard';
+  if (toolUse) for (const m of run.unanswered) if (m.stage === 'after-tool') m.stage = 'next';
+}
+
+/** A turn ended. Success answers what it saw; any other end drops it (the CLI does not retry an interrupted turn). */
+function turnEnded(run: Run, subtype: string): void {
+  const heard = run.unanswered.filter(m => m.stage === 'heard');
+  run.unanswered = run.unanswered.filter(m => m.stage !== 'heard');
+  for (const m of run.unanswered) if (m.stage === 'after-tool') m.stage = 'next';
+  if (subtype !== 'success') {
+    if (!run.discardOnStop) run.dropped.push(...heard);
+    run.discardOnStop = false;
+  }
+}
+
+/** Talk messages this run took but did not finish acting on: dropped by a failed turn, or still waiting. */
+export const unanswered = (agentId: string): Unanswered[] => {
+  const run = runs.get(agentId);
+  return run ? [...run.dropped, ...run.unanswered] : [];
+};
 
 /**
  * No model output this long after a message is worth a line in the transcript and the log, with
@@ -257,6 +302,8 @@ function spawn(options: SpawnOptions): Agent {
     entries: (options.history ?? []).map(e => ({ ...e, agentId: id })),
     handle: undefined as unknown as RunHandle,
     images: new Map(),
+    unanswered: [],
+    dropped: [],
     unread: [],
     inTurn: false,
   };
@@ -266,6 +313,7 @@ function spawn(options: SpawnOptions): Agent {
   const promptUuid = randomUUID();
   const first = userEntry(run, options.prompt, options.promptFrom ?? 'owner', options.promptTalkId);
   run.unread.push({ uuid: promptUuid, entryId: first.id, talkId: first.talkId! });
+  track(run, options.prompt, options.promptFrom ?? 'owner', true);
   const prompt = withFiles(options.prompt, text);
 
   run.handle = runtime(
@@ -307,9 +355,9 @@ function spawn(options: SpawnOptions): Agent {
 
       onTurnStart: uuids => turnStart(run, uuids),
 
-      onText: text => { heard(run); if (!run.inTurn) turnStart(run, undefined); append(run, 'assistant', '', text, { talkId: newTalkId() }); },
+      onText: text => { heard(run); if (!run.inTurn) turnStart(run, undefined); sawFrame(run, false); append(run, 'assistant', '', text, { talkId: newTalkId() }); },
 
-      onToolUse: (tool, input) => { heard(run); if (!run.inTurn) turnStart(run, undefined); append(run, kindForTool(tool), tool, describeInput(tool, input)); },
+      onToolUse: (tool, input) => { heard(run); if (!run.inTurn) turnStart(run, undefined); sawFrame(run, true); append(run, kindForTool(tool), tool, describeInput(tool, input)); },
 
       onPermission: request2 => new Promise<'allow' | 'always' | 'deny'>(resolve => {
         update(run, {
@@ -348,6 +396,7 @@ function spawn(options: SpawnOptions): Agent {
       }),
 
       onResult: result => {
+        turnEnded(run, result.subtype);
         update(run, { usage: { ...run.agent.usage, costUsd: result.totalCostUsd } });
         options.onResult?.(result);
       },
@@ -380,6 +429,7 @@ export function sendMessage(agentId: string, text: string, attachments: Attachme
   const entry = userEntry(run, text, opts.from ?? 'owner', opts.talkId);
   const uuid = randomUUID();
   run.unread.push({ uuid, entryId: entry.id, talkId: entry.talkId! });
+  track(run, text, opts.from ?? 'owner');
   update(run, { status: 'running', messageCount: (run.agent.messageCount ?? 0) + 1 });
   run.handle.send(withFiles(text, files), images, uuid);
   armSilence(run);
@@ -478,8 +528,10 @@ const isTextual = (mediaType: string, name: string): boolean =>
 
 const language = (name: string): string => name.split('.').pop()?.toLowerCase() ?? '';
 
-export async function interruptRun(agentId: string): Promise<void> {
+/** `byOwner`: the owner's own Stop; what the interrupted turn was acting on is not delivered again. */
+export async function interruptRun(agentId: string, opts: { byOwner?: boolean } = {}): Promise<void> {
   const run = require$(agentId);
+  if (opts.byOwner && run.agent.status === 'running') run.discardOnStop = true;
   await run.handle.interrupt();
   append(run, 'system', 'Stopped', 'Interrupted from the Workplace. Anything already written stays written.');
   // Nothing is asked of the owner after an interrupt: the session simply sits until the next message.
