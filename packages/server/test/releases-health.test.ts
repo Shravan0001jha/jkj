@@ -138,6 +138,11 @@ test('five identical tool calls in a row are a loop', async () => {
     assert.equal(health.detectStalls()[0]?.reason, 'loop');
     s.tool('Read', { file_path: '/x' });
     assert.deepEqual(health.detectStalls(), []);
+    // Same tool, different arguments, is work, not a loop: Asha asking status_of about five people (4 Oct).
+    for (const q of ['Kabir', 'Neel', 'Ira', 'Mira', 'Dev']) s.tool('mcp__workplace__status_of', { q });
+    assert.deepEqual(health.detectStalls(), []);
+    for (let i = 0; i < 5; i++) s.tool('mcp__workplace__status_of', { q: 'Kabir' });
+    assert.equal(health.detectStalls()[0]?.reason, 'loop');
   } finally {
     fake.restore();
     tmp.cleanup();

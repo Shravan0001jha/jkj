@@ -530,8 +530,11 @@ function describeInput(tool: string, input: Record<string, unknown>): string {
     const value = input[key];
     if (typeof value === 'string' && value) return value.length > 300 ? `${value.slice(0, 300)}…` : value;
   }
-  const keys = Object.keys(input);
-  return keys.length ? `${tool}(${keys.join(', ')})` : tool;
+  // The values, not just the argument names: five status_of calls about five different people read
+  // as one call repeated five times, and the loop detector ended Asha mid-task (4 Oct).
+  const args = Object.entries(input).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
+  const text = args ? `${tool}(${args})` : tool;
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text;
 }
 
 /** A short name for the tab, taken from the first few words of the task. */
