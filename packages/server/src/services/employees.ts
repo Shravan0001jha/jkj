@@ -217,7 +217,7 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
     ...(options.assignment ? { assignmentId: options.assignment.id } : {}),
     contextTokens: context.tokens,
     extra: {
-      env: childEnv(wp),
+      env: childEnv(wp, employeeId),
       systemPromptAppend: context.append,
       settingSources: ['user', 'project'],
       // The Workplace's own tools are the reporting channel; they never prompt.
@@ -317,13 +317,15 @@ export function foreignChanges(wp: Workplace, emp: Employee, worktree: Worktree)
 }
 
 /** The child gets the subscription token; the API key is absent, not blank. */
-export function childEnv(wp: Workplace): Record<string, string | undefined> {
+export function childEnv(wp: Workplace, employeeId?: string): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env };
   delete env['ANTHROPIC_API_KEY'];
   delete env['ANTHROPIC_AUTH_TOKEN'];
   const token = readOauthToken(wp);
   if (token) env['CLAUDE_CODE_OAUTH_TOKEN'] = token;
   env['IRIS_WORKPLACE'] = '1';
+  // Who is running: scripts/pre-pr.sh records it as "run by <id>" (dry run #11: it showed the owner's git email).
+  if (employeeId) env['WORKPLACE_EMPLOYEE'] = employeeId; else delete env['WORKPLACE_EMPLOYEE'];
   // The toolchains scripts/pre-pr.sh needs (Android SDK, JDK 17, full Xcode, not the CLI tools).
   env['ANDROID_HOME'] = wp.config.evidence.androidHome;
   env['JAVA_HOME'] = wp.config.evidence.javaHome;
