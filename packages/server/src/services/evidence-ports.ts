@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -65,6 +65,43 @@ export interface Staging {
 }
 
 /** The app did not build at this commit. */
+/**
+ * Staging "in use" while an evidence run is queued or running (owner, 4 Oct). `hold(until)` touches a
+ * successful request (which alone keeps the idle stopper away) carrying the lock's expiry, and writes
+ * the expiry to the SSM parameter `/iris-staging/in-use`; `staging.sh stop` refuses while it is fresh
+ * and the on-box idle stopper reads the expiry from its access log.
+ */
+export interface StagingLock {
+  hold(untilMs: number): Promise<void>;
+  release(): Promise<void>;
+}
+
+export const STAGING_LOCK_PARAM = '/iris-staging/in-use';
+
+export class RealStagingLock implements StagingLock {
+  constructor(private readonly cfg: EvidenceConfig, private readonly region = 'ap-south-1') {}
+
+  private aws(args: string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      execFile('aws', ['--region', this.region, ...args], { timeout: 30_000, env: { ...process.env, AWS_PAGER: '' } }, err => (err ? reject(err) : resolve()));
+    });
+  }
+
+  async hold(untilMs: number): Promise<void> {
+    const until = Math.floor(untilMs / 1000);
+    const [, param] = await Promise.allSettled([
+      fetch(`${this.cfg.stagingUrl}/v1/min-version?in-use-until=${until}`, { signal: AbortSignal.timeout(10_000) }).then(r => { if (!r.ok) throw new Error(`touch ${r.status}`); }),
+      this.aws(['ssm', 'put-parameter', '--name', STAGING_LOCK_PARAM, '--type', 'String', '--overwrite', '--value', String(until)]),
+    ]);
+    // A staging that is down (queued before the run starts it) or an SSM hiccup is not an error of the run.
+    if (param.status === 'rejected') throw new Error(`staging lock not written: ${String(param.reason).split('\n')[0]!.slice(0, 200)}`);
+  }
+
+  async release(): Promise<void> {
+    await this.aws(['ssm', 'delete-parameter', '--name', STAGING_LOCK_PARAM]).catch(() => undefined);
+  }
+}
+
 export class BuildError extends Error {
   constructor(message: string, readonly logTail = '') { super(message); this.name = 'BuildError'; }
 }

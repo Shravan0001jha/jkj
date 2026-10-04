@@ -18,7 +18,7 @@ import { rawGet } from '../src/services/v2-map.js';
 import { testWorkplace } from './fakes/workplace.js';
 import { FakeGitHub } from './fakes/fake-github.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
-import { FakeBuilder, FakeRunner, FakeStaging, FakeStore } from './fakes/fake-evidence.js';
+import { FakeBuilder, FakeLock, FakeRunner, FakeStaging, FakeStore } from './fakes/fake-evidence.js';
 import { useEvidenceStore } from '../src/services/evidence-share.js';
 
 /**
@@ -37,6 +37,7 @@ interface Setup {
   builder: FakeBuilder;
   staging: FakeStaging;
   store: FakeStore;
+  lock: FakeLock;
   repo: string;
   storyId: string;
   wt: string;
@@ -63,7 +64,8 @@ function setup(opts: { auto?: boolean } = {}): Setup {
   runner.auto = !!opts.auto;
   const builder = new FakeBuilder(checkout => git(checkout, ['rev-parse', 'HEAD']).trim());
   const staging = new FakeStaging();
-  evidence.useEvidencePorts(wp, { runner, builder, staging });
+  const lock = new FakeLock();
+  evidence.useEvidencePorts(wp, { runner, builder, staging, lock });
   const store = new FakeStore();
   useEvidenceStore(wp, store);
 
@@ -74,7 +76,7 @@ function setup(opts: { auto?: boolean } = {}): Setup {
   };
   const first = make('Recall the last song');
   const st: Setup = {
-    wp, runner, builder, staging, store, repo, storyId: first.id, wt: first.wt,
+    wp, runner, builder, staging, store, lock, repo, storyId: first.id, wt: first.wt,
     commit: (file, content, storyId = st.storyId) => {
       const at = st.wt;
       git(at, ['checkout', '-q', `emp/kabir/${storyId}`]);
@@ -591,4 +593,32 @@ test('shadow: the link is the evidence status target_url and a PR comment; the P
     assert.notEqual(again.targetUrl, rec.share!.url);
     assert.equal(again.targetUrl, rawGet(s.wp, s.storyId)!.evidenceRun!.share!.url, 'the fresh link is stored');
   } finally { await flow.settled(); gh.cleanup(); await s.done(); }
+});
+
+/* ---------- staging "in use" ---------- */
+
+test('staging is held "in use" while a run is queued or running (about 25 min ahead, renewed), and released when the queue is empty', async () => {
+  const s = setup();
+  try {
+    s.commit('services/agent-svc/a.py', 'a = 1\n');
+    assert.equal(s.lock.holds.length, 0);
+    const t0 = Date.now();
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    await until(() => s.lock.holds.length === 1, 'the lock to be held at once');
+    assert.ok(s.lock.holds[0]! - t0 >= 20 * 60_000 && s.lock.holds[0]! - t0 <= 30 * 60_000, 'held well past the 10-min renewal');
+    assert.ok(evidence.LOCK_EVERY_MS <= 10 * 60_000, 'renewed at least every 10 min');
+    await until(() => s.runner.calls.length === 1, 'the run');
+    // A second request while one runs does not start a second heartbeat.
+    s.commit('services/agent-svc/a.py', 'a = 2\n');
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'ios', features: 'queries' });
+    await new Promise(r => setImmediate(r));
+    assert.equal(s.lock.holds.length, 1);
+    assert.equal(s.lock.releases, 0, 'not released while anything is queued or running');
+    s.runner.finish();
+    await until(() => s.runner.calls.length === 2, 'the second run');
+    assert.equal(s.lock.releases, 0);
+    s.runner.finish();
+    await evidence.settled(s.wp);
+    await until(() => s.lock.releases === 1, 'the release');
+  } finally { await s.done(); }
 });

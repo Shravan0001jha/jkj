@@ -120,3 +120,11 @@ export class FakeStore {
     return `https://iris-workplace-evidence-000000000000.s3.ap-south-1.amazonaws.com/${key}?X-Amz-Expires=${seconds}&sig=${this.signed}`;
   }
 }
+
+/** The staging "in use" lock, faked: every hold and release is recorded. */
+export class FakeLock {
+  readonly holds: number[] = [];
+  releases = 0;
+  async hold(untilMs: number): Promise<void> { this.holds.push(untilMs); }
+  async release(): Promise<void> { this.releases += 1; }
+}

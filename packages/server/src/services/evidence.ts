@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameS
 import { basename, join, sep } from 'node:path';
 import type { EvidenceRunRecord, EvidenceState, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
-import type { AppBuilder, EvidenceRunner, Platform, RunnerOutcome, Staging } from './evidence-ports.js';
-import { BUILDER_VERSION, BuildError, killGroupIfOurs, RealBuilder, RealRunner, RealStaging } from './evidence-ports.js';
+import type { AppBuilder, EvidenceRunner, Platform, RunnerOutcome, Staging, StagingLock } from './evidence-ports.js';
+import { BUILDER_VERSION, BuildError, killGroupIfOurs, RealBuilder, RealRunner, RealStaging, RealStagingLock } from './evidence-ports.js';
 import * as work from './work.js';
 import * as trail from './trail.js';
 import * as coo from './coo.js';
@@ -16,7 +16,7 @@ import { now } from './store.js';
 import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { branchFor, excludeLinked } from './worktrees.js';
 import { isDeveloper, isQa } from './review-policy.js';
-import { assertNotRealPath } from './test-guard.js';
+import { assertNotRealPath, underTest } from './test-guard.js';
 import * as evidenceShare from './evidence-share.js';
 import { log } from '../util/logger.js';
 
@@ -85,7 +85,7 @@ export interface EvidenceJob {
 
 /* ---------- the ports ---------- */
 
-export interface EvidencePorts { runner: EvidenceRunner; builder: AppBuilder; staging: Staging }
+export interface EvidencePorts { runner: EvidenceRunner; builder: AppBuilder; staging: Staging; lock: StagingLock }
 
 const ports = new WeakMap<Workplace, Partial<EvidencePorts>>();
 
@@ -98,6 +98,8 @@ function portsOf(wp: Workplace): EvidencePorts {
   p.runner ??= new RealRunner(cfg);
   p.builder ??= new RealBuilder(cfg);
   p.staging ??= new RealStaging(cfg, join(cfg.dir, '_logs', 'staging.log'));
+  // Tests never touch staging or SSM: without a fake, the lock does nothing.
+  p.lock ??= underTest() ? { hold: async () => undefined, release: async () => undefined } : new RealStagingLock(cfg);
   ports.set(wp, p);
   return p as EvidencePorts;
 }
@@ -110,6 +112,8 @@ interface Engine {
   active: Map<number, { job: EvidenceJob; promise: Promise<void> }>;
   stopped: boolean;
   scheduled: boolean;
+  /** The "in use" heartbeat while anything is queued or running. */
+  lockTimer?: ReturnType<typeof setInterval>;
 }
 
 const engines = new WeakMap<Workplace, Engine>();
@@ -243,9 +247,32 @@ function schedulePump(wp: Workplace): void {
   setImmediate(() => { e.scheduled = false; pump(wp); });
 }
 
+/** The lock outlives a missed beat: held for 25 min, renewed every 10. */
+export const LOCK_EVERY_MS = 10 * 60_000;
+const LOCK_FOR_MS = 25 * 60_000;
+
+function beat(wp: Workplace): void {
+  portsOf(wp).lock.hold(Date.now() + LOCK_FOR_MS).catch(err => log.warn('evidence', errText(err)));
+}
+
+/** Staging stays up while a run is queued or running: hold the lock now and every 10 min; release when idle. */
+function keepStagingInUse(wp: Workplace): void {
+  const e = engine(wp);
+  const busy = !e.stopped && (e.queue.length > 0 || e.active.size > 0);
+  if (busy && !e.lockTimer) {
+    beat(wp);
+    e.lockTimer = setInterval(() => beat(wp), LOCK_EVERY_MS);
+    e.lockTimer.unref?.();
+  } else if (!busy && e.lockTimer) {
+    clearInterval(e.lockTimer);
+    delete e.lockTimer;
+    if (!e.stopped) portsOf(wp).lock.release().catch(err => log.warn('evidence', `staging lock release: ${errText(err)}`));
+  }
+}
+
 function pump(wp: Workplace): void {
   const e = engine(wp);
-  if (e.stopped) return;
+  if (e.stopped) { keepStagingInUse(wp); return; }
   for (let slot = 1; slot <= wp.config.evidence.slots && e.queue.length; slot++) {
     if (e.active.has(slot)) continue;
     const job = e.jobs.get(e.queue.shift()!);
@@ -256,6 +283,7 @@ function pump(wp: Workplace): void {
       .catch(err => log.warn('evidence', `${job.id}: ${errText(err)}`))
       .finally(() => { e.active.delete(slot); schedulePump(wp); });
   }
+  keepStagingInUse(wp);
 }
 
 /** Resolves when nothing is queued or running (tests, shutdown). */
@@ -608,6 +636,8 @@ export function startEvidence(wp: Workplace): () => void {
 export function stopAll(wp: Workplace): void {
   const e = engine(wp);
   e.stopped = true;
+  // The lock is left to expire: the next boot queues these runs again and holds it anew.
+  if (e.lockTimer) { clearInterval(e.lockTimer); delete e.lockTimer; }
   for (const { job } of e.active.values()) {
     if (job.pid) killGroupIfOurs(job.pid, markerOf(wp)) || killGroupIfOurs(job.pid, wp.config.evidence.dir);
   }
