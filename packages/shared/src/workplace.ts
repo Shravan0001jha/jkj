@@ -284,6 +284,42 @@ export interface WorkItem {
   hold?: boolean;
   /** Ready and waiting for its busy assignee (the watcher's "busy" case): the dispatcher starts it when they are free. */
   queuedFor?: string;
+  /** The story's pull request on GitHub (docs/LLD-github-flow.md §1); set only in shadow/on mode. */
+  pr?: PrRecord;
+  /** The last time the server refused to push the story's branch (a planted key, build output, a bad name). */
+  prRefused?: { at: string; sha: string; reasons: string[] };
+}
+
+/* ---------- GitHub flow (docs/LLD-github-flow.md) ---------- */
+
+export type GitHubMode = 'local' | 'shadow' | 'on';
+
+/** An approval holds only for the commit it was given on, in the same stay in review. */
+export interface PrApproval {
+  by: string;
+  at: string;
+  sha: string;
+  /** The item's statusSince when it was given: a send-back and a new review are a new episode. */
+  episode: string;
+  note?: string;
+}
+
+export interface PrRecord {
+  number: number;
+  url: string;
+  branch: string;
+  base: string;
+  headSha: string;
+  pushedAt: string;
+  devApproval?: PrApproval;
+  qaApproval?: PrApproval;
+  evidence: 'pending' | 'stale' | 'success' | 'failure';
+  evidenceNote?: string;
+  tests?: { state: 'pending' | 'success' | 'failure' | 'error'; sha: string; at: string; summary: string; details?: string };
+  sendBack?: { by: string; at: string; note: string; disputedAt?: string };
+  /** context → "sha|state|description" last posted, so an unchanged status is not posted again. */
+  posted?: Record<string, string>;
+  merged?: { at: string; sha: string; by: string };
 }
 
 /* ---------- inbox ---------- */

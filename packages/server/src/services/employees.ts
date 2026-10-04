@@ -7,6 +7,7 @@ import type { Workplace } from './workplace.js';
 import type { RunResult } from '../runtime/claude-agent.js';
 import * as runs from './runs.js';
 import * as work from './work.js';
+import * as githubFlow from './github-flow.js';
 import * as spend from './spend.js';
 import * as inbox from './inbox.js';
 import { assembleContext } from './context-layers.js';
@@ -65,7 +66,7 @@ export const OWNER_TALK_TURN_INR = 100;
 /** The owner saying, in a talk, that paused work may go on. */
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'review_send_back', 'review_dispute'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -953,7 +954,9 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
             const item = work.reportDone(wp, id, evidence, employeeId);
             lastReport.set(employeeId, `Reported ${item.title}: ${evidence.tests.passed} passed / ${evidence.tests.failed} failed; ${evidence.commits.length} commits; live: ${evidence.liveVerified.join(', ') || 'none'}; not verified: ${evidence.notVerified.join(', ') || 'none'}`);
             const nudge = warning ? ` Warning (on the item): ${warning}. The handbook asks for "## Plan" first, then the build: post your plan before you start next time.` : '';
-            return ok(`Recorded. ${item.id} is in review; it becomes done when a verifier confirms it.${nudge}`);
+            // The server pushes the branch and opens the PR (shadow/on); local: nothing, and no text.
+            const gh = await githubFlow.onReview(wp, id, employeeId).catch(err => ({ message: `GitHub: ${err instanceof Error ? err.message : String(err)}` }));
+            return ok(`Recorded. ${item.id} is in review; it becomes done when a verifier confirms it.${nudge}${gh.message ? ` ${gh.message}` : ''}`);
           } catch (err) {
             return ok(`Not recorded: ${err instanceof Error ? err.message : String(err)}`);
           }
@@ -975,7 +978,24 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           // "State a feature once"; the §0 table has no owner row for a review): this is routine,
           // not an owner decision, so it never reaches his Inbox — only the reviewer's/Asha's page.
           inbox.raise(wp, { kind: 'question', title: `Review requested: ${item.title}`, body: note ?? 'Please verify.', raisedBy: employeeId, context: { assignmentId }, dedupeKey: `review:${assignmentId}`, ownerFacing: false });
-          return ok('Review requested.');
+          const gh = await githubFlow.onReview(wp, assignmentId, employeeId).catch(err => ({ message: `GitHub: ${err instanceof Error ? err.message : String(err)}` }));
+          return ok(`Review requested.${gh.message ? ` ${gh.message}` : ''}`);
+        }),
+      // The GitHub flow's two approvals (docs/HLD-github-flow.md D4): in local mode they answer "review as before".
+      tool('review_approve', 'Approve a story in review that has a pull request. First a lead who is not the author (the developer approval), then QA. QA\'s approval marks it done. A new commit resets both.',
+        { itemId: z.string(), note: z.string().optional() },
+        async ({ itemId, note }) => {
+          try { return ok((await githubFlow.approve(wp, itemId, employeeId, note)).message); } catch (err) { return ok(`Not approved: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('review_send_back', 'Send a story in review back to its author with what to fix (a lead or QA, not the author). It ends both approvals.',
+        { itemId: z.string(), note: z.string() },
+        async ({ itemId, note }) => {
+          try { await githubFlow.sendBack(wp, itemId, employeeId, note); return ok(`Sent back to its author: ${note}`); } catch (err) { return ok(`Not sent back: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('review_dispute', 'The author disputes a QA send-back, with the reason. It goes to Asha first, then the COO, then the owner.',
+        { itemId: z.string(), reason: z.string() },
+        async ({ itemId, reason }) => {
+          try { await githubFlow.dispute(wp, itemId, employeeId, reason); return ok('Dispute raised with Asha; she decides it or takes it to the COO.'); } catch (err) { return ok(`Not raised: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('write_spec', 'Chief of Staff only: attach the spec (acceptance criteria) to a stated feature. It becomes "specced" and can be decomposed.',
         { featureId: z.string(), spec: z.string() },

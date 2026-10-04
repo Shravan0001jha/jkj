@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as quality from '../src/services/quality.js';
@@ -137,7 +137,7 @@ test('run: a dist-x file or a planted key fails the run before any command', asy
     const res = await quality.run(r.root, 'feat/iris-character', 'HEAD', config('areas:\n  all:\n    paths: [""]\n    checks:\n      - name: never\n        run: touch .ran\n'));
     assert.equal(res.state, 'failure');
     assert.match(res.summary, /build output/);
-    assert.ok(!res.details?.includes('never'));
+    assert.ok(!existsSync(join(r.root, '.ran')), 'no command ran');
   } finally { r.cleanup(); }
 });
 

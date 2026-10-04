@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -17,6 +17,7 @@ import { ensureWorktree } from '../src/services/worktrees.js';
 import { rawGet } from '../src/services/v2-map.js';
 import { testWorkplace } from './fakes/workplace.js';
 import { FakeGitHub } from './fakes/fake-github.js';
+import { installFakeRuntime } from './fakes/fake-runtime.js';
 
 /**
  * Checkpoints 8 and 9 (docs/HLD-github-flow.md): the server pushes a story's branch and opens its PR
@@ -25,6 +26,10 @@ import { FakeGitHub } from './fakes/fake-github.js';
  */
 
 const TRUNK = 'feat/iris-character';
+
+// Asha is told of disputes (manager.alert): never a real agent session from a test.
+const runtime = installFakeRuntime();
+after(() => runtime.restore());
 const git = (cwd: string, args: string[]): string => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: 'pipe' });
 
 interface Setup {
@@ -35,7 +40,7 @@ interface Setup {
   wt: string;
   trunkRepo: string;
   commit(file: string, content: string, message?: string): string;
-  done(): void;
+  done(): Promise<void>;
 }
 
 function setup(mode: 'local' | 'shadow' | 'on' = 'shadow', opts: { quality?: string } = {}): Setup {
@@ -71,7 +76,7 @@ function setup(mode: 'local' | 'shadow' | 'on' = 'shadow', opts: { quality?: str
   };
   return {
     wp, gh, storyId: story.id, wt, trunkRepo, commit,
-    done: () => { gh.cleanup(); tmp.cleanup(); },
+    done: async () => { await flow.settled(); gh.cleanup(); tmp.cleanup(); },
   };
 }
 
@@ -105,7 +110,7 @@ test('local is the default: a review move pushes nothing, opens no PR, and the n
     assert.equal(items.update(s.wp, s.storyId, { status: 'done' }, reviewer).status, 'done');
     assert.equal(await flow.syncHeads(s.wp).then(x => x.length), 0);
     assert.equal(s.gh.calls.length, 0);
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 /* ---------- checkpoint 8: push and PR ---------- */
@@ -140,7 +145,7 @@ test('shadow: moving to review pushes emp/<name>/<story>, opens a PR to the trun
     await flow.onReview(s.wp, s.storyId, 'kabir');
     assert.equal(s.gh.prs.length, 1);
     assert.equal(s.gh.count('openPr'), 1);
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test('report_done and request_review drive the push through the Workplace tools', async () => {
@@ -161,7 +166,7 @@ test('report_done and request_review drive the push through the Workplace tools'
     assert.equal(s.gh.count('push'), 2);
     assert.equal(s.gh.prs.length, 1);
     await client.close();
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test('the push guard refuses a branch that is not emp/<assignee>/<story>', () => {
@@ -183,7 +188,7 @@ test('gate: a commit adding dist-x build output is refused and nothing reaches G
     assert.equal(s.gh.remoteSha(`emp/kabir/${s.storyId}`), null);
     assert.equal(rawGet(s.wp, s.storyId)!.pr?.number, undefined);
     assert.ok(rawGet(s.wp, s.storyId)!.prRefused?.reasons.length);
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test('gate: a planted fake key is refused (even when a later commit deletes it) and never echoed', async () => {
@@ -200,7 +205,7 @@ test('gate: a planted fake key is refused (even when a later commit deletes it) 
     assert.equal(s.gh.count('push'), 0);
     const everything = JSON.stringify([r, rawGet(s.wp, s.storyId), items.detail(s.wp, s.storyId)]);
     assert.ok(!everything.includes(key), 'the key is never echoed');
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 /* ---------- checkpoint 9: two approvals, in order ---------- */
@@ -226,7 +231,7 @@ test('two approvals in order: a lead who is not the author, then QA; identities 
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
     assert.equal(rawGet(s.wp, s.storyId)!.verifiedBy, 'nikhil');
     assert.equal(s.gh.status(head, 'workplace/review')?.state, 'success');
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test("a lead's own story needs a peer lead; Zoya (quality charter) can give the QA approval", async () => {
@@ -239,7 +244,7 @@ test("a lead's own story needs a peer lead; Zoya (quality charter) can give the 
     assert.equal(qa.stage, 'qa');
     assert.equal(pr(s).devApproval?.by, 'tara');
     assert.equal(pr(s).qaApproval?.by, 'zoya');
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test('a new commit resets both approvals, marks evidence stale, and is pushed', async () => {
@@ -258,7 +263,7 @@ test('a new commit resets both approvals, marks evidence stale, and is pushed', 
     await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil'), /developer approval/i);
     await flow.approve(s.wp, s.storyId, 'dev');
     assert.equal(pr(s).devApproval?.sha, newer);
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test('the sweep notices a new commit while in review: re-pushed and reset', async () => {
@@ -273,7 +278,7 @@ test('the sweep notices a new commit while in review: re-pushed and reset', asyn
     assert.equal(s.gh.remoteSha(`emp/kabir/${s.storyId}`), newer);
     assert.equal(flow.approvalHolds(rawGet(s.wp, s.storyId)!, 'dev'), false);
     assert.equal(s.gh.status(newer, 'workplace/review')?.state, 'pending');
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test('on: done needs both approvals (the owner excepted); shadow enforces nothing', async () => {
@@ -286,13 +291,13 @@ test('on: done needs both approvals (the owner excepted); shadow enforces nothin
     assert.throws(() => items.update(on.wp, on.storyId, { status: 'done' }, 'nikhil'), /approval/i);
     await flow.approve(on.wp, on.storyId, 'nikhil');
     assert.equal(rawGet(on.wp, on.storyId)!.status, 'done');
-  } finally { on.done(); }
+  } finally { await on.done(); }
   const shadow = setup('shadow');
   try {
     shadow.commit('services/agent-svc/recall.py', 'x = 1\n');
     await reviewed(shadow);
     assert.equal(items.update(shadow.wp, shadow.storyId, { status: 'done' }, 'nikhil').status, 'done');
-  } finally { shadow.done(); }
+  } finally { await shadow.done(); }
 });
 
 test('a dispute of a QA send-back goes to Asha first (then the COO, then the owner)', async () => {
@@ -314,7 +319,7 @@ test('a dispute of a QA send-back goes to Asha first (then the COO, then the own
     assert.match(alert!.title, /disput/i);
     assert.match(alert!.text ?? alert!.body, /COO/);
     assert.ok(pr(s).sendBack?.disputedAt);
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test('the evidence hook sets workplace/evidence on the head', async () => {
@@ -325,7 +330,7 @@ test('the evidence hook sets workplace/evidence on the head', async () => {
     await flow.setEvidence(s.wp, s.storyId, 'success', 'screenshots attached');
     assert.equal(pr(s).evidence, 'success');
     assert.equal(s.gh.status(head, 'workplace/evidence')?.state, 'success');
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test('quality failures make workplace/tests fail', async () => {
@@ -336,7 +341,7 @@ test('quality failures make workplace/tests fail', async () => {
     assert.equal(s.gh.status(head, 'workplace/tests')?.state, 'failure');
     assert.match(s.gh.status(head, 'workplace/tests')!.description, /agent-svc/);
     assert.equal(pr(s).tests?.state, 'failure');
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 /* ---------- fallback ---------- */
@@ -356,10 +361,10 @@ test('three GitHub failures within five minutes fall back to local and alert the
     assert.equal(flow.mode(s.wp), 'local');
     assert.ok(flow.state(s.wp).fallback, 'the fallback is recorded');
     assert.ok(coo.listItems(s.wp).some(i => /GitHub/.test(i.title) && /local/.test(i.body)), 'the COO is alerted');
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
-test('failures spread over more than five minutes do not fall back', () => {
+test('failures spread over more than five minutes do not fall back', async () => {
   const s = setup('on');
   try {
     const t0 = Date.parse('2026-10-04T10:00:00Z');
@@ -369,7 +374,7 @@ test('failures spread over more than five minutes do not fall back', () => {
     assert.equal(flow.mode(s.wp), 'on');
     flow.recordFailure(s.wp, 'push', s.storyId, t0 + 7 * 60_000);
     assert.equal(flow.mode(s.wp), 'local');
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test('a refusal (planted dist-x) is not a GitHub failure', async () => {
@@ -379,7 +384,7 @@ test('a refusal (planted dist-x) is not a GitHub failure', async () => {
     toReview(s);
     for (let i = 0; i < 4; i++) await flow.onReview(s.wp, s.storyId, 'kabir');
     assert.equal(flow.mode(s.wp), 'on');
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 /* ---------- merge ---------- */
@@ -394,7 +399,7 @@ test('merge: dry run in shadow; in on refused until review and tests are green, 
     assert.equal(dry.mode, 'shadow');
     assert.ok(dry.blockers?.some(b => /approval/i.test(b)));
     assert.equal(sh.gh.count('merge'), 0);
-  } finally { sh.done(); }
+  } finally { await sh.done(); }
 
   const s = setup('on');
   try {
@@ -414,7 +419,7 @@ test('merge: dry run in shadow; in on refused until review and tests are green, 
     assert.equal(git(s.trunkRepo, ['rev-list', '--parents', '-n1', after]).trim().split(' ').length, 3, 'a merge commit');
     assert.ok(pr(s).merged);
     await assert.rejects(flow.merge(s.wp, s.storyId, 'coo'), /already merged/i);
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test('merge: refused when tests are red, or the head moved since the approvals', async () => {
@@ -426,7 +431,7 @@ test('merge: refused when tests are red, or the head moved since the approvals',
     await flow.approve(s.wp, s.storyId, 'nikhil');
     await assert.rejects(flow.merge(s.wp, s.storyId, 'coo'), /tests/i);
     assert.equal(s.gh.count('merge'), 0);
-  } finally { s.done(); }
+  } finally { await s.done(); }
 });
 
 test('merge: a trunk checkout that cannot fast-forward alerts the COO and is never forced', async () => {
@@ -446,5 +451,14 @@ test('merge: a trunk checkout that cannot fast-forward alerts the COO and is nev
     assert.equal(m.synced, false);
     assert.equal(git(s.trunkRepo, ['rev-parse', 'HEAD']).trim(), local, 'nothing forced, nothing merged locally');
     assert.ok(coo.listItems(s.wp).some(i => /fast-forward/i.test(i.body)), 'the COO is alerted');
-  } finally { s.done(); }
+  } finally { await s.done(); }
+});
+
+test('an approval holds only for its commit and its stay in review', () => {
+  const a = { by: 'dev', at: 't', sha: 'aaa', episode: 'e1' };
+  const base = { status: 'in-review', statusSince: 'e1', pr: { number: 1, url: 'u', branch: 'b', base: TRUNK, headSha: 'aaa', pushedAt: 't', evidence: 'pending', devApproval: a } } as unknown as WorkItem;
+  assert.equal(flow.approvalHolds(base, 'dev'), true);
+  assert.equal(flow.approvalHolds({ ...base, pr: { ...base.pr!, headSha: 'bbb' } }, 'dev'), false, 'another commit');
+  assert.equal(flow.approvalHolds({ ...base, statusSince: 'e2' }, 'dev'), false, 'a new stay in review');
+  assert.equal(flow.approvalHolds({ ...base, status: 'in-progress' }, 'dev'), false, 'sent back');
 });

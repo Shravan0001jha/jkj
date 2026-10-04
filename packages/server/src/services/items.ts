@@ -10,6 +10,7 @@ import * as room from './room.js';
 import * as watch from './watch.js';
 import { now, rowsJson } from './store.js';
 import * as waits from './waits.js';
+import { doneProblem } from './review-policy.js';
 import { authorId, chiefOfStaffId, epicOf, humanDuration, isPerson, isWaitable, levelOf, nameOf, projectItem, rawGet, stateFromStatus } from './v2-map.js';
 import { BadRequest, NotFound } from '../util/errors.js';
 
@@ -190,6 +191,9 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
     if (!req.waitingOn || !isWaitable(wp, req.waitingOn)) throw new BadRequest('Blocked needs who it is waiting on: an employee, coo, owner or external.');
   }
   if (to === 'done') {
+    // GitHub flow `on` (docs/LLD-github-flow.md §3): a story with a PR is done by its two approvals. Local/shadow: null.
+    const github = doneProblem(wp, next, by);
+    if (github) throw new BadRequest(github);
     if (from === 'backlog' || from === 'ready') {
       if (by !== 'owner') throw new BadRequest('Closing work that never started is the owner\'s call.');
     } else if (level === 'epic') {

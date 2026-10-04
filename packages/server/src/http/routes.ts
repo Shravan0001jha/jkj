@@ -27,6 +27,7 @@ import * as areas from '../services/areas.js';
 import * as releasePosts from '../services/release-posts.js';
 import * as statusAnswers from '../services/status.js';
 import * as pace from '../services/pace.js';
+import * as githubFlow from '../services/github-flow.js';
 import type { Telegram } from '../services/telegram.js';
 import type { Tunnel } from '../services/tunnel.js';
 import type { Push } from '../services/push.js';
@@ -398,6 +399,20 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const body = await readJson(req);
       pace.setDisabled(wp, body['disabled'] === true);
       json(res, 200, { disabled: pace.disabled(wp), holdUntil: pace.holdUntil(wp) });
+    }),
+
+    // The GitHub flow (docs/LLD-github-flow.md §6): the mode, and the COO's merge. Loopback only, like the rest.
+    r('GET', '/api/coo/github', (req, res) => { requireLocal(req); json(res, 200, githubFlow.state(wp)); }),
+    r('POST', '/api/coo/github', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      githubFlow.setMode(wp, str(body['mode']), 'coo');
+      json(res, 200, githubFlow.state(wp));
+    }),
+    r('POST', '/api/coo/merge', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      json(res, 200, await githubFlow.merge(wp, str(body['itemId']), 'coo'));
     }),
 
     /* ---------- published access: the emergency off switch ---------- */

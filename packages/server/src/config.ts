@@ -63,6 +63,25 @@ export interface Config {
   ownerHandles: string[];
   /** "23-07": IST hours during which needs-you pushes are held; cap and blocked still go. */
   pushQuiet?: string;
+  /** The GitHub pull-request flow (docs/HLD-github-flow.md). The mode itself is a setting, not config. */
+  github: GitHubConfig;
+}
+
+export interface GitHubConfig {
+  org: string;
+  repo: string;
+  /** The trunk every story branch is cut from and merged into. */
+  trunk: string;
+  /** Prints an App installation token for the slug given as its one argument. */
+  tokenScript: string;
+  /** The Python that runs it (its venv has PyJWT). */
+  python: string;
+  /** The App that pushes, opens and merges PRs. */
+  pushApp: string;
+  /** The App that posts the workplace/* commit statuses. */
+  reviewApp: string;
+  /** Where a PR body links the item (GET <linkBase>/api/items/<id>). */
+  linkBase: string;
 }
 
 export function loadConfig(argv: string[] = process.argv.slice(2), env = process.env): Config {
@@ -108,5 +127,15 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
     push: !argv.includes('--no-push') && env['WORKPLACE_PUSH'] !== '0',
     ownerHandles: (env['WORKPLACE_OWNER_HANDLES'] ?? 'owner,shravan').split(',').map(s => s.trim()).filter(Boolean),
     ...(env['WORKPLACE_PUSH_QUIET'] ? { pushQuiet: env['WORKPLACE_PUSH_QUIET'] } : {}),
+    github: {
+      org: env['WORKPLACE_GITHUB_ORG'] ?? 'shravan0001jha-iris-hq',
+      repo: env['WORKPLACE_GITHUB_REPO'] ?? 'iris',
+      trunk: env['WORKPLACE_GITHUB_TRUNK'] ?? 'feat/iris-character',
+      tokenScript: env['WORKPLACE_GITHUB_TOKEN_SCRIPT'] ?? join(env['IRIS_OPS_DIR'] ?? join(homedir(), 'iris-ops'), 'github', 'token.py'),
+      python: env['WORKPLACE_GITHUB_PYTHON'] ?? join(env['IRIS_OPS_DIR'] ?? join(homedir(), 'iris-ops'), 'github', '.venv', 'bin', 'python'),
+      pushApp: env['WORKPLACE_GITHUB_PUSH_APP'] ?? 'iris-workplace',
+      reviewApp: env['WORKPLACE_GITHUB_REVIEW_APP'] ?? 'iris-review',
+      linkBase: env['WORKPLACE_GITHUB_LINK_BASE'] ?? `http://127.0.0.1:${num(flag('port') ?? env['WORKPLACE_PORT'], 4317)}`,
+    },
   };
 }

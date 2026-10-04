@@ -7,6 +7,7 @@ import * as spend from './spend.js';
 import * as trail from './trail.js';
 import { epicOf, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { log } from '../util/logger.js';
+import { githubMode } from './review-policy.js';
 
 /**
  * Waking the reviewer (QA, 2 Oct; LLD §19.6a). An item entering In review used to wake nobody: the
@@ -82,7 +83,9 @@ export function reviewPrompt(wp: Workplace, w: WorkItem): string {
   const branch = isAgent(wp, w.employeeId) ? `, then its commits on branch emp/${w.employeeId}/${w.id}` : '';
   return `Review request: ${noun} ${w.id} "${w.title}"${by} is In review and you are its reviewer. ` +
     `Check it against its acceptance criteria and evidence (status_of ${w.id}${branch}). ` +
-    `Then call item_update on ${w.id}: status done if it meets them, or status in-progress with a note saying what to fix. Keep it short.`;
+    (w.pr && !w.pr.merged && githubMode(wp) !== 'local'
+      ? `It has pull request #${w.pr.number} (head ${w.pr.headSha.slice(0, 8)}). Then call review_approve on ${w.id} if it meets them (a lead who is not the author approves first, then QA), or review_send_back with a note saying what to fix. Keep it short.`
+      : `Then call item_update on ${w.id}: status done if it meets them, or status in-progress with a note saying what to fix. Keep it short.`);
 }
 
 /** A turn is running, or parked on a tool approval: not the moment to push a review in. */

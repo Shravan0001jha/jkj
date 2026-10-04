@@ -30,6 +30,7 @@ import * as employees from './services/employees.js';
 import * as handoff from './services/handoff.js';
 import * as dispatch from './services/dispatch.js';
 import * as manager from './services/manager.js';
+import * as githubFlow from './services/github-flow.js';
 import * as spend from './services/spend.js';
 import * as pace from './services/pace.js';
 import * as alphaIntake from './services/alpha-intake.js';
@@ -122,6 +123,9 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   // Asha first (owner, 2 Oct): operational alerts go to her; the COO only when she does not act in
   // 15 min, the call is above her, or she is stuck. Her digest every 20 min while work is active.
   const stopManager = manager.startManager(wp);
+  // The GitHub flow's sweep (docs/HLD-github-flow.md D3): a new commit on a story in review is re-pushed
+  // and resets its approvals. Does nothing while the mode is local (the default).
+  const stopGitHubFlow = githubFlow.startGitHubFlow(wp);
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
@@ -211,6 +215,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       stopHandoffWatch();
       stopDispatch();
       stopManager();
+      stopGitHubFlow();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
       stopPace();
