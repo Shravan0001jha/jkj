@@ -7,7 +7,7 @@ import * as spend from './spend.js';
 import * as trail from './trail.js';
 import { epicOf, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { log } from '../util/logger.js';
-import { githubMode } from './review-policy.js';
+import { githubMode, qaTooEarly } from './review-policy.js';
 
 /**
  * Waking the reviewer (QA, 2 Oct; LLD §19.6a). An item entering In review used to wake nobody: the
@@ -83,7 +83,9 @@ export function reviewPrompt(wp: Workplace, w: WorkItem): string {
   const branch = isAgent(wp, w.employeeId) ? `, then its commits on branch emp/${w.employeeId}/${w.id}` : '';
   return `Review request: ${noun} ${w.id} "${w.title}"${by} is In review and you are its reviewer. ` +
     `Check it against its acceptance criteria and evidence (status_of ${w.id}${branch}). ` +
-    (w.pr && !w.pr.merged && githubMode(wp) !== 'local'
+    (w.reviewerId && qaTooEarly(wp, w, w.reviewerId)
+      ? `It has pull request #${w.pr!.number}, but no developer approval yet. Wait: developer approval first. QA reviews after the developer approver (approval 1 of 2): don't review it, move it or send it back now; you are woken again when it is your turn.`
+      : w.pr && !w.pr.merged && githubMode(wp) !== 'local'
       ? `It has pull request #${w.pr.number} (head ${w.pr.headSha.slice(0, 8)}). Approval 1 of 2 is the developer approver's (a lead who is not the author); approval 2 of 2 is QA's, only after the developer approval. ` +
         `Then call review_approve on ${w.id} if it meets them, or review_send_back with exactly what to change (QA: the root cause). Keep it short.`
       : `Then call item_update on ${w.id}: status done if it meets them, or status in-progress with a note saying what to fix. Keep it short.`);

@@ -33,6 +33,21 @@ export const DESKTOP_REFUSAL = 'Mac desktop checks need a live window from the C
 const WINDOWS_REFUSAL = 'Windows can\'t run on the Mac: Windows evidence is a cloud robot run that QA schedules, so ask QA on the item.';
 
 const PHONES: readonly Platform[] = ['android', 'ios'];
+/** The runner's own list (local-run.sh ALL_FEATURES), used when the commit has no e2e/ runner to read it from. */
+export const RUNNER_FEATURES: readonly string[] = ['queries', 'voice', 'memory', 'music', 'dance', 'files', 'timer', 'reminder', 'apps', 'errand'];
+
+/** The features the runner at `sha` accepts: its ALL_FEATURES line, else the shared list. */
+export function runnerFeatures(wp: Workplace, repo: string, sha: string): string[] {
+  try {
+    const src = git(repo, ['show', `${sha}:${wp.config.evidence.runnerInRepo}`]);
+    const m = /^ALL_FEATURES=([a-z0-9,-]+)\s*$/m.exec(src);
+    if (m) return m[1]!.split(',').filter(Boolean);
+  } catch { /* no runner in this commit */ }
+  return [...RUNNER_FEATURES];
+}
+
+export const featureRefusal = (allowed: readonly string[]): string =>
+  `Features must be from ${allowed.join(', ')} (or all); setup always runs, so don't name it, and call run_evidence again with those.`;
 const DESKTOP = new Set(['mac', 'macos', 'osx', 'desktop']);
 const WINDOWS = new Set(['windows', 'win', 'windows-default']);
 const FEATURE = /^[a-z][a-z0-9-]{0,31}$/;
@@ -186,6 +201,9 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
   if (!allowed) return no(`Only the story's author, its reviewers, a lead or QA run evidence on it; ask ${nameOf(wp, w.employeeId)} on the item.`);
   const ctx = storyOf(wp, w);
   if (typeof ctx === 'string') return no(ctx);
+  // Checked now, against the runner the run will use, not minutes later by the runner itself.
+  const known = runnerFeatures(wp, ctx.repo, ctx.head);
+  if (features.some(f => f !== 'all' && !known.includes(f))) return no(featureRefusal(known));
 
   const plats = PHONES.filter(p => platforms.includes(p));
   const feats = [...new Set(features)];

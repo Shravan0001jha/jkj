@@ -1013,6 +1013,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
       // The robot suite on the Mac against staging (docs/HLD-evidence.md); handbook "A story's life", step 4.
       tool('run_evidence', 'Run the robot suite on the Mac\'s simulators against the staging server, for your story branch\'s head commit, with the platforms and features your change touches (for example platforms "android,ios", features "memory"). ' +
         'It returns at once with its place in the queue and links a report with screenshots to your story. Never wait for it: the summary comes back to you and onto the story when it finishes; open screenshots only for failures. ' +
+        'Platforms: android, ios. Features: ' + evidenceRuns.RUNNER_FEATURES.join(', ') + ' (or all); setup always runs (install, sign-in), so don\'t name it. ' +
         'Evidence belongs to one commit: a new commit makes it stale, so run it again. Mac desktop features run only in a live window the COO opens (ask on the item); Windows evidence is a cloud run QA schedules.',
         { itemId: z.string().optional(), platforms: z.string(), features: z.string() },
         async ({ itemId, platforms, features }) => {

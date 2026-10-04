@@ -10,7 +10,7 @@ import * as room from './room.js';
 import * as watch from './watch.js';
 import { now, rowsJson } from './store.js';
 import * as waits from './waits.js';
-import { doneProblem } from './review-policy.js';
+import { doneProblem, earlyQaMoveProblem } from './review-policy.js';
 import { authorId, chiefOfStaffId, epicOf, humanDuration, isPerson, isWaitable, levelOf, nameOf, projectItem, rawGet, stateFromStatus } from './v2-map.js';
 import { BadRequest, NotFound } from '../util/errors.js';
 
@@ -225,6 +225,9 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
     if (!req.blockedReason?.trim()) throw new BadRequest('Blocked needs a reason.');
     if (!req.waitingOn || !isWaitable(wp, req.waitingOn)) throw new BadRequest('Blocked needs who it is waiting on: an employee, coo, owner or external.');
   }
+  // GitHub flow (shadow/on): QA does not move a story back before the developer approval (finding #3).
+  const early = earlyQaMoveProblem(wp, w, by, from, to);
+  if (early) throw new BadRequest(early);
   if (to === 'done') {
     // GitHub flow `on` (docs/LLD-github-flow.md §3): a story with a PR is done by its two approvals. Local/shadow: null.
     const github = doneProblem(wp, next, by);
