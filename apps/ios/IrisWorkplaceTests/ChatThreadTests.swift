@@ -53,15 +53,37 @@ final class ChatThreadTests: XCTestCase {
         XCTAssertEqual(details, "more", "only details folds")
     }
 
-    func testTalkListPinsTheCooThenAshaThenByLastActivity() throws {
+    func testTalkListPinnedFirstThenUnreadThenByLastActivity() throws {
         let office = try Fixtures.decode("office", as: OfficeResponse.self)
         let cards = office.units.flatMap(\.employees)
-        let ordered = TalkListView.ordered(cards + cards.prefix(1), chiefOfStaff: office.chiefOfStaff)
+        let coo = cards.first { $0.employee.virtual == true }!.employee.id
+        let others = cards.filter { $0.employee.id != coo && $0.employee.id != "asha" }
+        let unreadId = others.last!.employee.id
+        let ordered = TalkListView.ordered(cards + cards.prefix(1), pinned: [coo, "asha"],
+                                           unread: { $0.employee.id == unreadId ? 2 : 0 }, lastAt: TalkListView.lastActivity)
         XCTAssertEqual(ordered.count, cards.count, "no duplicate card")
-        XCTAssertEqual(ordered[0].employee.virtual, true, "the COO first")
-        XCTAssertEqual(ordered[1].employee.id, "asha", "Asha second")
-        let rest = ordered.dropFirst(2).map { TalkListView.lastActivity($0) ?? "" }
+        XCTAssertEqual(ordered[0].employee.id, coo, "pinned first, in pin order")
+        XCTAssertEqual(ordered[1].employee.id, "asha")
+        XCTAssertEqual(ordered[2].employee.id, unreadId, "then unread")
+        let rest = ordered.dropFirst(3).map { TalkListView.lastActivity($0) ?? "" }
         XCTAssertEqual(rest, rest.sorted(by: >), "then newest activity first")
+        let unpinned = TalkListView.ordered(cards, pinned: ["asha"], unread: { _ in 0 }, lastAt: TalkListView.lastActivity)
+        XCTAssertEqual(unpinned[0].employee.id, "asha", "an unpinned COO is no longer forced first")
+    }
+
+    @MainActor func testPinsAndReadMarksPersist() {
+        let d = UserDefaults(suiteName: "talkprefs-\(UUID().uuidString)")!
+        let p = TalkPrefs(defaults: d, now: Date(timeIntervalSince1970: 0))
+        XCTAssertEqual(p.pinned, ["coo"], "the COO is pinned on a first run")
+        p.seed(chiefOfStaff: "asha")
+        p.togglePin("dev")
+        p.togglePin("coo")
+        XCTAssertEqual(TalkPrefs(defaults: d).pinned, ["asha", "dev"])
+        XCTAssertEqual(p.unread("dev", lastFromThemAt: "2026-10-04T10:00:00.000Z"), 1)
+        p.markRead("dev", at: "2026-10-04T10:00:01.000Z")
+        XCTAssertEqual(p.unread("dev", lastFromThemAt: "2026-10-04T10:00:00.000Z"), 0)
+        p.serverUnread["dev"] = 3
+        XCTAssertEqual(p.unread("dev", lastFromThemAt: nil), 3, "the server's count wins")
     }
 }
 

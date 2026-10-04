@@ -60,6 +60,10 @@ enum ServerEvent: Equatable {
     case areaUpdated(Area)
     case inboxMessage(InboxMessage)
     case releasePost(ReleasePost)
+    // Talk threads (LLD-app-fixes §2–§4)
+    case talkMessage(TalkMessage, thread: TalkThread)
+    case talkThread(TalkThread)
+    case talkTyping(threadId: String, employeeId: String, typing: Bool)
     case unknown(type: String)
 
     static let knownTypes: [String] = [
@@ -68,6 +72,7 @@ enum ServerEvent: Equatable {
         "spend.updated", "signals.updated", "alert", "room.thread", "room.message", "coo.message", "coo.item", "coo.presence",
         "room.replying",
         "item.updated", "item.comment", "activity.recorded", "update.posted", "area.updated", "inbox.message", "release.post",
+        "talk.message", "talk.thread", "talk.typing",
     ]
 }
 
@@ -81,7 +86,7 @@ extension ServerEvent: Decodable {
         case type, version, startedAt, agents, agent, agentId, entry, server, event, message
         case office, card, item, proposal, release, id, line, summary, signals, level, title, body, inboxId
         case thread, presence, threadId, employeeId, state
-        case comment, activity, update, area, post
+        case comment, activity, update, area, post, typing
     }
 
     init(from decoder: Decoder) throws {
@@ -156,6 +161,14 @@ extension ServerEvent: Decodable {
             self = .inboxMessage(try c.decode(InboxMessage.self, forKey: .message))
         case "release.post":
             self = .releasePost(try c.decode(ReleasePost.self, forKey: .post))
+        case "talk.message":
+            self = .talkMessage(try c.decode(TalkMessage.self, forKey: .message), thread: try c.decode(TalkThread.self, forKey: .thread))
+        case "talk.thread":
+            self = .talkThread(try c.decode(TalkThread.self, forKey: .thread))
+        case "talk.typing":
+            self = .talkTyping(threadId: try c.decode(String.self, forKey: .threadId),
+                               employeeId: try c.decodeIfPresent(String.self, forKey: .employeeId) ?? "",
+                               typing: try c.decode(Bool.self, forKey: .typing))
         default:
             self = .unknown(type: type)
         }

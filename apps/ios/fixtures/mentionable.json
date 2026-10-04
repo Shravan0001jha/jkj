@@ -1,0 +1,18 @@
+[
+ {
+  "id": "asha",
+  "name": "Asha",
+  "role": "Chief of Staff",
+  "kind": "employee"
+ },
+ {
+  "id": "coo",
+  "name": "Claude — COO",
+  "kind": "coo"
+ },
+ {
+  "id": "dev",
+  "name": "Dev",
+  "kind": "employee"
+ }
+]

@@ -27,6 +27,7 @@ struct TalkRoute: Hashable { let employeeId: String }
 /// Rows are one height. The COO first, Asha second, then by last activity.
 struct TalkListView: View {
     @Environment(AppModel.self) private var model
+    @State private var actionError: String?
 
     static let rowHeight: CGFloat = 64
 
@@ -39,43 +40,109 @@ struct TalkListView: View {
                     HStack { Spacer(); ProgressView("Loading…"); Spacer() }
                 }
             }
-            ForEach(Self.ordered(model.office.cards, chiefOfStaff: model.chiefOfStaff)) { card in
-                NavigationLink(value: TalkRoute(employeeId: card.employee.id)) {
-                    TalkListRow(card: card, preview: IdLinks.plain(preview(card)) { model.title(forId: $0) }, time: time(card))
+            ForEach(orderedCards) { card in
+                let id = card.employee.id
+                NavigationLink(value: TalkRoute(employeeId: id)) {
+                    TalkListRow(card: card, preview: IdLinks.plain(preview(card)) { model.title(forId: $0) }, time: time(card),
+                                pinned: isPinned(card), unread: unread(card), typing: thread(card).map { model.talkThreads.typing.contains($0.id) } ?? false)
                 }
                 .frame(height: Self.rowHeight)
                 .listRowInsets(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 12))
-                .accessibilityIdentifier("talk.row.\(card.employee.id)")
+                .swipeActions(edge: .leading) {
+                    Button { togglePin(card) } label: {
+                        Label(isPinned(card) ? "Unpin" : "Pin", systemImage: isPinned(card) ? "pin.slash.fill" : "pin.fill")
+                    }
+                    .tint(.orange)
+                }
+                .contextMenu {
+                    Button { togglePin(card) } label: {
+                        Label(isPinned(card) ? "Unpin" : "Pin to top", systemImage: isPinned(card) ? "pin.slash" : "pin")
+                    }
+                    if unread(card) > 0 {
+                        Button { markRead(card) } label: { Label("Mark as read", systemImage: "envelope.open") }
+                    }
+                }
+                .accessibilityIdentifier("talk.row.\(id)")
             }
         }
         .listStyle(.plain)
         .navigationTitle("Talk")
-        .refreshable { if let r = model.rest { await model.office.load(r); await model.coo.load(r) } }
+        .refreshable { if let r = model.rest { await model.office.load(r); await model.coo.load(r); await model.talkThreads.load(r) } }
+        .alert("Couldn't do that", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(actionError ?? "") }
         .task {
             guard let rest = model.rest else { return }
             if model.office.data == nil { await model.office.load(rest) }
+            model.talkPrefs.seed(chiefOfStaff: model.chiefOfStaff)
             if !model.coo.loaded { await model.coo.load(rest) }
+            await model.talkThreads.load(rest)
             // Titles for the ids the previews mention.
             await model.loadTitles(in: model.office.cards.compactMap(\.lastReport) + model.coo.log.suffix(1).map(\.text))
         }
     }
 
-    /// The COO, then the Chief of Staff, then everyone else by last activity (newest first).
-    static func ordered(_ cards: [EmployeeCard], chiefOfStaff: String?) -> [EmployeeCard] {
+    /// Pinned first (in pin order), then unread, then by last activity (newest first).
+    static func ordered(_ cards: [EmployeeCard], pinned: [String], unread: (EmployeeCard) -> Int, lastAt: (EmployeeCard) -> String?) -> [EmployeeCard] {
         var seen = Set<String>()
         let unique = cards.filter { seen.insert($0.employee.id).inserted }
-        func rank(_ c: EmployeeCard) -> Int { c.employee.virtual == true ? 0 : c.employee.id == chiefOfStaff ? 1 : 2 }
-        return unique.sorted { a, b in
-            if rank(a) != rank(b) { return rank(a) < rank(b) }
-            let la = lastActivity(a) ?? "", lb = lastActivity(b) ?? ""
-            if la != lb { return la > lb }
-            return a.employee.name < b.employee.name
-        }
+        return TalkPrefs.order(unique, id: { $0.employee.id }, lastAt: lastAt, unread: unread, pinned: pinned, name: { $0.employee.name })
     }
 
     static func lastActivity(_ c: EmployeeCard) -> String? { c.session.map { $0.endedAt ?? $0.startedAt } }
 
+    // MARK: threads (the server's, else this phone's pins and read marks)
+
+    /// The card's Talk thread, when the server has them: `coo` for the COO, else the employee id.
+    private func thread(_ c: EmployeeCard) -> TalkThread? {
+        guard model.talkThreads.supported == true else { return nil }
+        return model.talkThreads.threads[c.employee.virtual == true ? "coo" : c.employee.id] ?? model.talkThreads.threads[c.employee.id]
+    }
+
+    private var orderedCards: [EmployeeCard] {
+        let cards = model.office.cards
+        if model.talkThreads.supported == true {
+            let pinned = model.talkThreads.threads.values.filter(\.pinned).sorted { ($0.pinnedAt ?? "") > ($1.pinnedAt ?? "") }
+                .compactMap { t in cards.first { thread($0)?.id == t.id }?.employee.id }
+            return Self.ordered(cards, pinned: pinned, unread: unread, lastAt: lastAt)
+        }
+        return Self.ordered(cards, pinned: model.talkPrefs.pinned, unread: unread, lastAt: lastAt)
+    }
+
+    private func isPinned(_ c: EmployeeCard) -> Bool { thread(c)?.pinned ?? model.talkPrefs.isPinned(c.employee.id) }
+
+    private func togglePin(_ c: EmployeeCard) {
+        guard let t = thread(c) else { withAnimation { model.talkPrefs.togglePin(c.employee.id) }; return }
+        guard let rest = model.rest else { return }
+        Task {
+            do { try await model.talkThreads.setPinned(rest, threadId: t.id, pinned: !t.pinned) }
+            catch { if let m = error.userMessage { actionError = m } }
+        }
+    }
+
+    private func markRead(_ c: EmployeeCard) {
+        model.talkPrefs.markRead(c.employee.id)
+        if let t = thread(c), let rest = model.rest { Task { await model.talkThreads.markRead(rest, threadId: t.id) } }
+    }
+
+    /// The COO's last message, or the session's last activity.
+    private func lastAt(_ c: EmployeeCard) -> String? {
+        if let t = thread(c) { return t.lastMessageAt }
+        if c.employee.virtual == true { return model.coo.log.last?.at }
+        return Self.lastActivity(c)
+    }
+
+    private func unread(_ c: EmployeeCard) -> Int {
+        if let t = thread(c) { return t.unreadCount }
+        let them: String? = c.employee.virtual == true ? model.coo.log.last(where: { $0.from != .owner })?.at : Self.lastActivity(c)
+        return model.talkPrefs.unread(c.employee.id, lastFromThemAt: them)
+    }
+
     private func preview(_ c: EmployeeCard) -> String {
+        if let t = thread(c) {
+            if model.talkThreads.typing.contains(t.id) { return "typing…" }
+            if let m = t.lastMessage { return (m.from == "owner" ? "You: " : m.from == t.id || (t.id == "coo" && m.from == "coo") ? "" : "\(m.fromName): ") + m.text }
+        }
         if c.employee.virtual == true, let last = model.coo.log.last { return (last.from == .owner ? "You: " : "") + last.text }
         // Busy: what they are on. Otherwise their last line. Never "typing" from a working state.
         if c.employee.state == .working, let w = c.currentWork { return "Working on \(w.title)" }
@@ -84,6 +151,7 @@ struct TalkListView: View {
     }
 
     private func time(_ c: EmployeeCard) -> String? {
+        if let t = thread(c), let at = t.lastMessageAt { return Format.ago(at) }
         if c.employee.virtual == true, let last = model.coo.log.last { return Format.ago(last.at) }
         return Self.lastActivity(c).map { Format.ago($0) }
     }
@@ -93,6 +161,9 @@ struct TalkListRow: View {
     let card: EmployeeCard
     let preview: String
     let time: String?
+    var pinned = false
+    var unread = 0
+    var typing = false
 
     /// Presence: the COO's heartbeat; for an employee, a session that is live right now.
     private var online: Bool? {
@@ -111,13 +182,23 @@ struct TalkListRow: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(card.employee.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Text(card.employee.name).font(.subheadline.weight(unread > 0 ? .bold : .semibold)).lineLimit(1)
                     Spacer(minLength: 6)
-                    if let time { Text(time).font(.caption2).foregroundStyle(.secondary) }
+                    if let time { Text(time).font(.caption2.weight(unread > 0 ? .semibold : .regular)).foregroundStyle(unread > 0 ? Color.accentColor : .secondary) }
                 }
                 HStack {
-                    Text(preview).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(preview).font(.caption).foregroundStyle(typing ? Color.accentColor : unread > 0 ? .primary : .secondary).lineLimit(1)
                     Spacer(minLength: 6)
+                    if pinned {
+                        Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary).rotationEffect(.degrees(45))
+                            .accessibilityLabel("Pinned")
+                    }
+                    if unread > 0 {
+                        Text("\(unread)").font(.caption2.weight(.bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 6).frame(minWidth: 18, minHeight: 18)
+                            .background(Color.accentColor, in: Capsule())
+                            .accessibilityLabel("\(unread) unread")
+                    }
                     if card.needsYou > 0 {
                         Text("\(card.needsYou)").font(.caption2.weight(.bold)).foregroundStyle(.white)
                             .padding(.horizontal, 6).frame(minWidth: 18, minHeight: 18)
@@ -150,6 +231,8 @@ struct ConversationView: View {
     let employeeId: String
     @Binding var path: NavigationPath
     @State private var draft = ""
+    @State private var replyTo: ChatItem?
+    @State private var pending: [OutgoingAttachment] = []
     @State private var error: String?
     @State private var showProfile = false
     @State private var showAssign = false
@@ -163,7 +246,7 @@ struct ConversationView: View {
 
     var body: some View {
         Group {
-            if isCoo { cooChat } else { employeeChat }
+            if model.talkThreads.supported == true { threadChat } else if isCoo { cooChat } else { employeeChat }
         }
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
@@ -192,6 +275,11 @@ struct ConversationView: View {
         } message: { Text("The session stops mid-step; the work so far stays on its branch.") }
         .task(id: employeeId) {
             guard let rest = model.rest else { return }
+            if model.talkThreads.supported == nil { await model.talkThreads.load(rest) }
+            if model.talkThreads.supported == true {
+                await model.talkThreads.loadMessages(rest, threadId: threadId)
+                await model.talkThreads.markRead(rest, threadId: threadId)
+            }
             if isCoo {
                 await model.coo.load(rest)
                 model.coo.pollPresence(rest)
@@ -201,7 +289,13 @@ struct ConversationView: View {
                 await talk.reload(rest)
             }
         }
-        .onDisappear { if isCoo { model.coo.stopPolling() } }
+        .onDisappear { if isCoo { model.coo.stopPolling() }; model.talkPrefs.markRead(employeeId) }
+        .onAppear { model.talkPrefs.markRead(employeeId) }
+        .onChange(of: isCoo ? model.coo.log.count : talk.log.count) { _, _ in model.talkPrefs.markRead(employeeId) }
+        .onChange(of: model.talkThreads.messages[threadId]?.count ?? 0) { _, _ in
+            // A message arrived while the thread is on screen: it is read (LLD-app-fixes §2).
+            if let r = model.rest { Task { await model.talkThreads.markRead(r, threadId: threadId) } }
+        }
     }
 
     private var sessionOnline: Bool? {
@@ -230,6 +324,85 @@ struct ConversationView: View {
         }
     }
 
+    // MARK: Talk thread (LLD-app-fixes)
+
+    /// The COO's thread is `coo`; an employee's is their id.
+    private var threadId: String { isCoo ? "coo" : employeeId }
+    private var threads: TalkThreadsStore { model.talkThreads }
+
+    private var threadChat: some View {
+        let mine = talk.employeeId == employeeId
+        return ChatThreadView(
+            items: ChatItem.from(talk: threads.shown(threadId), threadId: threadId, sentFiles: threads.sentFiles),
+            typing: threads.typing.contains(threadId),
+            typingName: name,
+            loading: threads.loadingThread.contains(threadId) && threads.messages[threadId] == nil,
+            emptyTitle: isCoo ? "Nothing yet" : "No messages yet",
+            emptyText: isCoo ? "Say what you need. The COO answers within its own authority, or brings you a recommendation."
+                             : "Your first message starts a session from \(name)'s context: handbook, unit, charter, status and handoff.",
+            placeholder: isCoo ? "Message the COO" : "Message \(name)",
+            draft: $draft,
+            replyTo: $replyTo,
+            sending: threads.sending.contains(threadId),
+            onSend: { Task { await sendToThread() } },
+            trailing: {
+                if !isCoo && mine && talk.isRunning {
+                    Button { confirmInterrupt = true } label: {
+                        Image(systemName: "stop.fill").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                            .frame(width: 36, height: 36).background(Color.red, in: Circle())
+                    }
+                    .accessibilityLabel("Interrupt")
+                }
+            },
+            header: {
+                if isCoo, cooOnline == false {
+                    Text("The COO is offline: messages wait; Asha handles routine work meanwhile.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity).padding(.vertical, 6).background(.bar)
+                } else if !isCoo, mine, let d = talk.detail, !d.needsYou.isEmpty {
+                    NeedsYouBanner(count: d.needsYou.count, name: name).padding(.top, 6)
+                }
+            },
+            footer: {
+                VStack(spacing: 8) {
+                    if !isCoo, mine, let a = talk.pendingApproval, let s = talk.session {
+                        ApprovalCard(approval: a, agentId: s.id) { self.error = $0 }
+                    }
+                    if let e = error ?? threads.error {
+                        Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.footnote)
+                    }
+                }
+            },
+            onOpen: open,
+            // The COO's thread takes text and voice, not files (§2).
+            pending: isCoo ? nil : $pending,
+            onVoice: { note in Task { await sendToThread(voice: note) } },
+            onComposerError: { self.error = $0 },
+            mentionable: model.mentionable.filter { $0 != threadId }
+        )
+    }
+
+    private func sendToThread(voice: OutgoingAttachment? = nil) async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let rest = model.rest, voice != nil || !text.isEmpty || !pending.isEmpty else { return }
+        let quoted = replyTo.flatMap { r in threads.shown(threadId).first { $0.id == r.id } }
+        error = nil
+        do {
+            let agent: Agent?
+            if let voice {
+                agent = try await threads.sendVoice(rest, threadId: threadId, note: voice, replyTo: quoted)
+            } else {
+                let mentions = RoomStore.mentions(in: text, known: model.mentionable)
+                agent = try await threads.send(rest, threadId: threadId, text: text, replyTo: quoted, mentions: mentions, files: pending)
+                draft = ""; pending = []
+            }
+            replyTo = nil
+            if let agent, !isCoo { await talk.adopt(rest, agent: agent) }
+        } catch {
+            if let m = error.userMessage { self.error = m }
+        }
+    }
+
     // MARK: employee
 
     private var employeeChat: some View {
@@ -243,6 +416,7 @@ struct ConversationView: View {
             emptyText: "Your first message starts one from \(name)'s context: handbook, unit, charter, status and handoff.",
             placeholder: "Message \(name)",
             draft: $draft,
+            replyTo: $replyTo,
             sending: talk.sending,
             onSend: { Task { await sendToEmployee() } },
             trailing: {
@@ -270,15 +444,24 @@ struct ConversationView: View {
                     }
                 }
             },
-            onOpen: open
+            onOpen: open,
+            pending: $pending,
+            onVoice: { note in Task { await sendToEmployee(voice: note) } },
+            onComposerError: { self.error = $0 },
+            mentionable: model.mentionable.filter { $0 != employeeId }
         )
     }
 
-    private func sendToEmployee() async {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let rest = model.rest else { return }
+    private func sendToEmployee(voice: OutgoingAttachment? = nil) async {
+        let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let files = voice.map { [$0] } ?? pending
+        guard !typed.isEmpty || !files.isEmpty, let rest = model.rest else { return }
+        let text = ChatReply.compose(typed.isEmpty && voice != nil ? "" : typed, replyTo: voice == nil ? replyTo : nil, counterpart: name)
         error = nil
-        do { try await talk.send(rest, text: text); draft = "" } catch { if let m = error.userMessage { self.error = m } }
+        do {
+            try await talk.send(rest, text: text.isEmpty ? (voice != nil ? "🎤 Voice note" : "📎 Attachment") : text, attachments: files)
+            if voice == nil { draft = ""; pending = []; replyTo = nil }
+        } catch { if let m = error.userMessage { self.error = m } }
     }
 
     // MARK: COO
@@ -293,6 +476,7 @@ struct ConversationView: View {
             emptyText: "Say what you need. The COO answers within its own authority, or brings you a recommendation.",
             placeholder: "Message the COO",
             draft: $draft,
+            replyTo: $replyTo,
             sending: model.coo.sending,
             onSend: { Task { await sendToCoo() } },
             trailing: { EmptyView() },
@@ -313,10 +497,11 @@ struct ConversationView: View {
     }
 
     private func sendToCoo() async {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let rest = model.rest else { return }
+        let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty, let rest = model.rest else { return }
+        let text = ChatReply.compose(typed, replyTo: replyTo, counterpart: name)
         error = nil
-        do { try await model.coo.send(rest, text: text); draft = "" } catch { if let m = error.userMessage { self.error = m } }
+        do { try await model.coo.send(rest, text: text); draft = ""; replyTo = nil } catch { if let m = error.userMessage { self.error = m } }
     }
 
     // MARK: menu

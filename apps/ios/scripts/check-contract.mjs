@@ -135,6 +135,10 @@ for (const [name, def] of Object.entries(tsInterfaces)) {
   // Emitted by the server but not declared in packages/shared yet; reported to the lead.
   const undeclared = {
     WorkplaceHealthResponse: ['resilience'],
+    // Ahead of packages/shared: docs/LLD-app-fixes.md on `app/fixes` (§1, §5, §8). Drop on merge.
+    LogEntry: ['fromName'],
+    RoomMessage: ['truncated'],
+    CommentRequest: ['mentions'],
   };
   for (const f of Object.keys(sw)) if (!(f in def.fields) && !(undeclared[name] ?? []).includes(f)) problems.push(`interface ${name}.${f}: Swift has a field the contract lacks`);
 }

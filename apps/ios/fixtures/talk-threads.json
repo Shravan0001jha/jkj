@@ -1,0 +1,46 @@
+[
+ {
+  "id": "coo",
+  "employeeId": "coo",
+  "name": "Claude — COO",
+  "role": "COO",
+  "lastMessageAt": "2026-10-04T09:12:00.000Z",
+  "lastMessage": {
+   "id": "tm_coo_2",
+   "from": "coo",
+   "fromName": "Claude — COO",
+   "text": "Merged. The build is green; see https://github.com/irisforu/jkj/pull/412"
+  },
+  "unreadCount": 1,
+  "lastReadAt": "2026-10-04T09:00:00.000Z",
+  "pinned": true,
+  "pinnedAt": "2026-10-01T00:00:00.000Z",
+  "typing": false
+ },
+ {
+  "id": "asha",
+  "employeeId": "asha",
+  "name": "Asha",
+  "role": "Chief of Staff",
+  "lastMessageAt": "2026-10-04T09:30:00.000Z",
+  "lastMessage": {
+   "id": "tm_asha_6",
+   "from": "asha",
+   "fromName": "Asha",
+   "text": "Here is the evidence pack."
+  },
+  "unreadCount": 2,
+  "lastReadAt": "2026-10-04T09:05:00.000Z",
+  "pinned": false,
+  "typing": true
+ },
+ {
+  "id": "dev",
+  "employeeId": "dev",
+  "name": "Dev",
+  "lastMessageAt": "2026-10-03T18:00:00.000Z",
+  "unreadCount": 0,
+  "pinned": false,
+  "typing": false
+ }
+]

@@ -42,6 +42,8 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Iris Workplace talks to the Workplace server on your Mac over the local network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Iris Workplace records voice notes you send to your team.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

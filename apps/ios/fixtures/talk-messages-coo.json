@@ -1,0 +1,31 @@
+[
+ {
+  "id": "tm_coo_1",
+  "threadId": "coo",
+  "at": "2026-10-04T09:11:00.000Z",
+  "from": "owner",
+  "fromName": "You",
+  "direction": "in",
+  "text": "Is the PR merged?",
+  "mentions": [],
+  "attachments": [],
+  "receipt": "read"
+ },
+ {
+  "id": "tm_coo_2",
+  "threadId": "coo",
+  "at": "2026-10-04T09:12:00.000Z",
+  "from": "coo",
+  "fromName": "Claude — COO",
+  "direction": "out",
+  "text": "Merged. The build is green; see https://github.com/irisforu/jkj/pull/412",
+  "mentions": [],
+  "attachments": [],
+  "replyTo": {
+   "id": "tm_coo_1",
+   "from": "owner",
+   "fromName": "You",
+   "text": "Is the PR merged?"
+  }
+ }
+]

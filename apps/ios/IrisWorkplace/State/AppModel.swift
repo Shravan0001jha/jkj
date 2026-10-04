@@ -83,6 +83,12 @@ final class AppModel {
     let updates = UpdatesStore()
     let rooms = RoomsStore()
     let releasePosts = ReleasePostsStore()
+    /// Chat files fetched with the session's credential, cached on disk.
+    let attachments = AttachmentCache()
+    /// Talk list pins and read marks (this phone's own).
+    let talkPrefs: TalkPrefs
+    /// Talk threads (LLD-app-fixes): nil-supported until the server answers; 404 keeps the old chat.
+    let talkThreads = TalkThreadsStore()
     private var planReload: Task<Void, Never>?
     let alerts: AlertsStore
     /// Releases updated over the socket, and their streamed log lines.
@@ -127,6 +133,7 @@ final class AppModel {
         self.lanTokens = lanTokens
         self.defaults = defaults
         self.alerts = AlertsStore(notifier: notifier)
+        self.talkPrefs = TalkPrefs(defaults: defaults)
         self.urlSession = urlSession
         self.makeTransport = makeTransport
         self.webAuth = webAuth ?? ASWebAuth()
@@ -138,6 +145,10 @@ final class AppModel {
         pathMonitor?.start()
         alerts.suppressLocal = { [weak self] in self?.pushRegistered ?? false }
         plan.onStale = { [weak self] in self?.reloadPlanSoon() }
+        attachments.fetch = { [weak self] path in
+            guard let rest = await self?.rest else { throw WorkplaceError.notPaired }
+            return try await rest.download(path)
+        }
     }
 
     /// A story moved: its epic card's progress and flags changed. One reload for a burst of moves.
@@ -533,6 +544,7 @@ final class AppModel {
         updates.handle(event)
         rooms.handle(event)
         releasePosts.handle(event)
+        talkThreads.handle(event)
         switch event {
         case .hello(let version, _):
             connection = .online(version: version)
@@ -573,6 +585,7 @@ final class AppModel {
         guard let id, !id.isEmpty else { return "—" }
         if id == "owner" { return "You" }
         if let name = office.card(id)?.employee.name { return name }
+        if let name = talkThreads.mentionable?.first(where: { $0.id == id })?.name { return name }
         switch id {
         case "workplace": return "Workplace"
         case "coo": return "Claude — COO"

@@ -236,17 +236,23 @@ final class TalkStore {
         return sessions.max(by: { $0.startedAt < $1.startedAt })
     }
 
-    func send(_ rest: RestClient, text: String) async throws {
+    func send(_ rest: RestClient, text: String, attachments: [OutgoingAttachment] = []) async throws {
         guard let employeeId else { throw WorkplaceError.notPaired }
         sending = true
         defer { sending = false }
-        let agent = try await rest.talk(employeeId, text: text)
+        let agent = try await rest.talk(employeeId, text: text, attachments: attachments.isEmpty ? nil : attachments.map(\.wire))
         if agent.id != session?.id {
             log = (try? await rest.agentLog(agent.id)) ?? []
         }
         session = agent
         error = nil
         replyPending(true)
+    }
+
+    /// A Talk-thread send started or continued a session: follow it for approvals and Interrupt.
+    func adopt(_ rest: RestClient, agent: Agent) async {
+        if agent.id != session?.id { log = (try? await rest.agentLog(agent.id)) ?? [] }
+        session = agent
     }
 
     func interrupt(_ rest: RestClient) async throws {

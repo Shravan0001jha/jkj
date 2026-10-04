@@ -61,6 +61,8 @@ struct LogEntry: Codable, Equatable, Hashable, Identifiable {
     var details: String?
     var activity: LogActivity?
     var from: LogFrom?
+    /// The sender's name (LLD-app-fixes §1): "You", "Claude — COO", "Workplace" or the employee's.
+    var fromName: String? = nil
 }
 
 struct PendingApproval: Codable, Equatable, Hashable {
@@ -809,6 +811,8 @@ struct RoomMessage: Codable, Equatable, Hashable, Identifiable {
     var details: String?
     /// v2: the item an update line is about.
     var itemId: String?
+    /// The agent's post was cut: `details` is the full text (LLD-app-fixes §8).
+    var truncated: Bool? = nil
 }
 
 // MARK: - workplace.ts · views

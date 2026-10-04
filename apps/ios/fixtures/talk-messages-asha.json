@@ -1,0 +1,110 @@
+[
+ {
+  "id": "tm_asha_1",
+  "threadId": "asha",
+  "at": "2026-10-04T09:00:00.000Z",
+  "from": "owner",
+  "fromName": "You",
+  "direction": "in",
+  "text": "Where are we on the greeting epic?",
+  "mentions": [],
+  "attachments": [],
+  "receipt": "read",
+  "deliveredAt": "2026-10-04T09:00:01.000Z",
+  "readAt": "2026-10-04T09:00:20.000Z"
+ },
+ {
+  "id": "tm_asha_2",
+  "threadId": "asha",
+  "at": "2026-10-04T09:01:00.000Z",
+  "from": "coo",
+  "fromName": "Claude — COO",
+  "direction": "in",
+  "text": "Asha, please prioritise the weather-aware greeting today.",
+  "mentions": [],
+  "attachments": [],
+  "receipt": "read"
+ },
+ {
+  "id": "tm_asha_3",
+  "threadId": "asha",
+  "at": "2026-10-04T09:02:00.000Z",
+  "from": "asha",
+  "fromName": "Asha",
+  "direction": "out",
+  "text": "On it. The spec is in [the PR](https://github.com/irisforu/jkj/pull/411) and the board is at https://work.irisforu.com/#/plan.",
+  "replyTo": {
+   "id": "tm_asha_1",
+   "from": "owner",
+   "fromName": "You",
+   "text": "Where are we on the greeting epic?"
+  },
+  "mentions": [],
+  "attachments": []
+ },
+ {
+  "id": "tm_asha_4",
+  "threadId": "asha",
+  "at": "2026-10-04T09:10:00.000Z",
+  "from": "asha",
+  "fromName": "Asha",
+  "direction": "out",
+  "text": "Full report:\n1. Step 1: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n2. Step 2: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n3. Step 3: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n4. Step 4: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n5. Step 5: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n6. Step 6: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n7. Step 7: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n8. Step 8: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n9. Step 9: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n10. Step 10: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n11. Step 11: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n12. Step 12: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n13. Step 13: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n14. Step 14: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.\n15. Step 15: checked the greeting path on the phone, the Mac and the relay; everything answered within budget.",
+  "mentions": [],
+  "attachments": []
+ },
+ {
+  "id": "tm_asha_5",
+  "threadId": "asha",
+  "at": "2026-10-04T09:20:00.000Z",
+  "from": "owner",
+  "fromName": "You",
+  "direction": "in",
+  "text": "",
+  "mentions": [],
+  "attachments": [
+   {
+    "id": "att_voice1",
+    "name": "voice-20261004-0920.m4a",
+    "mediaType": "audio/mp4",
+    "size": 24000,
+    "kind": "voice",
+    "url": "/api/talk/attachments/att_voice1"
+   }
+  ],
+  "voice": {
+   "attachmentId": "att_voice1",
+   "transcript": "Send me the evidence pack when it is ready, please.",
+   "durationMs": 4200
+  },
+  "receipt": "delivered"
+ },
+ {
+  "id": "tm_asha_6",
+  "threadId": "asha",
+  "at": "2026-10-04T09:30:00.000Z",
+  "from": "asha",
+  "fromName": "Asha",
+  "direction": "out",
+  "text": "Here is the evidence pack.",
+  "mentions": [],
+  "attachments": [
+   {
+    "id": "att_img1",
+    "name": "greeting.png",
+    "mediaType": "image/png",
+    "size": 5120,
+    "kind": "image",
+    "url": "/api/talk/attachments/att_img1"
+   },
+   {
+    "id": "att_pdf1",
+    "name": "evidence.pdf",
+    "mediaType": "application/pdf",
+    "size": 2048,
+    "kind": "file",
+    "url": "/api/talk/attachments/att_pdf1"
+   }
+  ]
+ }
+]
