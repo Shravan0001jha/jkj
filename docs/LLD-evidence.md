@@ -145,6 +145,20 @@ Wording (handbook, "A story's life" step 4):
   (<duration>). Report: <link>.` + failures (max 5 lines) + the next step (`stale`: run it again on
   the new commit; `failure`: open the screenshots of the failures only, fix, commit, run again).
 
+## 3a. The global link (`services/evidence-share.ts`, HLD D13)
+
+- `EvidenceStore { put(file, key); presign(key, seconds) }`; real = `S3Store` (aws CLI, region
+  ap-south-1; `bucket()` ensures the bucket once per process and re-applies its settings); tests
+  install `FakeStore` (`useEvidenceStore`); under a test with no fake the store is unavailable, so a
+  test can never reach AWS.
+- `finish()`: `share()` writes `<run>/evidence.html` (`bundle()`: `<img src>` of files inside the run
+  → data URIs, other relative links → `#`, a header line, `summary.txt` appended) and uploads it as
+  `<item>/<run>/evidence.html`; `EvidenceRunRecord.share = {key, url, expiresAt}`. Then `slim()`.
+  `summaryText` names the URL, or "link unavailable". In shadow/on the summary is also a PR comment
+  (`GitHubPort.comment`, push App); a PR that takes over a run comments its link too.
+- `statusesFor`: `workplace/evidence` gets `targetUrl` = the share of the run behind it.
+  `postStatuses`: before posting it, `freshLink()` re-signs a link with under an hour left.
+
 ## 4. `onReview` takes over evidence (github-flow.ts)
 
 When a PR record is created (no reuse), `evidence` starts from the item's `evidenceRun` if its `sha`

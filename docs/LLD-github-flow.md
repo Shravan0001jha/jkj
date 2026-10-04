@@ -88,7 +88,8 @@ Registry: `setGitHubPort(wp, port)` / `gitHubPort(wp)` (WeakMap; the real one is
    `pr` saved with `work.saveQuiet`; trail note "Pushed … PR #n".
 6. In `on` only, the reviewer becomes the developer approver (the author's lead, else the lead with
    the fewest open reviews); shadow leaves the reviewer as it is.
-7. Statuses posted (only those that changed); quality run queued (`tests` promise in the result) in
+7. Statuses posted (only those that changed); `workplace/tests` from the author's pre-pr.sh result for
+   the head (`pre-pr.ts`; D9; pending when there is none). Formerly: quality run queued (`tests` promise in the result) in
    a server-owned detached checkout `<workDir>/_quality/<repo>`, put on the head inside the queue;
    `settled()` waits for in-flight runs. A failed run is commented on the item.
 Any GitHub error → `recordFailure` (fallback at 3 in 5 min) and a note on the item.
@@ -158,7 +159,7 @@ areas:
   evidence stale; `on` done-gate; dispute → manager alert; fallback after 3 failures in 5 min (not
   after 2, not when spread over 6 min) with a COO alert; merge refused when not green / in local;
   merge on GitHub (fake) + delete branch + ff pull; non-ff → COO alert, nothing forced; statuses.
-- `quality.test.ts`: yaml loading; per-area command selection; `{files}` substitution; failures;
+- `quality.test.ts`: yaml loading (areas ignored); guards only. (Formerly: per-area command selection; `{files}` substitution; failures;)
   file-size; build output ignores already-tracked files and deletions.
 - `github-port.test.ts`: the real port with a fake fetch and a fake token script — token never in
   errors or logs, PR exists fallback, merge body, status app.

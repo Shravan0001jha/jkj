@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import type { Employee, GitHubMode, PrApproval, PrRecord, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { GitHubPort, StatusState } from './github-port.js';
@@ -13,9 +12,10 @@ import * as coo from './coo.js';
 import * as manager from './manager.js';
 import { now } from './store.js';
 import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
-import { branchFor, excludeLinked, linkUntracked } from './worktrees.js';
+import { branchFor, worktreePath } from './worktrees.js';
+import * as prePr from './pre-pr.js';
 import { GITHUB_MODES, githubMode, holds, isDeveloper, isQa, qaReviewer, writeGithubMode } from './review-policy.js';
-import { assertNotRealPath } from './test-guard.js';
+import { freshLink } from './evidence-share.js';
 import { BadRequest, Conflict, NotFound } from '../util/errors.js';
 import { log } from '../util/logger.js';
 
@@ -164,17 +164,16 @@ export interface ReviewResult {
   refused?: string[];
   error?: string;
   pr?: { number: number; url: string };
-  /** The quality run for this head (never rejects). */
+  /** Settles when workplace/tests is recorded for this head (never rejects). */
   tests?: Promise<void>;
   /** One line for the employee's tool reply ('' when nothing happened). */
   message: string;
 }
 
-function prBody(wp: Workplace, w: WorkItem, ctx: Ctx): string {
+function prBody(w: WorkItem, ctx: Ctx): string {
   return [
     `Workplace story **${w.id}**: ${w.title}`,
     '',
-    `- Item: ${wp.config.github.linkBase}/api/items/${encodeURIComponent(w.id)}`,
     `- Author: ${ctx.emp.name} (${ctx.emp.id})`,
     `- Branch: \`${ctx.branch}\` → \`${ctx.base}\``,
     '',
@@ -221,7 +220,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   if (!number) {
     try {
       const found = await port.findOpenPr(ctx.branch)
-        ?? await port.openPr({ title: `${w.title} [${w.id}]`, body: prBody(wp, w, ctx), head: ctx.branch, base: ctx.base });
+        ?? await port.openPr({ title: `${w.title} [${w.id}]`, body: prBody(w, ctx), head: ctx.branch, base: ctx.base });
       number = found.number;
       url = found.url;
     } catch (err) {
@@ -234,6 +233,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   const moved = !!reuse && reuse.headSha !== ctx.head;
   const episode = w.statusSince ?? '';
   const at = now();
+  let tookOver = false;
   savePr(wp, itemId, cur => {
     const base: PrRecord = reuse
       ? { ...reuse }
@@ -250,6 +250,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
     const ev = cur.evidenceRun;
     if (ev && ev.sha === ctx.head && (ev.state === 'success' || ev.state === 'failure') && (!reuse || moved)) {
       record.evidence = ev.state;
+      tookOver = true;
       record.evidenceNote = `${ev.passed} passed, ${ev.failed} failed on ${ev.platforms.join('+')} (run_evidence)`;
     }
     return { pr: record, prRefused: undefined };
@@ -270,7 +271,12 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   }
 
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
-  const tests = runChecks(wp, itemId, ctx, cfg);
+  if (tookOver) {
+    const ev = rawGet(wp, itemId)!.evidenceRun!;
+    const link = ev.share ? (await freshLink(wp, ev.share))?.url : undefined;
+    await prComment(wp, itemId, `Evidence ${ev.state === 'success' ? 'PASS' : 'FAIL'} on ${ev.sha.slice(0, 8)} (${ev.platforms.join(',')} / ${ev.features.join(',')}): ${ev.passed} passed, ${ev.failed} failed. Report: ${link ?? 'link unavailable'}`);
+  }
+  const tests = recordTests(wp, itemId, ctx);
   return {
     pr: { number: number!, url: url! }, tests,
     message: `The Workplace pushed your branch: pull request #${number} (${url}). ` +
@@ -286,65 +292,54 @@ function refuse(wp: Workplace, itemId: string, sha: string, reasons: string[]): 
   return { refused: reasons, message: `Your report is recorded, but the Workplace did not push your branch: ${reasons.join('; ')}. Fix ${reasons.length === 1 ? 'it' : 'them'} on your branch, then call report_done again.` };
 }
 
-/* ---------- quality checks (workplace/tests) ---------- */
+/* ---------- the pre-PR gate (workplace/tests) ---------- */
 
-/** A server-owned detached checkout per repo, put on the head inside the quality queue. */
-function qualityCheckout(wp: Workplace, repo: string): string {
-  return join(wp.config.workDir, '_quality', basename(repo));
+/** Where the author's pre-pr.sh results live: their worktree. */
+function authorWorktree(wp: Workplace, emp: Employee): string { return worktreePath(wp.config.workDir, emp); }
+
+/**
+ * report_done / request_review in shadow or on: a passing scripts/pre-pr.sh result for the branch
+ * head must be in the author's worktree. Null when the submit may go on (local mode, no code branch,
+ * or a passing result); else the refusal sentence.
+ */
+export function prePrGate(wp: Workplace, itemId: string): string | null {
+  if (mode(wp) === 'local') return null;
+  const w = rawGet(wp, itemId);
+  if (!w) return null;
+  const ctx = contextOf(wp, w);
+  if (typeof ctx === 'string') return null;
+  return prePr.refusal(prePr.read(authorWorktree(wp, ctx.emp), ctx.head), ctx.head);
 }
 
-function prepareCheckout(wp: Workplace, repo: string, sha: string): void {
-  const path = qualityCheckout(wp, repo);
-  assertNotRealPath('quality checkout', path);
-  if (!existsSync(path)) {
-    mkdirSync(join(path, '..'), { recursive: true });
-    git(repo, ['worktree', 'add', '--detach', '-f', path, sha]);
-  } else {
-    git(path, ['checkout', '-q', '--detach', '--force', sha]);
-  }
-  excludeLinked(path);
-  git(path, ['clean', '-fdq']);
-  linkUntracked(repo, path);
-}
+/** Kept for callers that wait for checks: workplace/tests is now recorded synchronously. */
+export async function settled(): Promise<void> { /* nothing runs in the background */ }
 
-const inFlight = new Set<Promise<void>>();
-
-/** Resolves when every quality run started so far has finished (shutdown, tests). */
-export async function settled(): Promise<void> {
-  while (inFlight.size) await Promise.all([...inFlight]);
-}
-
-function runChecks(wp: Workplace, itemId: string, ctx: Ctx, cfg: quality.QualityConfig): Promise<void> {
-  const p = runChecksNow(wp, itemId, ctx, cfg);
-  inFlight.add(p);
-  void p.finally(() => inFlight.delete(p));
-  return p;
-}
-
-function runChecksNow(wp: Workplace, itemId: string, ctx: Ctx, cfg: quality.QualityConfig): Promise<void> {
+/** workplace/tests from the author's pre-pr.sh results for this head (the server runs no suites). */
+async function recordTests(wp: Workplace, itemId: string, ctx: Ctx): Promise<void> {
   const sha = ctx.head;
-  const checkout = qualityCheckout(wp, ctx.repo);
-  return (async () => {
-    try {
-      savePr(wp, itemId, cur => (cur.pr ? { pr: { ...cur.pr, tests: { state: 'pending', sha, at: now(), summary: 'checks queued' } } } : {}));
-      const res = await quality.run(checkout, ctx.base, sha, cfg, () => prepareCheckout(wp, ctx.repo, sha), { QUALITY_MAIN_REPO: ctx.repo });
-      const cur = rawGet(wp, itemId);
-      if (!cur?.pr || cur.pr.headSha !== sha) return;   // a newer head has its own run
-      savePr(wp, itemId, c => ({ pr: { ...c.pr!, tests: { state: res.state, sha, at: now(), summary: res.summary, ...(res.details ? { details: res.details.slice(-4000) } : {}) } } }));
-      trail.record(wp, { itemId, by: 'workplace', kind: 'test', text: `Quality checks ${res.state === 'success' ? 'green' : res.state} on ${sha.slice(0, 8)}: ${res.summary}` });
-      if (res.state === 'failure') {
-        trail.comment(wp, itemId, { by: 'workplace', text: `The quality checks failed on ${sha.slice(0, 8)} (${res.summary}). Fix it on your branch, then call report_done again.`, ...(res.details ? { details: res.details.slice(-4000) } : {}) });
-      }
-      try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
-    } catch (err) {
-      log.warn('quality', `${itemId}: ${errText(err)}`);
+  try {
+    const r = prePr.read(authorWorktree(wp, ctx.emp), sha);
+    const valid = r && r.sha === sha ? r : null;
+    // Only a full run counts (pre-pr.ts passes); a fast or partial pass stays pending.
+    const tests: NonNullable<PrRecord['tests']> = !valid
+      ? { state: 'pending', sha, at: now(), summary: `Waiting for scripts/pre-pr.sh results on ${sha.slice(0, 7)}` }
+      : !valid.ok
+        ? { state: 'failure', sha, at: now(), summary: prePr.describe(valid), details: prePr.failureDetails(valid).slice(-4000) }
+        : { state: prePr.passes(valid, sha) ? 'success' : 'pending', sha, at: now(), summary: prePr.describe(valid) };
+    savePr(wp, itemId, c => (c.pr && c.pr.headSha === sha ? { pr: { ...c.pr, tests } } : {}));
+    trail.record(wp, { itemId, by: 'workplace', kind: 'test', text: `Pre-PR checks ${tests.state === 'success' ? 'green' : tests.state} on ${sha.slice(0, 8)}: ${tests.summary}` });
+    if (tests.state === 'failure') {
+      trail.comment(wp, itemId, { by: 'workplace', text: `scripts/pre-pr.sh failed on ${sha.slice(0, 8)} (${tests.summary}). Fix it on your branch, commit, run scripts/pre-pr.sh again, then call report_done.`, ...(tests.details ? { details: tests.details } : {}) });
     }
-  })();
+    try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
+  } catch (err) {
+    log.warn('github', `${itemId}: tests status: ${errText(err)}`);
+  }
 }
 
 /* ---------- statuses ---------- */
 
-interface Status { context: string; state: StatusState; description: string }
+interface Status { context: string; state: StatusState; description: string; targetUrl?: string }
 
 export function statusesFor(wp: Workplace, w: WorkItem): Status[] {
   const pr = w.pr!;
@@ -361,6 +356,9 @@ export function statusesFor(wp: Workplace, w: WorkItem): Status[] {
     : pr.evidence === 'failure' ? { context: CONTEXTS.evidence, state: 'failure', description: pr.evidenceNote ?? 'Evidence missing' }
     : pr.evidence === 'stale' ? { context: CONTEXTS.evidence, state: 'pending', description: 'Stale: a new commit needs run_evidence again' }
     : { context: CONTEXTS.evidence, state: 'pending', description: 'Waiting for run_evidence on this commit' };
+  // The shared report of the run behind this status (the global link), when there is one.
+  const share = w.evidenceRun?.sha === pr.headSha && w.evidenceRun.state === pr.evidence ? w.evidenceRun.share : undefined;
+  if (share && (pr.evidence === 'success' || pr.evidence === 'failure')) evidence.targetUrl = share.url;
   return [review, tests, evidence];
 }
 
@@ -369,14 +367,35 @@ async function postStatuses(wp: Workplace, itemId: string): Promise<void> {
   const w = rawGet(wp, itemId);
   if (!w?.pr || w.pr.merged) return;
   const port = gitHubPort(wp);
+  const head = w.pr.headSha;
   const posted = { ...(w.pr.posted ?? {}) };
-  for (const s of statusesFor(wp, w)) {
-    const key = `${w.pr.headSha}|${s.state}|${s.description}`;
+  for (const status of statusesFor(wp, w)) {
+    const s: Status = { ...status };
+    const key = `${head}|${s.state}|${s.description}`;
     if (posted[s.context] === key) continue;
-    await port.setStatus(w.pr.headSha, s);
+    // Re-posted after the 7-day link expired: sign a fresh one first.
+    const share = w.evidenceRun?.share;
+    if (s.targetUrl && share) {
+      const fresh = await freshLink(wp, share);
+      if (!fresh) delete s.targetUrl;
+      else if (fresh.url !== share.url) {
+        const cur = rawGet(wp, itemId)!;
+        if (cur.evidenceRun?.share?.key === share.key) work.saveQuiet(wp, { ...cur, evidenceRun: { ...cur.evidenceRun, share: fresh } });
+        s.targetUrl = fresh.url;
+      }
+    }
+    await port.setStatus(head, s);
     posted[s.context] = key;
     savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, posted: { ...(c.pr.posted ?? {}), [s.context]: key } } } : {}));
   }
+}
+
+/** A comment on the item's open PR (shadow/on): the evidence summary with its link. */
+export async function prComment(wp: Workplace, itemId: string, body: string): Promise<void> {
+  if (mode(wp) === 'local') return;
+  const pr = rawGet(wp, itemId)?.pr;
+  if (!pr || pr.merged) return;
+  try { await gitHubPort(wp).comment(pr.number, body); } catch (err) { recordFailure(wp, 'comment', itemId, Date.now(), errText(err)); }
 }
 
 /** The evidence hook (docs/HLD-github-flow.md D7): the evidence tool, when it exists, calls this. */

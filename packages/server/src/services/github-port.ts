@@ -29,7 +29,9 @@ export interface GitHubPort {
   findOpenPr(branch: string): Promise<PullRequest | null>;
   openPr(pr: { title: string; body: string; head: string; base: string }): Promise<PullRequest>;
   getPr(n: number): Promise<PullRequest>;
-  setStatus(sha: string, s: { context: string; state: StatusState; description: string }): Promise<void>;
+  setStatus(sha: string, s: { context: string; state: StatusState; description: string; targetUrl?: string }): Promise<void>;
+  /** A comment on the PR's conversation (posted by the push App). */
+  comment(n: number, body: string): Promise<void>;
   /** A merge commit, and only if the PR head is still `sha`. */
   merge(n: number, sha: string, title: string): Promise<{ merged: boolean; sha?: string }>;
   deleteBranch(branch: string): Promise<void>;
@@ -173,8 +175,12 @@ export class RealGitHub implements GitHubPort {
     return view(await this.ok(this.o.pushApp, 'GET', `${this.repoPath}/pulls/${n}`));
   }
 
-  async setStatus(sha: string, s: { context: string; state: StatusState; description: string }): Promise<void> {
-    await this.ok(this.o.reviewApp, 'POST', `${this.repoPath}/statuses/${sha}`, { context: s.context, state: s.state, description: s.description.slice(0, 140) });
+  async setStatus(sha: string, s: { context: string; state: StatusState; description: string; targetUrl?: string }): Promise<void> {
+    await this.ok(this.o.reviewApp, 'POST', `${this.repoPath}/statuses/${sha}`, { context: s.context, state: s.state, description: s.description.slice(0, 140), ...(s.targetUrl ? { target_url: s.targetUrl } : {}) });
+  }
+
+  async comment(n: number, body: string): Promise<void> {
+    await this.ok(this.o.pushApp, 'POST', `${this.repoPath}/issues/${n}/comments`, { body: body.slice(0, 60_000) }, [201, 200]);
   }
 
   async merge(n: number, sha: string, title: string): Promise<{ merged: boolean; sha?: string }> {

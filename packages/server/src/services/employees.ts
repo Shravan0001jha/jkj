@@ -317,6 +317,10 @@ export function childEnv(wp: Workplace): Record<string, string | undefined> {
   const token = readOauthToken(wp);
   if (token) env['CLAUDE_CODE_OAUTH_TOKEN'] = token;
   env['IRIS_WORKPLACE'] = '1';
+  // The toolchains scripts/pre-pr.sh needs (Android SDK, JDK 17, full Xcode, not the CLI tools).
+  env['ANDROID_HOME'] = wp.config.evidence.androidHome;
+  env['JAVA_HOME'] = wp.config.evidence.javaHome;
+  env['DEVELOPER_DIR'] = wp.config.evidence.developerDir;
   return env;
 }
 
@@ -941,7 +945,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           writeEmployeeFile(wp.org, employeeId, 'handoff.md', `${handoff.trim()}\n`);
           return ok('Handoff written.');
         }),
-      tool('report_done', 'Report an assignment as done, with evidence. It goes to review; a verifier marks it done.',
+      tool('report_done', 'Report an assignment as done, with evidence. It goes to review; a verifier marks it done. With pull requests on, run scripts/pre-pr.sh on your latest commit first: its results for that commit are workplace/tests, and without them the report is refused.',
         {
           assignmentId: z.string().optional(),
           testsPassed: z.number().int().min(0), testsFailed: z.number().int().min(0), testCommand: z.string().optional(),
@@ -960,6 +964,9 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
             if (evidence.commits.length && real.length === 0) return ok('Not recorded: no commits on your branch since the base; commit your work first.');
             if (real.length) evidence.commits = [...new Set([...evidence.commits, ...real.map(c => c.split(' ')[0]!)])];
           }
+          // Results belong to a commit: scripts/pre-pr.sh must have passed on the branch head (shadow/on).
+          const gate = githubFlow.prePrGate(wp, id);
+          if (gate) return ok(`Not recorded: ${gate}`);
           try {
             const warning = work.get(wp, id) ? work.planWarning(work.get(wp, id)!) : null;
             const item = work.reportDone(wp, id, evidence, employeeId);
@@ -982,11 +989,13 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           setState(wp, employeeId, 'needs-owner');
           return ok(`Filed as ${item.id}. Continue with other work; the answer arrives in your next session's context.`);
         }),
-      tool('request_review', 'Ask the reviewer (your lead, or QA for a lead) to verify an assignment in review.',
+      tool('request_review', 'Ask the reviewer (your lead, or QA for a lead) to verify an assignment in review. With pull requests on, run scripts/pre-pr.sh on your latest commit first, or the request is refused.',
         { assignmentId: z.string(), note: z.string().optional() },
         async ({ assignmentId, note }) => {
           const item = work.get(wp, assignmentId);
           if (!item) return ok(`No assignment ${assignmentId}.`);
+          const gate = githubFlow.prePrGate(wp, assignmentId);
+          if (gate) return ok(`Not requested: ${gate}`);
           // The reviewer is a different identity (lead, or QA for a lead), never the owner (HOWTO
           // "State a feature once"; the §0 table has no owner row for a review): this is routine,
           // not an owner decision, so it never reaches his Inbox — only the reviewer's/Asha's page.

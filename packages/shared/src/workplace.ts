@@ -317,6 +317,15 @@ export interface EvidenceRunRecord {
   at: string;
   /** Why it is stale, an error, or a build failure. */
   note?: string;
+  /** The shared copy (one self-contained HTML in the evidence bucket); absent when the upload failed. */
+  share?: EvidenceShare;
+}
+
+/** A presigned link to a run's shared copy; re-signed from `key` when it expires. */
+export interface EvidenceShare {
+  key: string;
+  url: string;
+  expiresAt: string;
 }
 
 /* ---------- GitHub flow (docs/LLD-github-flow.md) ---------- */
