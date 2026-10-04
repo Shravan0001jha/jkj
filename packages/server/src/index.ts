@@ -33,6 +33,7 @@ import * as handoff from './services/handoff.js';
 import * as dispatch from './services/dispatch.js';
 import * as manager from './services/manager.js';
 import * as githubFlow from './services/github-flow.js';
+import * as evidence from './services/evidence.js';
 import * as spend from './services/spend.js';
 import * as pace from './services/pace.js';
 import * as alphaIntake from './services/alpha-intake.js';
@@ -131,6 +132,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   // The GitHub flow's sweep (docs/HLD-github-flow.md D3): a new commit on a story in review is re-pushed
   // and resets its approvals. Does nothing while the mode is local (the default).
   const stopGitHubFlow = githubFlow.startGitHubFlow(wp);
+  // run_evidence (docs/LLD-evidence.md §3): runs left by the last process are queued again.
+  const stopEvidence = evidence.startEvidence(wp);
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
@@ -222,6 +225,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       stopDispatch();
       stopManager();
       stopGitHubFlow();
+      stopEvidence();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
       stopPace();

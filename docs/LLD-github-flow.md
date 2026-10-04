@@ -104,7 +104,9 @@ reviewer becomes `qaReviewer`; stage `qa` → `isQa`, not the author/dev approve
 `dispute(wp, itemId, by, reason)`: only the author, only after a QA send-back → `manager.alert` with
 key `dispute:<id>:<sendBack.at>` (Asha → COO after 15 min → owner via the COO's forward).
 
-`setEvidence(wp, itemId, state, description)`: the evidence hook (unused until the evidence tool).
+`setEvidence(wp, itemId, state, description)`: the evidence hook, called by `run_evidence` when a run on
+the PR's head finishes (docs/LLD-evidence.md); a PR opened on a commit that already has evidence takes it
+over from `WorkItem.evidenceRun`.
 
 `syncHeads(wp)`: one-minute sweep (mode ≠ local) of in-review items: a PR whose head moved →
 `onReview` again; no PR yet (the first push failed) → retried, unless that head was refused.
