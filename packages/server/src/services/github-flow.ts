@@ -312,7 +312,7 @@ function runChecksNow(wp: Workplace, itemId: string, ctx: Ctx, cfg: quality.Qual
   return (async () => {
     try {
       savePr(wp, itemId, cur => (cur.pr ? { pr: { ...cur.pr, tests: { state: 'pending', sha, at: now(), summary: 'checks queued' } } } : {}));
-      const res = await quality.run(checkout, ctx.base, sha, cfg, () => prepareCheckout(wp, ctx.repo, sha));
+      const res = await quality.run(checkout, ctx.base, sha, cfg, () => prepareCheckout(wp, ctx.repo, sha), { QUALITY_MAIN_REPO: ctx.repo });
       const cur = rawGet(wp, itemId);
       if (!cur?.pr || cur.pr.headSha !== sha) return;   // a newer head has its own run
       savePr(wp, itemId, c => ({ pr: { ...c.pr!, tests: { state: res.state, sha, at: now(), summary: res.summary, ...(res.details ? { details: res.details.slice(-4000) } : {}) } } }));

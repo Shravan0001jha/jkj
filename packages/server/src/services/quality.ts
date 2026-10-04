@@ -166,16 +166,16 @@ let queue: Promise<unknown> = Promise.resolve();
  * One run at a time on this Mac (heavy builds are capped): runs queue behind each other. `prepare`
  * (putting a checkout on the head) runs inside the queue, so two runs never share a checkout.
  */
-export function run(worktree: string, base: string, head: string, cfg: QualityConfig, prepare?: () => void): Promise<QualityResult> {
+export function run(worktree: string, base: string, head: string, cfg: QualityConfig, prepare?: () => void, env: Record<string, string> = {}): Promise<QualityResult> {
   const next = queue.then(async (): Promise<QualityResult> => {
     try { prepare?.(); } catch (err) { return { state: 'error', summary: `checks not run: could not prepare the checkout (${err instanceof Error ? err.message.split('\n')[0] : err})` }; }
-    return runNow(worktree, base, head, cfg);
+    return runNow(worktree, base, head, cfg, env);
   });
   queue = next.catch(() => undefined);
   return next;
 }
 
-async function runNow(worktree: string, base: string, head: string, cfg: QualityConfig): Promise<QualityResult> {
+async function runNow(worktree: string, base: string, head: string, cfg: QualityConfig, env: Record<string, string>): Promise<QualityResult> {
   let sha: string;
   try {
     sha = git(worktree, ['rev-parse', head]).trim();
@@ -202,7 +202,7 @@ async function runNow(worktree: string, base: string, head: string, cfg: Quality
       if (check.run.includes('{files}') && !files.length) { details.push(`${label}: skipped (no matching files)`); continue; }
       const command = check.run.split('{files}').join(files.map(shellQuote).join(' '));
       const started = Date.now();
-      const r = await runCommand(worktree, command, { CHANGED_FILES: files.join('\n'), QUALITY_AREA: area.id }, check.timeoutSec);
+      const r = await runCommand(worktree, command, { ...env, CHANGED_FILES: files.join('\n'), QUALITY_AREA: area.id }, check.timeoutSec);
       const secs = Math.round((Date.now() - started) / 1000);
       if (r.ok) { passed.push(label); details.push(`${label}: passed (${secs}s)`); }
       else {
