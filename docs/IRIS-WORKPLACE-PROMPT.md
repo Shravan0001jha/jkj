@@ -16,8 +16,8 @@
   - Define "agent" precisely in the HLD: its identity, its context layers, its tools, its permission
     mode, what it may do without asking, and its budget.
 - **GitHub:**
-  - The organization is **`shravan0001jha-iris-hq`**: Team plan, 1 seat (the owner), empty. The current
-    code is private `Shravan0001jha/hivemind-prototype`; don't move it until the approved split.
+  - The organization is **`shravan0001jha-iris-hq`**: Team plan, 1 seat (the owner), empty. The code
+    is private `shravan0001jha-iris-hq/iris` (moved from `Shravan0001jha/hivemind-prototype` on 2026-10-04).
   - **One GitHub App per lead**, not bot user accounts. Apps take no seats and give an identity
     such as `iris-<charter>-lead[bot]`. Each App is installed only on its own repos, with minimal
     permissions (contents, pull requests, checks), and uses hourly installation tokens minted from its
