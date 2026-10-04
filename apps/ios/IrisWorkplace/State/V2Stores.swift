@@ -176,10 +176,10 @@ final class ItemsStore {
         return d
     }
 
-    func comment(_ rest: RestClient, id: String, text: String) async throws {
+    func comment(_ rest: RestClient, id: String, text: String, mentions: [String] = []) async throws {
         busy.insert(id)
         defer { busy.remove(id) }
-        add(try await rest.comment(item: id, text: text))
+        add(try await rest.comment(item: id, text: text, mentions: mentions))
     }
 
     func handle(_ event: ServerEvent) {

@@ -270,7 +270,7 @@ struct ItemDetailView: View {
     private func send() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let rest = model.rest else { return }
-        do { try await model.items.comment(rest, id: id, text: text); draft = ""; composing = false }
+        do { try await model.items.comment(rest, id: id, text: text, mentions: RoomStore.mentions(in: text, known: model.mentionable)); draft = ""; composing = false }
         catch { if let m = error.userMessage { actionError = m } }
     }
 

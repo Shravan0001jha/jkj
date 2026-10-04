@@ -148,7 +148,8 @@ final class ChatAlignmentUITests: XCTestCase {
         // Accessibility frames of a combined element are outset ~4 pt on each side of the drawn
         // bubble (the drawn left edge is the 10 pt gutter; the frame reads 6): allow for it.
         for f in theirs + mine { XCTAssertLessThanOrEqual(f.width, width * 0.8 + 8, "≤ 80% wide: \(f.width) of \(width)", file: file, line: line) }
-        let send = app.buttons["chat.send"]
+        // An empty composer shows the mic in Send's place where voice notes are on.
+        let send = app.buttons["chat.send"].exists ? app.buttons["chat.send"] : app.descendants(matching: .any).matching(identifier: "chat.mic").firstMatch
         XCTAssertEqual(send.frame.midY, field.frame.midY, accuracy: 1, "send is centred on the field", file: file, line: line)
         let tab = app.tabBars.firstMatch
         if tab.exists { XCTAssertLessThanOrEqual(field.frame.maxY, tab.frame.minY, "the composer sits above the tab bar", file: file, line: line) }

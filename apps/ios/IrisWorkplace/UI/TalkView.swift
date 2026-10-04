@@ -409,7 +409,9 @@ struct ConversationView: View {
         let mine = talk.employeeId == employeeId
         return ChatThreadView(
             items: mine ? ChatItem.from(log: talk.chatLog) : [],
-            typing: mine && talk.isTyping(),
+            // Typing comes only from the server's talk.typing (threads); an older server has no
+            // honest signal, so nothing shows rather than dots the moment the owner sends.
+            typing: false,
             typingName: name,
             loading: talk.loading || !mine,
             emptyTitle: "No session open",
@@ -469,7 +471,7 @@ struct ConversationView: View {
     private var cooChat: some View {
         ChatThreadView(
             items: ChatItem.from(coo: model.coo.log),
-            typing: model.coo.isTyping(),
+            typing: false,
             typingName: name,
             loading: model.coo.loading,
             emptyTitle: "Nothing yet",

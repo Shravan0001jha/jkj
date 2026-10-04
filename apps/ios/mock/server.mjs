@@ -16,6 +16,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 import * as D from './data.mjs';
 import * as V2 from './v2.mjs';
+import { talkState, handleTalk } from './talk.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : def; };
@@ -43,6 +44,7 @@ const fresh = () => withV2({
   cooLog: structuredClone(D.cooLog),
   cooOnline: true,
   usedCodes: new Set(),
+  talk: (() => { const t = talkState(D.cards); t.on = args.includes('--talk-threads'); return t; })(),
 });
 /** v2: the open decision joins the Inbox, and the live area/release threads join the Room. */
 function withV2(st) {
@@ -131,6 +133,7 @@ const server = createServer(async (req, res) => {
   if (!p.startsWith('/api/')) return json(res, 404, { error: 'not found' });
   if (!authed(req, url)) return json(res, 401, { error: 'unauthorized' });
 
+  if (await handleTalk(state.talk, { m, p, url, req, res, json, readJson, broadcast })) return;
   const seg = p.split('/').filter(Boolean); // ['api', ...]
   const id = seg[2] ? decodeURIComponent(seg[2]) : undefined;
 
