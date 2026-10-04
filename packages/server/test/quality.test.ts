@@ -7,9 +7,9 @@ import { join } from 'node:path';
 import * as quality from '../src/services/quality.js';
 
 /**
- * Checkpoint 10 (docs/HLD-github-flow.md D2, D6): the quality checks the Mac runs for
- * `workplace/tests` — per-area commands from quality.yaml, a secret scan, a build-output guard and a
- * file-size limit — judged only on what the branch adds or changes.
+ * Checkpoint 10 (docs/HLD-github-flow.md D2): the security guards the server runs on every push —
+ * a secret scan, a build-output guard and a file-size limit — judged only on what the branch adds or
+ * changes. The suites are the author's scripts/pre-pr.sh (D9), not run here.
  */
 
 const git = (cwd: string, args: string[]): string => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: 'pipe' });
@@ -34,19 +34,17 @@ function repo(): { root: string; commit(file: string, content: string | Buffer):
 
 const config = (yaml: string): quality.QualityConfig => quality.parseConfig(yaml);
 
-test('quality.yaml: defaults when missing; areas, checks and limits when present', () => {
+test('quality.yaml: defaults when missing; limits when present; an areas key is ignored (the suites are pre-pr.sh\'s)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'iris-qcfg-'));
   try {
     const d = quality.loadConfig(dir);
     assert.ok(d.maxFileBytes > 0);
     assert.ok(d.buildOutput.some(p => p.test('services/agent-svc/dist-x/a.bin')));
-    assert.equal(d.areas.length, 0);
     writeFileSync(join(dir, 'quality.yaml'), 'maxFileBytes: 10\nareas:\n  desktop:\n    paths: [desktop/]\n    checks:\n      - name: lint\n        run: node --check {files}\n        extensions: [.js]\n        timeoutSec: 30\n');
     const c = quality.loadConfig(dir);
     assert.equal(c.maxFileBytes, 10);
-    assert.deepEqual(c.areas.map(a => a.id), ['desktop']);
-    assert.equal(c.areas[0]!.checks[0]!.timeoutSec, 30);
-    assert.throws(() => config('areas:\n  x:\n    checks:\n      - name: lint\n'), /run/);
+    assert.equal('areas' in c, false);
+    assert.doesNotThrow(() => config('areas:\n  x:\n    checks:\n      - name: lint\n'));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -96,68 +94,5 @@ test('the secret scan passes a clean branch', () => {
   try {
     r.commit('services/iris-api/conf.py', 'TOKEN = os.environ["TOKEN"]\n');
     assert.deepEqual(quality.secretProblems(r.root, 'feat/iris-character', 'HEAD', config('')), []);
-  } finally { r.cleanup(); }
-});
-
-test('run: only the touched areas run, with {files} filtered by extension; a failing check fails the run', async () => {
-  const r = repo();
-  try {
-    r.commit('desktop/a.js', 'const a = 1;\n');
-    r.commit('desktop/notes.md', '# n\n');
-    const yaml = [
-      'areas:',
-      '  desktop:',
-      '    paths: [desktop/]',
-      '    checks:',
-      '      - name: lint',
-      '        run: for f in {files}; do node --check "$f" || exit 1; done; echo "$CHANGED_FILES" > .files-seen',
-      '        extensions: [.js]',
-      '  iris-api:',
-      '    paths: [services/iris-api/]',
-      '    checks:',
-      '      - name: lint',
-      '        run: "false"',
-    ].join('\n');
-    const ok = await quality.run(r.root, 'feat/iris-character', 'HEAD', config(yaml));
-    assert.equal(ok.state, 'success', ok.details);
-    assert.match(ok.summary, /desktop/);
-    assert.ok(!/iris-api/.test(ok.summary), 'an untouched area does not run');
-
-    r.commit('desktop/b.js', 'const = ;\n');
-    const bad = await quality.run(r.root, 'feat/iris-character', 'HEAD', config(yaml));
-    assert.equal(bad.state, 'failure');
-    assert.match(bad.summary, /desktop lint/);
-  } finally { r.cleanup(); }
-});
-
-test('run: a dist-x file or a planted key fails the run before any command', async () => {
-  const r = repo();
-  try {
-    r.commit('dist-x/out.js', 'x\n');
-    const res = await quality.run(r.root, 'feat/iris-character', 'HEAD', config('areas:\n  all:\n    paths: [""]\n    checks:\n      - name: never\n        run: touch .ran\n'));
-    assert.equal(res.state, 'failure');
-    assert.match(res.summary, /build output/);
-    assert.ok(!existsSync(join(r.root, '.ran')), 'no command ran');
-  } finally { r.cleanup(); }
-});
-
-test('run: a check over its time limit fails', async () => {
-  const r = repo();
-  try {
-    r.commit('desktop/a.js', 'x\n');
-    const res = await quality.run(r.root, 'feat/iris-character', 'HEAD', config('areas:\n  desktop:\n    paths: [desktop/]\n    checks:\n      - name: slow\n        run: sleep 5\n        timeoutSec: 1\n'));
-    assert.equal(res.state, 'failure');
-    assert.match(res.details ?? '', /timed out/);
-  } finally { r.cleanup(); }
-});
-
-test('run: refused when the worktree is not at the head under review', async () => {
-  const r = repo();
-  try {
-    const first = r.commit('desktop/a.js', 'x\n');
-    r.commit('desktop/b.js', 'y\n');
-    const res = await quality.run(r.root, 'feat/iris-character', first, config(''));
-    assert.equal(res.state, 'error');
-    assert.match(res.summary, /not at/);
   } finally { r.cleanup(); }
 });

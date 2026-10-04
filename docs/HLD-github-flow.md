@@ -57,7 +57,7 @@ Fallback: GitHub failures (an API error, a push that fails for a network/auth re
 report_done / request_review ──► github-flow.onReview ──► push guard ──► GitHubPort.push / openPr
                                        │                     (branch name, dist-*, gitleaks, size)
                                        ├──► statuses (iris-review App)
-                                       └──► quality.run (async, serial) ──► workplace/tests
+                                       └──► pre-pr.sh results of the head (author's worktree) ──► workplace/tests
 review_approve / review_send_back / review_dispute ──► github-flow (review-policy decides who)
 POST /api/coo/merge ──► github-flow.merge ──► GitHubPort.merge + deleteBranch ──► git pull --ff-only
 POST/GET /api/coo/github ──► mode, fallback state
@@ -70,7 +70,8 @@ POST/GET /api/coo/github ──► mode, fallback state
   the fast-forward pull are real git.
 - **review-policy** (pure): who may give which approval, and whether an approval still holds.
 - **github-flow**: the orchestration, the mode, the fallback, the statuses, the merge.
-- **quality**: loads `quality.yaml`, runs the static guards and the per-area commands.
+- **quality**: loads `quality.yaml`, runs the static guards (the suites are pre-pr.sh's, D9).
+- **pre-pr**: reads the author's `scripts/pre-pr.sh` results for a commit and describes them.
 
 ## 5. Key decisions
 
@@ -91,9 +92,22 @@ POST/GET /api/coo/github ──► mode, fallback state
   approval marks the story done.
 - **D5 Disputes** of a QA send-back go through the existing manager alert: Asha first, the COO after
   15 minutes unacted (manager.ts), and the COO forwards to the owner (`/api/coo/forward`).
-- **D6 Quality checks run in the employee's worktree, serially** (heavy builds are capped on the Mac),
+- **D6 (superseded by D9 for the suites; the guards stay)** Quality checks run in the employee's worktree, serially (heavy builds are capped on the Mac),
   only for the areas the diff touches. Commands come from `quality.yaml`; nothing is hard-coded per
   project. A missing tool fails closed (gitleaks absent = refused).
+- **D9 Pre-PR gate** (owner, 4 Oct; replaces re-running suites on the server). The author runs
+  `scripts/pre-pr.sh` (Iris repo) on their latest commit; it writes
+  `<worktree>/.workplace/pre-pr/<full sha>.json` (`{sha, base, at, by, ok, areas:[{area, checks:[…]}]}`).
+  In shadow/on, `report_done` and `request_review` are refused ("Run scripts/pre-pr.sh on your latest
+  commit first (results belong to a commit).") unless that file exists for the branch head and is a
+  pass: `ok`, `mode` `full`, `only` null, `sha` = the head (a fast or partial run never counts).
+  `workplace/tests` is that result ("mobile-android unit 16 passed · iris-api unit 379 passed — run by
+  tara on bbd2d88"; counts may be null, e.g. a syntax check, shown as "ok"); a head with no result,
+  or only a fast/partial pass, is pending; `ok` false is failure. Employee worktrees need the trunk
+  merged in to have the script. The server runs no suites; the security
+  guards (gitleaks, build output, file size) still run on every push and still refuse. Employee
+  sessions get `ANDROID_HOME`, `JAVA_HOME` (JDK 17) and `DEVELOPER_DIR` (full Xcode) so the script can
+  build. Local mode: nothing new.
 - **D7 `workplace/evidence`** is driven by `run_evidence` (docs/HLD-evidence.md) through `setEvidence`;
   it is not yet required to merge.
 - **D8 The merge uses a merge commit and passes the reviewed SHA** to GitHub, so a commit that lands

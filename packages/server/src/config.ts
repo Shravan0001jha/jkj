@@ -81,6 +81,8 @@ export interface EvidenceConfig {
   /** The runner used while the built commit has no e2e/ yet (an iris-e2e clone). */
   runnerFallback: string;
   androidHome: string;
+  /** JDK 17 (gradle): builds and every employee session (pre-pr.sh). */
+  javaHome: string;
   /** Full Xcode (employee worktrees only have the command-line tools). */
   developerDir: string;
   /** Device slots of the runner: at most this many runs at once. */
@@ -168,6 +170,7 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
       runnerInRepo: 'e2e/scripts/local-run.sh',
       runnerFallback: env['WORKPLACE_EVIDENCE_RUNNER'] ?? join(homedir(), 'iris-e2e', 'scripts', 'local-run.sh'),
       androidHome: env['ANDROID_HOME'] ?? '/opt/homebrew/share/android-commandlinetools',
+      javaHome: env['WORKPLACE_JAVA_HOME'] ?? '/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home',
       developerDir: env['WORKPLACE_DEVELOPER_DIR'] ?? '/Applications/Xcode.app/Contents/Developer',
       slots: 2,
       keepBuilds: 4,
