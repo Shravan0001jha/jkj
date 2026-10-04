@@ -371,6 +371,8 @@ struct UpdateItemRequest: Codable, Equatable {
 
 struct CommentRequest: Codable, Equatable {
     var text: String
+    /// Several people at once (LLD-app-fixes §5); `@id` in the text counts too.
+    var mentions: [String]? = nil
 }
 
 struct MergeRequest: Codable, Equatable {

@@ -213,6 +213,7 @@ struct ThreadView: View {
     @State private var error: String?
     @State private var showResolve = false
     @State private var summary = ""
+    @State private var replyTo: RoomMessage?
     @FocusState private var composing: Bool
 
     private var thread: RoomThread? { model.room.thread(id) }
@@ -229,14 +230,7 @@ struct ThreadView: View {
     }
     /// Who can be @mentioned: everyone in the Office, plus the thread's participants (the Office may not be loaded yet).
     private var knownIds: [String] {
-        Array(Set(model.office.cards.map(\.employee.id) + (thread?.participants ?? []) + messages.map(\.by))).filter { $0 != "owner" && $0 != "workplace" }
-    }
-    /// The word being typed after the last unfinished `@`, or nil when the draft isn't mid-mention.
-    private var mentionQuery: String? {
-        guard let at = draft.lastIndex(of: "@") else { return nil }
-        let after = draft[draft.index(after: at)...]
-        guard !after.contains(where: { $0.isWhitespace }) else { return nil }
-        return String(after)
+        Array(Set(model.mentionable + (thread?.participants ?? []) + messages.map(\.by))).filter { $0 != "owner" && $0 != "workplace" }
     }
 
     var body: some View {
@@ -276,7 +270,7 @@ struct ThreadView: View {
                             Text("No messages yet. Say something, or @mention someone.").font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding()
                         }
                         ForEach(messages) { m in
-                            RoomMessageRow(message: m).id(m.id)
+                            RoomMessageRow(message: m, onReply: thread?.state == .resolved ? nil : { replyTo = $0; composing = true }).id(m.id)
                         }
                         if let who = model.room.replying[id] {
                             ReplyingBubble(name: model.employeeName(who)).id("replying")
@@ -319,51 +313,15 @@ struct ThreadView: View {
         .onChange(of: messages.count) { _, _ in model.room.markRead(id) }
     }
 
-    /// Employees whose id or name starts with the word after the last unfinished `@`.
-    private var mentionCandidates: [String] {
-        guard let q = mentionQuery else { return [] }
-        if q.isEmpty { return knownIds.sorted { model.employeeName($0) < model.employeeName($1) } }
-        return knownIds.filter { $0.hasPrefix(q.lowercased()) || model.employeeName($0).lowercased().hasPrefix(q.lowercased()) }
-    }
-
-    /// Replaces the word being typed after the last `@` with the chosen id, so picking never
-    /// disturbs anything typed before it.
-    private func pickMention(_ empId: String) {
-        guard let at = draft.lastIndex(of: "@") else { return }
-        draft.replaceSubrange(draft.index(after: at)..., with: empId + " ")
-    }
-
     private var composer: some View {
         VStack(spacing: 4) {
-            if !mentionCandidates.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(mentionCandidates, id: \.self) { empId in
-                            Button { pickMention(empId) } label: {
-                                HStack(spacing: 4) {
-                                    InitialsAvatar(name: model.employeeName(empId), size: 18)
-                                    Text(model.employeeName(empId)).font(.caption.weight(.medium))
-                                }
-                                .padding(.horizontal, 8).padding(.vertical, 5)
-                                .background(Color(.secondarySystemBackground), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                }
-                .accessibilityLabel("Mention someone")
-            }
-            let mentions = RoomStore.mentions(in: draft, known: knownIds)
-            if !mentions.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "at").font(.caption).foregroundStyle(.secondary)
-                    ForEach(mentions, id: \.self) { Pill(text: model.employeeName($0), tint: .accentColor) }
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
+            MentionSuggestions(draft: $draft, known: knownIds)
+            MentionPills(draft: draft, known: knownIds)
+            if let r = replyTo {
+                ReplyStrip(sender: senderName(r), text: r.text) { replyTo = nil }
             }
             HStack(alignment: .bottom, spacing: 8) {
+                MentionButton(draft: $draft, known: knownIds)
                 TextField("Post as you · @name to mention", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.roundedBorder)
@@ -380,13 +338,21 @@ struct ThreadView: View {
         .background(.bar)
     }
 
+    private func senderName(_ m: RoomMessage) -> String {
+        m.by == "owner" || (m.owner && m.by != "coo") ? "You" : m.by == "coo" ? "Claude — COO" : model.employeeName(m.by)
+    }
+
     private func send() async {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let rest = model.rest else { return }
+        let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty, let rest = model.rest else { return }
+        let text = replyTo.map { r in
+            let line = MessageMenu.plain(r.text).replacingOccurrences(of: "\n", with: " ")
+            return "> \(senderName(r) == "You" ? "me" : senderName(r)): \(line.count > 140 ? String(line.prefix(139)) + "…" : line)\n\n\(typed)"
+        } ?? typed
         error = nil
         do {
-            try await model.room.post(rest, threadId: id, text: text, mentions: RoomStore.mentions(in: text, known: knownIds))
-            draft = ""
+            try await model.room.post(rest, threadId: id, text: text, mentions: RoomStore.mentions(in: typed, known: knownIds))
+            draft = ""; replyTo = nil
         } catch { if let m = error.userMessage { self.error = m } }
     }
 
@@ -401,6 +367,7 @@ struct ThreadView: View {
 struct RoomMessageRow: View {
     @Environment(AppModel.self) private var model
     let message: RoomMessage
+    var onReply: ((RoomMessage) -> Void)? = nil
     @State private var expanded = false
 
     /// Only the owner's own words are "You": the COO posts as herself (`by: 'coo'`).
@@ -414,8 +381,11 @@ struct RoomMessageRow: View {
         if let kind = message.kind, kind != .message { UpdateLineRow(message: message) } else { bubble }
     }
 
+    /// Room messages fold to three lines: the room is for skimming.
+    static let foldLines = 3
+
     private var bubble: some View {
-        let c = CompactText(text: message.text, details: message.details)
+        let body = MessageBody(text: message.text, details: message.details, foldLines: Self.foldLines, detailsIsFull: message.truncated == true)
         return HStack(alignment: .top, spacing: 8) {
             if isOwner { Spacer(minLength: 40) }
             if !isOwner { InitialsAvatar(name: senderName, tint: message.by == "workplace" ? .secondary : .accentColor) }
@@ -423,30 +393,27 @@ struct RoomMessageRow: View {
                 HStack(spacing: 6) {
                     Text(senderName).font(.caption.weight(.semibold)).foregroundStyle(isOwner ? Color.accentColor : .primary)
                     Text(Format.ago(message.at)).font(.caption2).foregroundStyle(.tertiary)
-                    if c.hasDetails { Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.secondary) }
                 }
-                Text(highlighted(expanded ? (message.details ?? message.text) : c.line))
-                    .font(.subheadline)
-                    .lineLimit(expanded ? nil : 1)
-                    .multilineTextAlignment(isOwner ? .trailing : .leading)
-                    .foregroundStyle(isOwner ? .white : .primary)
-                    .textSelection(.enabled)
+                MessageTextView(text: message.text, details: message.details, expanded: $expanded, mine: isOwner,
+                                alignment: .leading, foldLines: Self.foldLines, detailsIsFull: message.truncated == true) { highlighted($0) }
                     .padding(.horizontal, 10).padding(.vertical, 7)
                     .background(isOwner ? Color.accentColor.opacity(0.9) : Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14))
+                    .onTapGesture { if body.isLong { withAnimation(.snappy) { expanded.toggle() } } }
+                    .contextMenu { MessageMenu(text: body.full, onReply: onReply.map { f in { f(message) } }) }
+                    .accessibilityAction(named: "Reply") { onReply?(message) }
             }
             if !isOwner { Spacer(minLength: 40) }
         }
         .frame(maxWidth: .infinity, alignment: isOwner ? .trailing : .leading)
         .padding(.horizontal, 12)
-        .contentShape(Rectangle())
-        .onTapGesture { if c.hasDetails { withAnimation(.snappy) { expanded.toggle() } } }
         .accessibilityElement(children: .combine)
-        .accessibilityHint(c.hasDetails ? (expanded ? "Collapses the details" : "Expands the details") : "")
+        .accessibilityIdentifier("room.message")
     }
 
     /// `@name` in the accent colour.
     private func highlighted(_ text: String) -> AttributedString {
-        var a = AttributedString(text)
+        var a = (try? AttributedString(markdown: IdLinks.headingsAsBold(text), options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
         for m in text.matches(of: /@([A-Za-z0-9_-]+)/) {
             if let r = a.range(of: String(m.0)) {
                 a[r].foregroundColor = .accentColor

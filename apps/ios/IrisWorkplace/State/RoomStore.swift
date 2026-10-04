@@ -90,7 +90,7 @@ final class RoomStore {
     func thread(_ id: String) -> RoomThread? { threads.first { $0.id == id } }
 
     /// Employee ids mentioned as `@id` in the text, in order, without duplicates.
-    static func mentions(in text: String, known: [String]) -> [String] {
+    nonisolated static func mentions(in text: String, known: [String]) -> [String] {
         var out: [String] = []
         for match in text.matches(of: /@([A-Za-z0-9_-]+)/) {
             let id = String(match.1).lowercased()

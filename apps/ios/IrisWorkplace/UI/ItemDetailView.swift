@@ -237,36 +237,12 @@ struct ItemDetailView: View {
     }
 
     private func composer(_ d: ItemDetail) -> some View {
-        let known = model.assignees.map(\.id).filter { $0 != "owner" } + ["coo"]
-        let mentions = RoomStore.mentions(in: draft, known: known)
+        let known = model.mentionable
         return VStack(spacing: 4) {
-            if let q = mentionQuery {
-                let cands = known.filter { q.isEmpty || $0.hasPrefix(q.lowercased()) || model.employeeName($0).lowercased().hasPrefix(q.lowercased()) }
-                if !cands.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(cands, id: \.self) { e in
-                                Button { pickMention(e) } label: {
-                                    HStack(spacing: 4) { InitialsAvatar(name: model.employeeName(e), size: 18); Text(model.employeeName(e)).font(.caption.weight(.medium)) }
-                                        .padding(.horizontal, 8).padding(.vertical, 5)
-                                        .background(Color(.secondarySystemBackground), in: Capsule())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal, 14)
-                    }
-                }
-            }
-            if !mentions.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "at").font(.caption).foregroundStyle(.secondary)
-                    ForEach(mentions, id: \.self) { Pill(text: model.employeeName($0), tint: .accentColor) }
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-            }
+            MentionSuggestions(draft: $draft, known: known)
+            MentionPills(draft: draft, known: known)
             HStack(alignment: .bottom, spacing: 8) {
+                MentionButton(draft: $draft, known: known)
                 TextField("Comment · @name to mention", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.roundedBorder)
@@ -281,17 +257,6 @@ struct ItemDetailView: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.bar)
-    }
-
-    private var mentionQuery: String? {
-        guard let at = draft.lastIndex(of: "@") else { return nil }
-        let after = draft[draft.index(after: at)...]
-        return after.contains(where: \.isWhitespace) ? nil : String(after)
-    }
-
-    private func pickMention(_ e: String) {
-        guard let at = draft.lastIndex(of: "@") else { return }
-        draft.replaceSubrange(draft.index(after: at)..., with: e + " ")
     }
 
     // MARK: actions
@@ -341,6 +306,7 @@ struct CommentRow: View {
 
     var body: some View {
         let mine = comment.by == "owner"
+        let body = MessageBody(text: comment.text, details: comment.details, foldLines: 6)
         HStack(alignment: .top, spacing: 8) {
             InitialsAvatar(name: model.employeeName(comment.by), size: 24, tint: mine ? .accentColor : .secondary)
             VStack(alignment: .leading, spacing: 3) {
@@ -348,12 +314,18 @@ struct CommentRow: View {
                     Text(model.employeeName(comment.by)).font(.caption.weight(.semibold)).foregroundStyle(mine ? Color.accentColor : .primary)
                     Text(Format.ago(comment.at)).font(.caption2).foregroundStyle(.tertiary)
                 }
-                Text(mentionHighlighted(expanded ? (comment.details ?? comment.text) : comment.text)).font(.subheadline).textSelection(.enabled)
-                if comment.details != nil {
-                    Button(expanded ? "Less" : "More") { withAnimation(.snappy) { expanded.toggle() } }.font(.caption.weight(.semibold)).buttonStyle(.borderless)
+                MessageTextView(text: comment.text, details: comment.details, expanded: $expanded, foldLines: 6) {
+                    var a = (try? AttributedString(markdown: $0, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString($0)
+                    for m in $0.matches(of: /@([A-Za-z0-9_-]+)/) {
+                        if let r = a.range(of: String(m.0)) { a[r].foregroundColor = .accentColor; a[r].font = Font.subheadline.weight(.semibold) }
+                    }
+                    return a
                 }
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture { if body.isLong { withAnimation(.snappy) { expanded.toggle() } } }
+        .contextMenu { MessageMenu(text: body.full) }
         .accessibilityElement(children: .combine)
     }
 }
