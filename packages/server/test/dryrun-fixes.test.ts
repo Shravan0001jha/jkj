@@ -2,7 +2,12 @@ import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import type { Workplace } from '../src/services/workplace.js';
 import * as employees from '../src/services/employees.js';
+import * as items from '../src/services/items.js';
+import { rawGet } from '../src/services/v2-map.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
 import { testWorkplace } from './fakes/workplace.js';
 
@@ -16,6 +21,15 @@ function withOauth(dir: string): void {
   writeFileSync(join(dir, 'ops', 'workplace', 'claude-oauth.env'), 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-test-token-value\n');
 }
 
+async function toolsFor(wp: Workplace, employeeId: string, assignmentId?: string) {
+  const server = employees.workplaceTools(wp, employeeId, () => ({ agentId: 'a', employeeId, ...(assignmentId ? { assignmentId } : {}), startedAt: '', seen: {}, planCaptured: false }));
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await server.instance.connect(st);
+  const client = new Client({ name: 't', version: '1' });
+  await client.connect(ct);
+  return async (name: string, args: Record<string, unknown>) => JSON.stringify((await client.callTool({ name, arguments: args })).content);
+}
+
 test('#11: every employee session runs with WORKPLACE_EMPLOYEE=<its id>, so pre-pr.sh records who ran it', () => {
   const { wp, tmp } = testWorkplace();
   withOauth(tmp.dir);
@@ -24,5 +38,29 @@ test('#11: every employee session runs with WORKPLACE_EMPLOYEE=<its id>, so pre-
     const env = runtime.last().options.env!;
     assert.equal(env['WORKPLACE_EMPLOYEE'], 'tara');
     assert.equal(employees.childEnv(wp)['WORKPLACE_EMPLOYEE'], undefined, 'never inherited from the server');
+  } finally { tmp.cleanup(); }
+});
+
+test('#19: item_handback is refused while the story is In review (or its PR waits on review); allowed once it is back in progress', async () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const epic = items.create(wp, { level: 'epic', title: 'Practice' }, 'owner');
+    const story = items.create(wp, { level: 'story', parentId: epic.id, title: 'About screen version', assigneeId: 'nikhil' }, 'asha');
+    items.update(wp, story.id, { status: 'in-progress' }, 'nikhil');
+    items.update(wp, story.id, { status: 'blocked', blockedReason: 'Needs the footer built.', waitingOn: 'dev', kind: 'work' }, 'nikhil');
+    assert.equal(rawGet(wp, story.id)!.handoff?.fromId, 'nikhil');
+    items.update(wp, story.id, { status: 'in-review', reviewerId: 'kabir' }, 'dev');
+    const dev = await toolsFor(wp, 'dev', story.id);
+    const refused = await dev('item_handback', { itemId: story.id, note: 'Done' });
+    assert.match(refused, /The story is in review; post progress as a comment \(item_comment\) instead of handing it back\./);
+    assert.equal(rawGet(wp, story.id)!.status, 'in-review', 'left in review');
+
+    // An open PR pushed for review counts too, whatever the status says.
+    const w = rawGet(wp, story.id)!;
+    assert.equal(employees.awaitingReview({ ...w, status: 'in-progress', pr: { number: 1, url: '', branch: 'b', base: 't', headSha: 'abc', pushedAt: '2026-10-04T10:00:00Z', evidence: 'pending' } }), true);
+    assert.equal(employees.awaitingReview({ ...w, status: 'in-progress', pr: { number: 1, url: '', branch: 'b', base: 't', headSha: 'abc', pushedAt: '2026-10-04T10:00:00Z', evidence: 'pending', sendBack: { by: 'nikhil', at: '2026-10-04T10:05:00Z', note: 'fix' } } }), false, 'sent back: work again');
+
+    items.update(wp, story.id, { status: 'in-progress', note: 'back to work' }, 'kabir');
+    assert.match(await dev('item_handback', { itemId: story.id, note: 'Built the footer' }), /Handed .* back to Nikhil/);
   } finally { tmp.cleanup(); }
 });

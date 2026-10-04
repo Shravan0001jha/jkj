@@ -1007,6 +1007,20 @@ function recordUsage(wp: Workplace, session: Session, result: RunResult): void {
 
 /* ---------- the Workplace's own tools, served in-process ---------- */
 
+export const HANDBACK_IN_REVIEW = 'The story is in review; post progress as a comment (item_comment) instead of handing it back.';
+
+/**
+ * In review, or its PR is open and was pushed for review with no send-back since (dry run #19: Tara
+ * handed a story back to Asha while it was In review with Dev, which pulled it out of review).
+ */
+export function awaitingReview(w: WorkItem | undefined): boolean {
+  if (!w) return false;
+  if (w.status === 'in-review') return true;
+  const pr = w.pr;
+  if (!pr || pr.merged || w.status === 'done') return false;
+  return !pr.sendBack || pr.sendBack.at < pr.pushedAt;
+}
+
 export function workplaceTools(wp: Workplace, employeeId: string, session: () => Session) {
   const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] });
   return createSdkMcpServer({
@@ -1265,6 +1279,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         async ({ itemId, note }) => {
           const id = itemId ?? session().assignmentId;
           if (!id) return ok('Name the item: no item is attached to this session.');
+          if (awaitingReview(rawGet(wp, id))) return ok(`Not handed back: ${HANDBACK_IN_REVIEW}`);
           try { const it = items.handback(wp, id, note, employeeId); return ok(`Handed ${it.id} back to ${nameOf(wp, it.assigneeId)}.`); }
           catch (err) { return ok(`Not handed back: ${err instanceof Error ? err.message : String(err)}`); }
         }),
