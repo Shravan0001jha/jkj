@@ -272,6 +272,27 @@ test('a new commit resets both approvals, marks evidence stale, and is pushed', 
   } finally { await s.done(); }
 });
 
+test('#23: a new head that already has evidence says so; without it the evidence is stale', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    const pushed = () => trail.activityFor(s.wp, s.storyId).filter(a => /^Pushed .*new commits/.test(a.text)).map(a => a.text);
+    s.commit('services/agent-svc/recall.py', 'x = 2\n');
+    await flow.syncHeads(s.wp);
+    assert.match(pushed().at(-1)!, /both approvals reset; the evidence is stale$/);
+    assert.equal(pr(s).evidence, 'stale');
+
+    const newer = s.commit('services/agent-svc/recall.py', 'x = 3\n');
+    const cur = rawGet(s.wp, s.storyId)!;
+    work.saveQuiet(s.wp, { ...cur, evidenceRun: { run: 'r', sha: newer, state: 'success', platforms: ['android'], features: ['queries'], passed: 14, failed: 0, failures: [], durationS: 60, report: '/r', by: 'kabir', at: new Date().toISOString() } });
+    await flow.syncHeads(s.wp);
+    assert.match(pushed().at(-1)!, /both approvals reset; evidence already matches this commit$/);
+    assert.doesNotMatch(pushed().at(-1)!, /stale/);
+    assert.equal(pr(s).evidence, 'success');
+  } finally { await s.done(); }
+});
+
 test('the sweep notices a new commit while in review: re-pushed and reset', async () => {
   const s = setup('shadow');
   try {
@@ -329,6 +350,29 @@ test('a dispute of a QA send-back goes to Asha first (then the COO, then the own
     assert.match(alert!.title, /disput/i);
     assert.match(alert!.text ?? alert!.body, /COO/);
     assert.ok(pr(s).sendBack?.disputedAt);
+  } finally { await s.done(); }
+});
+
+test('#20: a send-back reaches the author at once: a message into an idle open session, else a session on the story', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    const kabirs = () => runtime.sessions.filter(x => x.options.cwd.includes('/kabir/'));
+    const before = kabirs().length;
+    // No open session: one starts on the story, with the note.
+    await flow.sendBack(s.wp, s.storyId, 'dev', 'the recall test is missing');
+    assert.equal(kabirs().length, before + 1);
+    assert.match(kabirs().at(-1)!.options.prompt, /Sent back by Dev: .*the recall test is missing/s);
+    assert.ok(trail.activityFor(s.wp, s.storyId).some(a => /Send-back delivered to Kabir: a session started/.test(a.text)));
+
+    // An open session sitting idle (waiting) gets it as a message, not a second session.
+    kabirs().at(-1)!.result();
+    items.update(s.wp, s.storyId, { status: 'in-review' }, 'kabir');
+    await flow.onReview(s.wp, s.storyId, 'kabir');
+    await flow.sendBack(s.wp, s.storyId, 'dev', 'rename the helper');
+    assert.equal(kabirs().length, before + 1, 'no second session');
+    assert.match(kabirs().at(-1)!.sent.at(-1)!.text, /Sent back by Dev: .*rename the helper/s);
   } finally { await s.done(); }
 });
 

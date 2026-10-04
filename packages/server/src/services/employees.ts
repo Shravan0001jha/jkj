@@ -26,7 +26,7 @@ import * as statusAnswers from './status.js';
 import * as readTools from './read-tools.js';
 // The owner's Inbox replies reach the asker durably (HLD D23, LLD §19.14); the module wires itself.
 import './reply-delivery.js';
-import { isWaitable, nameOf, rawGet } from './v2-map.js';
+import { chiefOfStaffId, isWaitable, nameOf, rawGet } from './v2-map.js';
 import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
 import { humanizeIds } from './id-names.js';
 import { now } from './store.js';
@@ -217,7 +217,7 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
     ...(options.assignment ? { assignmentId: options.assignment.id } : {}),
     contextTokens: context.tokens,
     extra: {
-      env: childEnv(wp),
+      env: childEnv(wp, employeeId),
       systemPromptAppend: context.append,
       settingSources: ['user', 'project'],
       // The Workplace's own tools are the reporting channel; they never prompt.
@@ -317,13 +317,15 @@ export function foreignChanges(wp: Workplace, emp: Employee, worktree: Worktree)
 }
 
 /** The child gets the subscription token; the API key is absent, not blank. */
-export function childEnv(wp: Workplace): Record<string, string | undefined> {
+export function childEnv(wp: Workplace, employeeId?: string): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env };
   delete env['ANTHROPIC_API_KEY'];
   delete env['ANTHROPIC_AUTH_TOKEN'];
   const token = readOauthToken(wp);
   if (token) env['CLAUDE_CODE_OAUTH_TOKEN'] = token;
   env['IRIS_WORKPLACE'] = '1';
+  // Who is running: scripts/pre-pr.sh records it as "run by <id>" (dry run #11: it showed the owner's git email).
+  if (employeeId) env['WORKPLACE_EMPLOYEE'] = employeeId; else delete env['WORKPLACE_EMPLOYEE'];
   // The toolchains scripts/pre-pr.sh needs (Android SDK, JDK 17, full Xcode, not the CLI tools).
   env['ANDROID_HOME'] = wp.config.evidence.androidHome;
   env['JAVA_HOME'] = wp.config.evidence.javaHome;
@@ -423,6 +425,8 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
   // A dead session (interrupted, errored) is closed first, whatever its age: work goes to a live one.
   closeDead(wp, item.employeeId);
   const open = openSession(item.employeeId);
+  // Dry run #17: a story assigned to the Chief of Staff is hers to route, not to build.
+  const routing = isChiefOfStaff(wp, item.employeeId);
   if (open && carryOver.has(item.employeeId)) {
     const carried = carryOver.get(item.employeeId)!;
     runs.sendMessage(open.agentId, redeliveryText(carried), [], { from: carried[0]!.from });
@@ -433,7 +437,7 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
     // new story in his talk session's emp/dev/general, cut before that day's merge). Between turns the
     // worktree is switched now (auto-saving any uncommitted work, as at spawn); mid-turn, the switch
     // and the message wait for the end of that turn, so nothing is built on the old branch meanwhile.
-    const prompt = `New assignment ${item.id}: ${item.title}\n\n${item.body}\n\nReply with "## Plan" first.`;
+    const prompt = routing ? routePrompt(item) : `New assignment ${item.id}: ${item.title}\n\n${item.body}\n\nReply with "## Plan" first.`;
     if (midTurn(open.agentId)) {
       queueSwitch(wp, open.agentId, item.id, prompt);
       return runs.getRunAgent(open.agentId)!;
@@ -441,6 +445,7 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
     handOver(wp, open, item, prompt);
     return runs.getRunAgent(open.agentId)!;
   }
+  if (routing) return spawn(wp, item.employeeId, { assignment: item, prompt: routePrompt(item) });
   if (item.state === 'planned' || item.state === 'building') {
     // The plan exists (it is in the assignment layer): this session builds.
     const started = item.state === 'planned' ? work.transition(wp, item.id, { to: 'building', by: item.employeeId }) : item;
@@ -453,6 +458,17 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
     });
   }
   return spawn(wp, item.employeeId, { assignment: item, prompt: `Take assignment ${item.id}: ${item.title}. Read your context and reply with "## Plan" first.` });
+}
+
+/** The Chief of Staff (role `chief-of-staff`, or the charter holder): she routes work, she does not build it. */
+export function isChiefOfStaff(wp: Workplace, employeeId: string): boolean {
+  return wp.org.employees.find(e => e.id === employeeId)?.roleId === 'chief-of-staff' || employeeId === chiefOfStaffId(wp);
+}
+
+export function routePrompt(item: WorkItem): string {
+  return `Route this: assign it to the right developer by the ownership map. ${item.id}: ${item.title}\n\n${item.body ?? ''}\n\n` +
+    'Read it (item_read), find the owning charter for what it changes, then item_update it with assigneeId set to that developer and say why in one line with item_comment. ' +
+    'Do not plan or build it yourself.';
 }
 
 /** A turn is running, or parked on a tool approval: not the moment to move the tree under it. */
@@ -498,6 +514,11 @@ function blockOnSwitch(wp: Workplace, assignmentId: string, err: WorktreeSwitchE
   const item = work.get(wp, assignmentId);
   if (item && item.state !== 'blocked' && item.state !== 'done' && item.state !== 'rejected') work.transition(wp, assignmentId, { to: 'blocked', by: 'workplace', note: err.message });
   log.error('employees', `${assignmentId} blocked: ${err.message}`);
+}
+
+/** A running or waiting session of this employee is on the item, or has it queued for its turn's end. */
+export function sessionOn(employeeId: string, itemId: string): boolean {
+  return sessionsOf(employeeId).some(s => isLive(s.agentId) && (s.assignmentId === itemId || (pendingSwitch.get(s.agentId) ?? []).some(x => x.assignmentId === itemId)));
 }
 
 /** An assignment is waiting for the end of this session's turn (the dispatcher counts that as busy). */
@@ -1005,6 +1026,20 @@ function recordUsage(wp: Workplace, session: Session, result: RunResult): void {
 
 /* ---------- the Workplace's own tools, served in-process ---------- */
 
+export const HANDBACK_IN_REVIEW = 'The story is in review; post progress as a comment (item_comment) instead of handing it back.';
+
+/**
+ * In review, or its PR is open and was pushed for review with no send-back since (dry run #19: Tara
+ * handed a story back to Asha while it was In review with Dev, which pulled it out of review).
+ */
+export function awaitingReview(w: WorkItem | undefined): boolean {
+  if (!w) return false;
+  if (w.status === 'in-review') return true;
+  const pr = w.pr;
+  if (!pr || pr.merged || w.status === 'done') return false;
+  return !pr.sendBack || pr.sendBack.at < pr.pushedAt;
+}
+
 export function workplaceTools(wp: Workplace, employeeId: string, session: () => Session) {
   const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] });
   return createSdkMcpServer({
@@ -1228,11 +1263,12 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         'Blocked is only for a wait on the owner (waitingOn owner, with your recommendation), the COO (coo) or someone outside the team (external). ' +
         'Waiting on a teammate is never Blocked: status blocked with waitingOn a teammate becomes In review with them reviewing when it is a review or sign-off (kind review), ' +
         'or hands the item to them when it is their work (kind work): they work on it and give it back with item_handback.',
-        { itemId: z.string(), status: z.enum(['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked']).optional(), blockedReason: z.string().optional(), waitingOn: z.string().optional(), kind: z.enum(['review', 'work']).optional(), recommendation: z.string().optional(), reviewerId: z.string().optional(), points: z.number().int().optional(), note: z.string().optional() },
-        async ({ itemId, status, blockedReason, waitingOn, kind, recommendation, reviewerId, points, note }) => {
+        { itemId: z.string(), status: z.enum(['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked']).optional(), blockedReason: z.string().optional(), waitingOn: z.string().optional(), kind: z.enum(['review', 'work']).optional(), recommendation: z.string().optional(), reviewerId: z.string().optional(), points: z.number().int().optional(), note: z.string().optional(), assigneeId: z.string().optional().describe('Chief of Staff only: route the item to this employee.') },
+        async ({ itemId, status, blockedReason, waitingOn, kind, recommendation, reviewerId, points, note, assigneeId }) => {
           if (status === 'blocked' && waitingOn === 'owner' && !recommendation?.trim()) return ok('Not changed: blocked on the owner raises a decision in his Inbox; give your recommendation.');
+          if (assigneeId && !isChiefOfStaff(wp, employeeId)) return ok('Not changed: only the Chief of Staff routes an item to someone; hand it over with status blocked, waitingOn and kind work instead.');
           try {
-            const it = items.update(wp, itemId, { ...(status ? { status } : {}), ...(blockedReason ? { blockedReason } : {}), ...(waitingOn ? { waitingOn } : {}), ...(kind ? { kind } : {}), ...(recommendation ? { recommendation } : {}), ...(reviewerId ? { reviewerId } : {}), ...(points ? { points: points as never } : {}), ...(note ? { note } : {}) }, employeeId);
+            const it = items.update(wp, itemId, { ...(assigneeId ? { assigneeId } : {}), ...(status ? { status } : {}), ...(blockedReason ? { blockedReason } : {}), ...(waitingOn ? { waitingOn } : {}), ...(kind ? { kind } : {}), ...(recommendation ? { recommendation } : {}), ...(reviewerId ? { reviewerId } : {}), ...(points ? { points: points as never } : {}), ...(note ? { note } : {}) }, employeeId);
             if (status === 'blocked' && it.status !== 'blocked') return ok(notBlocked(wp, it));
             return ok(`${it.id} is ${it.status}.`);
           } catch (err) { return ok(`Not changed: ${err instanceof Error ? err.message : String(err)}`); }
@@ -1263,6 +1299,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         async ({ itemId, note }) => {
           const id = itemId ?? session().assignmentId;
           if (!id) return ok('Name the item: no item is attached to this session.');
+          if (awaitingReview(rawGet(wp, id))) return ok(`Not handed back: ${HANDBACK_IN_REVIEW}`);
           try { const it = items.handback(wp, id, note, employeeId); return ok(`Handed ${it.id} back to ${nameOf(wp, it.assigneeId)}.`); }
           catch (err) { return ok(`Not handed back: ${err instanceof Error ? err.message : String(err)}`); }
         }),
