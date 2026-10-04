@@ -299,6 +299,37 @@ test('refusals: Mac desktop, Windows, no commits, someone else\'s story, no stor
   } finally { await s.done(); }
 });
 
+test('features are checked at call time against the runner\'s list: "setup" and unknown names are refused at once, listing the allowed ones', async () => {
+  const s = setup();
+  try {
+    s.commit('services/agent-svc/a.py', 'a = 1\n');
+    for (const f of ['setup', 'queries,setup', 'memroy']) {
+      const r = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: f });
+      assert.equal(r.ok, false, f);
+      const m = r.ok ? '' : r.message;
+      assert.match(m, /queries, voice, memory, music, dance, files, timer, reminder, apps, errand/);
+      assert.match(m, /setup always runs/i);
+      assert.equal(m.split(/\.\s/).length, 1, 'one sentence');
+    }
+    assert.ok(evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'all' }).ok);
+    // The list comes from the runner in the story's own commit when it has one (e2e/scripts/local-run.sh).
+    const head = s.commit('e2e/scripts/local-run.sh', '#!/usr/bin/env bash\nALL_FEATURES=queries,newthing\n');
+    const r = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'ios', features: 'newthing' });
+    assert.ok(r.ok, r.ok ? '' : r.message);
+    const old = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'ios', features: 'files' });
+    assert.match(old.ok ? '' : old.message, /queries, newthing/);
+    assert.ok(head);
+    // Through the tool, with the allowed values in its description.
+    const client = await toolClient(s.wp, 'kabir', s.storyId);
+    const tools = await client.listTools();
+    const desc = tools.tools.find(t => t.name === 'run_evidence')!.description!;
+    assert.match(desc, /queries, voice, memory, music, dance, files, timer, reminder, apps, errand/);
+    assert.match(desc, /setup always runs/i);
+    assert.match(text(await client.callTool({ name: 'run_evidence', arguments: { platforms: 'android', features: 'setup' } })), /setup always runs/i);
+    await client.close();
+  } finally { await s.done(); }
+});
+
 /* ---------- the build cache ---------- */
 
 test('build cache: a story with no app change reuses the trunk build; an app change builds; the same app tree hits', async () => {
