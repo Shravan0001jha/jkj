@@ -1,3 +1,4 @@
+import type { TalkAttachment } from './talk.js';
 /**
  * The Iris Workplace domain: the organisation as data, the requirements it
  * serves, the work it does, and what the owner must decide.
@@ -615,8 +616,10 @@ export interface RoomMessage {
   kind?: 'message' | 'update' | 'standup' | 'release';
   /** v2: who a stand-up is about (it is authored by 'workplace'). */
   about?: string;
-  /** v2: the rest of a long agent message; `text` stays short. */
+  /** v2: the whole of a long agent message (`text` stays short). Shown in place of `text` on "more". */
   details?: string;
+  /** True when `text` was cut: `details` then holds the full text. */
+  truncated?: boolean;
   /** v2: the item an update line is about. */
   itemId?: string;
 }
@@ -639,6 +642,8 @@ export interface CooMessage {
   details?: string;
   /** Set on a 'coo' message that answers a specific owner message. */
   inReplyTo?: string;
+  /** Files with the message, either way (docs/LLD-app-fixes.md §12). */
+  attachments?: TalkAttachment[];
 }
 
 export type CooItemKind = 'escalation' | 'mention' | 'stall';

@@ -125,10 +125,61 @@ const DEFAULT_OPTIONS: Record<InboxKind, InboxOption[]> = {
 };
 
 export function raise(wp: Workplace, spec: RaiseOptions): InboxItem {
+  return raiseOrReuse(wp, spec).item;
+}
+
+/**
+ * One thing reaches the owner once (RCA, 4 Oct: a "question" AND a "decision" about the same work).
+ * An agent filed ask_owner, then blocked its item on the owner, and the block raised a second
+ * "Blocked on you" question under another dedupe key. So, besides the dedupe key: while an open
+ * owner-facing question or decision exists for a work item (`context.itemId`), another one for the
+ * same item is not raised — the open one is returned (`reused`). The single exception is a real
+ * decision arriving while only the Workplace's own "Blocked on you" question is open: the decision
+ * is the richer ask (options, recommendation), so it replaces the question.
+ */
+export function raiseOrReuse(wp: Workplace, spec: RaiseOptions): { item: InboxItem; reused: boolean } {
   if (spec.dedupeKey) {
     const open = list(wp, 'open').find(i => i.context['dedupeKey'] === spec.dedupeKey);
-    if (open) return open;
+    if (open) return { item: open, reused: true };
   }
+  const itemId = typeof spec.context?.['itemId'] === 'string' ? spec.context['itemId'] : undefined;
+  if (itemId && isAsk(spec.kind) && spec.ownerFacing !== false) {
+    const existing = openAskFor(wp, itemId);
+    if (existing) {
+      const blockQuestion = typeof existing.context['dedupeKey'] === 'string' && existing.context['dedupeKey'].startsWith('blocked:');
+      const blockRaise = typeof spec.dedupeKey === 'string' && spec.dedupeKey.startsWith('blocked:');
+      if (!(blockQuestion && !blockRaise && spec.kind === 'decision')) return { item: existing, reused: true };
+      expireRaw(wp, existing.id, 'Replaced by a decision about the same item.');
+    }
+  }
+  return { item: insert(wp, spec), reused: false };
+}
+
+const isAsk = (kind: InboxKind): boolean => kind === 'question' || kind === 'decision';
+
+/** The open owner-facing question or decision about a work item, if any (the newest). */
+export function openAskFor(wp: Workplace, itemId: string): InboxItem | undefined {
+  return list(wp, 'open').find(i => isAsk(i.kind) && isOwnerFacing(i) && i.context['itemId'] === itemId);
+}
+
+/** Open owner-facing questions/decisions named by id (in_…) in a text: "filed in his Inbox (in_x)". */
+export function openAsksNamedIn(wp: Workplace, text: string): InboxItem[] {
+  const ids = new Set(text.match(/\bin_[a-z0-9]{6,}\b/g) ?? []);
+  if (ids.size === 0) return [];
+  return list(wp, 'open').filter(i => ids.has(i.id) && isAsk(i.kind) && isOwnerFacing(i));
+}
+
+/** Tie an Inbox item to the work item it is about (when it was raised without one). */
+export function linkToItem(wp: Workplace, id: string, itemId: string): InboxItem | undefined {
+  const item = get(wp, id);
+  if (!item || typeof item.context['itemId'] === 'string') return item;
+  const next: InboxItem = { ...item, context: { ...item.context, itemId } };
+  wp.db.prepare('update inbox set json = ? where id = ?').run(JSON.stringify(next), id);
+  wp.emit({ type: 'inbox.updated', item: next });
+  return next;
+}
+
+function insert(wp: Workplace, spec: RaiseOptions): InboxItem {
   const recommendation = spec.recommendation?.trim();
   const marked = markRecommended(spec.options ?? DEFAULT_OPTIONS[spec.kind], recommendation);
   const body = recommendation && !marked.matched && !spec.body.includes(recommendation) ? `${spec.body.trimEnd()}\n\nRecommendation: ${recommendation}` : spec.body;
@@ -292,6 +343,10 @@ export function setOwnerFacing(wp: Workplace, id: string, ownerFacing: boolean):
 
 /** The Workplace withdraws an item it raised itself (a superseded stall note). Never the owner's decisions. */
 export function expire(wp: Workplace, id: string, why: string): InboxItem {
+  return expireRaw(wp, id, why);
+}
+
+function expireRaw(wp: Workplace, id: string, why: string): InboxItem {
   const item = get(wp, id);
   if (!item) throw new BadRequest(`No inbox item ${id}`);
   if (item.state !== 'open') return item;
@@ -357,4 +412,23 @@ const replyListeners = new Set<ReplyListener>();
 export function onReply(fn: ReplyListener): () => void {
   replyListeners.add(fn);
   return () => void replyListeners.delete(fn);
+}
+
+/**
+ * One-off cleanup of duplicates raised before the fix (scripts/inbox-dedupe.ts): an open "Blocked on
+ * you" question (`blocked:` key) that names another open owner-facing ask, or whose item already has
+ * one, is the same thing asked twice. Pure, over stored items; the ask that is not the block survives.
+ */
+export function duplicateAsks(all: InboxItem[]): { keep: string; drop: string; itemId?: string }[] {
+  const open = all.filter(i => i.state === 'open' && isAsk(i.kind) && isOwnerFacing(i));
+  const out: { keep: string; drop: string; itemId?: string }[] = [];
+  for (const q of open) {
+    const key = q.context['dedupeKey'];
+    if (typeof key !== 'string' || !key.startsWith('blocked:')) continue;
+    const itemId = typeof q.context['itemId'] === 'string' ? q.context['itemId'] : key.slice('blocked:'.length);
+    const named = new Set(`${q.body}\n${q.details ?? ''}`.match(/\bin_[a-z0-9]{6,}\b/g) ?? []);
+    const other = open.find(o => o.id !== q.id && !(typeof o.context['dedupeKey'] === 'string' && (o.context['dedupeKey'] as string).startsWith('blocked:')) && (named.has(o.id) || o.context['itemId'] === itemId));
+    if (other) out.push({ keep: other.id, drop: q.id, itemId });
+  }
+  return out;
 }

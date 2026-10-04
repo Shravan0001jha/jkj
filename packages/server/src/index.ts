@@ -19,6 +19,8 @@ import { PowerMonitor } from './services/power.js';
 import * as room from './services/room.js';
 import * as coo from './services/coo.js';
 import { wireMentionReplies } from './services/mentions.js';
+import { wireTalk } from './services/talk-store.js';
+import { loadSttKey } from './services/stt.js';
 import { migrateV2 } from './services/migrate-v2.js';
 import * as watch from './services/watch.js';
 import * as reviewWake from './services/review-wake.js';
@@ -105,6 +107,9 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   try { const made = room.seedThreads(wp); if (made.length) log.info('boot', `seeded ${made.length} Team Room threads from the 27 Sep plans`); } catch (err) { log.warn('boot', `room seed failed: ${err instanceof Error ? err.message : err}`); }
   // @mentions wake a short, rate-limited reply turn (RCA, 29 Sep: nothing did this before); @coo goes to the COO bridge.
   wireMentionReplies(wp);
+  // Talk threads (docs/LLD-app-fixes.md): messages, receipts, typing; voice notes' speech-to-text key.
+  const stopTalk = wireTalk(wp);
+  loadSttKey(join(config.opsDir, 'workplace', 'stt.env'));
   try { room.ensureReleases(wp); } catch (err) { log.warn('boot', `Releases room: ${err instanceof Error ? err.message : err}`); }
   // v2 stalls are events, not a sweep (HLD D21): each open item has a deadline that every change re-arms.
   const stopWatch = watch.startWatch(wp);
@@ -213,6 +218,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       clearInterval(cosTimer);
       clearInterval(rhythmTimer);
       stopWatch();
+      stopTalk();
       stopReviewWake();
       stopBlockWatch();
       stopHandoffWatch();

@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Comment, CooItem, CooMessage, CooPresence, InboxItem, InboxOption, RoomMessage } from '@jkj/shared';
+import type { Comment, CooItem, CooMessage, CooPresence, InboxItem, InboxOption, RoomMessage, TalkAttachment } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as inbox from './inbox.js';
 import * as room from './room.js';
@@ -92,10 +92,11 @@ function saveMessage(wp: Workplace, message: CooMessage): CooMessage {
 }
 
 /** The owner talking to the COO: appended to the inbox file the lead tails, and to the transcript. */
-export function sendOwnerMessage(wp: Workplace, text: string): CooMessage {
-  if (!text.trim()) throw new BadRequest('Nothing to send.');
-  const message: CooMessage = { id: newId('com'), at: now(), from: 'owner', text: text.trim() };
-  appendInboxFile(wp, { kind: 'message', text: message.text });
+export function sendOwnerMessage(wp: Workplace, text: string, files: { attachment: TalkAttachment; path: string }[] = []): CooMessage {
+  if (!text.trim() && !files.length) throw new BadRequest('Nothing to send.');
+  const message: CooMessage = { id: newId('com'), at: now(), from: 'owner', text: text.trim(), ...(files.length ? { attachments: files.map(f => f.attachment) } : {}) };
+  // The bridge line names each file's absolute path on this Mac, so the COO can open it.
+  appendInboxFile(wp, { kind: 'message', text: message.text, ...(files.length ? { attachments: files.map(f => ({ id: f.attachment.id, name: f.attachment.name, mime: f.attachment.mediaType, size: f.attachment.size, path: f.path })) } : {}) });
   return saveMessage(wp, message);
 }
 
@@ -103,12 +104,15 @@ export function sendOwnerMessage(wp: Workplace, text: string): CooMessage {
  * The lead replying (loopback only). Chat-style: `text` is the message itself, short; `details` is
  * optional extra context behind an expand control, the same shape as every other line to the owner.
  */
-export function replyFromCoo(wp: Workplace, spec: { inReplyTo: string; text: string; details?: string }): CooMessage {
-  if (!spec.text.trim()) throw new BadRequest('Nothing to reply with.');
+export function replyFromCoo(wp: Workplace, spec: { inReplyTo: string; text: string; details?: string; attachments?: TalkAttachment[] }): CooMessage {
+  const files = spec.attachments ?? [];
+  const text = spec.text.trim() || files.map(f => f.name).join(', ');
+  if (!text) throw new BadRequest('Nothing to reply with.');
   if (!spec.inReplyTo.trim()) throw new BadRequest('Which message is this replying to?');
   const message: CooMessage = {
-    id: newId('com'), at: now(), from: 'coo', text: spec.text.trim(), summary: spec.text.trim(),
+    id: newId('com'), at: now(), from: 'coo', text, summary: text,
     inReplyTo: spec.inReplyTo, ...(spec.details?.trim() ? { details: spec.details.trim() } : {}),
+    ...(files.length ? { attachments: files } : {}),
   };
   return saveMessage(wp, message);
 }

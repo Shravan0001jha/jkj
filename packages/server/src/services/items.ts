@@ -46,19 +46,54 @@ function requireRow(wp: Workplace, id: string): WorkItem {
   return w;
 }
 
-export interface ItemQuery { level?: string; status?: string; assigneeId?: string; areaId?: string; parentId?: string }
+export interface ItemQuery {
+  level?: string;
+  /** One status, or several comma-separated ("in-progress,in-review"). */
+  status?: string;
+  assigneeId?: string;
+  /** Alias of assigneeId (docs/LLD-app-fixes.md §9); 'owner' = the owner's own items. */
+  ownerId?: string;
+  areaId?: string;
+  parentId?: string;
+  /** Case-insensitive text search over id, title and body. */
+  q?: string;
+  sort?: 'rank' | 'updated' | 'created' | 'title';
+  order?: 'asc' | 'desc';
+  /** Done items after open ones, the chosen order kept within each group. */
+  finishedLast?: boolean;
+}
 
-/** Rank order. `areaId` matches through the epic. */
+export const ITEM_SORTS = ['rank', 'updated', 'created', 'title'] as const;
+
+/** Rank order unless `sort` says otherwise. `areaId` matches through the epic. */
 export function list(wp: Workplace, q: ItemQuery = {}): Item[] {
   const where: string[] = [];
   const args: string[] = [];
   if (q.level) { where.push("coalesce(level, case kind when 'feature' then 'epic' else 'story' end) = ?"); args.push(q.level); }
-  if (q.status) { where.push('status = ?'); args.push(q.status); }
-  if (q.assigneeId) { where.push('employee_id = ?'); args.push(q.assigneeId); }
+  const statuses = (q.status ?? '').split(',').map(x => x.trim()).filter(Boolean);
+  if (statuses.length) { where.push(`status in (${statuses.map(() => '?').join(', ')})`); args.push(...statuses); }
+  const owner = q.assigneeId ?? q.ownerId;
+  if (owner) { where.push('employee_id = ?'); args.push(owner); }
   if (q.parentId) { where.push('parent_id = ?'); args.push(q.parentId); }
   const rows = rowsJson<WorkItem>(wp.db.prepare(`select json from work${where.length ? ` where ${where.join(' and ')}` : ''} order by coalesce(rank, 0), created_at`).all(...args));
-  const all = rows.map(w => toItem(wp, w));
-  return q.areaId ? all.filter(i => i.areaId === q.areaId) : all;
+  let all = rows.map(w => toItem(wp, w));
+  if (q.areaId) all = all.filter(i => i.areaId === q.areaId);
+  const needle = q.q?.trim().toLowerCase();
+  if (needle) all = all.filter(i => i.id.toLowerCase().includes(needle) || i.title.toLowerCase().includes(needle) || (i.body ?? '').toLowerCase().includes(needle));
+  const sort = q.sort ?? 'rank';
+  const dir = q.order === 'desc' ? -1 : 1;
+  const key: Record<NonNullable<ItemQuery['sort']>, (a: Item, b: Item) => number> = {
+    rank: () => 0,   // already in rank order
+    updated: (a, b) => a.updatedAt.localeCompare(b.updatedAt),
+    created: (a, b) => a.createdAt.localeCompare(b.createdAt),
+    title: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }),
+  };
+  const indexed = all.map((item, i) => ({ item, i }));
+  indexed.sort((a, b) =>
+    (q.finishedLast ? Number(a.item.status === 'done') - Number(b.item.status === 'done') : 0)
+    || dir * (key[sort](a.item, b.item) || (sort === 'rank' ? a.i - b.i : 0))
+    || a.i - b.i);
+  return indexed.map(x => x.item);
 }
 
 function childrenRows(wp: Workplace, id: string): WorkItem[] {
@@ -543,9 +578,10 @@ function card(wp: Workplace, epic: WorkItem, focus: Focus, nowMs: number): EpicC
  * not yet started, then the rest, and finished epics last. Rank order holds within a tier.
  */
 export function planTier(wp: Workplace, c: EpicCard): number {
-  if (c.flags.some(f => f.waitingOn === 'owner')) return 0;
+  // Finished first: a done epic never rises above unfinished work, whatever stale flag it carries (owner, 4 Oct).
   const finished = c.epic.status === 'done' || (c.progress.storiesTotal > 0 && c.progress.storiesDone === c.progress.storiesTotal);
   if (finished) return 4;
+  if (c.flags.some(f => f.waitingOn === 'owner')) return 0;
   const live = c.flags.length > 0 || childrenRows(wp, c.epic.id).some(s => s.status === 'in-progress' || s.status === 'in-review');
   if (live) return 1;
   return c.inFocus ? 2 : 3;

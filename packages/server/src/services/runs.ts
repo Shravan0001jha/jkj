@@ -5,6 +5,8 @@ import type {
 import { startRun, type RunEvents, type RunHandle, type RunImage, type RunOptions, type RunResult } from '../runtime/claude-agent.js';
 import { getSnapshot } from './workspace.js';
 import { withOwnerLine } from './one-line.js';
+import { randomUUID } from 'node:crypto';
+import { senderName } from '@jkj/shared';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
 
@@ -43,7 +45,18 @@ interface Run {
   dropped: Unanswered[];
   /** The owner pressed Stop: the interrupted turn's messages are his to drop, not to deliver again. */
   discardOnStop?: boolean;
+  /** Messages handed to the CLI and not yet consumed by a turn, oldest first (read receipts). */
+  unread: { uuid: string; entryId: string; talkId?: string }[];
+  /** Between a turn's first reply frame and its result. */
+  inTurn: boolean;
 }
+
+/** A turn boundary: `start` with the messages it consumed (in order), `end` on result, error, interrupt or close. */
+export interface TurnEvent { agentId: string; state: 'start' | 'end'; consumed: { entryId: string; talkId?: string }[] }
+
+/** How a sender id reads in the transcript; the Workplace installs one that knows employee names. */
+let senderNameOf: (from: string) => string = from => senderName(from);
+export function setSenderNames(fn: ((from: string) => string) | null): void { senderNameOf = fn ?? (from => senderName(from)); }
 
 /**
  * Whether a talk message has reached the model (4 Oct: the COO's message to Asha died with her
@@ -53,10 +66,11 @@ interface Run {
  * ('after-tool'); if the turn ends first it starts the following turn ('next' again). A message is
  * answered when a turn that saw it ends in success.
  */
-export interface Unanswered { text: string; from: 'owner' | 'workplace'; at: string; stage: 'after-tool' | 'next' | 'heard' }
+export interface Unanswered { text: string; /** Who sent it (owner, coo, …): the redelivery keeps the sender. */ from: string; at: string; stage: 'after-tool' | 'next' | 'heard' }
 
-function track(run: Run, text: string, from: 'owner' | 'workplace', opening = false): void {
-  if (from !== 'owner') return;
+/** Only explicit talk (the owner, the COO, …) is tracked; the Workplace's own prompts are not. */
+function track(run: Run, text: string, from: string, opening = false): void {
+  if (from === 'workplace') return;
   run.unanswered.push({ text, from, at: new Date().toISOString(), stage: !opening && run.agent.status === 'running' ? 'after-tool' : 'next' });
 }
 
@@ -123,7 +137,7 @@ export function useRuntime(fn: Runtime | null): void {
   runtime = fn ?? startRun;
 }
 
-type Listener = (event: { agent?: Agent; entry?: LogEntry }) => void;
+type Listener = (event: { agent?: Agent; entry?: LogEntry; turn?: TurnEvent }) => void;
 const listeners = new Set<Listener>();
 
 export function onRunEvent(fn: Listener): () => void {
@@ -251,8 +265,10 @@ interface SpawnOptions {
   /** Called when the run's SDK session id is known. */
   onSessionId?: (sessionId: string) => void;
   onRateLimit?: (info: { rateLimitType?: string; status: string; utilization?: number; resetsAt?: number }) => void;
-  /** Who wrote the first prompt (HLD D22): the owner's own Talk, or the Workplace starting work. */
-  promptFrom?: 'owner' | 'workplace';
+  /** Who wrote the first prompt (HLD D22): the owner's own Talk, the COO, or the Workplace starting work. */
+  promptFrom?: string;
+  /** The Talk message the first prompt is (docs/LLD-app-fixes.md). */
+  promptTalkId?: string;
 }
 
 export const createRunDirect = (options: SpawnOptions): Agent => spawn(options);
@@ -288,11 +304,15 @@ function spawn(options: SpawnOptions): Agent {
     images: new Map(),
     unanswered: [],
     dropped: [],
+    unread: [],
+    inTurn: false,
   };
   runs.set(id, run);
 
   const { images, text } = attach(run, options.attachments ?? []);
-  append(run, 'user', '', options.prompt, { from: options.promptFrom ?? 'owner' });
+  const promptUuid = randomUUID();
+  const first = userEntry(run, options.prompt, options.promptFrom ?? 'owner', options.promptTalkId);
+  run.unread.push({ uuid: promptUuid, entryId: first.id, talkId: first.talkId! });
   track(run, options.prompt, options.promptFrom ?? 'owner', true);
   const prompt = withFiles(options.prompt, text);
 
@@ -302,6 +322,7 @@ function spawn(options: SpawnOptions): Agent {
       cwd: options.cwd,
       model: options.model,
       prompt,
+      promptUuid,
       images,
       permissionMode: options.permissionMode,
       ...(options.resume ? { resume: options.resume } : {}),
@@ -332,9 +353,11 @@ function spawn(options: SpawnOptions): Agent {
         if (type !== 'stream_event') log.info('runs', `${id} sdk: ${type}${subtype ? `/${subtype}` : ''}`);
       },
 
-      onText: text => { heard(run); sawFrame(run, false); append(run, 'assistant', '', text); },
+      onTurnStart: uuids => turnStart(run, uuids),
 
-      onToolUse: (tool, input) => { heard(run); sawFrame(run, true); append(run, kindForTool(tool), tool, describeInput(tool, input)); },
+      onText: text => { heard(run); if (!run.inTurn) turnStart(run, undefined); sawFrame(run, false); append(run, 'assistant', '', text, { talkId: newTalkId() }); },
+
+      onToolUse: (tool, input) => { heard(run); if (!run.inTurn) turnStart(run, undefined); sawFrame(run, true); append(run, kindForTool(tool), tool, describeInput(tool, input)); },
 
       onPermission: request2 => new Promise<'allow' | 'always' | 'deny'>(resolve => {
         update(run, {
@@ -378,10 +401,11 @@ function spawn(options: SpawnOptions): Agent {
         options.onResult?.(result);
       },
 
-      onDone: () => { heard(run); update(run, { status: 'waiting' }); },
+      onDone: () => { heard(run); turnEnd(run); update(run, { status: 'waiting' }); },
 
       onError: message => {
         heard(run);
+        turnEnd(run);
         append(run, 'error', 'Failed', message);
         update(run, { status: 'error' });
       },
@@ -395,14 +419,52 @@ function spawn(options: SpawnOptions): Agent {
 
 /* ---------- driving ---------- */
 
-export function sendMessage(agentId: string, text: string, attachments: Attachment[] = [], opts: { from?: 'owner' | 'workplace' } = {}): void {
+/**
+ * Hand a message to a session. `from` is who wrote it (docs/LLD-app-fixes.md §1): never inferred
+ * from the route; `talkId` ties it to its Talk message for receipts. Returns the transcript entry.
+ */
+export function sendMessage(agentId: string, text: string, attachments: Attachment[] = [], opts: { from?: string; talkId?: string } = {}): LogEntry {
   const run = require$(agentId);
   const { images, text: files } = attach(run, attachments);
-  append(run, 'user', '', text, { from: opts.from ?? 'owner' });
+  const entry = userEntry(run, text, opts.from ?? 'owner', opts.talkId);
+  const uuid = randomUUID();
+  run.unread.push({ uuid, entryId: entry.id, talkId: entry.talkId! });
   track(run, text, opts.from ?? 'owner');
   update(run, { status: 'running', messageCount: (run.agent.messageCount ?? 0) + 1 });
-  run.handle.send(withFiles(text, files), images);
+  run.handle.send(withFiles(text, files), images, uuid);
   armSilence(run);
+  return entry;
+}
+
+function userEntry(run: Run, text: string, from: string, talkId?: string): LogEntry {
+  return append(run, 'user', '', text, { from, fromName: senderNameOf(from), talkId: talkId ?? newTalkId() });
+}
+
+/** Every message line (to or from the agent) is a Talk message; its id is minted here when the caller had none. */
+export const newTalkId = (): string => `tm_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+
+/**
+ * A turn's first reply frame. With the SDK's stamps, the stamped messages and every older one still
+ * waiting were consumed (the CLI takes messages in order; an older one missing from the stamp was
+ * folded into an earlier turn). Without stamps (an older CLI, or the scripted runtime), everything
+ * handed over so far was consumed. Never earlier than a reply frame: queued is not read.
+ */
+function turnStart(run: Run, uuids: string[] | undefined): void {
+  let upTo = run.unread.length - 1;
+  if (uuids) {
+    const want = new Set(uuids);
+    upTo = -1;
+    run.unread.forEach((m, i) => { if (want.has(m.uuid)) upTo = i; });
+  }
+  const consumed = run.unread.splice(0, upTo + 1).map(({ entryId, talkId }) => ({ entryId, ...(talkId ? { talkId } : {}) }));
+  run.inTurn = true;
+  emit({ turn: { agentId: run.agent.id, state: 'start', consumed } });
+}
+
+function turnEnd(run: Run): void {
+  if (!run.inTurn) return;
+  run.inTurn = false;
+  emit({ turn: { agentId: run.agent.id, state: 'end', consumed: [] } });
 }
 
 /**
@@ -474,6 +536,7 @@ export async function interruptRun(agentId: string, opts: { byOwner?: boolean } 
   append(run, 'system', 'Stopped', 'Interrupted from the Workplace. Anything already written stays written.');
   // Nothing is asked of the owner after an interrupt: the session simply sits until the next message.
   run.pending = undefined;
+  turnEnd(run);
   update(run, { status: 'idle', approval: undefined });
 }
 
@@ -529,6 +592,7 @@ export function closeRun(agentId: string): void {
   const run = runs.get(agentId);
   if (!run) return;
   heard(run);
+  turnEnd(run);
   run.handle.close();
   runs.delete(agentId);
 }

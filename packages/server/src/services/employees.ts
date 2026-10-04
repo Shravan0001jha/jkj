@@ -30,6 +30,7 @@ import { isWaitable, nameOf, rawGet } from './v2-map.js';
 import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
 import { humanizeIds } from './id-names.js';
 import { now } from './store.js';
+import * as talkStore from './talk-store.js';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
 
@@ -68,7 +69,7 @@ export const OWNER_TALK_TURN_INR = 100;
 /** The owner saying, in a talk, that paused work may go on. */
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'review_send_back', 'review_dispute', 'run_evidence'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -161,6 +162,10 @@ export interface SpawnOptions {
   probe?: boolean;
   /** The owner is talking: the session runs even at a cap (read-only on paused work until "continue"). */
   ownerTalk?: boolean;
+  /** Who wrote the prompt (docs/LLD-app-fixes.md §1). Default: 'owner' for owner talk, else 'workplace'. */
+  from?: string;
+  /** The Talk message the prompt is. */
+  talkId?: string;
 }
 
 export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions): Agent {
@@ -206,7 +211,8 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
     ...(options.attachments ? { attachments: options.attachments } : {}),
     ...(options.resume ? { resume: options.resume } : {}),
     // Only the owner's own Talk is the owner's words; everything else the Workplace sends (HLD D22).
-    promptFrom: options.ownerTalk ? 'owner' : 'workplace',
+    promptFrom: options.from ?? (options.ownerTalk ? 'owner' : 'workplace'),
+    ...(options.talkId ? { promptTalkId: options.talkId } : {}),
     employeeId,
     ...(options.assignment ? { assignmentId: options.assignment.id } : {}),
     contextTokens: context.tokens,
@@ -347,20 +353,24 @@ export function readOauthToken(wp: Workplace): string | null {
  * `autonomous: true` is for the Workplace's own use of talk (the Chief of Staff's spec), which
  * stays under the cap.
  */
-export function talk(wp: Workplace, employeeId: string, text: string, attachments: Attachment[] = [], opts: { probe?: boolean; autonomous?: boolean } = {}): Agent {
+export function talk(wp: Workplace, employeeId: string, text: string, attachments: Attachment[] = [], opts: { probe?: boolean; autonomous?: boolean; from?: string; talkId?: string } = {}): Agent {
   if (employee(wp, employeeId).virtual) throw new BadRequest(`${employee(wp, employeeId).name} is reached through POST /api/coo/message, not Talk.`);
   const ownerTalk = !opts.autonomous;
-  if (ownerTalk) maybeLiftPause(wp, employeeId, text);
+  // RCA (owner, 4 Oct: messages shown as his that he never sent): every non-autonomous caller was
+  // recorded as the owner, the COO's talk included. The sender is now passed in, never inferred.
+  const from = opts.from ?? (ownerTalk ? 'owner' : 'workplace');
+  // Only the owner's own "continue" lifts a cap pause.
+  if (ownerTalk && from === 'owner') maybeLiftPause(wp, employeeId, text);
   // The owner may carry on an interrupted session; autonomous work goes only to a live one (QA B4).
   const open = ownerTalk ? continuableSession(employeeId) : openSession(employeeId);
   if (open) {
     const budget = spend.canSpend(wp, employeeId);
     if (!budget.ok && !ownerTalk) throw new BadRequest(`${employee(wp, employeeId).name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox.`);
     if (ownerTalk) open.ownerTalk = true;
-    runs.sendMessage(open.agentId, text, attachments, { from: ownerTalk ? 'owner' : 'workplace' });
+    runs.sendMessage(open.agentId, text, attachments, { from, ...(opts.talkId ? { talkId: opts.talkId } : {}) });
     return runs.getRunAgent(open.agentId)!;
   }
-  return spawn(wp, employeeId, { prompt: text, attachments, ...(opts.probe ? { probe: true } : {}), ...(ownerTalk ? { ownerTalk: true } : {}) });
+  return spawn(wp, employeeId, { prompt: text, attachments, from, ...(opts.talkId ? { talkId: opts.talkId } : {}), ...(opts.probe ? { probe: true } : {}), ...(ownerTalk ? { ownerTalk: true } : {}) });
 }
 
 /** "Go ahead and continue" to a cap-paused employee: lift the pause for today, unlock the session, resume the work. */
@@ -414,7 +424,8 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
   closeDead(wp, item.employeeId);
   const open = openSession(item.employeeId);
   if (open && carryOver.has(item.employeeId)) {
-    runs.sendMessage(open.agentId, redeliveryText(carryOver.get(item.employeeId)!), [], { from: 'owner' });
+    const carried = carryOver.get(item.employeeId)!;
+    runs.sendMessage(open.agentId, redeliveryText(carried), [], { from: carried[0]!.from });
     carryOver.delete(item.employeeId);
   }
   if (open) {
@@ -647,12 +658,15 @@ function redeliver(wp: Workplace, employeeId: string, msgs: runs.Unanswered[]): 
   const again = msgs.filter(m => m.text.startsWith(REDELIVERED));
   const fresh = msgs.filter(m => !m.text.startsWith(REDELIVERED));
   if (again.length) tell(again, `Delivered again once and the session ended again before acting on it. Send it again yourself if it still stands.`);
-  if (!fresh.length) return;
-  try {
-    talk(wp, employeeId, redeliveryText(fresh));
-    log.info('employees', `${name}: delivered ${fresh.length} talk message(s) again in a new session`);
-  } catch (err) {
-    tell(fresh, `The session ended before acting on it and a new one could not start: ${err instanceof Error ? err.message : err}`);
+  // One message per sender, so each stays attributed to whoever sent it (owner, COO).
+  for (const from of [...new Set(fresh.map(m => m.from))]) {
+    const mine = fresh.filter(m => m.from === from);
+    try {
+      talk(wp, employeeId, redeliveryText(mine), [], { from });
+      log.info('employees', `${name}: delivered ${mine.length} talk message(s) from ${from} again`);
+    } catch (err) {
+      tell(mine, `The session ended before acting on it and a new one could not start: ${err instanceof Error ? err.message : err}`);
+    }
   }
 }
 
@@ -1049,10 +1063,12 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           }
         }),
       tool('ask_owner', 'Raise a real decision to the owner\'s Inbox, with your recommendation (required: one of the options, or what you would do). Use it only for what the handbook says needs the owner.',
-        { title: z.string(), body: z.string(), options: z.array(z.string()).optional(), recommendation: z.string().optional() },
-        async ({ title, body, options, recommendation }) => {
+        { title: z.string(), body: z.string(), options: z.array(z.string()).optional(), recommendation: z.string().optional(), itemId: z.string().optional().describe('The work item this decision is about (default: your current assignment). One open ask per item reaches the owner.') },
+        async ({ title, body, options, recommendation, itemId }) => {
           if (!recommendation?.trim()) return ok('Not filed: give your recommendation (one of the options, or what you would do). The owner decides faster with one.');
-          const item = inbox.raise(wp, { kind: 'decision', title, body, raisedBy: employeeId, recommendation, ...(options?.length ? { options: options.map(o => ({ id: o.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label: o })) } : {}) });
+          const about = itemId?.trim() || session().assignmentId;
+          const { item, reused } = inbox.raiseOrReuse(wp, { kind: 'decision', title, body, raisedBy: employeeId, recommendation, ...(about && rawGet(wp, about) ? { context: { itemId: about } } : {}), ...(options?.length ? { options: options.map(o => ({ id: o.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label: o })) } : {}) });
+          if (reused) return ok(`Not filed: ${item.id} is already in the owner's Inbox about ${about}. Add to it with inbox_reply; don't raise a second one.`);
           setState(wp, employeeId, 'needs-owner');
           return ok(`Filed as ${item.id}. Continue with other work; the answer arrives in your next session's context.`);
         }),
@@ -1141,9 +1157,14 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           const e = spend.record(wp, { employeeId, sessionId: session().agentId, source, basis: units ? 'metered' : 'reported', what, inr: amount, detail: { ...(usd !== undefined ? { usd } : {}), ...(units ?? {}) } });
           return ok(`Recorded ₹${e.inr} (${e.basis}, ${source}). Real money today: ₹${spend.summary(wp).companyInr} of ₹${spend.capFor(wp)}.`);
         }),
-      tool('room_post', 'Post in the Team Room: to an existing thread by id, or open a new one with a title. Use it when your work needs another team (an interface, a contract, a handoff, an ownership conflict) instead of editing outside your charter. Mention people with @id. The text can be as detailed as the work needs; `headline` is the one line the owner sees for the thread ("Weather source: agreed on open-meteo, Mira to wire it").',
+      tool('send_file', 'Send the owner a file in your Talk thread with him (a screenshot, a report, a build log): `path` must be inside your own worktree or ~/iris-workplace/evidence/, at most 20 MB. `caption` is one short line.',
+        { path: z.string(), caption: z.string().optional() },
+        async ({ path, caption }) => ok(await sendFileTool(wp, employeeId, session().agentId)({ path, ...(caption ? { caption } : {}) }))),
+      tool('room_post', `Post in the Team Room: to an existing thread by id, or open a new one with a title. Use it when your work needs another team (an interface, a contract, a handoff, an ownership conflict) instead of editing outside your charter. Mention people with @id. Posts are short (at most ${ROOM_POST_MAX} characters): put the detail on the item or in a doc and link it. \`headline\` is the one line the owner sees for the thread ("Weather source: agreed on open-meteo, Mira to wire it").`,
         { threadId: z.string().optional(), title: z.string().optional(), text: z.string(), charterIds: z.array(z.string()).optional(), headline: z.string().optional() },
         async ({ threadId, title, text, charterIds, headline }) => {
+          // Long posts are refused, not cut, so agents learn the habit (owner, 4 Oct).
+          if (text.trim().length > ROOM_POST_MAX) return ok(ROOM_POST_TOO_LONG);
           try {
             if (threadId) { const m = room.post(wp, threadId, { text, by: employeeId, ...(headline ? { headline } : {}) }); return ok(`Posted ${m.id} in ${threadId}.`); }
             if (!title) return ok('Give a threadId to reply, or a title to open a thread.');
@@ -1295,4 +1316,26 @@ function notBlocked(wp: Workplace, it: Item): string {
     : it.handoff
       ? `Not blocked: ${it.id} is handed to ${nameOf(wp, it.assigneeId)}, who works on it now; it comes back to ${nameOf(wp, it.handoff.fromId)} when they call item_handback.`
       : `Not blocked: ${it.id} is with ${nameOf(wp, it.assigneeId)} now.`;
+}
+
+/* ---------- send_file (docs/LLD-app-fixes.md §6) ---------- */
+
+export const ROOM_POST_MAX = 600;
+export const ROOM_POST_TOO_LONG = 'Not posted: Room posts are short: put the detail on the item or in a doc and link it.';
+
+/**
+ * The send_file tool's body: the file must resolve (symlinks followed) inside the agent's own
+ * worktree or the Workplace's evidence folder; it is copied into the owner's thread with the agent.
+ */
+export function sendFileTool(wp: Workplace, employeeId: string, agentId: string): (args: { path: string; caption?: string }) => Promise<string> {
+  return async ({ path, caption }) => {
+    const s = sessions.get(agentId) ?? openSession(employeeId);
+    const roots = [wp.config.evidence.dir, ...(s?.worktree?.path ? [s.worktree.path] : [])];
+    try {
+      const m = talkStore.sendFileFromAgent(wp, employeeId, { path, ...(caption ? { caption } : {}), allowedRoots: roots, agentId });
+      return `Sent ${m.attachments[0]!.name} to the owner's Talk with you.`;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  };
 }

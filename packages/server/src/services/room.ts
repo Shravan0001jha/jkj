@@ -81,7 +81,7 @@ export function post(wp: Workplace, threadId: string, given: { text: string; by:
   const body = spec.by === 'owner' || spec.by === 'workplace' ? { text: spec.text.trim() } : short(spec.text);
   const message: RoomMessage = {
     id: newId('msg'), threadId, at, by: spec.by, owner: spec.by === 'owner', text: body.text, mentions,
-    ...(body.details ? { details: body.details } : {}),
+    ...(body.details ? { details: body.details, truncated: true } : {}),
     ...(spec.kind ? { kind: spec.kind } : {}), ...(spec.about ? { about: spec.about } : {}), ...(spec.itemId ? { itemId: spec.itemId } : {}),
   };
   wp.db.prepare('insert into messages (id, thread_id, at, by, text, mentions, json) values (?, ?, ?, ?, ?, ?, ?)')

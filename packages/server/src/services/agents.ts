@@ -58,8 +58,8 @@ export async function resumeAgent(agentId: string, text: string, attachments?: A
   return runs.resumeRun(agent, history, text, attachments);
 }
 
-export const sendMessage = (agentId: string, text: string, attachments?: Attachment[]): void =>
-  runs.sendMessage(agentId, text, attachments);
+export const sendMessage = (agentId: string, text: string, attachments?: Attachment[], from: string = 'owner'): void =>
+  void runs.sendMessage(agentId, text, attachments, { from });
 
 export const interruptAgent = (agentId: string): Promise<void> => runs.interruptRun(agentId, { byOwner: true });
 
