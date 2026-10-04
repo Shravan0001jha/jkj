@@ -112,7 +112,25 @@ run_evidence ──► evidence.request ──► validate (desktop? item? branc
   Which features each phone platform supports is the runner's table, not duplicated here: a feature a
   platform lacks is skipped by the runner (its setup checks still run).
 
-## 5. Risks
+- **D13 The global link** (owner, 4 Oct). The report route is loopback/tunnel only, so nobody off the
+  Mac could open a report from GitHub. After each run the Workplace builds ONE self-contained HTML
+  (the report with its screenshots inlined as base64, plus `summary.txt`), uploads it to the private
+  bucket `iris-workplace-evidence-<account id>` (ap-south-1; made on first use: all public access
+  blocked, SSE-S3, 90-day expiry, tag Project=iris-workplace; aws CLI with the owner's credentials),
+  and signs a 7-day presigned URL. That URL is in the item comment, a PR comment and the
+  `workplace/evidence` status `target_url`; a status re-posted after the link expired is re-signed
+  from the stored key. An upload failure never voids the evidence: the comment says the link is
+  unavailable. The PR body names the story (title and id) only: no loopback link. Locally a PASS run
+  is slimmed (`raw/` deleted, each log keeps its last 300 lines); any other outcome keeps everything.
+- **D14 Staging "in use"** (owner, 4 Oct). While any run is queued or running, the engine holds a
+  lock (`StagingLock` port): at once and every 10 min it touches `GET /v1/min-version?in-use-until=
+  <epoch>` on staging (a 2xx request, which alone keeps the idle stopper away) and writes the same
+  expiry (now + 25 min) to the SSM parameter `/iris-staging/in-use`; when the queue empties it deletes
+  the parameter. `scripts/staging.sh stop` refuses while the parameter is fresh (`--force` overrides);
+  the on-box idle stopper reads the expiry from its access log (capped at 30 min after the request).
+  The box has no instance role, so it reads the log, not SSM. Tests use a fake lock; under a test with
+  no fake the lock does nothing.
+
 
 - A run takes minutes (Android ~9 min, iOS ~3.5 min, plus builds); the queue can grow. The queue is
   visible at `GET /api/coo/evidence`, and agents never wait on it.

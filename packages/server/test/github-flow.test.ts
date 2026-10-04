@@ -1,7 +1,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -10,13 +10,15 @@ import type { Workplace } from '../src/services/workplace.js';
 import * as items from '../src/services/items.js';
 import * as work from '../src/services/work.js';
 import * as coo from '../src/services/coo.js';
+import * as trail from '../src/services/trail.js';
 import * as manager from '../src/services/manager.js';
 import * as flow from '../src/services/github-flow.js';
-import { employee, workplaceTools } from '../src/services/employees.js';
+import { childEnv, employee, workplaceTools } from '../src/services/employees.js';
 import { ensureWorktree } from '../src/services/worktrees.js';
 import { rawGet } from '../src/services/v2-map.js';
 import { testWorkplace } from './fakes/workplace.js';
 import { FakeGitHub } from './fakes/fake-github.js';
+import { writePrePr } from './fakes/pre-pr.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
 
 /**
@@ -39,7 +41,8 @@ interface Setup {
   /** Kabir's worktree on emp/kabir/<story>. */
   wt: string;
   trunkRepo: string;
-  commit(file: string, content: string, message?: string): string;
+  /** Commits; by default scripts/pre-pr.sh then passes on it (`prePr: false` = not run, 'fail' = failed). */
+  commit(file: string, content: string, message?: string, prePr?: boolean | 'fail'): string;
   done(): Promise<void>;
 }
 
@@ -67,12 +70,14 @@ function setup(mode: 'local' | 'shadow' | 'on' = 'shadow', opts: { quality?: str
   const epic = items.create(wp, { level: 'epic', title: 'Memory' }, 'owner');
   const story = items.create(wp, { level: 'story', title: 'Recall the last song', parentId: epic.id, assigneeId: 'kabir' }, 'owner');
   const wt = ensureWorktree(wp.config.workDir, kabir, story.id).path;
-  const commit = (file: string, content: string, message = `add ${file}`): string => {
+  const commit = (file: string, content: string, message = `add ${file}`, prePr: boolean | 'fail' = true): string => {
     mkdirSync(join(wt, file, '..'), { recursive: true });
     writeFileSync(join(wt, file), content);
     git(wt, ['add', '-A']);
     git(wt, ['-c', 'user.email=k@iris.local', '-c', 'user.name=kabir', 'commit', '-q', '-m', message]);
-    return git(wt, ['rev-parse', 'HEAD']).trim();
+    const sha = git(wt, ['rev-parse', 'HEAD']).trim();
+    if (prePr) writePrePr(wt, sha, { ok: prePr !== 'fail' });
+    return sha;
   };
   return {
     wp, gh, storyId: story.id, wt, trunkRepo, commit,
@@ -130,7 +135,7 @@ test('shadow: moving to review pushes emp/<name>/<story>, opens a PR to the trun
     assert.match(ghPr.title, /Recall the last song/);
     assert.ok(ghPr.title.includes(s.storyId));
     assert.ok(ghPr.body.includes(s.storyId));
-    assert.match(ghPr.body, /\/api\/items\//, 'a link to the item');
+    assert.doesNotMatch(ghPr.body, /127\.0\.0\.1|\/api\/items\//, 'no loopback link: the story title and id only');
     assert.match(ghPr.body, /Evidence/i, 'an evidence placeholder');
     const p = pr(s);
     assert.equal(p.number, ghPr.number);
@@ -338,15 +343,87 @@ test('the evidence hook sets workplace/evidence on the head', async () => {
   } finally { await s.done(); }
 });
 
-test('quality failures make workplace/tests fail', async () => {
-  const s = setup('shadow', { quality: 'areas:\n  agent-svc:\n    paths: [services/agent-svc/]\n    checks:\n      - name: lint\n        run: "false"\n' });
+test('a failed pre-pr.sh result makes workplace/tests fail, with the failing tail on the item', async () => {
+  const s = setup('shadow');
+  try {
+    const head = s.commit('services/agent-svc/recall.py', 'x = 1\n', undefined, 'fail');
+    await reviewed(s);
+    assert.equal(s.gh.status(head, 'workplace/tests')?.state, 'failure');
+    assert.match(s.gh.status(head, 'workplace/tests')!.description, /agent-svc unit 372 passed, 2 failed/);
+    assert.equal(pr(s).tests?.state, 'failure');
+    assert.ok(trail.comments(s.wp, s.storyId).some(c => /pre-pr\.sh failed/.test(c.text) && /test_last_song/.test(c.details ?? '')));
+  } finally { await s.done(); }
+});
+
+test('workplace/tests reports pre-pr.sh: "mobile-android unit 16 passed · agent-svc syntax ok · agent-svc unit 374 passed — run by kabir on <sha7>"; the server runs no suites', async () => {
+  const s = setup('shadow', { quality: 'areas:\n  agent-svc:\n    paths: [services/agent-svc/]\n    checks:\n      - name: never\n        run: touch /tmp/never-ran-by-workplace\n' });
   try {
     const head = s.commit('services/agent-svc/recall.py', 'x = 1\n');
     await reviewed(s);
-    assert.equal(s.gh.status(head, 'workplace/tests')?.state, 'failure');
-    assert.match(s.gh.status(head, 'workplace/tests')!.description, /agent-svc/);
-    assert.equal(pr(s).tests?.state, 'failure');
+    const st = s.gh.status(head, 'workplace/tests')!;
+    assert.equal(st.state, 'success');
+    assert.equal(st.description, `mobile-android unit 16 passed · agent-svc syntax ok · agent-svc unit 374 passed — run by kabir on ${head.slice(0, 7)}`);
+    assert.ok(!existsSync(join(s.wp.config.workDir, '_quality')), 'no server-side suite checkout');
   } finally { await s.done(); }
+});
+
+test('pre-PR gate: report_done and request_review refuse without a passing pre-pr.sh result for the head; local does nothing new', async () => {
+  const s = setup('shadow');
+  try {
+    const client = await (async () => {
+      const server = workplaceTools(s.wp, 'kabir', () => ({ agentId: 'a', employeeId: 'kabir', assignmentId: s.storyId, startedAt: '', seen: {}, planCaptured: false }));
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      await server.instance.connect(st);
+      const c = new Client({ name: 'test', version: '1' });
+      await c.connect(ct);
+      return c;
+    })();
+    const args = { assignmentId: s.storyId, testsPassed: 3, testsFailed: 0, commits: ['abc'], liveVerified: [], notVerified: [] };
+    const refusal = /Run scripts\/pre-pr\.sh on your latest commit first \(results belong to a commit\)\./;
+    // Not run at all.
+    const first = s.commit('services/agent-svc/recall.py', 'x = 1\n', undefined, false);
+    assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
+    assert.notEqual(rawGet(s.wp, s.storyId)!.status, 'in-review', 'nothing recorded');
+    assert.equal(s.gh.count('push'), 0);
+    // Failed.
+    writePrePr(s.wt, first, { ok: false });
+    assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
+    // Passed, but on an older commit.
+    s.commit('services/agent-svc/recall.py', 'x = 2\n', undefined, false);
+    writePrePr(s.wt, first, { ok: true });
+    assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
+    // A file named for the head that describes another commit.
+    const head = s.commit('services/agent-svc/recall.py', 'x = 3\n', undefined, false);
+    writePrePr(s.wt, head, { forSha: first });
+    assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
+    // A fast run, or one limited to some areas, never counts.
+    writePrePr(s.wt, head, { mode: 'fast' });
+    assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
+    writePrePr(s.wt, head, { only: ['agent-svc'] });
+    assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
+    assert.match(JSON.stringify((await client.callTool({ name: 'request_review', arguments: { assignmentId: s.storyId } })).content), refusal);
+    // Passed on the head: recorded, pushed, workplace/tests green.
+    writePrePr(s.wt, head);
+    assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), /in review/);
+    assert.equal(s.gh.status(head, 'workplace/tests')?.state, 'success');
+    await client.close();
+  } finally { await s.done(); }
+
+  const l = setup('local');
+  try {
+    l.commit('services/agent-svc/recall.py', 'x = 1\n', undefined, false);
+    assert.equal(flow.prePrGate(l.wp, l.storyId), null, 'local: no gate');
+  } finally { await l.done(); }
+});
+
+test('employee sessions get ANDROID_HOME, JAVA_HOME (JDK 17) and DEVELOPER_DIR (full Xcode)', () => {
+  const s = setup('local');
+  try {
+    const env = childEnv(s.wp);
+    assert.equal(env['ANDROID_HOME'], '/opt/homebrew/share/android-commandlinetools');
+    assert.match(env['JAVA_HOME'] ?? '', /17/);
+    assert.equal(env['DEVELOPER_DIR'], '/Applications/Xcode.app/Contents/Developer');
+  } finally { void s.done(); }
 });
 
 /* ---------- fallback ---------- */
@@ -428,9 +505,9 @@ test('merge: dry run in shadow; in on refused until review and tests are green, 
 });
 
 test('merge: refused when tests are red, or the head moved since the approvals', async () => {
-  const s = setup('on', { quality: 'areas:\n  agent-svc:\n    paths: [services/agent-svc/]\n    checks:\n      - name: lint\n        run: "false"\n' });
+  const s = setup('on');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/recall.py', 'x = 1\n', undefined, 'fail');
     await reviewed(s);
     await flow.approve(s.wp, s.storyId, 'dev');
     await flow.approve(s.wp, s.storyId, 'nikhil');
