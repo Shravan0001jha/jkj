@@ -1268,6 +1268,8 @@ struct CooMessage: Codable, Equatable, Hashable, Identifiable {
     var details: String?
     /// Set on a `coo` message that answers a specific owner message.
     var inReplyTo: String?
+    /// Files on the message, either way (LLD-app-fixes §12).
+    var attachments: [TalkAttachment]? = nil
 }
 
 enum CooItemKind: String, Codable, CaseIterable, LenientEnum {

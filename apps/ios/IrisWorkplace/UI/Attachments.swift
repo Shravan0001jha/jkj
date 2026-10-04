@@ -44,8 +44,8 @@ struct OutgoingAttachment: Identifiable, Equatable {
     /// The contract's inline form (`{ name, mediaType, data: base64 }`).
     var wire: Attachment { Attachment(name: name, mediaType: mediaType, data: data.base64EncodedString()) }
 
-    /// Larger than this is refused before it is sent (the server would refuse it anyway).
-    static let maxBytes = 15 * 1024 * 1024
+    /// Larger than this is refused before it is sent: the relay carries at most ~12 MB (§11).
+    static let maxBytes = 12 * 1024 * 1024
 
     /// What this phone keeps of a sent file, so it shows at once without a download.
     func savedLocally() -> URL? {
@@ -459,7 +459,7 @@ struct AttachButton: View {
                     let scoped = url.startAccessingSecurityScopedResource()
                     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                     guard let data = try? Data(contentsOf: url) else { continue }
-                    if data.count > OutgoingAttachment.maxBytes { fail("\(url.lastPathComponent) is over 15 MB."); continue }
+                    if data.count > OutgoingAttachment.maxBytes { fail("\(url.lastPathComponent) is over 12 MB; send a smaller one or a link."); continue }
                     let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
                     out.append(OutgoingAttachment(name: url.lastPathComponent, mediaType: type, data: data))
                 }

@@ -139,6 +139,7 @@ for (const [name, def] of Object.entries(tsInterfaces)) {
     LogEntry: ['fromName'],
     RoomMessage: ['truncated'],
     CommentRequest: ['mentions'],
+    CooMessage: ['attachments'],
   };
   for (const f of Object.keys(sw)) if (!(f in def.fields) && !(undeclared[name] ?? []).includes(f)) problems.push(`interface ${name}.${f}: Swift has a field the contract lacks`);
 }

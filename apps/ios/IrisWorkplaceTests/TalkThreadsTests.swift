@@ -74,6 +74,14 @@ final class TalkThreadsTests: XCTestCase {
         XCTAssertEqual(ChatItem.from(log: [owner])[0].mine, true, "no sender recorded: an old entry, the owner's")
     }
 
+    func testCooMessagesCarryTheirFiles() throws {
+        let json = #"[{"id":"c1","at":"2026-10-04T10:00:00.000Z","from":"coo","text":"Report attached","attachments":[{"id":"att_r","name":"report.pdf","mediaType":"application/pdf","size":10,"kind":"file","url":"/api/talk/attachments/att_r"}]}]"#
+        let log = try JSONDecoder().decode([CooMessage].self, from: Data(json.utf8))
+        let item = ChatItem.from(coo: log)[0]
+        XCTAssertEqual(item.attachments.map(\.name), ["report.pdf"])
+        XCTAssertEqual(item.attachments.first?.path, "/api/talk/attachments/att_r")
+    }
+
     func testTypingOnlyFromTalkTyping() async {
         let s = TalkThreadsStore()
         await s.load(rest)

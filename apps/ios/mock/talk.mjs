@@ -108,7 +108,6 @@ export async function handleTalk(T, { m, p, url, req, res, json, readJson, broad
     return json(res, 200, t), true;
   }
   if (m === 'POST' && sub === 'attachments') {
-    if (id === 'coo') return json(res, 400, { error: 'The COO thread takes text and voice; send files to an employee.' }), true;
     const data = await readBytes(req);
     if (data.length > 20 * 1024 * 1024) return json(res, 413, { error: 'That file is over 20 MB; send a smaller one or a link.' }), true;
     const type = req.headers['content-type'] ?? 'application/octet-stream';

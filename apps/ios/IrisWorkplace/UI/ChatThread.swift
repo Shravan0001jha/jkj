@@ -112,7 +112,12 @@ extension ChatItem {
     static func from(coo: [CooMessage]) -> [ChatItem] {
         coo.map { m in
             let details = m.details.flatMap { $0 == m.text || $0.isEmpty ? nil : $0 }
-            return ChatItem(id: m.id, at: m.at, kind: .message(mine: m.from == .owner, text: m.text, details: details))
+            var item = ChatItem(id: m.id, at: m.at, kind: .message(mine: m.from == .owner, text: m.text, details: details))
+            item.attachments = (m.attachments ?? []).map { a in
+                ChatAttachment(id: a.id, kind: a.kind == .voice ? .voice : a.kind == .image ? .image : a.kind == .file ? .file : ChatAttachment.kind(for: a.mediaType),
+                               name: a.name, mediaType: a.mediaType, size: a.size, path: a.url)
+            }
+            return item
         }
     }
 }

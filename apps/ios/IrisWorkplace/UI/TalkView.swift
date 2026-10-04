@@ -374,8 +374,8 @@ struct ConversationView: View {
                 }
             },
             onOpen: open,
-            // The COO's thread takes text and voice, not files (§2).
-            pending: isCoo ? nil : $pending,
+            // Files go both ways in the COO thread too (§12).
+            pending: $pending,
             onVoice: { note in Task { await sendToThread(voice: note) } },
             onComposerError: { self.error = $0 },
             mentionable: model.mentionable.filter { $0 != threadId }
