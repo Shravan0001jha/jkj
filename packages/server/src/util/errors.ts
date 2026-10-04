@@ -44,3 +44,24 @@ export class Unauthorized extends BadRequest {
 
 export const statusOf = (err: unknown): number =>
   err instanceof BadRequest ? err.status : 500;
+
+/** A body or file over the size the route takes. */
+export class TooLarge extends BadRequest {
+  override readonly status = 413;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'TooLarge';
+  }
+}
+
+/** A dependency the Workplace relies on (speech-to-text) failed. */
+export class Upstream extends BadRequest {
+  override readonly status: number;
+
+  constructor(message: string, status = 502) {
+    super(message);
+    this.name = 'Upstream';
+    this.status = status;
+  }
+}

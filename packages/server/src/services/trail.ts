@@ -49,7 +49,7 @@ export function activitySince(wp: Workplace, sinceIso: string, kind?: ActivityKi
 
 /* ---------- comments ---------- */
 
-export function comment(wp: Workplace, itemId: string, given: { by: string; text: string; details?: string }): Comment {
+export function comment(wp: Workplace, itemId: string, given: { by: string; text: string; details?: string; mentions?: string[] }): Comment {
   const spec = { ...given, by: authorId(wp, given.by) };
   if (!rawGet(wp, itemId)) throw new BadRequest(`No item ${itemId}`);
   if (!spec.text.trim()) throw new BadRequest('An empty comment says nothing.');
@@ -57,7 +57,8 @@ export function comment(wp: Workplace, itemId: string, given: { by: string; text
   const details = spec.details ?? authored.details;
   const c: Comment = {
     id: newId('cm'), itemId, at: now(), by: spec.by, text: authored.text,
-    ...(details ? { details } : {}), mentions: room.mentionsIn(wp, spec.text),
+    // Several people at once (owner, 4 Oct): the ids the app sends plus every @id/@Name in the text.
+    ...(details ? { details } : {}), mentions: [...new Set([...(spec.mentions ?? []), ...room.mentionsIn(wp, spec.text)])],
   };
   wp.db.prepare('insert into comments (id, item_id, at, by, json) values (?, ?, ?, ?, ?)').run(c.id, itemId, c.at, c.by, JSON.stringify(c));
   record(wp, { itemId, by: spec.by, kind: 'comment', text: c.text.split('\n')[0]!.slice(0, 120) });
@@ -195,6 +196,10 @@ function lastBlockLine(wp: Workplace, itemId: string): UpdateKind | undefined {
 function ownerBlock(wp: Workplace, prev: WorkItem, next: WorkItem): void {
   const key = `blocked:${next.id}`;
   if (next.status === 'blocked' && next.waitingOn === 'owner') {
+    // The block names an ask already in his Inbox ("filed in his Inbox (in_x)"): that ask IS this
+    // block. Link it to the item and raise nothing (RCA in inbox.raiseOrReuse).
+    const named = inbox.openAsksNamedIn(wp, `${next.blockedReason ?? ''}\n${next.blockedRecommendation ?? ''}`);
+    if (named.length) { for (const i of named) inbox.linkToItem(wp, i.id, next.id); return; }
     inbox.raise(wp, {
       kind: 'question', title: `Blocked on you: ${next.title}`,
       body: `${next.blockedReason ?? 'Needs you.'}${next.blockedRecommendation ? `\n\nRecommendation: ${next.blockedRecommendation}` : ''}`,

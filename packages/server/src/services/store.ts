@@ -201,6 +201,32 @@ create table if not exists release_posts (
   json text not null
 );
 
+-- Talk threads (docs/LLD-app-fixes.md): every message in the owner's chats, with its sender and receipts.
+create table if not exists talk_messages (
+  id text primary key,
+  thread_id text not null,
+  at text not null,
+  from_who text not null,
+  direction text not null,
+  counts integer not null default 0,
+  agent_id text,
+  text_key text,
+  json text not null
+);
+create index if not exists talk_messages_thread on talk_messages(thread_id, at);
+create index if not exists talk_messages_text on talk_messages(text_key);
+create table if not exists talk_threads (
+  id text primary key,
+  json text not null
+);
+create table if not exists talk_attachments (
+  id text primary key,
+  thread_id text not null,
+  at text not null,
+  path text not null,
+  json text not null
+);
+
 create table if not exists coo_messages (
   id text primary key,
   at text not null,

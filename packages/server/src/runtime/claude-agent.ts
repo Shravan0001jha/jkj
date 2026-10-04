@@ -57,6 +57,12 @@ export interface RunEvents {
   onResult?(result: RunResult): void;
   onDone(summary: string): void;
   onError(message: string): void;
+  /**
+   * A turn's first reply frame (main thread): the client uuids of the user messages this turn
+   * consumed (`user_message_uuids`), or undefined when the CLI did not stamp them. This is the
+   * "the agent read it" signal for read receipts (docs/LLD-app-fixes.md §3).
+   */
+  onTurnStart?(uuids: string[] | undefined): void;
 }
 
 /** An image the model should look at, already decoded from the wire. */
@@ -67,8 +73,8 @@ export interface RunImage {
 }
 
 export interface RunHandle {
-  /** Queue a message for the running turn, or the next one. */
-  send(text: string, images?: RunImage[]): void;
+  /** Queue a message for the running turn, or the next one. `uuid` comes back in onTurnStart when consumed. */
+  send(text: string, images?: RunImage[], uuid?: string): void;
   /** Abort the current turn. Files already written stay written. */
   interrupt(): Promise<void>;
   /** Change how much the session asks. Rejects if the CLI refuses the mode. */
@@ -98,6 +104,8 @@ export interface RunOptions {
   prompt: string;
   /** Images to send with the opening message. */
   images?: RunImage[];
+  /** The opening message's client uuid (see RunHandle.send). */
+  promptUuid?: string;
   /** Continue an existing session by id rather than starting a new one. */
   resume?: string;
   permissionMode?: PermissionMode;
@@ -124,7 +132,7 @@ export interface RunOptions {
 
 export function startRun(options: RunOptions, events: RunEvents): RunHandle {
   const input = createInputQueue();
-  input.push(options.prompt, options.images);
+  input.push(options.prompt, options.images, options.promptUuid);
   const abort = new AbortController();
 
   const sdkOptions: Options = {
@@ -179,7 +187,7 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
   void consume(stream, events);
 
   return {
-    send: (text, images) => input.push(text, images),
+    send: (text, images, uuid) => input.push(text, images, uuid),
     interrupt: async () => {
       try {
         await stream.interrupt();
@@ -199,6 +207,7 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
 
 /** Translate the SDK's message stream into the events above. */
 async function consume(stream: Query, events: RunEvents): Promise<void> {
+  let inTurn = false;
   try {
     for await (const message of stream) {
       events.onSdkMessage?.(String(message.type), 'subtype' in message && typeof message.subtype === 'string' ? message.subtype : undefined);
@@ -216,6 +225,11 @@ async function consume(stream: Query, events: RunEvents): Promise<void> {
           break;
 
         case 'assistant': {
+          const stamped = message.user_message_uuids ?? (message.user_message_uuid ? [message.user_message_uuid] : undefined);
+          if (message.parent_tool_use_id === null && (!inTurn || stamped)) {
+            inTurn = true;
+            events.onTurnStart?.(stamped);
+          }
           for (const block of message.message.content) {
             if (block.type === 'text' && block.text.trim()) {
               events.onText(block.text);
@@ -245,6 +259,7 @@ async function consume(stream: Query, events: RunEvents): Promise<void> {
               costUSD: u.costUSD ?? 0,
             }])),
           });
+          inTurn = false;
           events.onDone(String(message.subtype));
           break;
         }
@@ -287,7 +302,7 @@ function createInputQueue() {
 
   return {
     iterable,
-    push(text: string, images?: RunImage[]): void {
+    push(text: string, images?: RunImage[], uuid?: string): void {
       // With no images the plain string form is what the CLI itself sends;
       // content blocks are only used when there is something to attach.
       const content = images?.length
@@ -306,6 +321,7 @@ function createInputQueue() {
         parent_tool_use_id: null,
         session_id: '',
         origin: { kind: 'human' },
+        ...(uuid ? { uuid } : {}),
       } as SDKUserMessage);
       notify?.();
       notify = null;

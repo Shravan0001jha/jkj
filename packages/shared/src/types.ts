@@ -57,9 +57,14 @@ export interface LogEntry {
   /**
    * v2 chat hygiene, on 'user' entries only: who wrote it. 'workplace' = a prompt the Workplace
    * sent the session (an assignment, a moderation turn, a handoff request); the chat view folds
-   * those into the activity line. Absent reads as 'owner'.
+   * those into the activity line. 'coo' = the COO ("Claude — COO"); an employee id = that employee.
+   * Absent reads as 'owner' (entries written before the sender was recorded).
    */
-  from?: 'owner' | 'workplace';
+  from?: 'owner' | 'coo' | 'workplace' | (string & {});
+  /** The sender's display name ("You", "Claude — COO", "Workplace", an employee's name), on 'user' entries. */
+  fromName?: string;
+  /** The Talk message this entry is (docs/LLD-app-fixes.md): receipts and replies are keyed by it. */
+  talkId?: string;
 }
 
 export type LogKind =

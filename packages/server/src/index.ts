@@ -19,6 +19,8 @@ import { PowerMonitor } from './services/power.js';
 import * as room from './services/room.js';
 import * as coo from './services/coo.js';
 import { wireMentionReplies } from './services/mentions.js';
+import { wireTalk } from './services/talk-store.js';
+import { loadSttKey } from './services/stt.js';
 import { migrateV2 } from './services/migrate-v2.js';
 import * as watch from './services/watch.js';
 import * as reviewWake from './services/review-wake.js';
@@ -30,6 +32,8 @@ import * as employees from './services/employees.js';
 import * as handoff from './services/handoff.js';
 import * as dispatch from './services/dispatch.js';
 import * as manager from './services/manager.js';
+import * as githubFlow from './services/github-flow.js';
+import * as evidence from './services/evidence.js';
 import * as spend from './services/spend.js';
 import * as pace from './services/pace.js';
 import * as alphaIntake from './services/alpha-intake.js';
@@ -103,6 +107,9 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   try { const made = room.seedThreads(wp); if (made.length) log.info('boot', `seeded ${made.length} Team Room threads from the 27 Sep plans`); } catch (err) { log.warn('boot', `room seed failed: ${err instanceof Error ? err.message : err}`); }
   // @mentions wake a short, rate-limited reply turn (RCA, 29 Sep: nothing did this before); @coo goes to the COO bridge.
   wireMentionReplies(wp);
+  // Talk threads (docs/LLD-app-fixes.md): messages, receipts, typing; voice notes' speech-to-text key.
+  const stopTalk = wireTalk(wp);
+  loadSttKey(join(config.opsDir, 'workplace', 'stt.env'));
   try { room.ensureReleases(wp); } catch (err) { log.warn('boot', `Releases room: ${err instanceof Error ? err.message : err}`); }
   // v2 stalls are events, not a sweep (HLD D21): each open item has a deadline that every change re-arms.
   const stopWatch = watch.startWatch(wp);
@@ -122,6 +129,11 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   // Asha first (owner, 2 Oct): operational alerts go to her; the COO only when she does not act in
   // 15 min, the call is above her, or she is stuck. Her digest every 20 min while work is active.
   const stopManager = manager.startManager(wp);
+  // The GitHub flow's sweep (docs/HLD-github-flow.md D3): a new commit on a story in review is re-pushed
+  // and resets its approvals. Does nothing while the mode is local (the default).
+  const stopGitHubFlow = githubFlow.startGitHubFlow(wp);
+  // run_evidence (docs/LLD-evidence.md §3): runs left by the last process are queued again.
+  const stopEvidence = evidence.startEvidence(wp);
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
@@ -206,11 +218,14 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       clearInterval(cosTimer);
       clearInterval(rhythmTimer);
       stopWatch();
+      stopTalk();
       stopReviewWake();
       stopBlockWatch();
       stopHandoffWatch();
       stopDispatch();
       stopManager();
+      stopGitHubFlow();
+      stopEvidence();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
       stopPace();

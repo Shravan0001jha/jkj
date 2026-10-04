@@ -70,6 +70,16 @@ export function ensureWorktree(workDir: string, employee: Employee, workItemId: 
   excludeLinked(path);
   if (!created) switchTo(employee, path, branch, base, workItemId);
 
+  linkUntracked(repo, path);
+
+  // Never hand back a worktree on another branch: the session would build on the wrong item (2 Oct).
+  const head = currentBranch(path);
+  if (head !== branch) throw new WorktreeSwitchError(employee.id, path, branch, `the worktree is on ${head}`);
+  return { path, branch: head, base, repo, created };
+}
+
+/** Link the untracked build/test dirs (venvs, node_modules) of the main checkout into a worktree. */
+export function linkUntracked(repo: string, path: string): void {
   for (const rel of LINKED) {
     const source = join(repo, rel);
     const target = join(path, rel);
@@ -82,11 +92,6 @@ export function ensureWorktree(workDir: string, employee: Employee, workItemId: 
       log.warn('worktrees', `could not link ${rel}: ${err instanceof Error ? err.message : err}`);
     }
   }
-
-  // Never hand back a worktree on another branch: the session would build on the wrong item (2 Oct).
-  const head = currentBranch(path);
-  if (head !== branch) throw new WorktreeSwitchError(employee.id, path, branch, `the worktree is on ${head}`);
-  return { path, branch: head, base, repo, created };
 }
 
 /**
@@ -108,7 +113,7 @@ const EXCLUDED = ['.venv*', ...LINKED.filter(l => !l.startsWith('.venv')).map(l 
  * auto-save, through the worktree's info/exclude (never the repo's .gitignore).
  * A pattern without a trailing slash also matches the symlinks we create.
  */
-function excludeLinked(path: string): void {
+export function excludeLinked(path: string): void {
   const file = resolve(path, git(path, ['rev-parse', '--git-path', 'info/exclude']).trim());
   const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
   const lines = new Set(existing.split('\n').map(l => l.trim()));

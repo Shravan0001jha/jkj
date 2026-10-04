@@ -13,3 +13,4 @@ export * from './workplace-api.js';
 export * from './workplace-v2.js';
 export * from './csrf.js';
 export * from './chat-view.js';
+export * from './talk.js';
