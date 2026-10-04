@@ -259,7 +259,8 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   });
   trail.record(wp, {
     itemId, by: 'workplace', kind: 'note',
-    text: `Pushed ${ctx.branch} (${ctx.head.slice(0, 8)}) to GitHub; PR #${number}${moved ? ': new commits, both approvals reset and the evidence is stale' : ''}`,
+    // Dry run #23: evidence run on the new head before the push is not stale; say which it is.
+    text: `Pushed ${ctx.branch} (${ctx.head.slice(0, 8)}) to GitHub; PR #${number}${moved ? `: new commits, both approvals reset; ${tookOver ? 'evidence already matches this commit' : 'the evidence is stale'}` : ''}`,
   });
   log.info('github', `${itemId}: pushed ${ctx.branch} ${ctx.head.slice(0, 8)}, PR #${number} (by ${by})`);
   // With a PR the first review is a developer's (shadow and on): whoever the author named, the reviewer
@@ -282,7 +283,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   return {
     pr: { number: number!, url: url! }, tests,
     message: `The Workplace pushed your branch: pull request #${number} (${url}). ` +
-      (moved ? 'Any new commit resets both approvals, so it goes back through the developer approver (approval 1 of 2) and QA (approval 2 of 2); run run_evidence again on this commit.'
+      (moved ? `Any new commit resets both approvals, so it goes back through the developer approver (approval 1 of 2) and QA (approval 2 of 2); ${tookOver ? 'evidence already matches this commit.' : 'run run_evidence again on this commit.'}`
         : 'Next: the developer approver (approval 1 of 2, a lead who is not the author), then QA (approval 2 of 2).'),
   };
 }

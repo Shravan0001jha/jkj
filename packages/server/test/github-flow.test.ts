@@ -272,6 +272,27 @@ test('a new commit resets both approvals, marks evidence stale, and is pushed', 
   } finally { await s.done(); }
 });
 
+test('#23: a new head that already has evidence says so; without it the evidence is stale', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    const pushed = () => trail.activityFor(s.wp, s.storyId).filter(a => /^Pushed .*new commits/.test(a.text)).map(a => a.text);
+    s.commit('services/agent-svc/recall.py', 'x = 2\n');
+    await flow.syncHeads(s.wp);
+    assert.match(pushed().at(-1)!, /both approvals reset; the evidence is stale$/);
+    assert.equal(pr(s).evidence, 'stale');
+
+    const newer = s.commit('services/agent-svc/recall.py', 'x = 3\n');
+    const cur = rawGet(s.wp, s.storyId)!;
+    work.saveQuiet(s.wp, { ...cur, evidenceRun: { run: 'r', sha: newer, state: 'success', platforms: ['android'], features: ['queries'], passed: 14, failed: 0, failures: [], durationS: 60, report: '/r', by: 'kabir', at: new Date().toISOString() } });
+    await flow.syncHeads(s.wp);
+    assert.match(pushed().at(-1)!, /both approvals reset; evidence already matches this commit$/);
+    assert.doesNotMatch(pushed().at(-1)!, /stale/);
+    assert.equal(pr(s).evidence, 'success');
+  } finally { await s.done(); }
+});
+
 test('the sweep notices a new commit while in review: re-pushed and reset', async () => {
   const s = setup('shadow');
   try {
