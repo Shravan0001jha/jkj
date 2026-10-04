@@ -8,6 +8,7 @@ import * as trail from './trail.js';
 import * as manager from './manager.js';
 import * as reviewWake from './review-wake.js';
 import * as replyDelivery from './reply-delivery.js';
+import * as floor from './floor.js';
 import { epicOf, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { rowJson, rowsJson } from './store.js';
 import { log } from '../util/logger.js';
@@ -153,6 +154,8 @@ function resumeOrphan(wp: Workplace, employeeId: string, nowMs: number): Dispatc
 /** Give one employee their next work if they are free: a queued review first, else the next focus story. */
 export function dispatch(wp: Workplace, employeeId: string, nowMs = Date.now()): DispatchResult {
   if (!isAgent(wp, employeeId)) return { action: 'none' };
+  // "Pause all": nothing is started, new or resumed, until the floor is resumed.
+  if (floor.paused(wp)) return { action: 'skipped', reason: floor.describe(wp) };
   const resumed = resumeOrphan(wp, employeeId, nowMs);
   if (resumed) return resumed;
   const busy = busyReason(wp, employeeId, nowMs);
@@ -266,6 +269,8 @@ export function idleAlerts(wp: Workplace, nowMs = Date.now()): string[] {
  */
 export function sweep(wp: Workplace, nowMs = Date.now()): { reviews: string[]; started: DispatchResult[]; alerts: string[] } {
   try { replyDelivery.sweep(wp, nowMs); } catch (err) { log.warn('dispatch', `inbox replies: ${err instanceof Error ? err.message : err}`); }
+  // Paused: no review wakes, no starts, and no "idle with queued work" alerts for an idleness that is the switch.
+  if (floor.paused(wp)) return { reviews: [], started: [], alerts: [] };
   const reviews = wakeStaleReviews(wp);
   const started: DispatchResult[] = [];
   for (const id of agents(wp)) {

@@ -80,17 +80,21 @@ test('a session idle for ten minutes is stalled once: interrupted, ended, one qu
     await tick();
     const started = new Date(agent.startedAt).getTime();
     assert.deepEqual(health.detectStalls(started + 5 * 60 * 1000), []);
+    const stalled = fake.last();
     const found = await health.handleStalls(wp, started + 11 * 60 * 1000);
     assert.equal(found.length, 1);
     assert.equal(found[0]!.reason, 'idle');
-    assert.equal(fake.last().interrupted, 1);
-    // The session is ended (QA B4), a routine note is filed for Asha (never the owner's Inbox, per
-    // the owner's rule), so the honest state on the Office is "blocked", not "needs you".
+    assert.equal(stalled.interrupted, 1);
+    // The owner's "go" was never acted on: it is delivered again in a new session (4 Oct).
+    assert.notEqual(fake.last(), stalled);
+    assert.match(fake.last().options.prompt, /Delivered again[\s\S]*go/);
+    // The session is ended (QA B4) and a routine note is filed for Asha (never the owner's Inbox, per
+    // the owner's rule); the employee is working again, on the delivered-again message.
     assert.equal(employees.allSessions().some(s => s.agentId === agent.id), false);
-    assert.equal(employees.stateOf(wp, 'dev'), 'blocked');
+    assert.equal(employees.stateOf(wp, 'dev'), 'working', 'on the delivered-again message, not blocked');
     await health.handleStalls(wp, started + 12 * 60 * 1000);
     assert.equal(inbox.list(wp).filter(i => i.kind === 'question').length, 1);
-    assert.equal(fake.last().interrupted, 1);
+    assert.equal(stalled.interrupted, 1, 'stalled once');
   } finally {
     health.setHandoffWait(30_000);
     fake.restore();

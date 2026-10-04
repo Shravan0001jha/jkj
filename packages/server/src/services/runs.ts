@@ -37,7 +37,51 @@ interface Run {
   silenceTimer?: ReturnType<typeof setTimeout>;
   /** Set when a message got no model output within SILENT_MS; cleared by the next output. */
   silentSince?: string;
+  /** Talk messages (owner/COO) the model has not finished acting on, oldest first. */
+  unanswered: Unanswered[];
+  /** Talk messages whose turn ended without success (interrupted, a turn or budget cap): the CLI will not run them again. */
+  dropped: Unanswered[];
+  /** The owner pressed Stop: the interrupted turn's messages are his to drop, not to deliver again. */
+  discardOnStop?: boolean;
 }
+
+/**
+ * Whether a talk message has reached the model (4 Oct: the COO's message to Asha died with her
+ * session and nobody noticed). A message sent between turns starts the next turn, so the next model
+ * frame has seen it ('next'). One sent mid-turn waits in the CLI's queue and is injected after the
+ * next tool result, so it is seen only by a frame that follows a tool call made after it
+ * ('after-tool'); if the turn ends first it starts the following turn ('next' again). A message is
+ * answered when a turn that saw it ends in success.
+ */
+export interface Unanswered { text: string; from: 'owner' | 'workplace'; at: string; stage: 'after-tool' | 'next' | 'heard' }
+
+function track(run: Run, text: string, from: 'owner' | 'workplace', opening = false): void {
+  if (from !== 'owner') return;
+  run.unanswered.push({ text, from, at: new Date().toISOString(), stage: !opening && run.agent.status === 'running' ? 'after-tool' : 'next' });
+}
+
+/** A model frame arrived (text or a tool call). */
+function sawFrame(run: Run, toolUse: boolean): void {
+  for (const m of run.unanswered) if (m.stage === 'next') m.stage = 'heard';
+  if (toolUse) for (const m of run.unanswered) if (m.stage === 'after-tool') m.stage = 'next';
+}
+
+/** A turn ended. Success answers what it saw; any other end drops it (the CLI does not retry an interrupted turn). */
+function turnEnded(run: Run, subtype: string): void {
+  const heard = run.unanswered.filter(m => m.stage === 'heard');
+  run.unanswered = run.unanswered.filter(m => m.stage !== 'heard');
+  for (const m of run.unanswered) if (m.stage === 'after-tool') m.stage = 'next';
+  if (subtype !== 'success') {
+    if (!run.discardOnStop) run.dropped.push(...heard);
+    run.discardOnStop = false;
+  }
+}
+
+/** Talk messages this run took but did not finish acting on: dropped by a failed turn, or still waiting. */
+export const unanswered = (agentId: string): Unanswered[] => {
+  const run = runs.get(agentId);
+  return run ? [...run.dropped, ...run.unanswered] : [];
+};
 
 /**
  * No model output this long after a message is worth a line in the transcript and the log, with
@@ -242,11 +286,14 @@ function spawn(options: SpawnOptions): Agent {
     entries: (options.history ?? []).map(e => ({ ...e, agentId: id })),
     handle: undefined as unknown as RunHandle,
     images: new Map(),
+    unanswered: [],
+    dropped: [],
   };
   runs.set(id, run);
 
   const { images, text } = attach(run, options.attachments ?? []);
   append(run, 'user', '', options.prompt, { from: options.promptFrom ?? 'owner' });
+  track(run, options.prompt, options.promptFrom ?? 'owner', true);
   const prompt = withFiles(options.prompt, text);
 
   run.handle = runtime(
@@ -285,9 +332,9 @@ function spawn(options: SpawnOptions): Agent {
         if (type !== 'stream_event') log.info('runs', `${id} sdk: ${type}${subtype ? `/${subtype}` : ''}`);
       },
 
-      onText: text => { heard(run); append(run, 'assistant', '', text); },
+      onText: text => { heard(run); sawFrame(run, false); append(run, 'assistant', '', text); },
 
-      onToolUse: (tool, input) => { heard(run); append(run, kindForTool(tool), tool, describeInput(tool, input)); },
+      onToolUse: (tool, input) => { heard(run); sawFrame(run, true); append(run, kindForTool(tool), tool, describeInput(tool, input)); },
 
       onPermission: request2 => new Promise<'allow' | 'always' | 'deny'>(resolve => {
         update(run, {
@@ -326,6 +373,7 @@ function spawn(options: SpawnOptions): Agent {
       }),
 
       onResult: result => {
+        turnEnded(run, result.subtype);
         update(run, { usage: { ...run.agent.usage, costUsd: result.totalCostUsd } });
         options.onResult?.(result);
       },
@@ -351,6 +399,7 @@ export function sendMessage(agentId: string, text: string, attachments: Attachme
   const run = require$(agentId);
   const { images, text: files } = attach(run, attachments);
   append(run, 'user', '', text, { from: opts.from ?? 'owner' });
+  track(run, text, opts.from ?? 'owner');
   update(run, { status: 'running', messageCount: (run.agent.messageCount ?? 0) + 1 });
   run.handle.send(withFiles(text, files), images);
   armSilence(run);
@@ -417,8 +466,10 @@ const isTextual = (mediaType: string, name: string): boolean =>
 
 const language = (name: string): string => name.split('.').pop()?.toLowerCase() ?? '';
 
-export async function interruptRun(agentId: string): Promise<void> {
+/** `byOwner`: the owner's own Stop; what the interrupted turn was acting on is not delivered again. */
+export async function interruptRun(agentId: string, opts: { byOwner?: boolean } = {}): Promise<void> {
   const run = require$(agentId);
+  if (opts.byOwner && run.agent.status === 'running') run.discardOnStop = true;
   await run.handle.interrupt();
   append(run, 'system', 'Stopped', 'Interrupted from the Workplace. Anything already written stays written.');
   // Nothing is asked of the owner after an interrupt: the session simply sits until the next message.

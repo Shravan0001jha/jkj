@@ -77,7 +77,8 @@ export async function handleStalls(wp: Workplace, nowMs = Date.now()): Promise<S
     // The session is ended, not left open (QA B4): the silent or looping turn is interrupted, the run
     // is asked for its handoff (briefly; it may be as silent as before), then closed either way.
     await runs.interruptRun(s.agentId).catch(() => {});
-    await employees.endSession(wp, s.agentId, handoffWaitMs, true).catch(() => {});
+    // What the session took from the owner or the COO and had not acted on is delivered again (4 Oct).
+    await employees.endSession(wp, s.agentId, handoffWaitMs, true, { redeliver: true }).catch(() => {});
     employees.setState(wp, s.employeeId, 'blocked');
     // A stall/loop is never an owner decision by itself (the owner's rule: only real decisions
     // reach him; Asha resumes, reassigns or lets it wait). The key is the employee + assignment,

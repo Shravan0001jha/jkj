@@ -151,12 +151,14 @@ test('B4: a dead run is closed, the state reads true, and the next assignment ge
     health.setHandoffWait(100);
     const s = employees.talk(wp, 'mira', 'go');
     await tick();
+    const silent = fake.sessions.at(-1)!;
     const found = await health.handleStalls(wp, Date.now() + 11 * 60_000);
     assert.equal(found.length, 1);
-    assert.equal(fake.sessions.at(-1)!.interrupted, 1, 'the silent turn is interrupted');
-    assert.ok(fake.sessions.at(-1)!.sent.some(m => /handoff/i.test(m.text)), 'then asked for its handoff');
+    assert.equal(silent.interrupted, 1, 'the silent turn is interrupted');
+    assert.ok(silent.sent.some(m => /handoff/i.test(m.text)), 'then asked for its handoff');
+    assert.match(fake.sessions.at(-1)!.options.prompt, /Delivered again[\s\S]*go/, 'the owner\'s unanswered "go" goes to a new session');
     assert.equal(employees.allSessions().some(x => x.agentId === s.id), false, 'ended');
-    assert.equal(employees.stateOf(wp, 'mira'), 'blocked');
+    assert.equal(employees.stateOf(wp, 'mira'), 'working', 'on the delivered-again message, not blocked');
     const item = inbox.list(wp, 'open').find(i => i.raisedBy === 'mira')!;
     assert.match(item.body, /was ended/);
     assert.ok(cos.isStallDetectorItem(item));

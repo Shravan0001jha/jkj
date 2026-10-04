@@ -6,6 +6,7 @@ import type { Agent, Attachment, Employee, EmployeeCard, EmployeeState, Evidence
 import type { Workplace } from './workplace.js';
 import type { RunResult } from '../runtime/claude-agent.js';
 import * as runs from './runs.js';
+import * as floor from './floor.js';
 import * as work from './work.js';
 import * as githubFlow from './github-flow.js';
 import * as evidenceRuns from './evidence.js';
@@ -126,7 +127,7 @@ export function closeStale(wp: Workplace, nowMs = Date.now()): string[] {
     if (a && (a.status === 'running' || a.status === 'waiting')) continue;
     const idle = runs.idleMs(s.agentId, nowMs);
     if (a && idle !== null && idle < STALE_MS) continue;
-    close(wp, s.agentId, a ? `stale (${a.status} for ${Math.round((idle ?? 0) / 60_000)} min)` : 'stale (no run)');
+    close(wp, s.agentId, a ? `stale (${a.status} for ${Math.round((idle ?? 0) / 60_000)} min)` : 'stale (no run)', { redeliver: true });
     closed.push(s.agentId);
   }
   return closed;
@@ -167,7 +168,9 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
   if (emp.virtual) throw new BadRequest(`${emp.name} is not spawned by the Workplace; reach it through the COO bridge (POST /api/coo/message).`);
   const budget = spend.canSpend(wp, employeeId);
   if (!budget.ok && !options.ownerTalk) throw new BadRequest(`${emp.name} is paused: the ${budget.scope} spend cap for today is reached. Raise it in the Inbox, or talk to ${emp.name} and say "continue".`);
-  for (const s of sessionsOf(employeeId)) if (!isLive(s.agentId)) close(wp, s.agentId, 'replaced: the run was dead');
+  // "Pause all": nothing unattended starts; the owner's and the COO's own talk still does.
+  if (!options.ownerTalk && floor.paused(wp)) throw new BadRequest(`${emp.name} was not started: ${floor.describe(wp)}.`);
+  closeDead(wp, employeeId);
   if (sessionsOf(employeeId).length >= emp.budget.concurrentSessions) {
     throw new BadRequest(`${emp.name} already has ${emp.budget.concurrentSessions} session(s) open. End one first, or talk to the open one.`);
   }
@@ -184,6 +187,10 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
   };
   const context = assembleContext(wp.org, emp, { ...(options.assignment ? { assignment: options.assignment } : {}), maxTokens: wp.config.contextTokens, worktree: worktree.path, ownedPaths: ownedPaths(wp, emp, repoId), room: room.contextFor(wp, employeeId) });
   const remaining = spend.remainingUsd(wp, employeeId);
+  // Talk a dead session took and never acted on rides in this session's first message.
+  const carried = carryOver.get(employeeId) ?? [];
+  carryOver.delete(employeeId);
+  const prompt = carried.length ? `${options.prompt}\n\n${redeliveryText(carried)}` : options.prompt;
 
   const session: Session = { agentId: '', employeeId, ...(options.assignment ? { assignmentId: options.assignment.id } : {}), worktree, guard, startedAt: now(), seen: {}, planCaptured: !!options.assignment?.plan, ...(options.probe ? { probe: true } : {}), ...(options.ownerTalk ? { ownerTalk: true } : {}) };
 
@@ -194,7 +201,7 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
     model: role?.model ?? 'sonnet',
     cwd: worktree.path,
     workspace: 'worktree',
-    prompt: options.prompt,
+    prompt,
     permissionMode: role?.permissionMode ?? 'ask',
     ...(options.attachments ? { attachments: options.attachments } : {}),
     ...(options.resume ? { resume: options.resume } : {}),
@@ -377,6 +384,7 @@ function maybeLiftPause(wp: Workplace, employeeId: string, text: string): void {
 
 /** Start the session for an assignment (the assignment block is the fifth layer). */
 export function assign(wp: Workplace, assignmentId: string): Agent {
+  if (floor.paused(wp)) throw new BadRequest(`${assignmentId} was not started: ${floor.describe(wp)}.`);
   const agent = assignSession(wp, assignmentId);
   // v2: a session on a Ready/Backlog item means it is in progress now (a "Started" line).
   try { items.markStarted(wp, assignmentId, 'workplace'); } catch (err) { log.warn('employees', `mark started ${assignmentId}: ${err instanceof Error ? err.message : err}`); }
@@ -399,8 +407,12 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
   if (!item.employeeId) throw new BadRequest(`${assignmentId} has no assignee`);
   if (item.employeeId === 'owner') throw new BadRequest(`${assignmentId} is the owner's own item; nobody is started on it.`);
   // A dead session (interrupted, errored) is closed first, whatever its age: work goes to a live one.
-  for (const s of sessionsOf(item.employeeId)) if (!isLive(s.agentId)) close(wp, s.agentId, 'replaced: the run was dead');
+  closeDead(wp, item.employeeId);
   const open = openSession(item.employeeId);
+  if (open && carryOver.has(item.employeeId)) {
+    runs.sendMessage(open.agentId, redeliveryText(carryOver.get(item.employeeId)!), [], { from: 'owner' });
+    carryOver.delete(item.employeeId);
+  }
   if (open) {
     // The open session takes the assignment, but on the assignment's branch (live 2 Oct: Dev began a
     // new story in his talk session's emp/dev/general, cut before that day's merge). Between turns the
@@ -496,7 +508,8 @@ export function drainSwitch(agentId: string): string | null {
 runs.onRunEvent(({ agent }) => {
   if (!agent || !pendingSwitch.has(agent.id) || agent.status !== 'waiting' || agent.approval) return;
   const id = agent.id;
-  setImmediate(() => { if (!midTurn(id)) drainSwitch(id); });
+  // While the floor is paused a queued assignment waits (the dispatcher picks it up after the resume).
+  setImmediate(() => { const q = pendingSwitch.get(id)?.[0]; if (!midTurn(id) && !(q && floor.paused(q.wp))) drainSwitch(id); });
 });
 
 const HANDOFF_PROMPT =
@@ -506,7 +519,7 @@ const HANDOFF_PROMPT =
   '"nothing done". Then stop.';
 
 /** Ask for the handoff, wait a bounded time, close. */
-export async function endSession(wp: Workplace, agentId: string, waitMs = 150_000, evenIfIdle = false): Promise<void> {
+export async function endSession(wp: Workplace, agentId: string, waitMs = 150_000, evenIfIdle = false, opts: CloseOptions = {}): Promise<void> {
   const session = sessions.get(agentId);
   if (!session) return;
   const agent = runs.getRunAgent(agentId);
@@ -517,7 +530,7 @@ export async function endSession(wp: Workplace, agentId: string, waitMs = 150_00
     runs.sendMessage(agentId, HANDOFF_PROMPT, [], { from: 'workplace' });
     await waiting;
   }
-  close(wp, agentId, 'ended');
+  close(wp, agentId, 'ended', opts);
 }
 
 /**
@@ -530,8 +543,13 @@ function waitForHandoff(wp: Workplace, session: Session, waitMs: number): Promis
   return new Promise(resolve => {
     let done = false;
     const finish = (): void => { if (done) return; done = true; clearInterval(timer); clearTimeout(limit); unsubscribe(); resolve(); };
-    const unsubscribe = runs.onRunEvent(({ agent }) => {
-      if (agent?.id === session.agentId && agent.status !== 'running') finish();
+    // A turn that ends with no model output since the prompt is not the handoff turn: it is the result
+    // of a turn interrupted just before (4 Oct: that stale result closed Asha's session 8 ms after
+    // the handoff prompt, with no handoff written).
+    let answered = false;
+    const unsubscribe = runs.onRunEvent(({ agent, entry }) => {
+      if (entry?.agentId === session.agentId && OUTPUT_KINDS.has(entry.kind)) answered = true;
+      if (agent?.id === session.agentId && (agent.status === 'error' || (agent.status !== 'running' && answered))) finish();
     });
     const timer = setInterval(() => {
       if (readEmployeeFile(wp.org, session.employeeId, 'handoff.md') !== before && runs.getRunAgent(session.agentId)?.status !== 'running') finish();
@@ -548,9 +566,19 @@ export function onSessionClosed(fn: ClosedListener): () => void {
   return () => void closedListeners.delete(fn);
 }
 
-export function close(wp: Workplace, agentId: string, reason: string): void {
+export interface CloseOptions {
+  /**
+   * Deliver again, in a new session, the owner's/COO's talk this session took and did not finish
+   * acting on. For the closes nobody asked for (a stall, a stale or dead run); never for a shutdown
+   * (the talk resumes on boot), the owner's own end-session, or test cleanup.
+   */
+  redeliver?: boolean;
+}
+
+export function close(wp: Workplace, agentId: string, reason: string, opts: CloseOptions = {}): void {
   const session = sessions.get(agentId);
   if (!session) return;
+  const undelivered = opts.redeliver && !session.probe && reason !== 'shutdown' ? runs.unanswered(agentId) : [];
   // An orderly shutdown loses a pending decision as surely as a crash does: report it the same way,
   // and leave a machine-written note in the handoff so the work the model did is not forgotten
   // (Asha's spec session was shut down with no handoff on 27 Sep and her files stayed empty).
@@ -576,7 +604,52 @@ export function close(wp: Workplace, agentId: string, reason: string): void {
   if (reason !== 'shutdown') {
     for (const q of queued) { try { assign(wp, q.assignmentId); } catch (err) { log.warn('employees', `${q.assignmentId}: ${err instanceof Error ? err.message : err}`); } }
   }
+  if (undelivered.length) redeliver(wp, session.employeeId, undelivered);
   for (const fn of closedListeners) { try { fn(wp, session, reason); } catch (err) { log.warn('employees', `session-closed listener: ${err instanceof Error ? err.message : err}`); } }
+}
+
+const OUTPUT_KINDS = new Set(['assistant', 'read', 'edit', 'bash', 'search', 'task', 'tool']);
+
+/* ---------- talk that must not be lost ---------- */
+
+const REDELIVERED = 'Delivered again:';
+/** Talk taken from dead sessions, for the next session this employee starts. */
+const carryOver = new Map<string, runs.Unanswered[]>();
+
+function redeliveryText(msgs: runs.Unanswered[]): string {
+  return [
+    `${REDELIVERED} your last session ended before you finished acting on ${msgs.length === 1 ? 'this message' : 'these messages'}. Act on ${msgs.length === 1 ? 'it' : 'them'} now.`,
+    ...msgs.map(m => `(sent ${m.at.slice(11, 16)} UTC) ${m.text}`),
+  ].join('\n\n');
+}
+
+/** Close this employee's dead sessions; what they had not acted on waits in carryOver for the next session. */
+function closeDead(wp: Workplace, employeeId: string): void {
+  for (const s of sessionsOf(employeeId)) {
+    if (isLive(s.agentId)) continue;
+    const msgs = s.probe ? [] : runs.unanswered(s.agentId);
+    close(wp, s.agentId, 'replaced: the run was dead');
+    if (msgs.length) carryOver.set(employeeId, [...(carryOver.get(employeeId) ?? []), ...msgs]);
+  }
+}
+
+/** Start (or reach) a session with the lost talk. A message already delivered again once goes to the COO, not round again. */
+function redeliver(wp: Workplace, employeeId: string, msgs: runs.Unanswered[]): void {
+  const name = wp.org.employees.find(e => e.id === employeeId)?.name ?? employeeId;
+  const tell = (list: runs.Unanswered[], why: string): void => {
+    coo.notifyStall(wp, { itemId: '', by: 'workplace', title: `${name}: a talk message was not delivered`, body: `${why}\n\n${list.map(m => m.text).join('\n\n').slice(0, 1500)}` });
+    log.warn('employees', `${name}: ${list.length} talk message(s) not delivered: ${why}`);
+  };
+  const again = msgs.filter(m => m.text.startsWith(REDELIVERED));
+  const fresh = msgs.filter(m => !m.text.startsWith(REDELIVERED));
+  if (again.length) tell(again, `Delivered again once and the session ended again before acting on it. Send it again yourself if it still stands.`);
+  if (!fresh.length) return;
+  try {
+    talk(wp, employeeId, redeliveryText(fresh));
+    log.info('employees', `${name}: delivered ${fresh.length} talk message(s) again in a new session`);
+  } catch (err) {
+    tell(fresh, `The session ended before acting on it and a new one could not start: ${err instanceof Error ? err.message : err}`);
+  }
 }
 
 /** Interrupt and pause every session in a spend scope. */
@@ -739,6 +812,12 @@ export interface ResumeAfterShutdown {
  */
 export async function resumeAfterShutdown(wp: Workplace, staggerMs = 1500): Promise<ResumeAfterShutdown> {
   const result: ResumeAfterShutdown = { resumed: [], resumedTalks: [], skipped: [] };
+  // "Pause all" holds the boot's resumes too; the markers stay for the boot after the resume.
+  if (floor.paused(wp)) {
+    result.skipped.push({ id: 'floor', reason: floor.describe(wp) });
+    log.info('employees', `resume after restart: none, ${floor.describe(wp)}`);
+    return result;
+  }
   const marked = (wp.db.prepare("select key from settings where key like 'resume:%'").all() as { key: string }[]).map(r => r.key.slice('resume:'.length));
   const items: WorkItem[] = [];
   for (const id of marked) {

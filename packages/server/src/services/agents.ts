@@ -61,7 +61,7 @@ export async function resumeAgent(agentId: string, text: string, attachments?: A
 export const sendMessage = (agentId: string, text: string, attachments?: Attachment[]): void =>
   runs.sendMessage(agentId, text, attachments);
 
-export const interruptAgent = (agentId: string): Promise<void> => runs.interruptRun(agentId);
+export const interruptAgent = (agentId: string): Promise<void> => runs.interruptRun(agentId, { byOwner: true });
 
 export const resolveApproval = (agentId: string, decision: ApprovalDecision): void =>
   runs.resolveApproval(agentId, decision);

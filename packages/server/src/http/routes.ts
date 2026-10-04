@@ -29,6 +29,8 @@ import * as areas from '../services/areas.js';
 import * as releasePosts from '../services/release-posts.js';
 import * as statusAnswers from '../services/status.js';
 import * as pace from '../services/pace.js';
+import * as floor from '../services/floor.js';
+import * as dispatch from '../services/dispatch.js';
 import * as githubFlow from '../services/github-flow.js';
 import * as evidence from '../services/evidence.js';
 import type { Telegram } from '../services/telegram.js';
@@ -394,6 +396,19 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const window = coo.openLiveWindow(wp, employeeId, Number(body['minutes']));
       employees.refreshLiveWindow(wp, employeeId, Date.parse(window.until));
       json(res, 200, window);
+    }),
+
+    // "Pause all" (owner, 4 Oct): nothing unattended starts while it is on; talk still works.
+    r('GET', '/api/coo/floor', (req, res) => { requireLocal(req); json(res, 200, floor.state(wp)); }),
+    r('POST', '/api/coo/floor', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      if (typeof body['paused'] !== 'boolean') throw new BadRequest('paused must be true or false.');
+      const reason = typeof body['reason'] === 'string' ? body['reason'].trim().slice(0, 300) : '';
+      const st = floor.setPaused(wp, body['paused'], reason, 'coo');
+      // Resumed: the queued work starts now, not at the next sweep.
+      if (!st.paused) { try { dispatch.sweep(wp); } catch (err) { log.warn('floor', `sweep after resume: ${err instanceof Error ? err.message : err}`); } }
+      json(res, 200, st);
     }),
 
     // Weekly pacing on/off (owner's call, relayed by the COO): off lifts any hold at once.
