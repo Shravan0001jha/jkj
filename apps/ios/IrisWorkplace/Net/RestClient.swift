@@ -111,7 +111,9 @@ final class RestClient {
     func item(_ id: String) async throws -> ItemDetail { try await get(API.item(id)) }
     func createItem(_ req: CreateItemRequest) async throws -> ItemDetail { try await post(API.items(), req) }
     func updateItem(_ id: String, _ req: UpdateItemRequest) async throws -> ItemDetail { try await post(API.item(id), req) }
-    func comment(item id: String, text: String) async throws -> Comment { try await post(API.itemComments(id), CommentRequest(text: text)) }
+    func comment(item id: String, text: String, mentions: [String] = []) async throws -> Comment {
+        try await post(API.itemComments(id), CommentRequest(text: text, mentions: mentions.isEmpty ? nil : mentions))
+    }
     func updates(limit: Int? = nil, before: String? = nil) async throws -> [Update] { try await get(API.updates(limit: limit, before: before)) }
     func inboxThread(_ id: String) async throws -> InboxThread { try await get(API.inboxThread(id)) }
     func inboxReply(_ id: String, text: String?, optionId: String?) async throws -> InboxThread {
@@ -139,6 +141,26 @@ final class RestClient {
         return r.token
     }
 
+    /// A file the server serves (an attachment): the raw bytes, with the same auth and errors.
+    func download(_ path: String) async throws -> Data {
+        var req = request(path, method: "GET")
+        req.setValue("*/*", forHTTPHeaderField: "accept")
+        req.timeoutInterval = 60
+        let data: Data, response: URLResponse
+        do { (data, response) = try await session.data(for: req) } catch {
+            if error.isCancellation { throw CancellationError() }
+            throw WorkplaceError.transport(Self.describeTransport(error, host: req.url?.host ?? "the server"))
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401 { throw WorkplaceError.unauthorized }
+        if Self.isMacOffline(status: status, body: data) { throw WorkplaceError.macOffline }
+        guard (200..<300).contains(status) else {
+            let message = (try? decoder.decode(ErrorResponse.self, from: data))?.error
+            throw WorkplaceError.server(status: status, message: message ?? (status == 404 ? "This file is no longer on the server." : "HTTP \(status)"))
+        }
+        return data
+    }
+
     // MARK: plumbing
 
     func get<T: Decodable>(_ path: String) async throws -> T {
@@ -149,6 +171,15 @@ final class RestClient {
         var req = request(path, method: "POST", authenticated: authenticated)
         req.setValue("application/json", forHTTPHeaderField: "content-type")
         req.httpBody = try encoder.encode(body)
+        return try await send(req)
+    }
+
+    /// A file upload: the raw bytes as the body, typed by `contentType`.
+    func postRaw<T: Decodable>(_ path: String, _ data: Data, contentType: String) async throws -> T {
+        var req = request(path, method: "POST")
+        req.setValue(contentType, forHTTPHeaderField: "content-type")
+        req.timeoutInterval = 120
+        req.httpBody = data
         return try await send(req)
     }
 
