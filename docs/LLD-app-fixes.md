@@ -116,8 +116,8 @@ Rules:
 * `POST /api/employees/:id/talk` and `POST /api/talk` (the Chief of Staff) keep working and accept the
   same optional `replyTo`, `mentions`, `attachmentIds`; they still return the `Agent`, now with one
   extra field `message: TalkMessage`.
-* The `coo` thread takes text, `replyTo` and voice (transcribed; the COO receives the transcript).
-  Files to the COO → 400 "The COO thread takes text and voice; send files to an employee."
+* The `coo` thread takes text, `replyTo`, voice (transcribed; the COO receives the transcript) and
+  files, both ways (§12).
 * Size: 20 MB per file (413 "That file is over 20 MB; send a smaller one or a link."). Images, PDFs,
   text and any other type are accepted; the agent reads images inline and every other file from
   disk (§6).
@@ -210,6 +210,22 @@ a second or two after the agent starts thinking, not at once.
 One thing reaches the owner once: while an open owner-facing question/decision exists for a work
 item, a second one for the same item is not raised. No contract change for the apps.
 `ask_owner` gains an optional `itemId` (default: the session's assignment).
+
+## 12. Files in the COO thread (both ways)
+
+* **Owner → COO:** upload to `POST /api/talk/threads/coo/attachments`, send with `attachmentIds` (as
+  for an employee). Stored under `~/iris-workplace/attachments/coo/`. The bridge line in
+  `coo/inbox.jsonl` (`kind: 'message'`) carries
+  `attachments: [{ id, name, mime, size, path }]`, `path` = the absolute file on this Mac.
+* **COO → owner:** `POST /api/coo/reply` (this Mac only) takes, besides `inReplyTo`/`text`/`details`:
+  * `attachmentIds: string[]` — files the COO uploaded to `POST /api/talk/threads/coo/attachments`
+    (with `x-workplace-actor: coo`); ids from another thread → 400;
+  * `files: string[]` — absolute paths, copied into attachments; only inside `~/iris-workplace/`,
+    `~/Desktop` or `/private/tmp/claude-502/` (symlinks resolved), ≤ 20 MB. Otherwise 400 "Not sent:
+    only files in ~/iris-workplace/, ~/Desktop or the COO scratchpad (/private/tmp/claude-502/) can be
+    sent." `text` may be empty when files are given (it becomes the file names).
+* Both show in the `coo` thread as `TalkMessage.attachments` (from "Claude — COO" for replies), and
+  `CooMessage.attachments` (`GET /api/coo/log`, `coo.message`) carries the same `TalkAttachment[]`.
 
 ## 11. Relay limits (apps off the home network)
 

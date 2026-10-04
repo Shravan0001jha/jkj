@@ -404,7 +404,11 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     r('POST', '/api/coo/reply', async (req, res) => {
       requireLocal(req);
       const body = await readJson(req);
-      json(res, 201, coo.replyFromCoo(wp, { inReplyTo: str(body['inReplyTo']), text: str(body['text']), ...(typeof body['details'] === 'string' && body['details'].trim() ? { details: body['details'] } : {}) }));
+      const attachments = talkStore.cooFiles(wp, { attachmentIds: strs(body['attachmentIds']), files: strs(body['files']) });
+      json(res, 201, coo.replyFromCoo(wp, {
+        inReplyTo: str(body['inReplyTo']), text: typeof body['text'] === 'string' ? body['text'] : '', ...(attachments.length ? { attachments } : {}),
+        ...(typeof body['details'] === 'string' && body['details'].trim() ? { details: body['details'] } : {}),
+      }));
     }),
     r('GET', '/api/coo/items', (req, res, url) => { requireLocal(req); const state = url.searchParams.get('state'); json(res, 200, coo.listItems(wp, state === 'open' || state === 'answered' || state === 'forwarded' ? state : undefined)); }),
     r('POST', '/api/coo/answer', async (req, res) => {

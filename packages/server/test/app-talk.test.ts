@@ -243,9 +243,6 @@ test('files: upload, send, the agent gets images as images and other files by pa
   assert.equal(big.status, 413);
   // An id from another thread is refused.
   assert.equal((await req(b, 'POST', '/api/talk/threads/dev/messages', { attachmentIds: [pdf.body.id] })).status, 400);
-  // The COO thread takes text and voice only.
-  const cooFile = await upload<{ id: string }>(b, '/api/talk/threads/coo/attachments?name=a.pdf', Buffer.from('x'), 'application/pdf');
-  assert.equal((await req(b, 'POST', '/api/talk/threads/coo/messages', { attachmentIds: [cooFile.body.id] })).status, 400);
 }));
 
 test('send_file: an agent sends a file from its worktree or evidence; anything else is refused in one sentence', async () => {
@@ -323,3 +320,45 @@ test('the COO thread: the owner\'s messages and the COO\'s replies, read when th
 }));
 
 void runs;
+
+/* ---------- files in the COO thread, both ways ---------- */
+
+test('owner → COO: files are stored and the bridge line carries id, name, mime, size and the absolute path', () => withBoot(async b => {
+  const { readFileSync } = await import('node:fs');
+  const pdf = await upload<{ id: string }>(b, '/api/talk/threads/coo/attachments?name=plan.pdf', Buffer.from('%PDF plan'), 'application/pdf');
+  const sent = await req<Sent>(b, 'POST', '/api/talk/threads/coo/messages', { text: 'Read this', attachmentIds: [pdf.body.id] });
+  assert.equal(sent.status, 201);
+  assert.equal(sent.body.message.text, 'Read this');
+  assert.deepEqual(sent.body.message.attachments.map(a => a.name), ['plan.pdf']);
+  const lines = readFileSync(join(b.running.wp.config.workplaceDir, 'coo', 'inbox.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l) as { kind: string; attachments?: { id: string; name: string; mime: string; size: number; path: string }[] });
+  const line = lines.filter(l => l.kind === 'message').at(-1)!;
+  assert.equal(line.attachments!.length, 1);
+  const a = line.attachments![0]!;
+  assert.deepEqual([a.id, a.name, a.mime, a.size], [pdf.body.id, 'plan.pdf', 'application/pdf', 9]);
+  assert.equal(readFileSync(a.path, 'utf8'), '%PDF plan', 'the COO can open the path');
+}));
+
+test('COO → owner: /api/coo/reply with uploaded ids or allowed absolute paths shows files from "Claude — COO"; other paths refused', () => withBoot(async b => {
+  const wp = b.running.wp;
+  const asked = await req<Sent>(b, 'POST', '/api/talk/threads/coo/messages', { text: 'Send me the report' });
+  const up = await upload<{ id: string }>(b, '/api/talk/threads/coo/attachments?name=chart.png', Buffer.from([1, 2, 3]), 'image/png');
+  const r1 = await req<{ id: string }>(b, 'POST', '/api/coo/reply', { inReplyTo: asked.body.message.id, text: 'Here', attachmentIds: [up.body.id] }, COO);
+  assert.equal(r1.status, 201);
+  const inWorkplace = join(wp.config.workplaceDir, 'report.md');
+  writeFileSync(inWorkplace, '# report');
+  const r2 = await req(b, 'POST', '/api/coo/reply', { inReplyTo: asked.body.message.id, files: [inWorkplace] }, COO);
+  assert.equal(r2.status, 201);
+  const outside = join(wp.config.workDir, 'x.txt');
+  writeFileSync(outside, 'no');
+  const r3 = await req<{ error: string }>(b, 'POST', '/api/coo/reply', { inReplyTo: asked.body.message.id, text: 'x', files: [outside] }, COO);
+  assert.equal(r3.status, 400);
+  assert.match(r3.body.error, /only files in ~\/iris-workplace\/, ~\/Desktop or the COO scratchpad/);
+
+  const out = talkStore.messages(wp, 'coo').filter(m => m.direction === 'out');
+  assert.deepEqual(out.map(m => [m.fromName, m.text, m.attachments.map(a => a.name)]), [
+    ['Claude — COO', 'Here', ['chart.png']],
+    ['Claude — COO', 'report.md', ['report.md']],
+  ]);
+  const log = (await req<{ attachments?: { name: string }[] }[]>(b, 'GET', '/api/coo/log')).body;
+  assert.equal(log.at(-1)!.attachments![0]!.name, 'report.md', 'the COO log carries them too');
+}));
