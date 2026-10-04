@@ -18,6 +18,7 @@ import { SuspendDetector } from './services/suspend.js';
 import { PowerMonitor } from './services/power.js';
 import * as room from './services/room.js';
 import * as coo from './services/coo.js';
+import * as cooPickup from './services/coo-pickup.js';
 import { wireMentionReplies } from './services/mentions.js';
 import { wireTalk } from './services/talk-store.js';
 import { loadSttKey } from './services/stt.js';
@@ -188,6 +189,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
     // The lead's heartbeat is a file, not an event: polled here, a coo.presence event goes out
     // only when online ↔ offline actually flips (coo.pollPresence).
     try { coo.pollPresence(wp); } catch (err) { log.warn('coo', `presence poll: ${err instanceof Error ? err.message : err}`); }
+    // The owner's message or @coo mention with no COO response in 15 min: one push (dry run #22).
+    try { cooPickup.check(wp); } catch (err) { log.warn('coo', `pickup check: ${err instanceof Error ? err.message : err}`); }
   }, 30_000);
   // The Chief of Staff's routine: stalled work is resumed within budget or explained in the Inbox.
   // Its stall loop is off in v2 (the watcher owns stalls); the Room moderation stays.

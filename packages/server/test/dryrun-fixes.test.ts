@@ -7,6 +7,8 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { Workplace } from '../src/services/workplace.js';
 import * as employees from '../src/services/employees.js';
 import * as items from '../src/services/items.js';
+import * as coo from '../src/services/coo.js';
+import * as cooPickup from '../src/services/coo-pickup.js';
 import { rawGet } from '../src/services/v2-map.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
 import { testWorkplace } from './fakes/workplace.js';
@@ -84,4 +86,40 @@ test('#17: a story assigned to the Chief of Staff starts a routing session, not 
     assert.match(await (await toolsFor(wp, 'asha', story.id))('item_update', { itemId: story.id, assigneeId: 'tara' }), /is /);
     assert.equal(rawGet(wp, story.id)!.employeeId, 'tara');
   } finally { tmp.cleanup(); }
+});
+
+test('#22: an owner message or @coo mention with no COO response in 15 min raises one push; answered ones and system kinds do not', async () => {
+  const { wp, tmp } = testWorkplace();
+  const alerts: { title: string; level: string }[] = [];
+  const off = wp.on(e => { if (e.type === 'alert') alerts.push({ title: e.title, level: e.level }); });
+  try {
+    coo.touchHeartbeatForTest(wp);
+    const epic = items.create(wp, { level: 'epic', title: 'Practice' }, 'owner');
+    const story = items.create(wp, { level: 'story', parentId: epic.id, title: 'About screen version', assigneeId: 'tara' }, 'owner');
+    coo.notifyMention(wp, { threadId: `item:${story.id}`, threadTitle: story.title, by: 'owner', text: '@coo seems like an operational issue here' });
+    coo.notifyStall(wp, { itemId: 'floor', by: 'owner', title: 'The floor is paused', body: 'x' });
+    coo.notifyMention(wp, { threadId: `item:${story.id}`, threadTitle: story.title, by: 'dev', text: '@coo fyi' });
+    const t0 = Date.now();
+    assert.deepEqual(cooPickup.check(wp, t0 + 10 * 60_000), [], 'not before 15 min');
+    const late = cooPickup.check(wp, t0 + 16 * 60_000);
+    assert.equal(late.length, 1, 'only the owner\'s mention; the stall and an agent\'s mention are not his');
+    assert.equal(alerts.length, 1);
+    assert.equal(alerts[0]!.level, 'needs-you');
+    assert.equal(alerts[0]!.title, 'The COO hasn\'t picked up your message on "About screen version"');
+    assert.deepEqual(cooPickup.check(wp, t0 + 30 * 60_000), [], 'once');
+    assert.equal(alerts.length, 1);
+
+    // Answered: a COO post on the story, or a /api/coo/reply on the chat, means picked up.
+    coo.notifyMention(wp, { threadId: `item:${story.id}`, threadTitle: story.title, by: 'owner', text: '@coo again' });
+    coo.threadReply(wp, { itemId: story.id, text: 'COO: on it.' });
+    const msg = coo.sendOwnerMessage(wp, 'are you there?');
+    coo.replyFromCoo(wp, { inReplyTo: msg.id, text: 'Yes.' });
+    assert.deepEqual(cooPickup.check(wp, Date.now() + 16 * 60_000), []);
+    assert.equal(alerts.length, 1);
+
+    await new Promise(r => setTimeout(r, 5));
+    coo.sendOwnerMessage(wp, 'hello?');
+    assert.equal(cooPickup.check(wp, Date.now() + 16 * 60_000).length, 1);
+    assert.match(alerts.at(-1)!.title, /your message on the COO chat/);
+  } finally { off(); tmp.cleanup(); }
 });
