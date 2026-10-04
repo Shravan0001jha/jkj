@@ -94,8 +94,8 @@ POST/GET /api/coo/github ──► mode, fallback state
 - **D6 Quality checks run in the employee's worktree, serially** (heavy builds are capped on the Mac),
   only for the areas the diff touches. Commands come from `quality.yaml`; nothing is hard-coded per
   project. A missing tool fails closed (gitleaks absent = refused).
-- **D7 `workplace/evidence` stays pending** ("evidence check not wired yet") and is not required to
-  merge until the evidence tool exists (`setEvidence` is the hook).
+- **D7 `workplace/evidence`** is driven by `run_evidence` (docs/HLD-evidence.md) through `setEvidence`;
+  it is not yet required to merge.
 - **D8 The merge uses a merge commit and passes the reviewed SHA** to GitHub, so a commit that lands
   between the check and the merge makes GitHub refuse it. After the merge `~/claude-dev` is updated
   with `git pull --ff-only`; if that cannot fast-forward the COO is alerted and nothing is forced.

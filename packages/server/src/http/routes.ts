@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createReadStream, statSync } from 'node:fs';
+import { extname } from 'node:path';
 import type {
   Attachment, CreateAgentRequest, Evidence, PermissionMode, PivotRows, ProposalKind, Shippable, WorkKind, WorkState,
 } from '@jkj/shared';
@@ -28,6 +30,7 @@ import * as releasePosts from '../services/release-posts.js';
 import * as statusAnswers from '../services/status.js';
 import * as pace from '../services/pace.js';
 import * as githubFlow from '../services/github-flow.js';
+import * as evidence from '../services/evidence.js';
 import type { Telegram } from '../services/telegram.js';
 import type { Tunnel } from '../services/tunnel.js';
 import type { Push } from '../services/push.js';
@@ -415,6 +418,24 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       json(res, 200, await githubFlow.merge(wp, str(body['itemId']), 'coo'));
     }),
 
+    // run_evidence (docs/LLD-evidence.md §5): the queue for the COO (loopback only), and the reports
+    // for the owner and reviewers (same auth as every /api route, so the tunnel and the token work).
+    r('GET', '/api/coo/evidence', (req, res) => { requireLocal(req); json(res, 200, evidence.state(wp)); }),
+    r('GET', '/api/evidence/:item/:run(?:/(.*))?', (_req, res, _url, [item, run, rest]) => {
+      const file = evidence.reportFile(wp, item ?? '', run ?? '', rest);
+      if (!file) return json(res, 404, { error: 'No such report file.' });
+      const size = statSync(file).size;
+      res.writeHead(200, {
+        'content-type': REPORT_MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
+        'content-length': size,
+        // The report is the runner's HTML: it never runs as the Workplace's origin.
+        'content-security-policy': "sandbox allow-scripts allow-popups; default-src 'self' 'unsafe-inline' data: blob:",
+        'x-content-type-options': 'nosniff',
+        'cache-control': 'private, max-age=300',
+      });
+      createReadStream(file).pipe(res);
+    }),
+
     /* ---------- published access: the emergency off switch ---------- */
     r('POST', '/api/relay/off', (req, res) => {
       // A relay request arrives on loopback too (the tunnel forwards it); the header the tunnel sets keeps the phone out (as for pairing).
@@ -554,6 +575,13 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
 }
 
 /* ---------- helpers ---------- */
+
+const REPORT_MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8', '.xml': 'text/plain; charset=utf-8',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+  '.mp4': 'video/mp4', '.webm': 'video/webm',
+};
 
 export function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);

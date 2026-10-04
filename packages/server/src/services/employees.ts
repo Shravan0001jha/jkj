@@ -8,6 +8,7 @@ import type { RunResult } from '../runtime/claude-agent.js';
 import * as runs from './runs.js';
 import * as work from './work.js';
 import * as githubFlow from './github-flow.js';
+import * as evidenceRuns from './evidence.js';
 import * as spend from './spend.js';
 import * as inbox from './inbox.js';
 import { assembleContext } from './context-layers.js';
@@ -66,7 +67,7 @@ export const OWNER_TALK_TURN_INR = 100;
 /** The owner saying, in a talk, that paused work may go on. */
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'review_send_back', 'review_dispute'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'review_send_back', 'review_dispute', 'run_evidence'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -996,6 +997,17 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         { itemId: z.string(), reason: z.string() },
         async ({ itemId, reason }) => {
           try { await githubFlow.dispute(wp, itemId, employeeId, reason); return ok('Dispute sent to Asha with your reason. Asha decides; if she can\'t, the COO; then the owner. Wait for the answer on the item.'); } catch (err) { return ok(`Not sent: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      // The robot suite on the Mac against staging (docs/HLD-evidence.md); handbook "A story's life", step 4.
+      tool('run_evidence', 'Run the robot suite on the Mac\'s simulators against the staging server, for your story branch\'s head commit, with the platforms and features your change touches (for example platforms "android,ios", features "memory"). ' +
+        'It returns at once with its place in the queue and links a report with screenshots to your story. Never wait for it: the summary comes back to you and onto the story when it finishes; open screenshots only for failures. ' +
+        'Evidence belongs to one commit: a new commit makes it stale, so run it again. Mac desktop features run only in a live window the COO opens (ask on the item); Windows evidence is a cloud run QA schedules.',
+        { itemId: z.string().optional(), platforms: z.string(), features: z.string() },
+        async ({ itemId, platforms, features }) => {
+          const id = itemId ?? session().assignmentId;
+          if (!id) return ok(evidenceRuns.platformRefusal(platforms) ?? 'Name the story: no story is attached to this session, so call run_evidence again with its itemId.');
+          const r = evidenceRuns.request(wp, { itemId: id, by: employeeId, platforms, features });
+          return ok(r.ok ? r.message : `Not queued: ${r.message}`);
         }),
       tool('write_spec', 'Chief of Staff only: attach the spec (acceptance criteria) to a stated feature. It becomes "specced" and can be decomposed.',
         { featureId: z.string(), spec: z.string() },

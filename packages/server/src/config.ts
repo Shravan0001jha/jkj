@@ -65,6 +65,30 @@ export interface Config {
   pushQuiet?: string;
   /** The GitHub pull-request flow (docs/HLD-github-flow.md). The mode itself is a setting, not config. */
   github: GitHubConfig;
+  /** run_evidence (docs/LLD-evidence.md §1): the robot suite on this Mac against staging. */
+  evidence: EvidenceConfig;
+}
+
+export interface EvidenceConfig {
+  /** Runs and the build cache: <dir>/<item>/<sha12>-<ts>/, <dir>/_builds/. */
+  dir: string;
+  /** The staging API the built apps and the runner talk to. */
+  stagingUrl: string;
+  /** `<script> start` brings staging up (it idles off by itself; never stopped from here). */
+  stagingScript: string;
+  /** The runner inside an Iris checkout (the suite moves into the repo at e2e/). */
+  runnerInRepo: string;
+  /** The runner used while the built commit has no e2e/ yet (an iris-e2e clone). */
+  runnerFallback: string;
+  androidHome: string;
+  /** Full Xcode (employee worktrees only have the command-line tools). */
+  developerDir: string;
+  /** Device slots of the runner: at most this many runs at once. */
+  slots: number;
+  /** Builds kept per platform in the cache. */
+  keepBuilds: number;
+  /** Where each app lives in the repo; its tree is the build cache key. */
+  appPaths: { android: string; ios: string };
 }
 
 export interface GitHubConfig {
@@ -136,6 +160,18 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
       pushApp: env['WORKPLACE_GITHUB_PUSH_APP'] ?? 'iris-workplace',
       reviewApp: env['WORKPLACE_GITHUB_REVIEW_APP'] ?? 'iris-review',
       linkBase: env['WORKPLACE_GITHUB_LINK_BASE'] ?? `http://127.0.0.1:${num(flag('port') ?? env['WORKPLACE_PORT'], 4317)}`,
+    },
+    evidence: {
+      dir: env['WORKPLACE_EVIDENCE_DIR'] ?? join(flag('workplace-dir') ?? env['IRIS_WORKPLACE_DIR'] ?? join(homedir(), 'iris-workplace'), 'evidence'),
+      stagingUrl: (env['WORKPLACE_STAGING_URL'] ?? 'https://staging.irisforu.com').replace(/\/+$/, ''),
+      stagingScript: env['WORKPLACE_STAGING_SCRIPT'] ?? join(homedir(), 'claude-dev', 'scripts', 'staging.sh'),
+      runnerInRepo: 'e2e/scripts/local-run.sh',
+      runnerFallback: env['WORKPLACE_EVIDENCE_RUNNER'] ?? join(homedir(), 'iris-e2e', 'scripts', 'local-run.sh'),
+      androidHome: env['ANDROID_HOME'] ?? '/opt/homebrew/share/android-commandlinetools',
+      developerDir: env['WORKPLACE_DEVELOPER_DIR'] ?? '/Applications/Xcode.app/Contents/Developer',
+      slots: 2,
+      keepBuilds: 4,
+      appPaths: { android: 'mobile/android', ios: 'mobile/ios' },
     },
   };
 }

@@ -244,7 +244,13 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
     }
     // A new stay in review (after a send-back): the approvals of the last one are over.
     for (const k of ['devApproval', 'qaApproval'] as const) if (record[k] && record[k]!.episode !== episode) delete record[k];
-    void cur;
+    // Evidence is run before submitting (handbook step 4, then 5): a finished run on this very head
+    // carries over to a new PR record, or to a head the PR has just moved to.
+    const ev = cur.evidenceRun;
+    if (ev && ev.sha === ctx.head && (ev.state === 'success' || ev.state === 'failure') && (!reuse || moved)) {
+      record.evidence = ev.state;
+      record.evidenceNote = `${ev.passed} passed, ${ev.failed} failed on ${ev.platforms.join('+')} (run_evidence)`;
+    }
     return { pr: record, prRefused: undefined };
   });
   trail.record(wp, {

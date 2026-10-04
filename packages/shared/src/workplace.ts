@@ -288,6 +288,34 @@ export interface WorkItem {
   pr?: PrRecord;
   /** The last time the server refused to push the story's branch (a planted key, build output, a bad name). */
   prRefused?: { at: string; sha: string; reasons: string[] };
+  /** The story's latest finished robot-suite run (run_evidence, docs/LLD-evidence.md §1). */
+  evidenceRun?: EvidenceRunRecord;
+}
+
+/* ---------- evidence runs (docs/LLD-evidence.md) ---------- */
+
+export type EvidenceState = 'success' | 'failure' | 'stale' | 'error';
+
+/** One finished run_evidence run, on the commit it built. */
+export interface EvidenceRunRecord {
+  /** "<sha12>-<yyyymmddHHMMSS>": the run's directory under evidence/<item>/. */
+  run: string;
+  sha: string;
+  state: EvidenceState;
+  platforms: string[];
+  features: string[];
+  passed: number;
+  failed: number;
+  /** One line per failed check (at most 10). */
+  failures: string[];
+  /** Build and run, seconds. */
+  durationS: number;
+  /** The report's path on the Workplace server: /api/evidence/<item>/<run>/index.html */
+  report: string;
+  by: string;
+  at: string;
+  /** Why it is stale, an error, or a build failure. */
+  note?: string;
 }
 
 /* ---------- GitHub flow (docs/LLD-github-flow.md) ---------- */
