@@ -10,6 +10,8 @@ import * as work from './work.js';
 import * as trail from './trail.js';
 import * as coo from './coo.js';
 import * as manager from './manager.js';
+import * as employees from './employees.js';
+import * as runs from './runs.js';
 import { now } from './store.js';
 import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { branchFor, worktreePath } from './worktrees.js';
@@ -493,8 +495,42 @@ export async function sendBack(wp: Workplace, itemId: string, by: string, note: 
   if (!isDeveloper(who) && !holds(w.pr.devApproval, w)) throw new BadRequest(QA_WAIT);
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, sendBack: { by, at: now(), note: note.trim() } } }));
   items.update(wp, itemId, { status: 'in-progress', note: `Sent back by ${nameOf(wp, by)}: ${note.trim()}` }, by);
+  tellAuthor(wp, itemId, by, note.trim());
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
   return rawGet(wp, itemId)!;
+}
+
+/** What the author is told on a send-back. */
+export function sendBackText(wp: Workplace, w: WorkItem, by: string, note: string): string {
+  return `Sent back by ${nameOf(wp, by)}: Story ${w.id} "${w.title}" is In progress again. ${nameOf(wp, by)} says: ${note} ` +
+    `Fix it on branch emp/${w.employeeId}/${w.id}, commit, run scripts/pre-pr.sh and run_evidence on the new commit, then report_done. ` +
+    'Disagree with a QA send-back? review_dispute once, with your reason.';
+}
+
+/**
+ * The author hears of a send-back at once (dry run #20: Tara sat idle for 6 minutes): a message into
+ * their open session, whatever it is doing (a running turn gets it next), else a session on the
+ * story. A refusal to start (floor paused, capped) is noted on the story; the note is there anyway.
+ */
+function tellAuthor(wp: Workplace, itemId: string, by: string, note: string): void {
+  const w = rawGet(wp, itemId);
+  const author = w?.employeeId;
+  if (!w || !author || !isAgent(wp, author)) return;
+  const text = sendBackText(wp, w, by, note);
+  try {
+    const open = employees.openSession(author);
+    if (open) {
+      runs.sendMessage(open.agentId, text, [], { from: 'workplace' });
+      trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Send-back delivered to ${nameOf(wp, author)} in the open session` });
+    } else {
+      employees.spawn(wp, author, { assignment: w, prompt: text });
+      trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Send-back delivered to ${nameOf(wp, author)}: a session started` });
+    }
+    log.info('github', `${itemId}: send-back delivered to ${author}`);
+  } catch (err) {
+    trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `${nameOf(wp, author)} could not be woken for the send-back: ${errText(err)}` });
+    log.warn('github', `${itemId}: send-back not delivered to ${author}: ${errText(err)}`);
+  }
 }
 
 /** The author disputes a QA send-back: Asha first, the COO if she does not act, then the owner. */

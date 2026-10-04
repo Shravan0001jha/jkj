@@ -332,6 +332,29 @@ test('a dispute of a QA send-back goes to Asha first (then the COO, then the own
   } finally { await s.done(); }
 });
 
+test('#20: a send-back reaches the author at once: a message into an idle open session, else a session on the story', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    const kabirs = () => runtime.sessions.filter(x => x.options.cwd.includes('/kabir/'));
+    const before = kabirs().length;
+    // No open session: one starts on the story, with the note.
+    await flow.sendBack(s.wp, s.storyId, 'dev', 'the recall test is missing');
+    assert.equal(kabirs().length, before + 1);
+    assert.match(kabirs().at(-1)!.options.prompt, /Sent back by Dev: .*the recall test is missing/s);
+    assert.ok(trail.activityFor(s.wp, s.storyId).some(a => /Send-back delivered to Kabir: a session started/.test(a.text)));
+
+    // An open session sitting idle (waiting) gets it as a message, not a second session.
+    kabirs().at(-1)!.result();
+    items.update(s.wp, s.storyId, { status: 'in-review' }, 'kabir');
+    await flow.onReview(s.wp, s.storyId, 'kabir');
+    await flow.sendBack(s.wp, s.storyId, 'dev', 'rename the helper');
+    assert.equal(kabirs().length, before + 1, 'no second session');
+    assert.match(kabirs().at(-1)!.sent.at(-1)!.text, /Sent back by Dev: .*rename the helper/s);
+  } finally { await s.done(); }
+});
+
 test('the evidence hook sets workplace/evidence on the head', async () => {
   const s = setup('shadow');
   try {
