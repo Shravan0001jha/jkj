@@ -104,3 +104,19 @@ export class FakeStaging implements Staging {
     if (this.fail) throw new Error('staging did not come up within 5 min');
   }
 }
+
+/** The evidence bucket, faked: uploads are kept in memory; links are signed with a counter. */
+export class FakeStore {
+  readonly objects = new Map<string, string>();
+  signed = 0;
+  failPut = false;
+  async put(file: string, key: string): Promise<void> {
+    if (this.failPut) throw new Error('fake S3: upload refused (503)');
+    const { readFileSync } = await import('node:fs');
+    this.objects.set(key, readFileSync(file, 'utf8'));
+  }
+  async presign(key: string, seconds: number): Promise<string> {
+    this.signed += 1;
+    return `https://iris-workplace-evidence-000000000000.s3.ap-south-1.amazonaws.com/${key}?X-Amz-Expires=${seconds}&sig=${this.signed}`;
+  }
+}

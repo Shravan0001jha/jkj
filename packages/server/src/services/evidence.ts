@@ -17,6 +17,7 @@ import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { branchFor, excludeLinked } from './worktrees.js';
 import { isDeveloper, isQa } from './review-policy.js';
 import { assertNotRealPath } from './test-guard.js';
+import * as evidenceShare from './evidence-share.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -480,8 +481,8 @@ const NEXT: Record<EvidenceState, string> = {
 const WORD: Record<EvidenceState, string> = { success: 'PASS', failure: 'FAIL', stale: 'STALE', error: 'ERROR' };
 
 /** The one summary the caller, the item and the COO see. */
-export function summaryText(wp: Workplace, rec: EvidenceRunRecord, title: string): string {
-  const link = `${wp.config.github.linkBase}${rec.report}`;
+export function summaryText(rec: EvidenceRunRecord, title: string): string {
+  const link = rec.share ? rec.share.url : 'link unavailable (the upload failed; the evidence still counts)';
   return [
     `Evidence ${WORD[rec.state]} for "${title}" on ${rec.sha.slice(0, 8)} (${rec.platforms.join(',')} / ${rec.features.join(',')}): ${rec.passed} passed, ${rec.failed} failed, ${dur(rec.durationS)}. Report: ${link}`,
     ...(rec.note && rec.state !== 'failure' ? [`Why: ${rec.note}.`] : []),
@@ -499,7 +500,15 @@ async function finish(wp: Workplace, job: EvidenceJob, outcome: Outcome, started
   };
   const w = rawGet(wp, job.itemId);
   const title = w?.title ?? job.itemId;
-  const text = summaryText(wp, rec, title);
+  // The global link (one self-contained HTML in the evidence bucket), then the local copy is slimmed.
+  const runDir = join(wp.config.evidence.dir, job.itemId, job.run!);
+  if (existsSync(runDir)) {
+    const shared = await evidenceShare.share(wp, job.itemId, runDir, rec, title);
+    if ('share' in shared) rec.share = shared.share;
+    else log.warn('evidence', `${job.id}: no shared link: ${shared.error}`);
+    try { evidenceShare.slim(runDir, rec.state); } catch (err) { log.warn('evidence', `${job.id}: not slimmed: ${errText(err)}`); }
+  }
+  const text = summaryText(rec, title);
   if (w) {
     try {
       const cur = rawGet(wp, job.itemId)!;
@@ -512,6 +521,8 @@ async function finish(wp: Workplace, job: EvidenceJob, outcome: Outcome, started
     if (githubFlow.mode(wp) !== 'local' && pr && !pr.merged && pr.headSha === rec.sha && rec.state !== 'error') {
       try { await githubFlow.setEvidence(wp, job.itemId, rec.state, `${rec.passed} passed, ${rec.failed} failed on ${rec.platforms.join('+')} (run_evidence)`); }
       catch (err) { log.warn('evidence', `${job.id}: setEvidence: ${errText(err)}`); }
+      try { await githubFlow.prComment(wp, job.itemId, text); }
+      catch (err) { log.warn('evidence', `${job.id}: PR comment: ${errText(err)}`); }
     }
   }
   if (rec.state === 'error') {

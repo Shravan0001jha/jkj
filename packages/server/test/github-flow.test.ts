@@ -130,7 +130,7 @@ test('shadow: moving to review pushes emp/<name>/<story>, opens a PR to the trun
     assert.match(ghPr.title, /Recall the last song/);
     assert.ok(ghPr.title.includes(s.storyId));
     assert.ok(ghPr.body.includes(s.storyId));
-    assert.match(ghPr.body, /\/api\/items\//, 'a link to the item');
+    assert.doesNotMatch(ghPr.body, /127\.0\.0\.1|\/api\/items\//, 'no loopback link: the story title and id only');
     assert.match(ghPr.body, /Evidence/i, 'an evidence placeholder');
     const p = pr(s);
     assert.equal(p.number, ghPr.number);

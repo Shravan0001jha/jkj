@@ -56,6 +56,20 @@ test('PRs use the iris-workplace App, statuses the iris-review App; tokens are m
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('a status carries its target_url; a PR comment goes to the issue comments as the push App', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iris-ghport-'));
+  try {
+    const calls: Call[] = [];
+    const gh = port(dir, fakeFetch(calls, () => ({ status: 201, body: {} })));
+    await gh.setStatus('abc', { context: 'workplace/evidence', state: 'success', description: '4 passed', targetUrl: 'https://s3.example/x?sig=1' });
+    await gh.comment(7, 'Evidence PASS');
+    assert.deepEqual(calls[0]!.body, { context: 'workplace/evidence', state: 'success', description: '4 passed', target_url: 'https://s3.example/x?sig=1' });
+    assert.equal(calls[1]!.url, 'https://api.github.com/repos/shravan0001jha-iris-hq/iris/issues/7/comments');
+    assert.equal(calls[1]!.auth, 'Bearer ghs_irisworkplace0123456789abcdefghij');
+    assert.deepEqual(calls[1]!.body, { body: 'Evidence PASS' });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('an existing PR for the branch is found instead of failing (422)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'iris-ghport-'));
   try {

@@ -1,7 +1,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -18,7 +18,8 @@ import { rawGet } from '../src/services/v2-map.js';
 import { testWorkplace } from './fakes/workplace.js';
 import { FakeGitHub } from './fakes/fake-github.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
-import { FakeBuilder, FakeRunner, FakeStaging } from './fakes/fake-evidence.js';
+import { FakeBuilder, FakeRunner, FakeStaging, FakeStore } from './fakes/fake-evidence.js';
+import { useEvidenceStore } from '../src/services/evidence-share.js';
 
 /**
  * Infra checkpoint 7 (docs/HLD-evidence.md): run_evidence queues a robot-suite run for a story's
@@ -35,6 +36,7 @@ interface Setup {
   runner: FakeRunner;
   builder: FakeBuilder;
   staging: FakeStaging;
+  store: FakeStore;
   repo: string;
   storyId: string;
   wt: string;
@@ -62,6 +64,8 @@ function setup(opts: { auto?: boolean } = {}): Setup {
   const builder = new FakeBuilder(checkout => git(checkout, ['rev-parse', 'HEAD']).trim());
   const staging = new FakeStaging();
   evidence.useEvidencePorts(wp, { runner, builder, staging });
+  const store = new FakeStore();
+  useEvidenceStore(wp, store);
 
   const epic = items.create(wp, { level: 'epic', title: 'Memory' }, 'owner');
   const make = (title: string): { id: string; wt: string } => {
@@ -70,7 +74,7 @@ function setup(opts: { auto?: boolean } = {}): Setup {
   };
   const first = make('Recall the last song');
   const st: Setup = {
-    wp, runner, builder, staging, repo, storyId: first.id, wt: first.wt,
+    wp, runner, builder, staging, store, repo, storyId: first.id, wt: first.wt,
     commit: (file, content, storyId = st.storyId) => {
       const at = st.wt;
       git(at, ['checkout', '-q', `emp/kabir/${storyId}`]);
@@ -210,7 +214,8 @@ test('the result goes to the caller\'s open session as the summary only, and ont
     assert.match(m, /FAIL/);
     assert.match(m, /1 passed, 1 failed/);
     assert.match(m, /queries\.ask FAIL: no reply within 60 s/);
-    assert.match(m, new RegExp(`/api/evidence/${s.storyId}/[0-9a-f]{12}-\\d{14}/index\\.html`));
+    assert.match(m, new RegExp(`Report: https://iris-workplace-evidence-\\d+\\.s3\\.ap-south-1\\.amazonaws\\.com/${s.storyId}/[0-9a-f]{12}-\\d{14}/evidence\\.html\\?`), 'the global link');
+    assert.doesNotMatch(m, /127\.0\.0\.1/);
     assert.doesNotMatch(m, /shots\//, 'no screenshots in the message');
     const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
     assert.equal(rec.state, 'failure');
@@ -241,7 +246,7 @@ test('with no open session the result is delivered on the item (comment + record
     const c = comments(s.wp, s.storyId).find(t => /Evidence PASS/.test(t));
     assert.ok(c, 'the summary is on the item');
     assert.match(c!, /4 passed, 0 failed/);
-    assert.match(c!, /\/api\/evidence\//);
+    assert.match(c!, /Report: https:\/\/iris-workplace-evidence-/);
     assert.equal(evidence.state(s.wp).recent[0]!.delivered, 'item');
   } finally { await s.done(); }
 });
@@ -499,4 +504,91 @@ test('a job that was running when the Workplace stopped is queued again on boot,
     assert.ok(comments(s.wp, s.storyId).some(t => /restarted/.test(t) && /queued again/.test(t)));
     assert.equal(rawGet(s.wp, s.storyId)!.evidenceRun!.state, 'success');
   } finally { await s.done(); }
+});
+
+/* ---------- the global link (one self-contained HTML in the evidence bucket) ---------- */
+
+const noisyRun = (r: { out: string }): void => {
+  mkdirSync(join(r.out, 'raw', 'android'), { recursive: true });
+  mkdirSync(join(r.out, 'logs', 'android'), { recursive: true });
+  writeFileSync(join(r.out, 'raw', 'android', 'maestro-1.log'), 'raw\n');
+  writeFileSync(join(r.out, 'logs', 'android', 'logcat.txt'), Array.from({ length: 1000 }, (_, i) => `line ${i}`).join('\n') + '\n');
+};
+
+test('the shared copy is one HTML with the screenshots inlined and summary.txt; a PASS is slimmed locally, a FAIL keeps everything', async () => {
+  const s = setup();
+  try {
+    s.commit('services/agent-svc/a.py', 'a = 1\n');
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    await until(() => s.runner.calls.length === 1, 'the run');
+    const pass = s.runner.finish({ verdict: 'PASS', during: noisyRun });
+    await evidence.settled(s.wp);
+    const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
+    assert.ok(rec.share, 'a shared link');
+    assert.equal(rec.share!.key, `${s.storyId}/${rec.run}/evidence.html`);
+    assert.ok(Date.parse(rec.share!.expiresAt) - Date.now() > 6.9 * 24 * 3600_000, 'valid for 7 days');
+    const html = s.store.objects.get(rec.share!.key)!;
+    assert.match(html, /<img src="data:image\/png;base64,iVBORw==">/, 'the screenshot is inlined');
+    assert.match(html, /summary\.txt/);
+    assert.match(html, /verdict PASS/);
+    assert.ok(!existsSync(join(pass.out, 'raw')), 'PASS: raw/ is deleted');
+    const kept = readFileSync(join(pass.out, 'logs', 'android', 'logcat.txt'), 'utf8').trim().split('\n');
+    assert.equal(kept.length, 300, 'PASS: a log keeps its last 300 lines');
+    assert.equal(kept.at(-1), 'line 999');
+
+    s.commit('services/agent-svc/a.py', 'a = 2\n');
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    await until(() => s.runner.calls.length === 2, 'the second run');
+    const fail = s.runner.finish({ verdict: 'FAIL', during: noisyRun });
+    await evidence.settled(s.wp);
+    assert.ok(existsSync(join(fail.out, 'raw', 'android', 'maestro-1.log')), 'FAIL: raw/ is kept');
+    assert.equal(readFileSync(join(fail.out, 'logs', 'android', 'logcat.txt'), 'utf8').trim().split('\n').length, 1000, 'FAIL: logs kept whole');
+  } finally { await s.done(); }
+});
+
+test('an upload that fails still counts as evidence; the comment says the link is unavailable', async () => {
+  const s = setup({ auto: true });
+  try {
+    s.commit('services/agent-svc/a.py', 'a = 1\n');
+    s.store.failPut = true;
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    await evidence.settled(s.wp);
+    const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
+    assert.equal(rec.state, 'success');
+    assert.equal(rec.share, undefined);
+    const c = comments(s.wp, s.storyId).find(t => /Evidence PASS/.test(t))!;
+    assert.match(c, /link unavailable/);
+  } finally { await s.done(); }
+});
+
+test('shadow: the link is the evidence status target_url and a PR comment; the PR body has no 127.0.0.1 link; an expired link is re-signed on re-post', async () => {
+  const s = setup({ auto: true });
+  const gh = shadow(s);
+  try {
+    const head = s.commit('services/agent-svc/a.py', 'a = 1\n');
+    work.reportDone(s.wp, s.storyId, { tests: { passed: 1, failed: 0 }, commits: ['x'], liveVerified: [], notVerified: [] }, 'kabir');
+    await (await flow.onReview(s.wp, s.storyId, 'kabir')).tests;
+    const pr = gh.prs[0]!;
+    assert.doesNotMatch(pr.body, /127\.0\.0\.1|\/api\/items/, 'no loopback link in the PR body');
+    assert.match(pr.body, new RegExp(`${s.storyId}.*Recall the last song`));
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    await evidence.settled(s.wp);
+    const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
+    const st = gh.status(head, 'workplace/evidence')!;
+    assert.equal(st.state, 'success');
+    assert.equal(st.targetUrl, rec.share!.url);
+    const posted = gh.comments.get(pr.number) ?? [];
+    assert.equal(posted.length, 1);
+    assert.ok(posted[0]!.includes(rec.share!.url), 'the PR comment carries the link');
+
+    // Seven days later the status is re-posted: the link is signed again first.
+    const cur = rawGet(s.wp, s.storyId)!;
+    work.saveQuiet(s.wp, { ...cur, evidenceRun: { ...cur.evidenceRun!, share: { ...cur.evidenceRun!.share!, expiresAt: new Date(Date.now() - 1000).toISOString() } } });
+    const before = s.store.signed;
+    await flow.setEvidence(s.wp, s.storyId, 'success', 're-posted');
+    assert.equal(s.store.signed, before + 1, 'signed again');
+    const again = gh.status(head, 'workplace/evidence')!;
+    assert.notEqual(again.targetUrl, rec.share!.url);
+    assert.equal(again.targetUrl, rawGet(s.wp, s.storyId)!.evidenceRun!.share!.url, 'the fresh link is stored');
+  } finally { await flow.settled(); gh.cleanup(); await s.done(); }
 });

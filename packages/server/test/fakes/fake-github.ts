@@ -11,7 +11,7 @@ import type { GitHubPort, PullRequest, StatusState } from '../../src/services/gi
  * way an outage or a revoked token would.
  */
 
-export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'merge' | 'deleteBranch' | 'pullFfOnly';
+export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly';
 
 export interface FakePr extends PullRequest { title: string; body: string; head: string; base: string }
 
@@ -20,7 +20,9 @@ export class FakeGitHub implements GitHubPort {
   readonly calls: { op: Op; args: unknown[] }[] = [];
   readonly prs: FakePr[] = [];
   /** `<sha>:<context>` → the last status posted. */
-  readonly statuses = new Map<string, { state: StatusState; description: string }>();
+  readonly statuses = new Map<string, { state: StatusState; description: string; targetUrl?: string }>();
+  /** PR number → the comments posted on it. */
+  readonly comments = new Map<number, string[]>();
   private readonly failures = new Map<Op, number>();
 
   constructor(trunkRepo: string) {
@@ -45,7 +47,7 @@ export class FakeGitHub implements GitHubPort {
     try { return execFileSync('git', ['-C', this.bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { encoding: 'utf8' }).trim(); } catch { return null; }
   }
 
-  status(sha: string, context: string): { state: StatusState; description: string } | undefined {
+  status(sha: string, context: string): { state: StatusState; description: string; targetUrl?: string } | undefined {
     return this.statuses.get(`${sha}:${context}`);
   }
 
@@ -79,9 +81,14 @@ export class FakeGitHub implements GitHubPort {
     return this.view(pr);
   }
 
-  async setStatus(sha: string, s: { context: string; state: StatusState; description: string }): Promise<void> {
+  async setStatus(sha: string, s: { context: string; state: StatusState; description: string; targetUrl?: string }): Promise<void> {
     this.enter('setStatus', sha, s);
-    this.statuses.set(`${sha}:${s.context}`, { state: s.state, description: s.description });
+    this.statuses.set(`${sha}:${s.context}`, { state: s.state, description: s.description, ...(s.targetUrl ? { targetUrl: s.targetUrl } : {}) });
+  }
+
+  async comment(n: number, body: string): Promise<void> {
+    this.enter('comment', n, body);
+    this.comments.set(n, [...(this.comments.get(n) ?? []), body]);
   }
 
   async merge(n: number, sha: string, title: string): Promise<{ merged: boolean; sha?: string }> {

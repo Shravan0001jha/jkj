@@ -16,6 +16,7 @@ import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { branchFor, excludeLinked, linkUntracked } from './worktrees.js';
 import { GITHUB_MODES, githubMode, holds, isDeveloper, isQa, qaReviewer, writeGithubMode } from './review-policy.js';
 import { assertNotRealPath } from './test-guard.js';
+import { freshLink } from './evidence-share.js';
 import { BadRequest, Conflict, NotFound } from '../util/errors.js';
 import { log } from '../util/logger.js';
 
@@ -170,11 +171,10 @@ export interface ReviewResult {
   message: string;
 }
 
-function prBody(wp: Workplace, w: WorkItem, ctx: Ctx): string {
+function prBody(w: WorkItem, ctx: Ctx): string {
   return [
     `Workplace story **${w.id}**: ${w.title}`,
     '',
-    `- Item: ${wp.config.github.linkBase}/api/items/${encodeURIComponent(w.id)}`,
     `- Author: ${ctx.emp.name} (${ctx.emp.id})`,
     `- Branch: \`${ctx.branch}\` → \`${ctx.base}\``,
     '',
@@ -221,7 +221,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   if (!number) {
     try {
       const found = await port.findOpenPr(ctx.branch)
-        ?? await port.openPr({ title: `${w.title} [${w.id}]`, body: prBody(wp, w, ctx), head: ctx.branch, base: ctx.base });
+        ?? await port.openPr({ title: `${w.title} [${w.id}]`, body: prBody(w, ctx), head: ctx.branch, base: ctx.base });
       number = found.number;
       url = found.url;
     } catch (err) {
@@ -234,6 +234,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   const moved = !!reuse && reuse.headSha !== ctx.head;
   const episode = w.statusSince ?? '';
   const at = now();
+  let tookOver = false;
   savePr(wp, itemId, cur => {
     const base: PrRecord = reuse
       ? { ...reuse }
@@ -250,6 +251,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
     const ev = cur.evidenceRun;
     if (ev && ev.sha === ctx.head && (ev.state === 'success' || ev.state === 'failure') && (!reuse || moved)) {
       record.evidence = ev.state;
+      tookOver = true;
       record.evidenceNote = `${ev.passed} passed, ${ev.failed} failed on ${ev.platforms.join('+')} (run_evidence)`;
     }
     return { pr: record, prRefused: undefined };
@@ -270,6 +272,11 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   }
 
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
+  if (tookOver) {
+    const ev = rawGet(wp, itemId)!.evidenceRun!;
+    const link = ev.share ? (await freshLink(wp, ev.share))?.url : undefined;
+    await prComment(wp, itemId, `Evidence ${ev.state === 'success' ? 'PASS' : 'FAIL'} on ${ev.sha.slice(0, 8)} (${ev.platforms.join(',')} / ${ev.features.join(',')}): ${ev.passed} passed, ${ev.failed} failed. Report: ${link ?? 'link unavailable'}`);
+  }
   const tests = runChecks(wp, itemId, ctx, cfg);
   return {
     pr: { number: number!, url: url! }, tests,
@@ -344,7 +351,7 @@ function runChecksNow(wp: Workplace, itemId: string, ctx: Ctx, cfg: quality.Qual
 
 /* ---------- statuses ---------- */
 
-interface Status { context: string; state: StatusState; description: string }
+interface Status { context: string; state: StatusState; description: string; targetUrl?: string }
 
 export function statusesFor(wp: Workplace, w: WorkItem): Status[] {
   const pr = w.pr!;
@@ -361,6 +368,9 @@ export function statusesFor(wp: Workplace, w: WorkItem): Status[] {
     : pr.evidence === 'failure' ? { context: CONTEXTS.evidence, state: 'failure', description: pr.evidenceNote ?? 'Evidence missing' }
     : pr.evidence === 'stale' ? { context: CONTEXTS.evidence, state: 'pending', description: 'Stale: a new commit needs run_evidence again' }
     : { context: CONTEXTS.evidence, state: 'pending', description: 'Waiting for run_evidence on this commit' };
+  // The shared report of the run behind this status (the global link), when there is one.
+  const share = w.evidenceRun?.sha === pr.headSha && w.evidenceRun.state === pr.evidence ? w.evidenceRun.share : undefined;
+  if (share && (pr.evidence === 'success' || pr.evidence === 'failure')) evidence.targetUrl = share.url;
   return [review, tests, evidence];
 }
 
@@ -369,14 +379,35 @@ async function postStatuses(wp: Workplace, itemId: string): Promise<void> {
   const w = rawGet(wp, itemId);
   if (!w?.pr || w.pr.merged) return;
   const port = gitHubPort(wp);
+  const head = w.pr.headSha;
   const posted = { ...(w.pr.posted ?? {}) };
-  for (const s of statusesFor(wp, w)) {
-    const key = `${w.pr.headSha}|${s.state}|${s.description}`;
+  for (const status of statusesFor(wp, w)) {
+    const s: Status = { ...status };
+    const key = `${head}|${s.state}|${s.description}`;
     if (posted[s.context] === key) continue;
-    await port.setStatus(w.pr.headSha, s);
+    // Re-posted after the 7-day link expired: sign a fresh one first.
+    const share = w.evidenceRun?.share;
+    if (s.targetUrl && share) {
+      const fresh = await freshLink(wp, share);
+      if (!fresh) delete s.targetUrl;
+      else if (fresh.url !== share.url) {
+        const cur = rawGet(wp, itemId)!;
+        if (cur.evidenceRun?.share?.key === share.key) work.saveQuiet(wp, { ...cur, evidenceRun: { ...cur.evidenceRun, share: fresh } });
+        s.targetUrl = fresh.url;
+      }
+    }
+    await port.setStatus(head, s);
     posted[s.context] = key;
     savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, posted: { ...(c.pr.posted ?? {}), [s.context]: key } } } : {}));
   }
+}
+
+/** A comment on the item's open PR (shadow/on): the evidence summary with its link. */
+export async function prComment(wp: Workplace, itemId: string, body: string): Promise<void> {
+  if (mode(wp) === 'local') return;
+  const pr = rawGet(wp, itemId)?.pr;
+  if (!pr || pr.merged) return;
+  try { await gitHubPort(wp).comment(pr.number, body); } catch (err) { recordFailure(wp, 'comment', itemId, Date.now(), errText(err)); }
 }
 
 /** The evidence hook (docs/HLD-github-flow.md D7): the evidence tool, when it exists, calls this. */
