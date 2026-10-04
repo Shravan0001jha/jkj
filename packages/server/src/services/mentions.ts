@@ -130,6 +130,35 @@ function wake(wp: Workplace, thread: RoomThread, message: RoomMessage, employeeI
   });
 }
 
+/**
+ * Talk (docs/LLD-app-fixes.md §5): people tagged in a message to someone else's thread are woken the
+ * same way as an item-comment mention (one turn per thread per cooldown, probe, autonomous); `@coo`
+ * goes to the COO bridge.
+ */
+export function notifyTalkMention(wp: Workplace, spec: { threadId: string; threadName: string; by: string; text: string; ids: string[] }): void {
+  const who = spec.by === 'owner' ? 'the owner' : spec.by === 'coo' ? 'the COO' : (wp.org.employees.find(e => e.id === spec.by)?.name ?? spec.by);
+  for (const id of spec.ids) {
+    if (coo.isCoo(id)) {
+      try { coo.notifyMention(wp, { threadId: `talk:${spec.threadId}`, threadTitle: `Talk with ${spec.threadName}`, by: spec.by, text: spec.text }); } catch (err) { log.warn('mentions', String(err)); }
+      continue;
+    }
+    const emp = wp.org.employees.find(e => e.id === id);
+    if (!emp || emp.virtual) continue;
+    const key = `${id}:talk:${spec.threadId}`;
+    if (Date.now() - (lastTurnAt.get(key) ?? 0) < MENTION_COOLDOWN_MS) continue;
+    lastTurnAt.set(key, Date.now());
+    const prompt = [
+      `${who} mentioned you in the Talk with ${spec.threadName}:`,
+      '',
+      `"${spec.text.slice(0, 500)}"`,
+      '',
+      'If it needs you, act on it or answer where the work lives (item_comment, room_post); otherwise do nothing.',
+    ].join('\n');
+    try { employees.talk(wp, id, prompt, [], { autonomous: true, probe: true }); }
+    catch (err) { log.warn('mentions', `${id} in talk ${spec.threadId}: ${err instanceof Error ? err.message : err}`); }
+  }
+}
+
 /** Test-only: let a test move past the cooldown without waiting for it. */
 export function resetForTest(): void {
   lastTurnAt.clear();

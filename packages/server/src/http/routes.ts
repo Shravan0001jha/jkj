@@ -28,6 +28,8 @@ import * as releasePosts from '../services/release-posts.js';
 import * as statusAnswers from '../services/status.js';
 import * as pace from '../services/pace.js';
 import * as githubFlow from '../services/github-flow.js';
+import * as talk from '../services/talk.js';
+import * as talkStore from '../services/talk-store.js';
 import type { Telegram } from '../services/telegram.js';
 import type { Tunnel } from '../services/tunnel.js';
 import type { Push } from '../services/push.js';
@@ -38,7 +40,7 @@ import { coverage } from '../services/requirements.js';
 import { commitOrg, parseCharter, renderCharter, writeCharter } from '../services/org.js';
 import { readEmployeeContext, saveEmployeeContext } from '../services/context.js';
 import { findClaudeHome } from '../runtime/claude-home.js';
-import { BadRequest, NotFound, Unauthorized, statusOf } from '../util/errors.js';
+import { BadRequest, NotFound, TooLarge, Unauthorized, statusOf } from '../util/errors.js';
 
 /**
  * REST surface (LLD §14). One entry per route so the whole API is readable
@@ -132,18 +134,69 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     r('GET', '/api/employees', (_req, res) => json(res, 200, wp.org.employees.map(e => ({ ...e, state: employees.stateOf(wp, e.id) })))),
     r('GET', '/api/employees/:id', (_req, res, _url, [id]) => json(res, 200, views.employeeDetail(wp, dec(id)))),
     // The default Talk: the Chief of Staff (29 Sep, phone).
+    // The sender is the actor (owner, or the COO from this Mac), never assumed (docs/LLD-app-fixes.md §1).
     r('POST', '/api/talk', async (req, res) => {
       const body = await readJson(req);
-      const { text, attachments } = validateMessage(body);
       const cos = features.chiefOfStaff(wp);
       if (!cos) throw new BadRequest('No Chief of Staff in the organisation.');
-      json(res, 201, employees.talk(wp, cos, text, attachments, { probe: body['probe'] === true }));
+      const { message, agent } = talk.send(wp, cos, talkSpec(req, body));
+      json(res, 201, { ...agent!, message });
     }),
     r('POST', '/api/employees/:id/talk', async (req, res, _url, [id]) => {
       const body = await readJson(req);
-      const { text, attachments } = validateMessage(body);
-      json(res, 201, employees.talk(wp, dec(id), text, attachments, { probe: body['probe'] === true }));
+      const emp = wp.org.employees.find(e => e.id === dec(id));
+      if (!emp) throw new NotFound(`No employee ${dec(id)}`);
+      if (emp.virtual) throw new BadRequest(`${emp.name} is reached through POST /api/coo/message, not Talk.`);
+      const { message, agent } = talk.send(wp, dec(id), talkSpec(req, body));
+      json(res, 201, { ...agent!, message });
     }),
+
+    /* ---------- Talk threads (docs/LLD-app-fixes.md §2) ---------- */
+    r('GET', '/api/talk/threads', (_req, res) => json(res, 200, talkStore.threads(wp))),
+    r('GET', '/api/talk/threads/:id', (_req, res, _url, [id]) => json(res, 200, talkStore.thread(wp, dec(id)))),
+    r('GET', '/api/talk/threads/:id/messages', (_req, res, url, [id]) => {
+      const limit = url.searchParams.get('limit');
+      if (limit !== null && !/^[1-9]\d*$/.test(limit)) throw new BadRequest('limit must be a positive whole number');
+      json(res, 200, talkStore.messages(wp, dec(id), { ...(limit ? { limit: Number(limit) } : {}), ...(url.searchParams.get('before') ? { before: url.searchParams.get('before')! } : {}) }));
+    }),
+    r('POST', '/api/talk/threads/:id/messages', async (req, res, _url, [id]) => {
+      json(res, 201, talk.send(wp, dec(id), talkSpec(req, await readJson(req))));
+    }),
+    r('POST', '/api/talk/threads/:id/read', async (req, res, _url, [id]) => {
+      const upTo = (await readJson(req))['upTo'];
+      json(res, 200, talkStore.markThreadRead(wp, dec(id), typeof upTo === 'string' && upTo ? upTo : undefined));
+    }),
+    r('POST', '/api/talk/threads/:id/pin', async (req, res, _url, [id]) => {
+      const pinned = (await readJson(req))['pinned'];
+      if (typeof pinned !== 'boolean') throw new BadRequest('pinned must be true or false');
+      json(res, 200, talkStore.setPinned(wp, dec(id), pinned));
+    }),
+    r('POST', '/api/talk/threads/:id/attachments', async (req, res, url, [id]) => {
+      talkStore.requireThread(wp, dec(id));
+      const data = await readRaw(req, talkStore.MAX_FILE_BYTES);
+      const mediaType = String(req.headers['content-type'] ?? 'application/octet-stream').split(';')[0]!.trim();
+      json(res, 201, talkStore.saveAttachment(wp, dec(id), { name: url.searchParams.get('name') ?? 'file', mediaType, data }));
+    }),
+    r('POST', '/api/talk/threads/:id/voice', async (req, res, url, [id]) => {
+      talkStore.requireThread(wp, dec(id));
+      const data = await readRaw(req, talkStore.MAX_FILE_BYTES);
+      const ms = Number(url.searchParams.get('durationMs') ?? '');
+      json(res, 201, await talk.sendVoice(wp, dec(id), {
+        from: actorOf(req), name: url.searchParams.get('name') ?? 'voice-note.m4a', mediaType: String(req.headers['content-type'] ?? ''), data,
+        ...(Number.isFinite(ms) && ms > 0 ? { durationMs: Math.round(ms) } : {}),
+        ...(url.searchParams.get('replyTo') ? { replyTo: url.searchParams.get('replyTo')! } : {}),
+      }));
+    }),
+    r('GET', '/api/talk/attachments/:id', (_req, res, url, [id]) => {
+      const { meta, data } = talkStore.attachmentBytes(wp, dec(id));
+      const disposition = url.searchParams.get('download') === '1' ? 'attachment' : 'inline';
+      res.writeHead(200, {
+        'content-type': meta.mediaType, 'content-length': data.byteLength, 'cache-control': 'private, max-age=86400, immutable',
+        'content-disposition': `${disposition}; filename="${meta.name.replace(/[^\x20-\x7e]|"/g, '_')}"`, 'x-content-type-options': 'nosniff',
+      });
+      res.end(data);
+    }),
+    r('GET', '/api/mentionable', (_req, res) => json(res, 200, talk.mentionable(wp))),
     r('POST', '/api/employees/:id/end-session', async (_req, res, _url, [id]) => {
       const open = employees.openSession(dec(id));
       if (open) await employees.endSession(wp, open.agentId, 150_000);
@@ -163,13 +216,14 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     // keeps only the owner's/employee's messages; approvals stay inline (Agent.approval, not a log
     // entry). The full log is still the default and always reachable with no query or ?view=full.
     r('GET', '/api/agents/:id/log', async (_req, res, url, [id]) => {
-      const entries = await agents.getTranscript(dec(id));
+      // A transcript read back from disk has lost each line's sender; the Talk store gives it back.
+      const entries = talkStore.overlaySenders(wp, await agents.getTranscript(dec(id)));
       json(res, 200, url.searchParams.get('view') === 'chat' ? toChatView(entries) : entries);
     }),
     r('POST', '/api/agents/:id/message', async (req, res, _url, [id]) => {
       const body = await readJson(req);
       const { text, attachments } = validateMessage(body);
-      agents.sendMessage(dec(id), text, attachments);
+      agents.sendMessage(dec(id), text, attachments, actorOf(req));
       json(res, 202, { ok: true });
     }),
     r('POST', '/api/agents/:id/interrupt', async (_req, res, _url, [id]) => { await agents.interruptAgent(dec(id)); json(res, 200, { ok: true }); }),
@@ -438,7 +492,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     }),
     r('POST', '/api/room/:id/messages', async (req, res, _url, [id]) => {
       const body = await readJson(req);
-      json(res, 201, room.post(wp, dec(id), { text: str(body['text']), by: actorOf(req), mentions: strs(body['mentions']) }));
+      json(res, 201, room.post(wp, dec(id), { text: str(body['text']), by: actorOf(req), mentions: talk.validMentions(wp, strs(body['mentions'])) }));
     }),
     r('POST', '/api/room/:id/resolve', async (req, res, _url, [id]) => {
       const body = await readJson(req);
@@ -458,7 +512,15 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     r('POST', '/api/focus', async (req, res) => json(res, 200, items.setFocus(wp, strs((await readJson(req))['epicIds']), actorOf(req)))),
     r('GET', '/api/items', (_req, res, url) => {
       const q = (k: string) => url.searchParams.get(k) ?? undefined;
-      json(res, 200, items.list(wp, { level: q('level'), status: q('status'), assigneeId: q('assigneeId'), areaId: q('areaId'), parentId: q('parentId') }));
+      const sort = q('sort');
+      if (sort && !(items.ITEM_SORTS as readonly string[]).includes(sort)) throw new BadRequest(`sort must be one of ${items.ITEM_SORTS.join(', ')}`);
+      const order = q('order');
+      if (order && order !== 'asc' && order !== 'desc') throw new BadRequest('order must be asc or desc');
+      json(res, 200, items.list(wp, {
+        level: q('level'), status: q('status'), assigneeId: q('assigneeId'), ownerId: q('ownerId'), areaId: q('areaId'), parentId: q('parentId'), q: q('q'),
+        ...(sort ? { sort: sort as items.ItemQuery['sort'] } : {}), ...(order ? { order: order as 'asc' | 'desc' } : {}),
+        finishedLast: q('finishedLast') === '1' || q('finishedLast') === 'true',
+      }));
     }),
     r('POST', '/api/items', async (req, res) => {
       const body = await readJson(req);
@@ -475,7 +537,8 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     }),
     r('POST', '/api/items/:id/comments', async (req, res, _url, [id]) => {
       items.require$(wp, dec(id));
-      json(res, 201, trail.comment(wp, dec(id), { by: actorOf(req), text: str((await readJson(req))['text']) }));
+      const body = await readJson(req);
+      json(res, 201, trail.comment(wp, dec(id), { by: actorOf(req), text: str(body['text']), mentions: talk.validMentions(wp, strs(body['mentions'])) }));
     }),
     r('POST', '/api/items/:id/handback', async (req, res, _url, [id]) => {
       const note = (await readJson(req))['note'];
@@ -604,6 +667,34 @@ function str(v: unknown, fallback?: string): string {
 }
 
 const strs = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map(x => x.trim()) : [];
+
+/** A Talk send body: text, reply-to, mentions, uploaded ids, base64 files (the old format). */
+function talkSpec(req: IncomingMessage, body: Record<string, unknown>): talk.SendSpec {
+  const text = typeof body['text'] === 'string' ? body['text'].trim() : '';
+  const raw = Array.isArray(body['attachments']) ? body['attachments'] : [];
+  const attachments = raw.length ? validateMessage({ text: text || 'x', attachments: raw }).attachments : [];
+  return {
+    from: actorOf(req), text, attachments,
+    mentions: strs(body['mentions']), attachmentIds: strs(body['attachmentIds']),
+    ...(typeof body['replyTo'] === 'string' && body['replyTo'] ? { replyTo: body['replyTo'] } : {}),
+    ...(body['probe'] === true ? { probe: true } : {}),
+  };
+}
+
+/** A raw upload (a file or a voice note), refused past `max` bytes without reading the rest into memory. */
+export async function readRaw(req: IncomingMessage, max: number): Promise<Buffer> {
+  const declared = Number(req.headers['content-length'] ?? '');
+  if (Number.isFinite(declared) && declared > max) throw new TooLarge('That file is over 20 MB; send a smaller one or a link.');
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).byteLength;
+    if (size > max) throw new TooLarge('That file is over 20 MB; send a smaller one or a link.');
+    chunks.push(chunk as Buffer);
+  }
+  if (size === 0) throw new BadRequest('The upload was empty.');
+  return Buffer.concat(chunks);
+}
 
 /** Attachments are decoded on the server, so the wire is checked first. */
 export function validateMessage(body: Record<string, unknown>): { text: string; attachments: Attachment[] } {

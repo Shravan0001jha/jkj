@@ -5,6 +5,8 @@ import type {
 import { startRun, type RunEvents, type RunHandle, type RunImage, type RunOptions, type RunResult } from '../runtime/claude-agent.js';
 import { getSnapshot } from './workspace.js';
 import { withOwnerLine } from './one-line.js';
+import { randomUUID } from 'node:crypto';
+import { senderName } from '@jkj/shared';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
 
@@ -37,7 +39,18 @@ interface Run {
   silenceTimer?: ReturnType<typeof setTimeout>;
   /** Set when a message got no model output within SILENT_MS; cleared by the next output. */
   silentSince?: string;
+  /** Messages handed to the CLI and not yet consumed by a turn, oldest first (read receipts). */
+  unread: { uuid: string; entryId: string; talkId?: string }[];
+  /** Between a turn's first reply frame and its result. */
+  inTurn: boolean;
 }
+
+/** A turn boundary: `start` with the messages it consumed (in order), `end` on result, error, interrupt or close. */
+export interface TurnEvent { agentId: string; state: 'start' | 'end'; consumed: { entryId: string; talkId?: string }[] }
+
+/** How a sender id reads in the transcript; the Workplace installs one that knows employee names. */
+let senderNameOf: (from: string) => string = from => senderName(from);
+export function setSenderNames(fn: ((from: string) => string) | null): void { senderNameOf = fn ?? (from => senderName(from)); }
 
 /**
  * No model output this long after a message is worth a line in the transcript and the log, with
@@ -79,7 +92,7 @@ export function useRuntime(fn: Runtime | null): void {
   runtime = fn ?? startRun;
 }
 
-type Listener = (event: { agent?: Agent; entry?: LogEntry }) => void;
+type Listener = (event: { agent?: Agent; entry?: LogEntry; turn?: TurnEvent }) => void;
 const listeners = new Set<Listener>();
 
 export function onRunEvent(fn: Listener): () => void {
@@ -207,8 +220,10 @@ interface SpawnOptions {
   /** Called when the run's SDK session id is known. */
   onSessionId?: (sessionId: string) => void;
   onRateLimit?: (info: { rateLimitType?: string; status: string; utilization?: number; resetsAt?: number }) => void;
-  /** Who wrote the first prompt (HLD D22): the owner's own Talk, or the Workplace starting work. */
-  promptFrom?: 'owner' | 'workplace';
+  /** Who wrote the first prompt (HLD D22): the owner's own Talk, the COO, or the Workplace starting work. */
+  promptFrom?: string;
+  /** The Talk message the first prompt is (docs/LLD-app-fixes.md). */
+  promptTalkId?: string;
 }
 
 export const createRunDirect = (options: SpawnOptions): Agent => spawn(options);
@@ -242,11 +257,15 @@ function spawn(options: SpawnOptions): Agent {
     entries: (options.history ?? []).map(e => ({ ...e, agentId: id })),
     handle: undefined as unknown as RunHandle,
     images: new Map(),
+    unread: [],
+    inTurn: false,
   };
   runs.set(id, run);
 
   const { images, text } = attach(run, options.attachments ?? []);
-  append(run, 'user', '', options.prompt, { from: options.promptFrom ?? 'owner' });
+  const promptUuid = randomUUID();
+  const first = userEntry(run, options.prompt, options.promptFrom ?? 'owner', options.promptTalkId);
+  run.unread.push({ uuid: promptUuid, entryId: first.id, talkId: first.talkId! });
   const prompt = withFiles(options.prompt, text);
 
   run.handle = runtime(
@@ -255,6 +274,7 @@ function spawn(options: SpawnOptions): Agent {
       cwd: options.cwd,
       model: options.model,
       prompt,
+      promptUuid,
       images,
       permissionMode: options.permissionMode,
       ...(options.resume ? { resume: options.resume } : {}),
@@ -285,9 +305,11 @@ function spawn(options: SpawnOptions): Agent {
         if (type !== 'stream_event') log.info('runs', `${id} sdk: ${type}${subtype ? `/${subtype}` : ''}`);
       },
 
-      onText: text => { heard(run); append(run, 'assistant', '', text); },
+      onTurnStart: uuids => turnStart(run, uuids),
 
-      onToolUse: (tool, input) => { heard(run); append(run, kindForTool(tool), tool, describeInput(tool, input)); },
+      onText: text => { heard(run); if (!run.inTurn) turnStart(run, undefined); append(run, 'assistant', '', text, { talkId: newTalkId() }); },
+
+      onToolUse: (tool, input) => { heard(run); if (!run.inTurn) turnStart(run, undefined); append(run, kindForTool(tool), tool, describeInput(tool, input)); },
 
       onPermission: request2 => new Promise<'allow' | 'always' | 'deny'>(resolve => {
         update(run, {
@@ -330,10 +352,11 @@ function spawn(options: SpawnOptions): Agent {
         options.onResult?.(result);
       },
 
-      onDone: () => { heard(run); update(run, { status: 'waiting' }); },
+      onDone: () => { heard(run); turnEnd(run); update(run, { status: 'waiting' }); },
 
       onError: message => {
         heard(run);
+        turnEnd(run);
         append(run, 'error', 'Failed', message);
         update(run, { status: 'error' });
       },
@@ -347,13 +370,51 @@ function spawn(options: SpawnOptions): Agent {
 
 /* ---------- driving ---------- */
 
-export function sendMessage(agentId: string, text: string, attachments: Attachment[] = [], opts: { from?: 'owner' | 'workplace' } = {}): void {
+/**
+ * Hand a message to a session. `from` is who wrote it (docs/LLD-app-fixes.md §1): never inferred
+ * from the route; `talkId` ties it to its Talk message for receipts. Returns the transcript entry.
+ */
+export function sendMessage(agentId: string, text: string, attachments: Attachment[] = [], opts: { from?: string; talkId?: string } = {}): LogEntry {
   const run = require$(agentId);
   const { images, text: files } = attach(run, attachments);
-  append(run, 'user', '', text, { from: opts.from ?? 'owner' });
+  const entry = userEntry(run, text, opts.from ?? 'owner', opts.talkId);
+  const uuid = randomUUID();
+  run.unread.push({ uuid, entryId: entry.id, talkId: entry.talkId! });
   update(run, { status: 'running', messageCount: (run.agent.messageCount ?? 0) + 1 });
-  run.handle.send(withFiles(text, files), images);
+  run.handle.send(withFiles(text, files), images, uuid);
   armSilence(run);
+  return entry;
+}
+
+function userEntry(run: Run, text: string, from: string, talkId?: string): LogEntry {
+  return append(run, 'user', '', text, { from, fromName: senderNameOf(from), talkId: talkId ?? newTalkId() });
+}
+
+/** Every message line (to or from the agent) is a Talk message; its id is minted here when the caller had none. */
+export const newTalkId = (): string => `tm_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+
+/**
+ * A turn's first reply frame. With the SDK's stamps, the stamped messages and every older one still
+ * waiting were consumed (the CLI takes messages in order; an older one missing from the stamp was
+ * folded into an earlier turn). Without stamps (an older CLI, or the scripted runtime), everything
+ * handed over so far was consumed. Never earlier than a reply frame: queued is not read.
+ */
+function turnStart(run: Run, uuids: string[] | undefined): void {
+  let upTo = run.unread.length - 1;
+  if (uuids) {
+    const want = new Set(uuids);
+    upTo = -1;
+    run.unread.forEach((m, i) => { if (want.has(m.uuid)) upTo = i; });
+  }
+  const consumed = run.unread.splice(0, upTo + 1).map(({ entryId, talkId }) => ({ entryId, ...(talkId ? { talkId } : {}) }));
+  run.inTurn = true;
+  emit({ turn: { agentId: run.agent.id, state: 'start', consumed } });
+}
+
+function turnEnd(run: Run): void {
+  if (!run.inTurn) return;
+  run.inTurn = false;
+  emit({ turn: { agentId: run.agent.id, state: 'end', consumed: [] } });
 }
 
 /**
@@ -423,6 +484,7 @@ export async function interruptRun(agentId: string): Promise<void> {
   append(run, 'system', 'Stopped', 'Interrupted from the Workplace. Anything already written stays written.');
   // Nothing is asked of the owner after an interrupt: the session simply sits until the next message.
   run.pending = undefined;
+  turnEnd(run);
   update(run, { status: 'idle', approval: undefined });
 }
 
@@ -478,6 +540,7 @@ export function closeRun(agentId: string): void {
   const run = runs.get(agentId);
   if (!run) return;
   heard(run);
+  turnEnd(run);
   run.handle.close();
   runs.delete(agentId);
 }

@@ -578,8 +578,10 @@ export interface RoomMessage {
   kind?: 'message' | 'update' | 'standup' | 'release';
   /** v2: who a stand-up is about (it is authored by 'workplace'). */
   about?: string;
-  /** v2: the rest of a long agent message; `text` stays short. */
+  /** v2: the whole of a long agent message (`text` stays short). Shown in place of `text` on "more". */
   details?: string;
+  /** True when `text` was cut: `details` then holds the full text. */
+  truncated?: boolean;
   /** v2: the item an update line is about. */
   itemId?: string;
 }

@@ -8,6 +8,7 @@
  */
 import type { Agent } from './types.js';
 import type { Attachment, HealthResponse } from './protocol.js';
+import type { TalkMessage, TalkThread } from './talk.js';
 import type {
   CharterSummary,
   Coverage,
@@ -358,7 +359,11 @@ export type WorkplaceServerEvent =
   | { type: 'update.posted'; update: Update }
   | { type: 'area.updated'; area: Area }
   | { type: 'inbox.message'; message: InboxMessage }
-  | { type: 'release.post'; post: ReleasePost };
+  | { type: 'release.post'; post: ReleasePost }
+  /* Talk threads (docs/LLD-app-fixes.md): upsert by id. */
+  | { type: 'talk.message'; message: TalkMessage; thread: TalkThread }
+  | { type: 'talk.thread'; thread: TalkThread }
+  | { type: 'talk.typing'; threadId: string; employeeId: string; typing: boolean; at: string };
 
 export type WorkplaceClientCommand =
   | { type: 'inbox.answer'; id: string; optionId: string; note?: string };
