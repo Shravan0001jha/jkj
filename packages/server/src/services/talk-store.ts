@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve, sep, isAbsolute } from 'node:path';
+import { homedir } from 'node:os';
 import type { LogEntry, TalkAttachment, TalkFrom, TalkMessage, TalkQuote, TalkThread } from '@jkj/shared';
 import { COO_NAME, senderName } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
@@ -230,7 +231,7 @@ export function attachmentBytes(wp: Workplace, id: string): { meta: TalkAttachme
 }
 
 /** An agent's file, copied in (send_file): the path must resolve inside one of `allowedRoots`. */
-export function copyInFromAgent(wp: Workplace, threadId: string, path: string, allowedRoots: string[]): TalkAttachment {
+export function copyInFromAgent(wp: Workplace, threadId: string, path: string, allowedRoots: string[], refusal = 'Not sent: only files in your worktree or ~/iris-workplace/evidence/ can be sent.'): TalkAttachment {
   let real: string;
   try { real = realpathSync(resolve(path)); } catch { throw new BadRequest(`Not sent: ${path} does not exist.`); }
   const inside = allowedRoots.some(r => {
@@ -238,7 +239,7 @@ export function copyInFromAgent(wp: Workplace, threadId: string, path: string, a
     try { base = realpathSync(r); } catch { return false; }
     return real === base || real.startsWith(base.endsWith(sep) ? base : base + sep);
   });
-  if (!inside) throw new BadRequest('Not sent: only files in your worktree or ~/iris-workplace/evidence/ can be sent.');
+  if (!inside) throw new BadRequest(refusal);
   const st = statSync(real);
   if (!st.isFile()) throw new BadRequest('Not sent: that is not a file.');
   if (st.size > MAX_FILE_BYTES) throw new BadRequest('Not sent: the file is over 20 MB; send a smaller one or put it in a doc.');
@@ -332,12 +333,12 @@ function onTurn(wp: Workplace, turn: runs.TurnEvent): void {
 /** Closing a run without a turn end (a crash) must not leave a thread typing forever. */
 export function clearTyping(wp: Workplace, threadId: string): void { setTyping(wp, threadId, false); }
 
-interface CooLine { id: string; at: string; from: 'owner' | 'coo'; text: string; inReplyTo?: string }
+interface CooLine { id: string; at: string; from: 'owner' | 'coo'; text: string; inReplyTo?: string; attachments?: TalkAttachment[] }
 
 function cooMessage(wp: Workplace, c: CooLine, s: Staged = {}): TalkMessage {
   return {
     id: c.id, threadId: COO_THREAD, at: c.at, from: c.from, fromName: nameOf(wp, c.from),
-    direction: c.from === 'owner' ? 'in' : 'out', text: s.text ?? c.text, mentions: s.mentions ?? [], attachments: s.attachments ?? [],
+    direction: c.from === 'owner' ? 'in' : 'out', text: s.text ?? c.text, mentions: s.mentions ?? [], attachments: s.attachments ?? c.attachments ?? [],
     ...(s.replyTo ? { replyTo: s.replyTo } : {}), ...(s.voice ? { voice: s.voice } : {}),
     ...(c.from === 'owner' ? { receipt: 'delivered' as const, deliveredAt: c.at } : {}),
   };
@@ -393,4 +394,22 @@ export function sendFileFromAgent(wp: Workplace, employeeId: string, spec: { pat
     id: runs.newTalkId(), threadId: employeeId, at: now(), from: employeeId, fromName: nameOf(wp, employeeId),
     direction: 'out', text: spec.caption?.trim() || att.name, mentions: [], attachments: [att], ...(spec.agentId ? { agentId: spec.agentId } : {}),
   });
+}
+
+/** The COO's own files (POST /api/coo/reply `files`): only from the Workplace folder, the Desktop or the COO's scratchpad. */
+export const COO_FILE_ROOTS = (wp: Workplace): string[] => [wp.config.workplaceDir, join(homedir(), 'Desktop'), '/private/tmp/claude-502'];
+
+export function cooFiles(wp: Workplace, spec: { attachmentIds?: string[]; files?: string[] }): TalkAttachment[] {
+  const out: TalkAttachment[] = [];
+  for (const id of spec.attachmentIds ?? []) {
+    const a = attachment(wp, id);
+    if (!a || a.threadId !== COO_THREAD) throw new BadRequest(`No uploaded file ${id} in the COO thread; upload it again.`);
+    const { threadId: _t, path: _p, ...pub } = a;
+    out.push(pub);
+  }
+  for (const path of spec.files ?? []) {
+    if (!isAbsolute(path)) throw new BadRequest(`Not sent: ${path} is not an absolute path.`);
+    out.push(copyInFromAgent(wp, COO_THREAD, path, COO_FILE_ROOTS(wp), 'Not sent: only files in ~/iris-workplace/, ~/Desktop or the COO scratchpad (/private/tmp/claude-502/) can be sent.'));
+  }
+  return out;
 }

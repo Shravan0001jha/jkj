@@ -39,7 +39,6 @@ export function send(wp: Workplace, threadId: string, spec: SendSpec): { message
   for (const f of spec.attachments ?? []) files.push(store.saveAttachment(wp, threadId, { name: f.name, mediaType: f.mediaType, data: Buffer.from(f.data, 'base64') }));
   const text = spec.text?.trim() ?? '';
   if (!text && files.length === 0 && !spec.voice) throw new BadRequest('Nothing to send.');
-  if (threadId === store.COO_THREAD && files.some(f => f.kind !== 'voice')) throw new BadRequest('The COO thread takes text and voice; send files to an employee.');
 
   const quoted = spec.replyTo ? store.getMessage(wp, spec.replyTo) : undefined;
   if (spec.replyTo && (!quoted || quoted.threadId !== threadId)) throw new BadRequest(`No message ${spec.replyTo} in this thread to reply to.`);
@@ -57,7 +56,8 @@ export function send(wp: Workplace, threadId: string, spec: SendSpec): { message
   let agent: Agent | undefined;
   if (threadId === store.COO_THREAD) {
     store.stageCoo(talkId, staged);
-    const line = coo.sendOwnerMessage(wp, agentText);
+    const bridged = files.filter(f => !(spec.voice && f.id === spec.voice.attachmentId)).map(f => ({ attachment: f, path: store.attachment(wp, f.id)!.path }));
+    const line = coo.sendOwnerMessage(wp, agentText, bridged);
     const message = store.getMessage(wp, line.id)!;
     wakeMentioned(wp, threadId, spec.from, message);
     return { message };

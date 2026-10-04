@@ -1,3 +1,4 @@
+import type { TalkAttachment } from './talk.js';
 /**
  * The Iris Workplace domain: the organisation as data, the requirements it
  * serves, the work it does, and what the owner must decide.
@@ -632,6 +633,8 @@ export interface CooMessage {
   details?: string;
   /** Set on a 'coo' message that answers a specific owner message. */
   inReplyTo?: string;
+  /** Files with the message, either way (docs/LLD-app-fixes.md §12). */
+  attachments?: TalkAttachment[];
 }
 
 export type CooItemKind = 'escalation' | 'mention' | 'stall';
