@@ -65,6 +65,20 @@ export function doneProblem(wp: Workplace, w: WorkItem, by: string): string | nu
     : 'This story has a pull request, so it is done only through review_approve: it has the developer approval (1 of 2) and needs QA\'s (2 of 2). QA calls review_approve.';
 }
 
+export const QA_WAIT = 'Wait: developer approval first. QA reviews after the developer approver (approval 1 of 2), so leave the story in review; you are woken when it is your turn.';
+
+/** True when QA (not a lead) would act on a story whose PR has no developer approval yet. */
+export function qaTooEarly(wp: Workplace, w: WorkItem, by: string): boolean {
+  if (!w.pr || w.pr.merged || githubMode(wp) === 'local') return false;
+  const who = wp.org.employees.find(e => e.id === by);
+  return isQa(who) && !isDeveloper(who) && !approvalHolds(w, 'dev');
+}
+
+/** An In review story with a PR moved back by QA before the developer approval: refused (finding #3). */
+export function earlyQaMoveProblem(wp: Workplace, w: WorkItem, by: string, from: string, to: string): string | null {
+  return from === 'in-review' && to === 'in-progress' && qaTooEarly(wp, w, by) ? QA_WAIT : null;
+}
+
 /** Who takes the QA approval: the item's reviewer if QA, else the `qa` role, else the quality charter; never the excluded. */
 export function qaReviewer(employees: Employee[], w: WorkItem, exclude: string[]): string | undefined {
   const ok = (e: Employee | undefined): e is Employee => !!e && isQa(e) && !exclude.includes(e.id) && e.id !== w.employeeId;

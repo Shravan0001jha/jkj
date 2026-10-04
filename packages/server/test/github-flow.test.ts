@@ -297,7 +297,10 @@ test('on: done needs both approvals (the owner excepted); shadow enforces nothin
   try {
     shadow.commit('services/agent-svc/recall.py', 'x = 1\n');
     await reviewed(shadow);
-    assert.equal(items.update(shadow.wp, shadow.storyId, { status: 'done' }, 'nikhil').status, 'done');
+    // Shadow routes review to a developer approver first (finding #3) but enforces no approvals: the reviewer marks it done.
+    const reviewer = rawGet(shadow.wp, shadow.storyId)!.reviewerId!;
+    assert.notEqual(reviewer, 'nikhil');
+    assert.equal(items.update(shadow.wp, shadow.storyId, { status: 'done' }, reviewer).status, 'done');
   } finally { await shadow.done(); }
 });
 

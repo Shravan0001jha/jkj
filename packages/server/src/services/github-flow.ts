@@ -30,6 +30,7 @@ import { log } from '../util/logger.js';
  */
 
 export { approvalHolds } from './review-policy.js';
+import { QA_WAIT } from './review-policy.js';
 
 const FAILURES_KEY = 'github:failures';
 const FALLBACK_KEY = 'github:fallback';
@@ -258,9 +259,12 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
     text: `Pushed ${ctx.branch} (${ctx.head.slice(0, 8)}) to GitHub; PR #${number}${moved ? ': new commits, both approvals reset and the evidence is stale' : ''}`,
   });
   log.info('github', `${itemId}: pushed ${ctx.branch} ${ctx.head.slice(0, 8)}, PR #${number} (by ${by})`);
-  // In `on` the first review is a developer's: the reviewer becomes one (shadow leaves the floor as it is).
+  // With a PR the first review is a developer's (shadow and on): whoever the author named, the reviewer
+  // becomes a developer approver until the developer approval holds (dry-run finding #3, 4 Oct: QA
+  // named first refused and sent it back, a wasted round). The reviewer change wakes them.
   const fresh = rawGet(wp, itemId)!;
-  if (mode(wp) === 'on' && !holds(fresh.pr?.devApproval, fresh) && !isDeveloper(employeeOf(wp, fresh.reviewerId ?? ''))) {
+  const named = fresh.reviewerId ?? '';
+  if (!holds(fresh.pr?.devApproval, fresh) && (!isDeveloper(employeeOf(wp, named)) || named === fresh.employeeId)) {
     const dev = devReviewer(wp, fresh);
     if (dev) items.update(wp, itemId, { reviewerId: dev, note: 'A developer reviews first, then QA' }, 'workplace');
   }
@@ -467,6 +471,7 @@ export async function sendBack(wp: Workplace, itemId: string, by: string, note: 
   const who = employeeOf(wp, by);
   if (!isDeveloper(who) && !isQa(who)) throw new BadRequest(`${nameOf(wp, by)} is not a reviewer: only the developer approver (a lead who is not the author) or QA sends a story back; add your view with item_comment instead.`);
   if (w.status !== 'in-review') throw new BadRequest(`This story is not in review (it is ${w.status}), so there is nothing to send back.`);
+  if (!isDeveloper(who) && !holds(w.pr.devApproval, w)) throw new BadRequest(QA_WAIT);
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, sendBack: { by, at: now(), note: note.trim() } } }));
   items.update(wp, itemId, { status: 'in-progress', note: `Sent back by ${nameOf(wp, by)}: ${note.trim()}` }, by);
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
