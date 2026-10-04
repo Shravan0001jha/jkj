@@ -516,6 +516,11 @@ function blockOnSwitch(wp: Workplace, assignmentId: string, err: WorktreeSwitchE
   log.error('employees', `${assignmentId} blocked: ${err.message}`);
 }
 
+/** A running or waiting session of this employee is on the item, or has it queued for its turn's end. */
+export function sessionOn(employeeId: string, itemId: string): boolean {
+  return sessionsOf(employeeId).some(s => isLive(s.agentId) && (s.assignmentId === itemId || (pendingSwitch.get(s.agentId) ?? []).some(x => x.assignmentId === itemId)));
+}
+
 /** An assignment is waiting for the end of this session's turn (the dispatcher counts that as busy). */
 export const hasPendingSwitch = (agentId: string): boolean => (pendingSwitch.get(agentId)?.length ?? 0) > 0;
 
