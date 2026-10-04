@@ -84,7 +84,8 @@ export function reviewPrompt(wp: Workplace, w: WorkItem): string {
   return `Review request: ${noun} ${w.id} "${w.title}"${by} is In review and you are its reviewer. ` +
     `Check it against its acceptance criteria and evidence (status_of ${w.id}${branch}). ` +
     (w.pr && !w.pr.merged && githubMode(wp) !== 'local'
-      ? `It has pull request #${w.pr.number} (head ${w.pr.headSha.slice(0, 8)}). Then call review_approve on ${w.id} if it meets them (a lead who is not the author approves first, then QA), or review_send_back with a note saying what to fix. Keep it short.`
+      ? `It has pull request #${w.pr.number} (head ${w.pr.headSha.slice(0, 8)}). Approval 1 of 2 is the developer approver's (a lead who is not the author); approval 2 of 2 is QA's, only after the developer approval. ` +
+        `Then call review_approve on ${w.id} if it meets them, or review_send_back with exactly what to change (QA: the root cause). Keep it short.`
       : `Then call item_update on ${w.id}: status done if it meets them, or status in-progress with a note saying what to fix. Keep it short.`);
 }
 

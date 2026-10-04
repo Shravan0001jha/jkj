@@ -15,17 +15,20 @@ interface PrRecord {
   evidence: 'pending' | 'stale' | 'success' | 'failure';
   tests?: { state: 'pending' | 'success' | 'failure' | 'error'; sha: string; at: string; summary: string; details?: string };
   sendBack?: { by: string; at: string; note: string; disputedAt?: string };
-  refused?: { at: string; sha: string; reasons: string[] };   // last push refusal
-  posted?: Record<string, string>;                             // context -> "sha:state:description" last posted
+  evidenceNote?: string;
+  posted?: Record<string, string>;                             // context -> "sha|state|description" last posted
   merged?: { at: string; sha: string; by: string };
 }
 ```
+
+`WorkItem.prRefused?: { at, sha, reasons }` — the last push refusal (there may be no PR yet).
 
 Settings rows: `github:mode` (`local|shadow|on`, absent = `local`), `github:failures` (ISO times,
 pruned to 5 min), `github:fallback` (`{at, from, reason}`).
 
 Config (`config.ts`, env overrides): `github.org` (`shravan0001jha-iris-hq`), `github.repo` (`iris`),
-`github.trunk` (`feat/iris-character`), `github.tokenScript` (`<opsDir>/github/token.py`),
+`github.trunk` (`feat/iris-character`), `github.tokenScript` (`<opsDir>/github/token.py`), `github.python` (`<opsDir>/github/.venv/bin/python`,
+which has PyJWT),
 `github.pushApp` (`iris-workplace`), `github.reviewApp` (`iris-review`), `github.linkBase`
 (`http://127.0.0.1:<port>`).
 
@@ -83,7 +86,11 @@ Registry: `setGitHubPort(wp, port)` / `gitHubPort(wp)` (WeakMap; the real one is
 4. Head SHA; if it differs from `pr.headSha`, approvals no longer hold (D3) and evidence → `stale`.
 5. `push`; PR found or opened (title `<title> [<id>]`, body: id, link, author, evidence placeholder);
    `pr` saved with `work.saveQuiet`; trail note "Pushed … PR #n".
-6. Statuses posted (only those that changed); quality run queued (`tests` promise in the result).
+6. In `on` only, the reviewer becomes the developer approver (the author's lead, else the lead with
+   the fewest open reviews); shadow leaves the reviewer as it is.
+7. Statuses posted (only those that changed); quality run queued (`tests` promise in the result) in
+   a server-owned detached checkout `<workDir>/_quality/<repo>`, put on the head inside the queue;
+   `settled()` waits for in-flight runs. A failed run is commented on the item.
 Any GitHub error → `recordFailure` (fallback at 3 in 5 min) and a note on the item.
 
 `approve(wp, itemId, by, note)`: local → refused; requires in-review + pr; `syncHead` first (moved
@@ -99,8 +106,8 @@ key `dispute:<id>:<sendBack.at>` (Asha → COO after 15 min → owner via the CO
 
 `setEvidence(wp, itemId, state, description)`: the evidence hook (unused until the evidence tool).
 
-`syncHeads(wp)`: one-minute sweep (mode ≠ local) of in-review items with a PR: head moved →
-`onReview` again.
+`syncHeads(wp)`: one-minute sweep (mode ≠ local) of in-review items: a PR whose head moved →
+`onReview` again; no PR yet (the first push failed) → retried, unless that head was refused.
 
 `merge(wp, itemId, by)`: local → refused; shadow → dry run `{ merged: false, wouldMerge, blockers }`;
 on → blockers (not in a PR, already merged, head moved, GitHub head ≠ reviewed head, review not
@@ -127,6 +134,8 @@ areas:
   in the worktree with `{files}` replaced by the area's changed files (shell-quoted, filtered by
   `extensions`; no files → skipped) and `CHANGED_FILES` in the env; output tail kept in `details`.
   A module-level queue makes runs serial. The worktree must be at the head SHA, else `error`.
+  `QUALITY_MAIN_REPO` (the main checkout) is in every command's environment, for untracked local
+  config such as Android's `local.properties`.
 
 ## 6. Surfaces
 
@@ -152,3 +161,18 @@ areas:
 - `github-port.test.ts`: the real port with a fake fetch and a fake token script — token never in
   errors or logs, PR exists fallback, merge body, status app.
 - Everything else: the existing suite unchanged (local mode).
+
+## 8. Employee-facing wording
+
+Every reply and refusal an employee sees uses the terms of the handbook draft
+(`~/iris-workplace/next/handbook.md`): "developer approver" (approval 1 of 2, a lead who is not the
+author), "QA" (approval 2 of 2, only after the developer approval), "any new commit resets both
+approvals", `run_evidence`, and disputes Asha → COO → owner. Each refusal ends with the next step in
+one sentence. A dispute is accepted once per send-back.
+
+## 9. Real-app trial
+
+`packages/server/test/trials/github-sandbox.trial.mts` runs the flow once against
+`shravan0001jha-iris-hq/iris-sandbox` with the real Apps (never `iris`, never `~/claude-dev`): a
+planted key never pushed; push, PR, statuses from `iris-review`, approvals, merge commit, branch
+deleted, and a temp clone fast-forwarded.

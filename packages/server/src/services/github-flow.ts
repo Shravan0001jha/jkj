@@ -210,7 +210,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   } catch (err) {
     recordFailure(wp, 'push', itemId, Date.now(), errText(err));
     trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Could not push ${ctx.branch} to GitHub: ${errText(err)}` });
-    return { error: errText(err), message: `Not pushed to GitHub yet (${errText(err)}); the Workplace retries when the review moves.` };
+    return { error: errText(err), message: `Your report is recorded, but GitHub did not take the push (${errText(err)}). Nothing to do: the Workplace retries every minute.` };
   }
 
   const prev = rawGet(wp, itemId)!.pr;
@@ -226,7 +226,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
     } catch (err) {
       recordFailure(wp, 'open PR', itemId, Date.now(), errText(err));
       trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Pushed ${ctx.branch}, but GitHub did not open its PR: ${errText(err)}` });
-      return { error: errText(err), message: `Pushed, but the PR did not open (${errText(err)}).` };
+      return { error: errText(err), message: `Your report is recorded and your branch is pushed, but GitHub did not open the pull request (${errText(err)}). Nothing to do: the Workplace retries every minute.` };
     }
   }
 
@@ -261,14 +261,19 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
 
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
   const tests = runChecks(wp, itemId, ctx, cfg);
-  return { pr: { number: number!, url: url! }, tests, message: `Pushed to GitHub: PR #${number} (${url}).${moved ? ' New commits: both approvals were reset.' : ''}` };
+  return {
+    pr: { number: number!, url: url! }, tests,
+    message: `The Workplace pushed your branch: pull request #${number} (${url}). ` +
+      (moved ? 'Any new commit resets both approvals, so it goes back through the developer approver (approval 1 of 2) and QA (approval 2 of 2); run run_evidence again on this commit.'
+        : 'Next: the developer approver (approval 1 of 2, a lead who is not the author), then QA (approval 2 of 2).'),
+  };
 }
 
 function refuse(wp: Workplace, itemId: string, sha: string, reasons: string[]): ReviewResult {
   savePr(wp, itemId, () => ({ prRefused: { at: now(), sha, reasons } }));
-  trail.comment(wp, itemId, { by: 'workplace', text: `Not pushed to GitHub: ${reasons.length} problem${reasons.length === 1 ? '' : 's'} on the branch. Fix them on your branch and report again.`, details: reasons.map(r => `- ${r}`).join('\n') });
+  trail.comment(wp, itemId, { by: 'workplace', text: `Not pushed to GitHub: ${reasons.length} problem${reasons.length === 1 ? '' : 's'} on the branch. Fix ${reasons.length === 1 ? 'it' : 'them'} on your branch, then call report_done again.`, details: reasons.map(r => `- ${r}`).join('\n') });
   log.warn('github', `${itemId}: push refused (${reasons.length}): ${reasons.map(r => r.split(':')[0]).join(', ')}`);
-  return { refused: reasons, message: `Not pushed to GitHub: ${reasons.join('; ')}` };
+  return { refused: reasons, message: `Your report is recorded, but the Workplace did not push your branch: ${reasons.join('; ')}. Fix ${reasons.length === 1 ? 'it' : 'them'} on your branch, then call report_done again.` };
 }
 
 /* ---------- quality checks (workplace/tests) ---------- */
@@ -317,6 +322,9 @@ function runChecksNow(wp: Workplace, itemId: string, ctx: Ctx, cfg: quality.Qual
       if (!cur?.pr || cur.pr.headSha !== sha) return;   // a newer head has its own run
       savePr(wp, itemId, c => ({ pr: { ...c.pr!, tests: { state: res.state, sha, at: now(), summary: res.summary, ...(res.details ? { details: res.details.slice(-4000) } : {}) } } }));
       trail.record(wp, { itemId, by: 'workplace', kind: 'test', text: `Quality checks ${res.state === 'success' ? 'green' : res.state} on ${sha.slice(0, 8)}: ${res.summary}` });
+      if (res.state === 'failure') {
+        trail.comment(wp, itemId, { by: 'workplace', text: `The quality checks failed on ${sha.slice(0, 8)} (${res.summary}). Fix it on your branch, then call report_done again.`, ...(res.details ? { details: res.details.slice(-4000) } : {}) });
+      }
       try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
     } catch (err) {
       log.warn('quality', `${itemId}: ${errText(err)}`);
@@ -333,16 +341,16 @@ export function statusesFor(wp: Workplace, w: WorkItem): Status[] {
   const dev = holds(pr.devApproval, w);
   const qa = dev && holds(pr.qaApproval, w);
   const review: Status = qa
-    ? { context: CONTEXTS.review, state: 'success', description: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer) and ${nameOf(wp, pr.qaApproval!.by)} (QA)` }
+    ? { context: CONTEXTS.review, state: 'success', description: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer approver) and ${nameOf(wp, pr.qaApproval!.by)} (QA)` }
     : dev
-      ? { context: CONTEXTS.review, state: 'pending', description: `Developer approval by ${nameOf(wp, pr.devApproval!.by)}; waiting for QA` }
-      : { context: CONTEXTS.review, state: 'pending', description: 'Waiting for a developer approval, then QA' };
+      ? { context: CONTEXTS.review, state: 'pending', description: `Approval 1 of 2 by ${nameOf(wp, pr.devApproval!.by)} (developer approver); waiting for QA (2 of 2)` }
+      : { context: CONTEXTS.review, state: 'pending', description: 'Waiting for the developer approver (1 of 2), then QA (2 of 2)' };
   const t = pr.tests && pr.tests.sha === pr.headSha ? pr.tests : undefined;
   const tests: Status = t ? { context: CONTEXTS.tests, state: t.state, description: t.summary } : { context: CONTEXTS.tests, state: 'pending', description: 'Checks queued' };
   const evidence: Status = pr.evidence === 'success' ? { context: CONTEXTS.evidence, state: 'success', description: pr.evidenceNote ?? 'Evidence checked' }
     : pr.evidence === 'failure' ? { context: CONTEXTS.evidence, state: 'failure', description: pr.evidenceNote ?? 'Evidence missing' }
-    : pr.evidence === 'stale' ? { context: CONTEXTS.evidence, state: 'pending', description: 'Stale: new commits since the evidence' }
-    : { context: CONTEXTS.evidence, state: 'pending', description: 'Evidence check not wired yet' };
+    : pr.evidence === 'stale' ? { context: CONTEXTS.evidence, state: 'pending', description: 'Stale: a new commit needs run_evidence again' }
+    : { context: CONTEXTS.evidence, state: 'pending', description: 'Waiting for run_evidence on this commit' };
   return [review, tests, evidence];
 }
 
@@ -372,9 +380,15 @@ export async function setEvidence(wp: Workplace, itemId: string, value: PrRecord
 
 /* ---------- approvals ---------- */
 
-const LOCAL_REVIEW = 'The GitHub flow is local: review as before (the reviewer marks it done with item_update).';
+const LOCAL_REVIEW = 'The Workplace is in local mode, so there is no pull request to approve: the reviewer marks the story done with item_update, or moves it to in-progress with what to change.';
 
 function employeeOf(wp: Workplace, id: string): Employee | undefined { return wp.org.employees.find(e => e.id === id); }
+
+/** QA's names, for a refusal that says who gives approval 2 of 2. */
+function qaNames(wp: Workplace): string {
+  const names = wp.org.employees.filter(e => isQa(e) && !e.virtual).map(e => e.name);
+  return names.length ? names.join(' or ') : 'QA';
+}
 
 /** The developer reviewer: the author's lead, else the lead (not the author) with the fewest reviews open. */
 export function devReviewer(wp: Workplace, w: WorkItem): string | undefined {
@@ -390,12 +404,16 @@ export function devReviewer(wp: Workplace, w: WorkItem): string | undefined {
 async function reviewable(wp: Workplace, itemId: string): Promise<WorkItem> {
   const w = rawGet(wp, itemId);
   if (!w) throw new NotFound(`No item ${itemId}`);
-  if (!w.pr) throw new BadRequest(`${itemId} has no pull request yet: it is pushed when it moves to review${w.prRefused ? ` (the last push was refused: ${w.prRefused.reasons.join('; ')})` : ''}.`);
-  if (w.status !== 'in-review') throw new BadRequest(`${itemId} is not in review (it is ${w.status}).`);
+  if (!w.pr) {
+    throw new BadRequest(w.prRefused
+      ? `This story has no pull request: the Workplace refused to push its branch (${w.prRefused.reasons.join('; ')}). Send it back to its author with item_update so they fix it.`
+      : 'This story has no pull request yet; the Workplace opens one when its author calls report_done, so review it after that.');
+  }
+  if (w.status !== 'in-review') throw new BadRequest(`This story is not in review (it is ${w.status}); review it once its author calls report_done.`);
   const ctx = contextOf(wp, w);
   if (typeof ctx !== 'string' && ctx.head !== w.pr.headSha) {
     await onReview(wp, itemId, 'workplace');
-    throw new Conflict(`New commits on ${ctx.branch} since the review started (${ctx.head.slice(0, 8)}): both approvals were reset. Review the new head, then approve again.`);
+    throw new Conflict(`Any new commit resets both approvals: ${ctx.branch} has a new commit (${ctx.head.slice(0, 8)}), so review the new head and call review_approve again (developer approver first, then QA).`);
   }
   return w;
 }
@@ -407,42 +425,42 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
   const w = await reviewable(wp, itemId);
   const pr = w.pr!;
   const author = w.employeeId;
-  if (by === author) throw new BadRequest('The author never approves their own story: a lead who is not the author approves, then QA.');
+  if (by === author) throw new BadRequest('You are the author, so you never approve your own story; another lead gives approval 1 of 2, then QA gives approval 2 of 2.');
   const who = employeeOf(wp, by);
   const approval: PrApproval = { by, at: now(), sha: pr.headSha, episode: w.statusSince ?? '', ...(note?.trim() ? { note: note.trim() } : {}) };
 
   if (!holds(pr.devApproval, w)) {
     if (!isDeveloper(who)) {
-      if (isQa(who)) throw new BadRequest('The developer approval comes first: a lead who is not the author approves, then QA picks it up.');
-      throw new BadRequest(`${nameOf(wp, by)} cannot give the developer approval: it needs a lead who is not the author (a peer lead for a lead's own story).`);
+      if (isQa(who)) throw new BadRequest('QA reviews after a developer approval; ask a lead to review first.');
+      throw new BadRequest(`${nameOf(wp, by)} is not a lead, and approval 1 of 2 comes from the developer approver (a lead who is not the author); ask a lead to review.`);
     }
     savePr(wp, itemId, c => ({ pr: { ...c.pr!, devApproval: approval } }));
     trail.record(wp, { itemId, by, kind: 'note', text: `Developer approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}${approval.note ? `: ${approval.note}` : ''}` });
     const qa = qaReviewer(wp.org.employees, w, [by]);
     if (qa && qa !== w.reviewerId) items.update(wp, itemId, { reviewerId: qa, note: 'Developer approval given; QA reviews next' }, by);
     try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
-    return { stage: 'dev', message: `Developer approval recorded on ${pr.headSha.slice(0, 8)}. QA reviews next${qa ? ` (${nameOf(wp, qa)})` : ''}.` };
+    return { stage: 'dev', message: `Developer approval recorded (approval 1 of 2) on ${pr.headSha.slice(0, 8)}. QA reviews next${qa ? ` (${nameOf(wp, qa)})` : ''} for approval 2 of 2. Any new commit resets both approvals.` };
   }
 
-  if (!isQa(who)) throw new BadRequest(`${nameOf(wp, by)} is not QA: the second approval is QA's (role qa, or the quality charter's holder).`);
-  if (by === pr.devApproval!.by) throw new BadRequest('The QA approval needs a different identity from the developer approval.');
+  if (!isQa(who)) throw new BadRequest(`It already has the developer approval (1 of 2), and approval 2 of 2 is QA's (${qaNames(wp)}); leave it to QA.`);
+  if (by === pr.devApproval!.by) throw new BadRequest('You gave approval 1 of 2, so approval 2 of 2 must come from another person in QA; leave it to them.');
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, qaApproval: approval } }));
   trail.record(wp, { itemId, by, kind: 'note', text: `QA approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}${approval.note ? `: ${approval.note}` : ''}` });
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
   items.update(wp, itemId, { status: 'done', reviewerId: by, note: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer) and ${nameOf(wp, by)} (QA)` }, by);
-  return { stage: 'qa', message: `QA approval recorded; the story is done. The COO merges it once workplace/tests is green.` };
+  return { stage: 'qa', message: 'QA approval recorded (approval 2 of 2); the story is done. The COO merges it once the tests check is green: approved is not merged.' };
 }
 
 export async function sendBack(wp: Workplace, itemId: string, by: string, note: string): Promise<WorkItem> {
   if (mode(wp) === 'local') throw new BadRequest(LOCAL_REVIEW);
-  if (!note?.trim()) throw new BadRequest('A send-back needs a note: what to fix.');
+  if (!note?.trim()) throw new BadRequest('A send-back needs the reason: say exactly what to change (QA: the root cause, what failed and why).');
   const w = rawGet(wp, itemId);
   if (!w) throw new NotFound(`No item ${itemId}`);
-  if (!w.pr) throw new BadRequest(`${itemId} has no pull request; send it back with item_update as before.`);
-  if (by === w.employeeId) throw new BadRequest('The author does not send back their own story.');
+  if (!w.pr) throw new BadRequest('This story has no pull request, so send it back with item_update (status in-progress, with what to change).');
+  if (by === w.employeeId) throw new BadRequest('You are the author: only a reviewer (the developer approver or QA) sends a story back.');
   const who = employeeOf(wp, by);
-  if (!isDeveloper(who) && !isQa(who)) throw new BadRequest(`${nameOf(wp, by)} is not a reviewer of this story (a lead, or QA).`);
-  if (w.status !== 'in-review') throw new BadRequest(`${itemId} is not in review (it is ${w.status}).`);
+  if (!isDeveloper(who) && !isQa(who)) throw new BadRequest(`${nameOf(wp, by)} is not a reviewer: only the developer approver (a lead who is not the author) or QA sends a story back; add your view with item_comment instead.`);
+  if (w.status !== 'in-review') throw new BadRequest(`This story is not in review (it is ${w.status}), so there is nothing to send back.`);
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, sendBack: { by, at: now(), note: note.trim() } } }));
   items.update(wp, itemId, { status: 'in-progress', note: `Sent back by ${nameOf(wp, by)}: ${note.trim()}` }, by);
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
@@ -455,16 +473,17 @@ export async function dispute(wp: Workplace, itemId: string, by: string, reason:
   const w = rawGet(wp, itemId);
   if (!w) throw new NotFound(`No item ${itemId}`);
   const sb = w.pr?.sendBack;
-  if (!sb) throw new BadRequest('There is no QA send-back on this story to dispute.');
-  if (!isQa(employeeOf(wp, sb.by))) throw new BadRequest(`The send-back was ${nameOf(wp, sb.by)}'s, not QA's: settle it with them directly.`);
-  if (by !== w.employeeId) throw new BadRequest(`Only the author (${nameOf(wp, w.employeeId)}) disputes a send-back.`);
-  if (!reason?.trim()) throw new BadRequest('A dispute needs a reason.');
+  if (!sb) throw new BadRequest('There is no QA send-back on this story to dispute; review_dispute is only for a QA send-back.');
+  if (!isQa(employeeOf(wp, sb.by))) throw new BadRequest(`The send-back came from ${nameOf(wp, sb.by)}, the developer approver, not QA; talk it through with them on the item with item_comment.`);
+  if (by !== w.employeeId) throw new BadRequest(`Only the author (${nameOf(wp, w.employeeId)}) disputes a send-back; add your view on the item with item_comment.`);
+  if (sb.disputedAt) throw new BadRequest('You already disputed this send-back; Asha decides (then the COO, then the owner), so wait for the answer on the item.');
+  if (!reason?.trim()) throw new BadRequest('A dispute needs your reason in one or two sentences.');
   manager.alert(wp, {
     key: `dispute:${itemId}:${sb.at}`, itemId, by,
     title: `Disputed QA send-back: ${w.title}`,
     body: `${nameOf(wp, by)} disputes ${nameOf(wp, sb.by)}'s send-back ("${sb.note}"): ${reason.trim()}`,
     text: `Disputed QA send-back on "${w.title}" [${itemId}]: ${nameOf(wp, by)} disputes ${nameOf(wp, sb.by)}'s send-back ("${sb.note}") because: ${reason.trim()}. ` +
-      'Decide it (keep the send-back, or have QA review again) and say so with item_comment. If you cannot, escalate to the COO, who takes it to the owner.',
+      'You decide it first: keep the send-back, or have QA review again, and say so with item_comment. If you cannot decide, escalate to the COO with both sides in two lines; the COO decides or takes it to the owner.',
   });
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, sendBack: { ...c.pr!.sendBack!, disputedAt: now() } } }));
   trail.record(wp, { itemId, by, kind: 'note', text: `Disputed ${nameOf(wp, sb.by)}'s send-back: ${reason.trim()}` });
@@ -478,7 +497,13 @@ export async function syncHeads(wp: Workplace): Promise<string[]> {
   const moved: string[] = [];
   const rows = (wp.db.prepare("select json from work where status = 'in-review'").all() as { json: string }[]).map(r => JSON.parse(r.json) as WorkItem);
   for (const w of rows) {
-    if (!w.pr || w.pr.merged) continue;
+    if (!w.pr) {
+      // The first push failed (GitHub down): try again, unless that head was refused on policy.
+      const ctx = contextOf(wp, w);
+      if (typeof ctx !== 'string' && w.prRefused?.sha !== ctx.head) await onReview(wp, w.id, 'workplace');
+      continue;
+    }
+    if (w.pr.merged) continue;
     const ctx = contextOf(wp, w);
     if (typeof ctx === 'string' || ctx.head === w.pr.headSha) continue;
     await onReview(wp, w.id, 'workplace');

@@ -92,7 +92,7 @@ export function changes(repo: string, base: string, head: string): string[] {
 export function buildOutputProblems(repo: string, base: string, head: string, cfg: QualityConfig): string[] {
   return changes(repo, base, head)
     .filter(f => cfg.buildOutput.some(p => p.test(f)))
-    .map(f => `build output: ${f} (never commit dist-* or other build output; remove it from the branch)`);
+    .map(f => `build output: ${f} is build output (dist-* and the like are never committed); delete it on your branch and commit`);
 }
 
 export function fileSizeProblems(repo: string, base: string, head: string, cfg: QualityConfig): string[] {
@@ -103,7 +103,7 @@ export function fileSizeProblems(repo: string, base: string, head: string, cfg: 
   const out: string[] = [];
   files.forEach((f, i) => {
     const [type, size] = (lines[i] ?? '').split(' ');
-    if (type === 'blob' && Number(size) > cfg.maxFileBytes) out.push(`file size: ${f} is ${Number(size)} bytes (limit ${cfg.maxFileBytes})`);
+    if (type === 'blob' && Number(size) > cfg.maxFileBytes) out.push(`file size: ${f} is ${Number(size)} bytes, over the ${cfg.maxFileBytes}-byte limit; delete it on your branch and commit`);
   });
   return out;
 }
@@ -123,18 +123,18 @@ export function secretProblems(repo: string, base: string, head: string, cfg: Qu
     const e = err as { status?: number | null; stdout?: string; code?: string };
     code = e.status ?? -1;
     stdout = e.stdout ?? '';
-    if (code !== 7) return [`secret scan could not run (${e.code === 'ENOENT' ? `${cfg.secretScan.command} is not installed: brew install gitleaks` : `exit ${code}`}); refused until it can`];
+    if (code !== 7) return [`secret scan could not run (${e.code === 'ENOENT' ? `${cfg.secretScan.command} is not installed` : `exit ${code}`}); nothing is pushed until it can, so escalate to the COO`];
   }
   if (code === 0) return [];
   let findings: { RuleID?: string; File?: string; StartLine?: number; Commit?: string }[] = [];
-  try { findings = JSON.parse(stdout || '[]'); } catch { return ['secret scan: findings could not be read; refused']; }
+  try { findings = JSON.parse(stdout || '[]'); } catch { return ['secret scan could not run (its report was unreadable); escalate to the COO']; }
   const seen = new Set<string>();
   const out: string[] = [];
   for (const f of findings) {
-    const line = `secret: ${f.RuleID ?? 'secret'} in ${f.File ?? '?'}:${f.StartLine ?? '?'} (commit ${(f.Commit ?? '').slice(0, 8)}); remove it from the branch history and rotate it`;
+    const line = `leaked secret: ${f.RuleID ?? 'secret'} in ${f.File ?? '?'}:${f.StartLine ?? '?'} (commit ${(f.Commit ?? '').slice(0, 8)}); escalate to the COO now, because the key must be rotated and the commit removed from your branch history, which only the COO can do`;
     if (!seen.has(line)) { seen.add(line); out.push(line); }
   }
-  return out.length ? out : ['secret scan reported a leak; refused'];
+  return out.length ? out : ['leaked secret: the scan reported a leak; escalate to the COO now'];
 }
 
 /** Every guard, all reported (not the first only): the push gate and the first step of a run. */

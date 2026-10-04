@@ -982,20 +982,20 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           return ok(`Review requested.${gh.message ? ` ${gh.message}` : ''}`);
         }),
       // The GitHub flow's two approvals (docs/HLD-github-flow.md D4): in local mode they answer "review as before".
-      tool('review_approve', 'Approve a story in review that has a pull request. First a lead who is not the author (the developer approval), then QA. QA\'s approval marks it done. A new commit resets both.',
+      tool('review_approve', 'Reviewers only: approve a story in review. Approval 1 of 2 is the developer approver\'s (a lead who is not the author); approval 2 of 2 is QA\'s, only after the developer approval. QA\'s approval marks the story done, and the COO merges it. Any new commit resets both approvals.',
         { itemId: z.string(), note: z.string().optional() },
         async ({ itemId, note }) => {
           try { return ok((await githubFlow.approve(wp, itemId, employeeId, note)).message); } catch (err) { return ok(`Not approved: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('review_send_back', 'Send a story in review back to its author with what to fix (a lead or QA, not the author). It ends both approvals.',
+      tool('review_send_back', 'Reviewers only (the developer approver or QA): send a story in review back to its author with exactly what to change; QA adds the root cause (what failed, where, and why). It resets both approvals.',
         { itemId: z.string(), note: z.string() },
         async ({ itemId, note }) => {
-          try { await githubFlow.sendBack(wp, itemId, employeeId, note); return ok(`Sent back to its author: ${note}`); } catch (err) { return ok(`Not sent back: ${err instanceof Error ? err.message : String(err)}`); }
+          try { await githubFlow.sendBack(wp, itemId, employeeId, note); return ok('Sent back to its author with your reason. Both approvals are reset: the story comes back through the developer approver, then QA.'); } catch (err) { return ok(`Not sent back: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('review_dispute', 'The author disputes a QA send-back, with the reason. It goes to Asha first, then the COO, then the owner.',
+      tool('review_dispute', 'Authors only, once per QA send-back: dispute it with your reason. Asha decides; if she can\'t, the COO; then the owner.',
         { itemId: z.string(), reason: z.string() },
         async ({ itemId, reason }) => {
-          try { await githubFlow.dispute(wp, itemId, employeeId, reason); return ok('Dispute raised with Asha; she decides it or takes it to the COO.'); } catch (err) { return ok(`Not raised: ${err instanceof Error ? err.message : String(err)}`); }
+          try { await githubFlow.dispute(wp, itemId, employeeId, reason); return ok('Dispute sent to Asha with your reason. Asha decides; if she can\'t, the COO; then the owner. Wait for the answer on the item.'); } catch (err) { return ok(`Not sent: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('write_spec', 'Chief of Staff only: attach the spec (acceptance criteria) to a stated feature. It becomes "specced" and can be decomposed.',
         { featureId: z.string(), spec: z.string() },

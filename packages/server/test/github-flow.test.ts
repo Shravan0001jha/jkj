@@ -159,7 +159,8 @@ test('report_done and request_review drive the push through the Workplace tools'
     await client.connect(ct);
     const done = await client.callTool({ name: 'report_done', arguments: { assignmentId: s.storyId, testsPassed: 3, testsFailed: 0, commits: ['abc'], liveVerified: [], notVerified: ['live'] } });
     assert.match(JSON.stringify(done.content), /in review/);
-    assert.match(JSON.stringify(done.content), /PR #\d+/);
+    assert.match(JSON.stringify(done.content), /pull request #\d+/);
+    assert.match(JSON.stringify(done.content), /developer approver \(approval 1 of 2/);
     assert.equal(s.gh.prs.length, 1);
     const again = await client.callTool({ name: 'request_review', arguments: { assignmentId: s.storyId } });
     assert.match(JSON.stringify(again.content), /Review requested/);
@@ -216,7 +217,7 @@ test('two approvals in order: a lead who is not the author, then QA; identities 
     const head = s.commit('services/agent-svc/recall.py', 'x = 1\n');
     await reviewed(s);
     await assert.rejects(flow.approve(s.wp, s.storyId, 'kabir'), /author/i);
-    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil'), /developer approval/i);
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil'), /^BadRequest: QA reviews after a developer approval; ask a lead to review first\.$/);
     await assert.rejects(flow.approve(s.wp, s.storyId, 'arjun'), /lead/i);   // an engineer is not a developer approver
     const dev = await flow.approve(s.wp, s.storyId, 'dev', 'reads well');
     assert.equal(dev.stage, 'dev');
@@ -314,6 +315,7 @@ test('a dispute of a QA send-back goes to Asha first (then the COO, then the own
     assert.equal(flow.approvalHolds(rawGet(s.wp, s.storyId)!, 'dev'), false, 'a send-back ends the approvals');
     await assert.rejects(flow.dispute(s.wp, s.storyId, 'dev', 'disagree'), /author/i);
     await flow.dispute(s.wp, s.storyId, 'kabir', 'the test exists: test_recall.py');
+    await assert.rejects(flow.dispute(s.wp, s.storyId, 'kabir', 'again'), /already disputed/i, 'once per send-back');
     const alert = manager.list(s.wp).find(a => a.key.startsWith(`dispute:${s.storyId}`));
     assert.ok(alert, 'a manager alert (Asha first)');
     assert.match(alert!.title, /disput/i);
@@ -461,4 +463,27 @@ test('an approval holds only for its commit and its stay in review', () => {
   assert.equal(flow.approvalHolds({ ...base, pr: { ...base.pr!, headSha: 'bbb' } }, 'dev'), false, 'another commit');
   assert.equal(flow.approvalHolds({ ...base, statusSince: 'e2' }, 'dev'), false, 'a new stay in review');
   assert.equal(flow.approvalHolds({ ...base, status: 'in-progress' }, 'dev'), false, 'sent back');
+});
+
+test('a first push GitHub failed is retried by the sweep; a refused head is not', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    toReview(s);
+    s.gh.failNext('push', 1);
+    assert.ok((await flow.onReview(s.wp, s.storyId, 'kabir')).error);
+    assert.equal(rawGet(s.wp, s.storyId)!.pr, undefined);
+    await flow.syncHeads(s.wp);
+    assert.equal(pr(s).number, s.gh.prs[0]!.number, 'pushed and opened on the retry');
+  } finally { await s.done(); }
+  const r = setup('shadow');
+  try {
+    r.commit('dist-x/a.js', 'x\n');
+    toReview(r);
+    await flow.onReview(r.wp, r.storyId, 'kabir');
+    const pushes = r.gh.count('push');
+    await flow.syncHeads(r.wp);
+    assert.equal(r.gh.count('push'), pushes, 'a refused head is not retried');
+    assert.equal(r.gh.calls.length, 0);
+  } finally { await r.done(); }
 });

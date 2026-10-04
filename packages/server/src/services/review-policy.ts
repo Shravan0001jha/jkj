@@ -61,8 +61,8 @@ export function doneProblem(wp: Workplace, w: WorkItem, by: string): string | nu
   const s = stage(w);
   if (s === 'approved') return null;
   return s === 'dev'
-    ? 'This story has a pull request: it needs the developer approval, then the QA approval (review_approve), not a status change.'
-    : 'This story has a pull request: it has the developer approval and needs the QA approval (review_approve), not a status change.';
+    ? 'This story has a pull request, so it is done only through review_approve: approval 1 of 2 from the developer approver (a lead who is not the author), then approval 2 of 2 from QA. Ask a lead to review first.'
+    : 'This story has a pull request, so it is done only through review_approve: it has the developer approval (1 of 2) and needs QA\'s (2 of 2). QA calls review_approve.';
 }
 
 /** Who takes the QA approval: the item's reviewer if QA, else the `qa` role, else the quality charter; never the excluded. */
