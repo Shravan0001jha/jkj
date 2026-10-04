@@ -121,3 +121,8 @@ run_evidence ──► evidence.request ──► validate (desktop? item? branc
 - The iOS line patch depends on one line of `Api.swift`; it fails closed (no build) when the line
   changes, with a clear message to the COO.
 - Memory: the Mac sits near 15 of 18 GB with devices up; 2 slots is the ceiling.
+- Staging by name after a cold start (found by the gate, 4 Oct): every stop deletes the A record, so
+  resolvers (1.1.1.1, 8.8.8.8, the Mac's own cache) hold NXDOMAIN for the zone's negative TTL (900 s)
+  after the next start, and a stop by anyone else in between deletes it again. `ensureUp` re-runs the
+  idempotent `start` every 3 min and waits up to 20 min by name. The lasting fix is the COO's: a lower
+  SOA negative TTL on the zone, or keeping the record (pointing nowhere harmful) while stopped.

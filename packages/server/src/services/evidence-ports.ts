@@ -286,7 +286,7 @@ function findFile(dir: string, name: string): string | null {
 
 export class RealStaging implements Staging {
   private inFlight: Promise<void> | null = null;
-  constructor(private readonly cfg: EvidenceConfig, private readonly logFile: string) {}
+  constructor(private readonly cfg: EvidenceConfig, private readonly logFile: string, private readonly nameWaitMs = 20 * 60_000, private readonly restartEveryMs = 3 * 60_000, private readonly pollMs = 15_000) {}
 
   private async healthy(): Promise<boolean> {
     try { return (await fetch(`${this.cfg.stagingUrl}/healthz`, { signal: AbortSignal.timeout(5000) })).ok; } catch { return false; }
@@ -301,11 +301,21 @@ export class RealStaging implements Staging {
     if (await this.healthy()) return;
     if (!existsSync(this.cfg.stagingScript)) throw new Error(`staging is down and ${this.cfg.stagingScript} does not exist`);
     // `start` is idempotent: it starts the box if stopped, fixes DNS, and waits for https health.
-    const ran = await runLogged('bash', [this.cfg.stagingScript, 'start'], { cwd: dirname(this.cfg.stagingScript), env: childEnvFor({}), logFile: this.logFile, timeoutMs: 12 * 60_000 });
-    for (let i = 0; i < 6; i++) {
-      if (await this.healthy()) return;
-      await new Promise(res => setTimeout(res, 5000));
+    // staging.sh checks health by IP. By name it can still fail for a while: the A record is deleted at
+    // every stop, so resolvers that asked meanwhile cache NXDOMAIN for the zone's negative TTL (900 s),
+    // and a stop by someone else in the meantime deletes the record again (4 Oct gate). The apps and
+    // the runner need the name, so: `start` (idempotent: it starts the box and rewrites the record),
+    // poll by name, and run `start` again every few minutes until the deadline.
+    const until = Date.now() + this.nameWaitMs;
+    let ran = { code: null as number | null, timedOut: false };
+    while (Date.now() < until) {
+      ran = await runLogged('bash', [this.cfg.stagingScript, 'start'], { cwd: dirname(this.cfg.stagingScript), env: childEnvFor({}), logFile: this.logFile, timeoutMs: 12 * 60_000 });
+      const next = Math.min(until, Date.now() + this.restartEveryMs);
+      while (Date.now() < next) {
+        if (await this.healthy()) return;
+        await new Promise(res => setTimeout(res, this.pollMs));
+      }
     }
-    throw new Error(`staging did not come up (staging.sh start exit ${ran.code}${ran.timedOut ? ', timed out' : ''}; see ${this.logFile})`);
+    throw new Error(`staging did not answer by name within ${Math.round(this.nameWaitMs / 60_000)} min (last staging.sh start exit ${ran.code}${ran.timedOut ? ', timed out' : ''}; see ${this.logFile})`);
   }
 }
