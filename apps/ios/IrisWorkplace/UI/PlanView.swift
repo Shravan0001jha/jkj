@@ -10,6 +10,7 @@ struct PlanView: View {
     @State private var creating: NewItemView.Draft?
     @State private var actionError: String?
     @State private var showDone = false
+    @State private var query = PlanQuery()
 
     private var store: PlanStore { model.plan }
 
@@ -17,9 +18,14 @@ struct PlanView: View {
         @Bindable var router = model.router
         NavigationStack(path: $path) {
             Group {
-                if router.planBoard { boardList } else { areasList }
+                if query.showsFlatResults { resultsList } else if router.planBoard { boardList } else { areasList }
             }
             .listStyle(.insetGrouped)
+            .searchable(text: $query.text, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search epics, stories, tasks")
+            .onChange(of: query.showsFlatResults) { _, flat in
+                // Stories and tasks live on the board: fetch it the first time a search needs them.
+                if flat, store.board == nil, let rest = model.rest { Task { await store.loadBoard(rest) } }
+            }
             .refreshable { await reload() }
             .navigationTitle("Plan")
             .navigationBarTitleDisplayMode(.inline)
@@ -68,18 +74,25 @@ struct PlanView: View {
                 }
                 .accessibilityIdentifier("plan.mine")
 
+                if query.isFiltering || query.sort != .plan {
+                    Section { activeFilters }
+                }
                 ForEach(plan.areas) { a in
+                    let shown = query.epics(a.epics)
                     Section {
                         if a.epics.isEmpty {
                             Button { creating = .init(level: .epic, areaId: a.area.id) } label: {
                                 Label("No epics yet — add one", systemImage: "plus.circle").font(.subheadline)
                             }
                         }
-                        ForEach(a.epics) { card in epicRow(card) }
-                            .onMove { from, to in
+                        else if shown.isEmpty {
+                            Text("No epics match the filter").font(.caption).foregroundStyle(.tertiary)
+                        }
+                        ForEach(shown) { card in epicRow(card) }
+                            .onMove(perform: query.allowsReorder ? { from, to in
                                 guard let rest = model.rest else { return }
-                                Task { do { try await store.move(rest, areaId: a.area.id, from: from, to: to) } catch { if let m = error.userMessage { actionError = m } } }
-                            }
+                                Task { do { try await store.move(rest, areaId: a.area.id, shown: shown, from: from, to: to) } catch { if let m = error.userMessage { actionError = m } } }
+                            } : nil)
                     } header: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(a.area.title).font(.title3.weight(.bold)).foregroundStyle(.primary).textCase(nil)
@@ -87,9 +100,9 @@ struct PlanView: View {
                         }
                     }
                 }
-                if !plan.unfiled.isEmpty {
+                if !query.epics(plan.unfiled).isEmpty {
                     Section {
-                        ForEach(plan.unfiled) { card in epicRow(card) }
+                        ForEach(query.epics(plan.unfiled)) { card in epicRow(card) }
                     } header: { SectionHeader(text: "No area yet") }
                 }
                 Section {
@@ -124,7 +137,9 @@ struct PlanView: View {
                     update(card.epic.id, UpdateItemRequest(ownerId: who ?? "owner"))
                 } label: { Label("Reassign owner", systemImage: "person.crop.circle") }
                 Button { creating = .init(level: .story, parentId: card.epic.id) } label: { Label("Add a story", systemImage: "plus") }
-                Button { editMode = .active } label: { Label("Reorder epics", systemImage: "arrow.up.arrow.down") }
+                if query.allowsReorder {
+                    Button { editMode = .active } label: { Label("Reorder epics", systemImage: "arrow.up.arrow.down") }
+                }
             }
             .swipeActions(edge: .leading) {
                 Button { toggleFocus(card) } label: { Label(card.inFocus ? "Unfocus" : "Focus", systemImage: "scope") }.tint(.orange)
@@ -139,9 +154,10 @@ struct PlanView: View {
                 if let e = store.error { ErrorRow(message: e) { Task { await reload() } } }
                 else { HStack { Spacer(); ProgressView("Loading the board…"); Spacer() } }
             }
-            ForEach(store.columns, id: \.status) { col in
+            if query.isFiltering || query.sort != .plan { Section { activeFilters } }
+            ForEach(boardColumns, id: \.status) { col in
                 Section {
-                    if col.status == .done && !showDone {
+                    if col.status == .done && !showDone && query.status != .done {
                         Button("Show \(col.items.count) done") { showDone = true }.font(.subheadline)
                     } else {
                         if col.items.isEmpty { Text("None").font(.caption).foregroundStyle(.tertiary) }
@@ -159,6 +175,102 @@ struct PlanView: View {
                 }
             }
         }
+    }
+
+    /// The board's columns after the filter: a status filter hides the columns it excludes.
+    private var boardColumns: [(status: ItemStatus, items: [Item])] {
+        store.columns.compactMap { col in
+            switch query.status {
+            case .open where col.status == .done: return nil
+            case .done where col.status != .done: return nil
+            default: return (col.status, query.column(col.items))
+            }
+        }
+    }
+
+    // MARK: results (a search, or a story/task level filter)
+
+    private var resultsList: some View {
+        let results = query.results(plan: store.plan, board: store.board)
+        return List {
+            if query.isFiltering || query.sort != .plan { Section { activeFilters } }
+            Section {
+                if results.isEmpty {
+                    if store.board == nil && store.error == nil {
+                        HStack { Spacer(); ProgressView("Searching…"); Spacer() }
+                    } else {
+                        Text(query.trimmedText.isEmpty ? "Nothing matches the filter" : "No results for “\(query.trimmedText)”")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(results) { item in
+                    NavigationLink(value: ItemRoute(id: item.id)) {
+                        if item.level == .epic, let card = store.epic(item.id) { EpicCardView(card: card) } else { ItemRow(item: item, showEpic: true) }
+                    }
+                    .accessibilityIdentifier("plan.result.\(item.id)")
+                }
+            } header: {
+                SectionHeader(text: "\(results.count) result\(results.count == 1 ? "" : "s")")
+            }
+        }
+    }
+
+    // MARK: filter
+
+    /// One line naming what is narrowing the plan, with a Clear.
+    private var activeFilters: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "line.3.horizontal.decrease.circle.fill").foregroundStyle(Color.accentColor)
+            Text(filterSummary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            Spacer()
+            Button("Clear") { withAnimation(.snappy) { let t = query.text; query = PlanQuery(); query.text = t } }
+                .font(.caption.weight(.semibold)).buttonStyle(.borderless)
+                .accessibilityIdentifier("plan.filter.clear")
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("plan.filter.summary")
+    }
+
+    private var filterSummary: String {
+        var parts: [String] = []
+        if query.status != .all { parts.append(query.status.label) }
+        if let l = query.level { parts.append(l.label + "s") }
+        if let p = query.personId { parts.append(model.employeeName(p)) }
+        if query.sort != .plan { parts.append("by " + query.sort.label.lowercased()) }
+        return parts.joined(separator: " · ")
+    }
+
+    private var filterMenu: some View {
+        Menu {
+            Picker("Status", selection: $query.status) {
+                ForEach(PlanQuery.StatusFilter.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.inline)
+            Menu {
+                Picker("Level", selection: $query.level) {
+                    Text("Every level").tag(ItemLevel?.none)
+                    ForEach([ItemLevel.epic, .story, .task], id: \.self) { l in Text(l.label + "s").tag(Optional(l)) }
+                }
+            } label: { Label("Level: " + (query.level.map { $0.label + "s" } ?? "all"), systemImage: "square.stack.3d.up") }
+            Menu {
+                Picker("Owner", selection: $query.personId) {
+                    Text("Anyone").tag(String?.none)
+                    ForEach(model.assignees, id: \.id) { p in Text(p.name).tag(Optional(p.id)) }
+                }
+            } label: { Label("Owner: " + (query.personId.map { model.employeeName($0) } ?? "anyone"), systemImage: "person.crop.circle") }
+            Menu {
+                Picker("Sort", selection: $query.sort) {
+                    ForEach(PlanQuery.Sort.allCases) { Text($0.label).tag($0) }
+                }
+            } label: { Label("Sort: " + query.sort.label, systemImage: "arrow.up.arrow.down") }
+            if query.isFiltering || query.sort != .plan {
+                Button(role: .destructive) { let t = query.text; query = PlanQuery(); query.text = t } label: { Label("Clear filter", systemImage: "xmark.circle") }
+            }
+        } label: {
+            Image(systemName: query.isFiltering || query.sort != .plan ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+        }
+        .accessibilityLabel("Filter and sort")
+        .accessibilityIdentifier("plan.filter")
     }
 
     // MARK: toolbar
@@ -185,13 +297,16 @@ struct PlanView: View {
             .frame(maxWidth: 200)
         }
         ToolbarItem(placement: .topBarTrailing) {
+            if !editMode.isEditing { filterMenu }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
             if editMode.isEditing {
                 Button("Done") { editMode = .inactive }
             } else {
                 Menu {
                     Button { creating = .init(level: .epic, areaId: store.plan?.areas.first?.area.id) } label: { Label("New epic", systemImage: "flag") }
                     Button { creating = .init(level: .story, parentId: store.plan?.focus.epicIds.first) } label: { Label("New story", systemImage: "doc.badge.plus") }
-                    if !model.router.planBoard {
+                    if !model.router.planBoard && query.allowsReorder {
                         Button { editMode = .active } label: { Label("Reorder epics", systemImage: "arrow.up.arrow.down") }
                     }
                 } label: { Image(systemName: "plus.circle.fill") }

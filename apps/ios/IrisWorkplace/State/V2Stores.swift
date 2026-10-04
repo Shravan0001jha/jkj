@@ -108,20 +108,22 @@ final class PlanStore {
         }
     }
 
-    /// Reorder an area's epics: only the moved epic gets a new rank, between its new neighbours.
-    func move(_ rest: RestClient, areaId: String, from source: IndexSet, to destination: Int) async throws {
-        guard let p = plan, let a = p.areas.firstIndex(where: { $0.area.id == areaId }), let from = source.first else { return }
-        var epics = p.areas[a].epics
+    /// Reorder an area's epics as the owner sees them (`shown`, after the Plan's filter and sort:
+    /// done epics sit at the bottom): only the moved epic gets a new rank, between its new
+    /// neighbours on screen.
+    func move(_ rest: RestClient, areaId: String, shown: [EpicCard], from source: IndexSet, to destination: Int) async throws {
+        guard let p = plan, let a = p.areas.firstIndex(where: { $0.area.id == areaId }), let from = source.first, shown.indices.contains(from) else { return }
+        var epics = shown
         let moved = epics[from]
         epics.move(fromOffsets: source, toOffset: destination)
         guard let at = epics.firstIndex(where: { $0.id == moved.id }) else { return }
         let before = at > 0 ? epics[at - 1].epic.rank : nil
         let after = at < epics.count - 1 ? epics[at + 1].epic.rank : nil
         let rank = Self.rank(before: before, after: after)
-        var shown = p
-        epics[at].epic.rank = rank
-        shown.areas[a].epics = epics
-        plan = shown   // the list keeps the row where the owner dropped it while the server confirms
+        var updated = p
+        if let i = updated.areas[a].epics.firstIndex(where: { $0.id == moved.id }) { updated.areas[a].epics[i].epic.rank = rank }
+        updated.areas[a].epics.sort { $0.epic.rank < $1.epic.rank }
+        plan = updated   // the list keeps the row where the owner dropped it while the server confirms
         do {
             _ = try await rest.updateItem(moved.id, UpdateItemRequest(rank: rank))
         } catch {

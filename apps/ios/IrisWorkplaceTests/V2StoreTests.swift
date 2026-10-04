@@ -101,7 +101,7 @@ final class V2StoreTests: XCTestCase {
             if req.httpMethod == "POST" { return (200, try! Fixtures.data("live-item-epic")) }
             return (200, try! Fixtures.data("live-plan"))
         }
-        try await s.move(rest, areaId: s.plan!.areas[1].area.id, from: IndexSet(integer: 1), to: 0)
+        try await s.move(rest, areaId: s.plan!.areas[1].area.id, shown: epics, from: IndexSet(integer: 1), to: 0)
         let post = StubURLProtocol.recorded.first { $0.request.httpMethod == "POST" }!
         XCTAssertEqual(post.request.url?.path, "/api/items/\(epics[1].epic.id)")
         let body = try JSONSerialization.jsonObject(with: post.body!) as! [String: Any]
