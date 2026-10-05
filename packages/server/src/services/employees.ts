@@ -13,7 +13,7 @@ import * as evidenceRuns from './evidence.js';
 import * as spend from './spend.js';
 import * as inbox from './inbox.js';
 import { assembleContext } from './context-layers.js';
-import { changedFiles, commitsSince, ensureWorktree, isMainCheckout, WorktreeSwitchError, type Worktree } from './worktrees.js';
+import { changedFiles, commitsSince, uncommittedFiles, ensureWorktree, isMainCheckout, WorktreeSwitchError, type Worktree } from './worktrees.js';
 import { guardTool, type GuardContext } from './guards.js';
 import { resolve as resolveOwner } from './ownership.js';
 import * as stall from './stall.js';
@@ -1078,7 +1078,13 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           const wt = session().worktree;
           if (wt) {
             const foreign = foreignChanges(wp, employee(wp, employeeId), wt);
-            if (foreign.length) return ok(`Not recorded: your branch changes files outside your charters: ${foreign.slice(0, 10).join(', ')}. Revert them or route them through their owner.`);
+            if (foreign.length) {
+              // Say which are only in the worktree (5 Oct: Dev chased committed files while 18 untracked build outputs were the cause).
+              const loose = new Set(uncommittedFiles(wt.path));
+              const local = foreign.filter(f => loose.has(f));
+              const hint = local.length ? ` ${local.length} of them are uncommitted or untracked in your worktree (e.g. ${local[0]}): remove them (git checkout / git clean on those paths) if they are build leftovers.` : '';
+              return ok(`Not recorded: your branch changes files outside your charters: ${foreign.slice(0, 10).join(', ')}.${hint} Revert them or route them through their owner.`);
+            }
             const real = commitsSince(wt.path, wt.base);
             if (evidence.commits.length && real.length === 0) return ok('Not recorded: no commits on your branch since the base; commit your work first.');
             if (real.length) evidence.commits = [...new Set([...evidence.commits, ...real.map(c => c.split(' ')[0]!)])];

@@ -181,6 +181,11 @@ export function changedFiles(worktree: string, base: string): string[] {
   return [...new Set([...committed, ...uncommitted].map(f => f.trim()).filter(f => f && !LINKED.includes(f) && !f.startsWith('.venv')))].sort();
 }
 
+/** Files changed in the worktree but not committed (untracked included). */
+export function uncommittedFiles(worktree: string): string[] {
+  return git(worktree, ['status', '--porcelain', '--untracked-files=all']).split('\n').map(l => l.slice(3).trim()).filter(Boolean);
+}
+
 export function isClean(worktree: string, includeUntracked = false): boolean {
   return git(worktree, ['status', '--porcelain', `--untracked-files=${includeUntracked ? 'all' : 'no'}`]).trim() === '';
 }
