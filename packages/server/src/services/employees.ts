@@ -1122,7 +1122,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           return ok(`Review requested.${gh.message ? ` ${gh.message}` : ''}`);
         }),
       // The GitHub flow's two approvals (docs/HLD-github-flow.md D4): in local mode they answer "review as before".
-      tool('review_approve', 'Reviewers only: approve a story in review. Approval 1 of 2 is the developer approver\'s (a lead who is not the author); approval 2 of 2 is QA\'s, only after the developer approval. QA\'s approval marks the story done, and the COO merges it. Any new commit resets both approvals.',
+      tool('review_approve', 'Reviewers only: approve a story in review. Approval 1 of 2 is the developer approver\'s (a lead who is not the author); approval 2 of 2 is QA\'s, only after the developer approval. QA\'s approval marks the story done, and the Workplace merges it once the tests check is green (blockers go to the COO). Any new commit resets both approvals.',
         { itemId: z.string(), note: z.string().optional() },
         async ({ itemId, note }) => {
           try { return ok((await githubFlow.approve(wp, itemId, employeeId, note)).message); } catch (err) { return ok(`Not approved: ${err instanceof Error ? err.message : String(err)}`); }

@@ -533,11 +533,12 @@ test('merge: dry run in shadow; in on refused until review and tests are green, 
     await reviewed(s);
     await assert.rejects(flow.merge(s.wp, s.storyId, 'coo'), /approval/i);
     await flow.approve(s.wp, s.storyId, 'dev');
-    await flow.approve(s.wp, s.storyId, 'nikhil');
     const before = git(s.trunkRepo, ['rev-parse', TRUNK]).trim();
-    const m = await flow.merge(s.wp, s.storyId, 'coo');
-    assert.equal(m.merged, true);
-    assert.equal(m.synced, true);
+    // The QA approval (2 of 2) with workplace/tests green: the Workplace merges it itself.
+    const qa = await flow.approve(s.wp, s.storyId, 'nikhil');
+    assert.match(qa.message, /merged/i);
+    assert.equal(s.gh.count('merge'), 1);
+    assert.equal(pr(s).merged?.by, 'workplace');
     assert.equal(s.gh.remoteSha(`emp/kabir/${s.storyId}`), null, 'the branch is deleted');
     const after = git(s.trunkRepo, ['rev-parse', TRUNK]).trim();
     assert.notEqual(after, before);
@@ -555,8 +556,67 @@ test('merge: refused when tests are red, or the head moved since the approvals',
     await reviewed(s);
     await flow.approve(s.wp, s.storyId, 'dev');
     await flow.approve(s.wp, s.storyId, 'nikhil');
+    assert.equal(pr(s).merged, undefined, 'red tests: no auto-merge');
+    await flow.autoMergeSweep(s.wp);
+    assert.equal(pr(s).merged, undefined, 'nor from the sweep');
+    assert.equal(coo.listItems(s.wp).filter(i => /auto-merge/i.test(i.title) && /tests/.test(i.body)).length, 1, 'approved but red: the COO hears of it once');
     await assert.rejects(flow.merge(s.wp, s.storyId, 'coo'), /tests/i);
     assert.equal(s.gh.count('merge'), 0);
+  } finally { await s.done(); }
+});
+
+test('auto-merge tells Asha on success', async () => {
+  const s = setup('on');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'nikhil');
+    const told = manager.list(s.wp).find(a => a.key.startsWith(`merged:${s.storyId}`));
+    assert.ok(told, 'Asha is told');
+    assert.match(told!.text ?? told!.body, /merged/i);
+    assert.ok(!coo.listItems(s.wp).some(i => /auto-merge/i.test(i.title)), 'the COO is not bothered');
+  } finally { await s.done(); }
+});
+
+test('auto-merge: a GitHub merge failure alerts the COO once, forces nothing, is not retried; the manual merge still works', async () => {
+  const s = setup('on');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'dev');
+    s.gh.failNext('merge', 1);
+    const qa = await flow.approve(s.wp, s.storyId, 'nikhil');   // never throws on a merge problem
+    assert.equal(qa.stage, 'qa');
+    assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
+    assert.equal(pr(s).merged, undefined);
+    const alerts = () => coo.listItems(s.wp).filter(i => /auto-merge/i.test(i.title) && i.itemId === s.storyId);
+    assert.equal(alerts().length, 1, 'the COO is alerted');
+    assert.match(alerts()[0]!.body, /POST \/api\/coo\/merge/);
+    const calls = s.gh.count('merge');
+    await flow.autoMergeSweep(s.wp);
+    assert.equal(s.gh.count('merge'), calls, 'the same head is left for the COO');
+    assert.equal(alerts().length, 1, 'alerted once');
+    const m = await flow.merge(s.wp, s.storyId, 'coo');
+    assert.equal(m.merged, true);
+    assert.equal(pr(s).merged?.by, 'coo');
+  } finally { await s.done(); }
+});
+
+test('auto-merge: the sweep merges a story approved in shadow once the mode is on; shadow never merges', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'nikhil');
+    await flow.autoMergeSweep(s.wp);
+    assert.equal(s.gh.count('merge'), 0, 'shadow never merges');
+    flow.setMode(s.wp, 'on', 'coo');
+    const merged = await flow.autoMergeSweep(s.wp);
+    assert.deepEqual(merged, [s.storyId]);
+    assert.equal(pr(s).merged?.by, 'workplace');
+    assert.equal(git(s.trunkRepo, ['rev-parse', TRUNK]).trim(), s.gh.remoteSha(TRUNK), 'the trunk checkout is fast-forwarded');
   } finally { await s.done(); }
 });
 
@@ -566,15 +626,13 @@ test('merge: a trunk checkout that cannot fast-forward alerts the COO and is nev
     s.commit('services/agent-svc/recall.py', 'x = 1\n');
     await reviewed(s);
     await flow.approve(s.wp, s.storyId, 'dev');
-    await flow.approve(s.wp, s.storyId, 'nikhil');
     // A local commit on the trunk checkout that GitHub does not have: a pull can only merge, not fast-forward.
     writeFileSync(join(s.trunkRepo, 'LOCAL.md'), 'local only\n');
     git(s.trunkRepo, ['add', '-A']);
     git(s.trunkRepo, ['commit', '-q', '-m', 'local only']);
     const local = git(s.trunkRepo, ['rev-parse', 'HEAD']).trim();
-    const m = await flow.merge(s.wp, s.storyId, 'coo');
-    assert.equal(m.merged, true);
-    assert.equal(m.synced, false);
+    await flow.approve(s.wp, s.storyId, 'nikhil');   // merges on GitHub, then the sync refuses to force
+    assert.ok(pr(s).merged, 'merged on GitHub');
     assert.equal(git(s.trunkRepo, ['rev-parse', 'HEAD']).trim(), local, 'nothing forced, nothing merged locally');
     assert.ok(coo.listItems(s.wp).some(i => /fast-forward/i.test(i.body)), 'the COO is alerted');
   } finally { await s.done(); }

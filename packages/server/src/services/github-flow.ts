@@ -28,7 +28,8 @@ import { log } from '../util/logger.js';
  * In `shadow` and `on`, a story moving to review has its branch pushed and a PR opened by the server
  * (employees never push), two approvals in order are recorded against the head commit, the
  * workplace/* statuses are posted, and the quality checks run. In `on`, "done" needs both approvals
- * and the COO merges through GitHub. Three GitHub failures in five minutes fall back to `local`.
+ * and the Workplace merges through GitHub itself once tests are green (autoMerge; the COO handles any blocker,
+ * and POST /api/coo/merge stays for manual merges). Three GitHub failures in five minutes fall back to `local`.
  */
 
 export { approvalHolds } from './review-policy.js';
@@ -480,7 +481,12 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
   trail.record(wp, { itemId, by, kind: 'note', text: `QA approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}${approval.note ? `: ${approval.note}` : ''}` });
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
   items.update(wp, itemId, { status: 'done', reviewerId: by, note: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer) and ${nameOf(wp, by)} (QA)` }, by);
-  return { stage: 'qa', message: 'QA approval recorded (approval 2 of 2); the story is done. The COO merges it once the tests check is green: approved is not merged.' };
+  const auto = await autoMerge(wp, itemId);
+  const tail = auto === 'merged' ? 'The Workplace merged it into the trunk.'
+    : auto === 'waiting' ? 'The Workplace merges it itself once the tests check is green: approved is not merged.'
+    : auto === 'blocked' ? 'The automatic merge was stopped and the COO is alerted: approved is not merged.'
+    : 'The COO merges it once the tests check is green: approved is not merged.';
+  return { stage: 'qa', message: `QA approval recorded (approval 2 of 2); the story is done. ${tail}` };
 }
 
 export async function sendBack(wp: Workplace, itemId: string, by: string, note: string): Promise<WorkItem> {
@@ -585,7 +591,9 @@ export function startGitHubFlow(wp: Workplace): () => void {
   const timer = setInterval(() => {
     if (busy || mode(wp) === 'local') return;
     busy = true;
-    syncHeads(wp).catch(err => log.warn('github', `sweep: ${errText(err)}`)).finally(() => { busy = false; });
+    syncHeads(wp).catch(err => log.warn('github', `sweep: ${errText(err)}`))
+      .then(() => autoMergeSweep(wp)).catch(err => log.warn('github', `auto-merge sweep: ${errText(err)}`))
+      .finally(() => { busy = false; });
   }, MIN);
   timer.unref?.();
   return () => clearInterval(timer);
@@ -651,6 +659,81 @@ export async function merge(wp: Workplace, itemId: string, by: string): Promise<
 
   const sync = await syncTrunk(wp, itemId, w, pr);
   return { mode: m, merged: true, ...(mergedSha ? { sha: mergedSha } : {}), synced: sync === null, ...(sync ? { syncError: sync } : {}) };
+}
+
+/* ---------- the automatic merge (owner-approved, 5 Oct) ---------- */
+
+export type AutoMergeOutcome = 'merged' | 'waiting' | 'blocked' | 'off';
+
+const AUTO_BLOCKED_PREFIX = 'github:automerge-blocked:';
+const autoInFlight = new Set<string>();
+
+/** In `on`: both approvals holding on the head and workplace/tests green on it. */
+function autoReady(w: WorkItem): 'ready' | 'waiting' | 'red' {
+  const pr = w.pr;
+  if (!pr || pr.merged || !holds(pr.devApproval, w) || !holds(pr.qaApproval, w)) return 'waiting';
+  if (!pr.tests || pr.tests.sha !== pr.headSha) return 'waiting';
+  if (pr.tests.state === 'success') return 'ready';
+  return pr.tests.state === 'pending' ? 'waiting' : 'red';
+}
+
+function blockAuto(wp: Workplace, w: WorkItem, why: string): void {
+  const pr = w.pr!;
+  putSetting(wp, AUTO_BLOCKED_PREFIX + w.id, pr.headSha);
+  coo.notifyStall(wp, {
+    itemId: w.id, by: 'workplace',
+    title: `Auto-merge stopped: ${w.title}`,
+    body: `PR #${pr.number} (${pr.branch} at ${pr.headSha.slice(0, 8)}) has both approvals, but the Workplace did not merge it: ${why}. Nothing was forced; it is left for you. Merge it by hand with POST /api/coo/merge {"itemId":"${w.id}"} once it is clear.`,
+  });
+  trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'note', text: `Automatic merge stopped (${why}); left for the COO` });
+  log.warn('github', `${w.id}: auto-merge stopped: ${why}`);
+}
+
+/**
+ * The automatic merge: in `on`, once a story's PR has both approvals on its head and workplace/tests
+ * is green, the Workplace merges it with `merge` (pinned to the reviewed head, branch deleted, trunk
+ * fast-forwarded). Any blocker alerts the COO once per head and is left for him; never forced, never throws.
+ */
+export async function autoMerge(wp: Workplace, itemId: string): Promise<AutoMergeOutcome> {
+  if (mode(wp) !== 'on') return 'off';
+  const w = rawGet(wp, itemId);
+  if (!w?.pr || w.pr.merged) return 'off';
+  if (getSetting(wp, AUTO_BLOCKED_PREFIX + itemId) === w.pr.headSha) return 'blocked';
+  const ready = autoReady(w);
+  if (ready === 'waiting') return 'waiting';
+  if (ready === 'red') { blockAuto(wp, w, `workplace/tests is ${w.pr.tests!.state} on ${w.pr.headSha.slice(0, 8)}`); return 'blocked'; }
+  if (autoInFlight.has(itemId)) return 'waiting';
+  autoInFlight.add(itemId);
+  try {
+    const res = await merge(wp, itemId, 'workplace');
+    if (!res.merged) { blockAuto(wp, rawGet(wp, itemId) ?? w, (res.blockers ?? []).join('; ') || 'not merged'); return 'blocked'; }
+    dropSetting(wp, AUTO_BLOCKED_PREFIX + itemId);
+    const pr = rawGet(wp, itemId)!.pr!;
+    manager.alert(wp, {
+      key: `merged:${itemId}:${pr.headSha}`, itemId, by: 'workplace', notice: true,
+      title: `Merged: ${w.title}`,
+      body: `PR #${pr.number} merged into ${pr.base}${res.sha ? ` as ${res.sha.slice(0, 8)}` : ''}${res.synced ? '' : ' (the trunk checkout was not synced; the COO is alerted)'}.`,
+      text: `Merged automatically: "${w.title}" [${itemId}], PR #${pr.number} into ${pr.base}${res.sha ? ` as ${res.sha.slice(0, 8)}` : ''}, after both approvals and green tests. Nothing to do unless it unblocks other work.`,
+    });
+    return 'merged';
+  } catch (err) {
+    blockAuto(wp, rawGet(wp, itemId) ?? w, errText(err));
+    return 'blocked';
+  } finally {
+    autoInFlight.delete(itemId);
+  }
+}
+
+/** The sweep's half for merges: every approved, unmerged story in `on`. Returns the merged ids. */
+export async function autoMergeSweep(wp: Workplace): Promise<string[]> {
+  if (mode(wp) !== 'on') return [];
+  const rows = (wp.db.prepare("select json from work where status = 'done'").all() as { json: string }[]).map(r => JSON.parse(r.json) as WorkItem);
+  const merged: string[] = [];
+  for (const w of rows) {
+    if (!w.pr || w.pr.merged) continue;
+    if (await autoMerge(wp, w.id) === 'merged') merged.push(w.id);
+  }
+  return merged;
 }
 
 /** `git pull --ff-only` of the trunk into its main checkout. Never forced; a failure alerts the COO. Null when synced. */
