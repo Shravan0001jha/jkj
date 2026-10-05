@@ -204,6 +204,17 @@ export function notifyStall(wp: Workplace, spec: { itemId: string; title: string
 }
 
 /**
+ * The hygiene monitor's hourly summary (docs/HLD-jira-lifecycle.md §4): a bridge item of kind
+ * `hygiene` and a line in the bridge file. Never falls back to the owner's Inbox.
+ */
+export function notifyHygiene(wp: Workplace, spec: { title: string; body: string }): CooItem {
+  const item: CooItem = { id: newId('coi'), at: now(), kind: 'hygiene', title: spec.title, body: spec.body, options: [], raisedBy: 'workplace', state: 'open' };
+  saveItem(wp, item);
+  appendInboxFile(wp, { kind: 'hygiene', coiId: item.id, title: item.title, body: item.body });
+  return item;
+}
+
+/**
  * The owner replied in an Inbox thread the COO must hear (LLD §19.14): an item the COO raised or
  * forwarded (the COO answers it), or — `copy: true` — any decision, so the timeline owner knows what
  * the owner said even though the raiser answers it.

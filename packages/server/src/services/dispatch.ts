@@ -3,6 +3,7 @@ import type { Workplace } from './workplace.js';
 import * as runs from './runs.js';
 import * as employees from './employees.js';
 import * as items from './items.js';
+import { openStartsAfter } from './lifecycle.js';
 import * as spend from './spend.js';
 import * as trail from './trail.js';
 import * as manager from './manager.js';
@@ -95,6 +96,7 @@ export function queue(wp: Workplace, employeeId: string): WorkItem[] {
   for (const w of rows) {
     if (levelOf(w) === 'epic' || w.mergedInto) continue;
     if (w.status === 'backlog' && w.hold) continue;
+    if (openStartsAfter(wp, w)) continue; // starts after an item that has not finished
     const epic = epicOf(wp, w);
     const at = epic ? focus.indexOf(epic.id) : -1;
     if (at < 0) continue; // never auto-start anything outside the focus

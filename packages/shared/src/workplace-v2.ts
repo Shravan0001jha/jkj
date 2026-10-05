@@ -9,7 +9,79 @@ import type { InboxItem, RoomThread, WorkKind } from './workplace.js';
 
 export type ItemLevel = 'epic' | 'story' | 'task';
 export type ItemStatus = 'backlog' | 'ready' | 'in-progress' | 'in-review' | 'done' | 'blocked';
-export type ItemResolution = 'done' | 'wont-do' | 'duplicate';
+export type ItemResolution = 'done' | 'wont-do' | 'duplicate' | 'cant-reproduce';
+/** The Jira type (docs/HLD-jira-lifecycle.md §1): a bug is a story-level item. */
+export type ItemType = 'epic' | 'story' | 'task' | 'bug';
+/**
+ * The true status the board shows (docs/HLD-jira-lifecycle.md §1), computed on every read from the
+ * stored status, the hold, the PR's stage and merge, and any open `startsAfter`.
+ */
+export type TrueStatus = 'backlog' | 'on-hold' | 'ready' | 'in-progress' | 'in-review' | 'qa' | 'approved' | 'merged' | 'done' | 'blocked';
+export const TRUE_STATUS_LABEL: Record<TrueStatus, string> = {
+  backlog: 'Backlog', 'on-hold': 'On hold', ready: 'Ready', 'in-progress': 'In progress', 'in-review': 'In review',
+  qa: 'QA', approved: 'Approved', merged: 'Merged', done: 'Done', blocked: 'Blocked',
+};
+
+/** What a Blocked item waits on, and where that blocker stands now (computed on read). */
+export interface ItemBlocker {
+  kind: 'person' | 'owner' | 'coo' | 'external' | 'release' | 'item';
+  /** The employee id, 'owner', 'coo', 'external', 'release', or the item id. */
+  id: string;
+  /** "Tara", "you", "the release", or the item's title. */
+  label: string;
+  /** The blocker's status now: the linked item's true status ("In review"), "release 1.4 approved", "no release planned". */
+  status: string;
+  reason?: string;
+  since?: string;
+}
+
+/** The story's pull request, as the apps show it on the item. */
+export interface ItemPr {
+  number: number;
+  url: string;
+  branch: string;
+  /** dev: waiting on the developer approval; qa: on QA; approved: both hold; merged. */
+  stage: 'dev' | 'qa' | 'approved' | 'merged';
+  /** The workplace/tests check on the head commit. */
+  tests?: 'pending' | 'success' | 'failure' | 'error';
+  evidence: 'pending' | 'stale' | 'success' | 'failure';
+  merged?: { at: string; by: string };
+}
+
+/* ---------- hygiene (docs/HLD-jira-lifecycle.md §4) ---------- */
+
+/** a top-idle, b no-session, c bad-block, d bad-review, e done-unmerged, f unrouted-top, g wrong-assignee. */
+export type HygieneRule = 'top-idle' | 'no-session' | 'bad-block' | 'bad-review' | 'done-unmerged' | 'unrouted-top' | 'wrong-assignee';
+export const HYGIENE_RULES: readonly HygieneRule[] = ['top-idle', 'no-session', 'bad-block', 'bad-review', 'done-unmerged', 'unrouted-top', 'wrong-assignee'];
+
+export interface HygieneViolation {
+  /** `<rule>:<itemId>[:<who>]`, stable while the condition lasts. */
+  key: string;
+  rule: HygieneRule;
+  itemId: string;
+  title: string;
+  assigneeId?: string;
+  /** What is wrong, one line. */
+  what: string;
+  /** When the sweep first saw it. */
+  since: string;
+  minutes: number;
+  /** The suggested fix, one line. */
+  fix: string;
+}
+
+/** GET /api/hygiene. */
+export interface HygieneReport {
+  at: string;
+  /** The floor is paused: the monitor is silent. */
+  paused: boolean;
+  /** Open items (and Done with an unmerged PR) without a violation, in percent. */
+  cleanPct: number;
+  open: number;
+  clean: number;
+  counts: Record<HygieneRule, number>;
+  violations: HygieneViolation[];
+}
 export type Points = 1 | 2 | 3 | 5 | 8;
 
 export const ITEM_STATUSES: readonly ItemStatus[] = ['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked'];
@@ -65,6 +137,19 @@ export interface Item {
   releasedIn?: string;
   /** The old engine's view of the same row (the /api/work adapters). */
   legacy: { kind: WorkKind; state: string; charterId?: string; featureId?: string };
+  /** epic, story, task or bug (a story-level bug). */
+  type?: ItemType;
+  /** The true status (docs/HLD-jira-lifecycle.md §1): what the board shows. */
+  trueStatus?: TrueStatus;
+  /** Blocked (or Ready with an open startsAfter): what it waits on and where that stands now. */
+  blocker?: ItemBlocker;
+  /** An explicit dependency: "Starts after <title> (<status>)". `done` once it finished. */
+  startsAfter?: { id: string; title: string; status: string; done: boolean };
+  /** On hold: why. */
+  holdReason?: string;
+  /** Merged and closed by Asha (Merged → Done). */
+  closedAt?: string;
+  pr?: ItemPr;
   createdAt: string;
   updatedAt: string;
 }
@@ -290,6 +375,10 @@ export interface CreateItemRequest {
   targetDate?: string;
   acceptance?: string[];
   rank?: number;
+  /** 'bug' files a story-level bug. */
+  type?: 'bug';
+  /** An explicit dependency: it starts after this item finishes. */
+  startsAfter?: string;
 }
 
 export interface UpdateItemRequest {
@@ -322,6 +411,8 @@ export interface UpdateItemRequest {
    * it); false lifts the hold. Moving into Backlog as the owner/COO, or with a hold/parked note, holds it.
    */
   hold?: boolean;
+  /** An explicit dependency: it starts after this item finishes; '' clears it. */
+  startsAfter?: string;
 }
 
 export interface CommentRequest { text: string }

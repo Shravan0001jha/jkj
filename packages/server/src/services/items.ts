@@ -10,6 +10,7 @@ import * as room from './room.js';
 import * as watch from './watch.js';
 import { now, rowsJson } from './store.js';
 import * as waits from './waits.js';
+import * as lifecycle from './lifecycle.js';
 import { doneProblem, earlyQaMoveProblem } from './review-policy.js';
 import { authorId, chiefOfStaffId, epicOf, humanDuration, isPerson, isWaitable, levelOf, nameOf, projectItem, rawGet, stateFromStatus } from './v2-map.js';
 import { BadRequest, NotFound } from '../util/errors.js';
@@ -23,7 +24,7 @@ import { BadRequest, NotFound } from '../util/errors.js';
 /* ---------- reading ---------- */
 
 export function toItem(wp: Workplace, w: WorkItem, nowMs = Date.now()): Item {
-  const item = projectItem(wp, w);
+  const item = lifecycle.decorate(wp, w, projectItem(wp, w));
   const stall = watch.evaluate(wp, w, nowMs);
   if (stall?.stalled && stall.rule) item.stall = { rule: stall.rule, since: stall.since, minutes: Math.floor((nowMs - Date.parse(stall.since)) / 60_000) };
   return item;
@@ -163,12 +164,16 @@ export function create(wp: Workplace, req: CreateItemRequest, by: string): Item 
   checkAssignee(wp, req.ownerId);
   if (req.status && req.status !== 'backlog' && req.status !== 'ready') throw new BadRequest('A new item starts in backlog or ready.');
   if (req.reviewerId && req.reviewerId === req.assigneeId) throw new BadRequest('The reviewer cannot be the assignee.');
+  if (req.type !== undefined && (req.type !== 'bug' || req.level !== 'story')) throw new BadRequest('type bug is a story-level item: create it with level story under an epic.');
+  if (req.startsAfter !== undefined) checkStartsAfter(wp, undefined, req.startsAfter);
   const common = {
     ...(points ? { points } : {}),
     ...(req.reviewerId ? { reviewerId: req.reviewerId } : {}),
     ...(req.targetDate ? { targetDate: req.targetDate } : {}),
     ...(req.acceptance?.length ? { acceptance: req.acceptance.map(a => a.trim()).filter(Boolean) } : {}),
     ...(typeof req.rank === 'number' ? { rank: req.rank } : {}),
+    ...(req.type === 'bug' ? { type: 'bug' as const } : {}),
+    ...(req.startsAfter ? { startsAfter: req.startsAfter } : {}),
     status: req.status ?? 'ready' as ItemStatus,
   };
 
@@ -222,8 +227,11 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
     if (next.reviewerId === next.employeeId) throw new BadRequest('The reviewer cannot be the assignee.');
   }
   if (to === 'blocked') {
-    if (!req.blockedReason?.trim()) throw new BadRequest('Blocked needs a reason.');
-    if (!req.waitingOn || !isWaitable(wp, req.waitingOn)) throw new BadRequest('Blocked needs who it is waiting on: an employee, coo, owner or external.');
+    // docs/HLD-jira-lifecycle.md §3: a block always names its blocker (waitingOn + why, or startsAfter).
+    if (!req.blockedReason?.trim() && !next.startsAfter) throw new BadRequest('Blocked needs a reason: add blockedReason saying what you wait for, or startsAfter with the item it waits on.');
+    if (!req.waitingOn && !next.startsAfter) throw new BadRequest('Blocked needs who it is waiting on: set waitingOn to a person, an item id, owner, coo, release or external.');
+    if (req.waitingOn && !isWaitable(wp, req.waitingOn)) throw new BadRequest(`Blocked needs who it is waiting on: "${req.waitingOn}" is not a person, an item id, owner, coo, release or external.`);
+    if (req.waitingOn === w.id) throw new BadRequest('An item cannot wait on itself: name the item or person it waits on.');
   }
   // GitHub flow (shadow/on): QA does not move a story back before the developer approval (finding #3).
   const early = earlyQaMoveProblem(wp, w, by, from, to);
@@ -244,6 +252,18 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
     if (by === next.employeeId && by !== 'owner') throw new BadRequest('An assignee never marks its own work done.');
   }
   if (from === 'done' && !req.note?.trim()) throw new BadRequest('A reopen needs a note: what was wrong with "done"?');
+}
+
+/** A dependency must be another existing story or task, and must not loop back to this item. */
+function checkStartsAfter(wp: Workplace, id: string | undefined, depId: string): void {
+  if (id && depId === id) throw new BadRequest('An item cannot start after itself: name the item it waits on.');
+  const dep = rawGet(wp, depId);
+  if (!dep) throw new BadRequest(`startsAfter: no item ${depId}; give the id of the item it waits on.`);
+  if (levelOf(dep) === 'epic') throw new BadRequest('startsAfter names a story or task, not an epic: pick the story it waits on.');
+  for (let cur: WorkItem | undefined = dep, i = 0; cur?.startsAfter && i < 20; i++) {
+    if (cur.startsAfter === id) throw new BadRequest(`startsAfter ${depId} would make a loop: ${depId} already starts after this item.`);
+    cur = rawGet(wp, cur.startsAfter);
+  }
 }
 
 /** The assignee, and the charter that follows it (as any reassign does). */
@@ -294,11 +314,11 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
   const next: WorkItem = { ...prev };
   const at = now();
 
-  for (const k of ['title', 'body', 'assigneeId', 'reviewerId', 'ownerId', 'parentId', 'blockedReason', 'waitingOn', 'note', 'recommendation', 'status', 'resolution'] as const) {
+  for (const k of ['title', 'body', 'assigneeId', 'reviewerId', 'ownerId', 'parentId', 'blockedReason', 'waitingOn', 'note', 'recommendation', 'status', 'resolution', 'startsAfter'] as const) {
     if (req[k] !== undefined && typeof req[k] !== 'string') throw new BadRequest(`${k} must be a string`);
   }
   if (req.acceptance !== undefined && (!Array.isArray(req.acceptance) || req.acceptance.some(a => typeof a !== 'string'))) throw new BadRequest('acceptance must be a list of strings');
-  if (req.resolution !== undefined && !['done', 'wont-do', 'duplicate'].includes(req.resolution)) throw new BadRequest('resolution must be done, wont-do or duplicate');
+  if (req.resolution !== undefined && !['done', 'wont-do', 'duplicate', 'cant-reproduce'].includes(req.resolution)) throw new BadRequest('resolution must be done, wont-do, duplicate or cant-reproduce');
   if (req.kind !== undefined && req.kind !== 'review' && req.kind !== 'work') throw new BadRequest('kind must be review or work');
   if (req.title !== undefined) { if (!req.title.trim()) throw new BadRequest('An item needs a title.'); next.title = req.title.trim(); }
   if (req.body !== undefined) next.body = req.body;
@@ -312,6 +332,9 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
   if (req.ownerId !== undefined) { checkAssignee(wp, req.ownerId); next.ownerId = req.ownerId; }
   if (req.points !== undefined) { const p = checkPoints(req.points); if (p) next.points = p; else delete next.points; }
   if (typeof req.rank === 'number' && Number.isFinite(req.rank)) next.rank = req.rank;
+  if (req.startsAfter !== undefined) {
+    if (req.startsAfter) { checkStartsAfter(wp, id, req.startsAfter); next.startsAfter = req.startsAfter; } else delete next.startsAfter;
+  }
   if (req.targetDate !== undefined) { if (req.targetDate) next.targetDate = req.targetDate; else delete next.targetDate; }
   if (req.acceptance !== undefined) next.acceptance = req.acceptance.map(a => a.trim()).filter(Boolean);
   if (req.areaId !== undefined) {
@@ -329,14 +352,39 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
   }
 
   const from = prev.status ?? 'ready';
+  // Keeping a block current (owner, 5 Oct): while it stays Blocked, its waitingOn, blockedReason and
+  // startsAfter can be edited; the block keeps its since, and a teammate wait still converts.
+  const blockEdit = from === 'blocked' && (req.status === undefined || req.status === 'blocked')
+    && (req.blockedReason !== undefined || req.waitingOn !== undefined || req.startsAfter !== undefined);
+  if (blockEdit) {
+    const followsDep = !!prev.startsAfter && prev.waitingOn === prev.startsAfter && req.startsAfter !== undefined;
+    const autoReason = !!prev.blockedReason && prev.blockedReason.startsWith('Starts after "') && req.startsAfter !== undefined;
+    const waitingOn = req.waitingOn ?? (followsDep ? next.startsAfter : prev.waitingOn);
+    const blockedReason = req.blockedReason ?? (autoReason ? undefined : prev.blockedReason);
+    req = { ...req, status: 'blocked', ...(waitingOn ? { waitingOn } : {}), ...(blockedReason !== undefined ? { blockedReason } : {}) };
+    if (!waitingOn) delete req.waitingOn;
+    if (blockedReason === undefined) delete req.blockedReason;
+  }
   if (req.hold !== undefined) {
     if (typeof req.hold !== 'boolean') throw new BadRequest('hold must be true or false');
     if (by !== 'owner' && by !== 'coo') throw new BadRequest('Only the owner or the COO holds an item (or lifts a hold).');
     if (req.hold && req.status && req.status !== 'backlog') throw new BadRequest('A hold parks an item in Backlog: move it to backlog with it, or leave the status out.');
+    if (req.hold && !req.note?.trim()) throw new BadRequest('On hold needs a reason: add a note saying why it is parked and what restarts it.');
+  }
+  // Merged → Done (docs/HLD-jira-lifecycle.md §1): Asha (or the owner, the COO, the reviewer) closes a merged story.
+  if (req.status === 'done' && from === 'done' && prev.pr?.merged && !prev.closedAt) {
+    if (by !== 'owner' && by !== 'coo' && by !== chiefOfStaffId(wp) && by !== prev.reviewerId) throw new BadRequest('Closing a merged story is Asha\'s call (or the owner\'s, the COO\'s or its reviewer\'s): tell Asha it is merged.');
+    next.closedAt = at;
+    next.closedBy = by;
+    next.statusSince = at;
+    next.updatedAt = at;
+    const saved = work.put(wp, prev, next, by, req.note ?? 'Closed: merged');
+    trail.record(wp, { itemId: id, by, kind: 'note', text: `Closed by ${nameOf(wp, by)}: PR #${prev.pr.number} is merged` });
+    return toItem(wp, saved);
   }
   // hold: true with no status parks it in Backlog (LLD §19.6d).
   const wanted = req.status ?? (req.hold === true && from !== 'backlog' ? 'backlog' : undefined);
-  let to = wanted && (wanted !== from || (opts.rewait && from === 'blocked')) ? wanted : undefined;
+  let to = wanted && (wanted !== from || (opts.rewait && from === 'blocked') || blockEdit) ? wanted : undefined;
   if (req.status && !ITEM_STATUSES.includes(req.status)) throw new BadRequest(`Unknown status ${req.status}`);
 
   // A wait on a teammate is never Blocked (owner, 2 Oct; LLD §19.6c): a review, or a handoff.
@@ -344,8 +392,9 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
   let line: string | undefined;
   if (to === 'blocked') {
     checkMove(wp, prev, from, 'blocked', req, by, next);
-    const waitingOn = req.waitingOn!;
-    const reason = req.blockedReason!.trim();
+    if (req.blockedReason !== undefined && !req.blockedReason.trim() && !next.startsAfter) throw new BadRequest('Blocked needs a reason: add blockedReason saying what you wait for, or startsAfter with the item it waits on.');
+    const waitingOn = req.waitingOn ?? next.startsAfter!;
+    const reason = req.blockedReason?.trim() ?? '';
     const wait = level === 'epic' ? 'block' : waits.classify(wp, { assigneeId: next.employeeId, waitingOn, reason, kind: req.kind });
     if (wait === 'block' && opts.rewait && from === 'blocked') return toItem(wp, prev);
     if (wait === 'review') {
@@ -373,13 +422,15 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
   if (to) {
     checkMove(wp, prev, from, to, req, by, next, converted);
     next.status = to;
-    next.statusSince = at;
+    if (to !== from) next.statusSince = at;
     if (to === 'done') next.resolution = req.resolution ?? (from === 'backlog' || from === 'ready' ? 'wont-do' : 'done');
     else delete next.resolution;
     if (to === 'blocked') {
-      next.blockedReason = req.blockedReason!.trim();
-      next.waitingOn = req.waitingOn!;
-      next.blockedSince = at;
+      const dep = next.startsAfter ? rawGet(wp, next.startsAfter) : undefined;
+      next.blockedReason = req.blockedReason?.trim() || `Starts after "${dep?.title ?? next.startsAfter}"`;
+      next.waitingOn = req.waitingOn ?? next.startsAfter!;
+      if (from !== 'blocked' || !prev.blockedSince) next.blockedSince = at;
+      if (from === 'blocked') line = `Blocker updated: waiting on ${nameOf(wp, next.waitingOn)}: ${clause(next.blockedReason)}`;
       if (req.recommendation?.trim()) next.blockedRecommendation = req.recommendation.trim();
     } else if (from === 'blocked') {
       delete next.blockedReason; delete next.waitingOn; delete next.blockedSince; delete next.blockedRecommendation;
@@ -398,6 +449,8 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
   if (to || next.employeeId !== prev.employeeId) delete next.queuedFor;
   // Held Backlog (LLD §19.6d): the owner/COO parking it, or a hold note; lifted by hold: false or leaving Backlog.
   const held = applyHold(next, to === 'backlog', req.hold, by, req.note);
+  if (held && (!prev.hold || req.hold === true)) next.holdReason = req.note?.trim() || prev.holdReason || `Parked by ${nameOf(wp, by)}`;
+  if (!held) delete next.holdReason;
   next.updatedAt = at;
   const saved = work.put(wp, prev, next, by, req.note);
   if (held && !prev.hold) trail.record(wp, { itemId: id, by, kind: 'note', text: `Held in Backlog by ${nameOf(wp, by)}: the dispatcher will not start it` });

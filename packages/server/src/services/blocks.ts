@@ -141,6 +141,8 @@ function onArrived(wp: Workplace, w: WorkItem): void {
   const state = w.status === 'done' ? 'Done' : 'In review';
   for (const b of blocked) {
     if (!b.employeeId || !isAgent(wp, b.employeeId) || !blockedOn(wp, b, w)) continue;
+    // An explicit dependency (waitingOn the item, or startsAfter) is lifecycle-watch's: it flips and tells on the finish.
+    if (b.waitingOn === w.id || b.startsAfter === w.id) continue;
     const how = tell(wp, b.employeeId,
       `${noun(w)} ${w.id} "${w.title}"${w.employeeId ? ` (${nameOf(wp, w.employeeId)})` : ''} is now ${state}. ` +
       `Your ${noun(b).toLowerCase()} ${b.id} "${b.title}" is blocked waiting on ${nameOf(wp, b.waitingOn)}: ${b.blockedReason ?? ''}\n` +

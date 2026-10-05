@@ -164,9 +164,12 @@ const INTRO = 'Manager alerts: you own stall handling for the team. For each one
   'chase whoever it waits on, or escalate with a recommendation if it is above you) and say what you did with item_comment on the item. ' +
   'Unanswered alerts go to the COO after 15 minutes.';
 
+/** A digest or a hygiene report (hygiene.ts): its own text, and it may start a session although it is a notice. */
+const report = (r: AlertRecord): boolean => r.key.startsWith('digest:') || r.key.startsWith('hygiene:');
+
 function compose(list: AlertRecord[]): string {
-  const lines = list.map(r => r.key.startsWith('digest:') ? r.text ?? r.body : `- ${r.notice ? '(FYI) ' : ''}${r.text ?? `${r.title}: ${r.body}`} [${r.itemId}]`);
-  const alerts = list.some(r => !r.key.startsWith('digest:'));
+  const lines = list.map(r => report(r) ? r.text ?? r.body : `- ${r.notice ? '(FYI) ' : ''}${r.text ?? `${r.title}: ${r.body}`} [${r.itemId}]`);
+  const alerts = list.some(r => !report(r));
   return [alerts ? INTRO : '', ...lines].filter(Boolean).join('\n');
 }
 
@@ -191,7 +194,7 @@ export function deliver(wp: Workplace, nowMs = Date.now()): number {
       // Notices never start a session of their own: they ride along with the next alert or digest.
       // "Pause all": nothing starts a session for Asha; what waits goes to her after the resume.
       if (floor.paused(wp)) return 0;
-      if (!queued.some(r => !r.notice || r.key.startsWith('digest:'))) return 0;
+      if (!queued.some(r => !r.notice || report(r))) return 0;
       if (ashaStuck(wp, nowMs)) return 0;
       employees.talk(wp, asha, text, [], { autonomous: true });
     }
