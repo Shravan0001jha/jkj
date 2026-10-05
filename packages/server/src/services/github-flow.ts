@@ -640,7 +640,13 @@ export async function merge(wp: Workplace, itemId: string, by: string): Promise<
   let mergedSha: string | undefined;
   try {
     const gh = await port.getPr(pr.number);
-    if (gh.merged) throw new Conflict(`PR #${pr.number} was merged on GitHub outside the Workplace; check it by hand.`);
+    // Already merged on GitHub (5 Oct: PR #27's only commit came in with PR #30): record it, don't alert.
+    if (gh.merged) {
+      savePr(wp, itemId, c => ({ pr: { ...c.pr!, merged: { at: now(), sha: '', by: 'github' } } }));
+      trail.record(wp, { itemId, by: 'workplace', kind: 'merged', text: `PR #${pr.number} was already merged on GitHub (its commits reached ${pr.base} another way); recorded as merged` });
+      try { lifecycleWatch.onMerged(wp, itemId, by); } catch (err) { log.warn('github', `${itemId}: after merge: ${errText(err)}`); }
+      return { mode: m, merged: true, synced: true };
+    }
     if (gh.state !== 'open') throw new Conflict(`PR #${pr.number} is closed on GitHub.`);
     if (gh.headSha !== pr.headSha) throw new Conflict(`GitHub's head for PR #${pr.number} (${gh.headSha.slice(0, 8)}) is not the reviewed commit (${pr.headSha.slice(0, 8)}).`);
     const res = await port.merge(pr.number, pr.headSha, `Merge ${pr.branch}: ${w.title} [${w.id}]`);

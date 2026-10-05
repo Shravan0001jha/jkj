@@ -626,6 +626,19 @@ test('auto-merge: a conflict with trunk reopens the story to its author instead 
   } finally { await s.done(); }
 });
 
+test('auto-merge: a PR GitHub already shows merged is recorded as merged, not alerted', async () => {
+  const s = setup('on');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'dev');
+    const fakePr = s.gh.prs[0]!; fakePr.state = 'closed'; fakePr.merged = true;   // its commits reached trunk via another PR
+    await flow.approve(s.wp, s.storyId, 'nikhil');
+    assert.equal(pr(s).merged?.by, 'github');
+    assert.ok(!coo.listItems(s.wp).some(i => /auto-merge/i.test(i.title) && i.itemId === s.storyId), 'no alert for the COO');
+  } finally { await s.done(); }
+});
+
 test('auto-merge: the sweep merges a story approved in shadow once the mode is on; shadow never merges', async () => {
   const s = setup('shadow');
   try {
