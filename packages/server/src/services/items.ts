@@ -367,7 +367,8 @@ export function update(wp: Workplace, id: string, req: UpdateItemRequest, given:
   }
   if (req.hold !== undefined) {
     if (typeof req.hold !== 'boolean') throw new BadRequest('hold must be true or false');
-    if (by !== 'owner' && by !== 'coo') throw new BadRequest('Only the owner or the COO holds an item (or lifts a hold).');
+    // The Chief of Staff parks work too (5 Oct: a story she parked for budget kept being auto-restarted).
+    if (by !== 'owner' && by !== 'coo' && by !== chiefOfStaffId(wp)) throw new BadRequest('Only the owner, the COO or the Chief of Staff holds an item (or lifts a hold).');
     if (req.hold && req.status && req.status !== 'backlog') throw new BadRequest('A hold parks an item in Backlog: move it to backlog with it, or leave the status out.');
     if (req.hold && !req.note?.trim()) throw new BadRequest('On hold needs a reason: add a note saying why it is parked and what restarts it.');
   }

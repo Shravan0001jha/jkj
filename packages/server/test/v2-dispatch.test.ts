@@ -133,8 +133,8 @@ test('held Backlog is never started: a COO/owner move, a hold note, or hold: tru
     assert.equal(dispatch.dispatch(wp, 'dev').action, 'none');
     assert.equal(fake.sessions.length, 0);
 
-    // Only the owner or the COO holds an item.
-    assert.throws(() => items.update(wp, h1.id, { hold: false }, 'dev'), /owner or the COO/);
+    // Only the owner, the COO or the Chief of Staff holds an item.
+    assert.throws(() => items.update(wp, h1.id, { hold: false }, 'dev'), /owner, the COO or the Chief of Staff/);
     assert.throws(() => items.update(wp, side.id, { hold: true, status: 'ready' }, 'owner'), /Backlog/);
     // Leaving Backlog clears the hold; the owner lifting it makes the item work again.
     items.update(wp, h3.id, { status: 'ready' }, 'owner');

@@ -117,3 +117,23 @@ test('the new tools are in the always-allowed list', () => {
     assert.ok((WORKPLACE_TOOLS as readonly string[]).includes(name), name);
   }
 });
+
+test('item_update hold: the Chief of Staff parks an item (backlog, held) and the dispatcher leaves it; nobody else can', async () => {
+  const fake = installFakeRuntime();
+  const { wp, tmp } = testWorkplace();
+  try {
+    const epic = items.create(wp, { level: 'epic', title: 'Music' }, 'owner');
+    const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Stream-first playback', assigneeId: 'mira' }, 'asha');
+    items.update(wp, s.id, { status: 'in-progress' }, 'mira');
+    const mira = await toolsFor(wp, 'mira');
+    assert.match(await mira.call('item_update', { itemId: s.id, status: 'backlog', hold: true }), /only the Chief of Staff/);
+    const asha = await toolsFor(wp, 'asha');
+    await asha.call('item_update', { itemId: s.id, hold: true, note: 'after launch work' });
+    const raw = items.require$(wp, s.id) as unknown as { status: string; hold?: boolean };
+    assert.equal(raw.status, 'backlog');
+    assert.equal(raw.hold, true);
+    await asha.call('item_update', { itemId: s.id, hold: false });
+    assert.equal((items.require$(wp, s.id) as unknown as { hold?: boolean }).hold ?? false, false);
+    await mira.client.close(); await asha.client.close();
+  } finally { fake.restore(); tmp.cleanup(); }
+});
