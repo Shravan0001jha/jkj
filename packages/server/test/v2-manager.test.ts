@@ -39,6 +39,12 @@ function setup() {
   return { ...t, fake, epic, story, done: () => { fake.restore(); t.tmp.cleanup(); } };
 }
 
+/** A new reason on an item already Blocked (the API sets it only on the move in). */
+function reblock(wp: Wp, id: string, reason: string): void {
+  const row = wp.db.prepare('select json from work where id = ?').get(id) as { json: string };
+  wp.db.prepare('update work set json = ? where id = ?').run(JSON.stringify({ ...JSON.parse(row.json), blockedReason: reason }), id);
+}
+
 const stalled = (id: string, title: string, key = `idle:${id}:t0`) =>
   ({ key, itemId: id, title: `Stalled: ${title}`, body: `Dev's story has had no activity for 12 min.`, subjectId: 'dev' });
 
@@ -142,7 +148,100 @@ test('the manager digest: every 20 minutes while work is active; nothing when th
     await tick();
     assert.ok(told(fake, 'asha').some(t => t.includes('Manager digest')));
     assert.equal(manager.digest(wp, t0 + 70 * MIN), null, 'not again within 20 minutes');
-    assert.ok(manager.digest(wp, t0 + 81 * MIN), 'again after 20 minutes');
+    reblock(wp, blocked.id, 'Needs the vendor build v2.');
+    assert.ok(manager.digest(wp, t0 + 81 * MIN), 'again after 20 minutes, when something changed');
+  } finally {
+    done();
+  }
+});
+
+test('the manager digest repeats nothing: only items whose state changed or that crossed a new age threshold; nothing new, no digest', async () => {
+  const { wp, fake, story, done } = setup();
+  try {
+    const t0 = Date.now();
+    const blocked = story('QA the bundle', 'nikhil');
+    items.update(wp, blocked.id, { status: 'in-progress' }, 'nikhil');
+    items.update(wp, blocked.id, { status: 'blocked', blockedReason: 'Needs the vendor build.', waitingOn: 'external' }, 'nikhil');
+    const review = story('Mic gate', 'owner');
+    items.update(wp, review.id, { status: 'in-progress' }, 'owner');
+    items.update(wp, review.id, { status: 'in-review', reviewerId: 'nikhil' }, 'owner');
+    story('Dance tempo', 'dev');
+    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`paused:${spend.dayOf()}:employee:dev`, new Date().toISOString());
+
+    const first = manager.digest(wp, t0 + 61 * MIN)!;
+    assert.match(first, /Dance tempo/);
+    assert.match(first, /Mic gate/);
+    assert.match(first, /QA the bundle/);
+    assert.doesNotMatch(first, /unchanged/, 'nothing was delivered before: everything is new');
+    await tick();
+    const session = of(fake, 'asha')[0]!;
+    fake.onSend = s => queueMicrotask(() => s.result()); // each digest message is a turn she finishes
+    session.result();
+    await tick(30);
+    const heard = () => told(fake, 'asha').filter(t => t.includes('Manager digest')).length;
+    assert.equal(heard(), 1);
+
+    // Twenty minutes on and nothing changed: no digest, no message, no session.
+    assert.equal(manager.digest(wp, t0 + 82 * MIN), null, 'nothing new: no digest');
+    await tick(30);
+    assert.equal(heard(), 1, 'Asha is not told the same thing again');
+    assert.equal(of(fake, 'asha').length, 1);
+
+    // The blocked reason changes: only that item, the rest in one line.
+    reblock(wp, blocked.id, 'Vendor build slipped to Monday.');
+    const second = manager.digest(wp, t0 + 103 * MIN)!;
+    assert.ok(second, 'a changed item: a digest');
+    assert.match(second, /Blocked:.*QA the bundle.*Vendor build slipped to Monday\./s);
+    assert.doesNotMatch(second, /Mic gate|Dance tempo/, 'unchanged items are not repeated');
+    assert.match(second, /2 items unchanged since your last digest/);
+    await tick(30);
+    assert.equal(heard(), 2);
+
+    // A reviewer change is a state change too.
+    items.update(wp, review.id, { reviewerId: 'dev' }, 'owner');
+    const third = manager.digest(wp, t0 + 124 * MIN)!;
+    assert.match(third, /Mic gate.*with Dev/s);
+    assert.doesNotMatch(third, /Dance tempo/);
+    assert.match(third, /unchanged since your last digest/);
+    await tick(30);
+
+    // Nothing changed, but the review and the block have now been waiting past the next threshold (4 h).
+    assert.equal(manager.digest(wp, t0 + 145 * MIN), null);
+    const fourth = manager.digest(wp, t0 + 245 * MIN)!;
+    assert.ok(fourth, 'a newly crossed age threshold: a digest');
+    assert.match(fourth, /Mic gate/);
+    assert.match(fourth, /QA the bundle/);
+    assert.match(fourth, /1 item unchanged since your last digest/);
+    assert.doesNotMatch(fourth, /Dance tempo/);
+    await tick(30);
+  } finally {
+    done();
+  }
+});
+
+test('the manager digest: an undelivered digest does not count as told', async () => {
+  const { wp, fake, story, done } = setup();
+  try {
+    const t0 = Date.now();
+    const blocked = story('QA the bundle', 'nikhil');
+    items.update(wp, blocked.id, { status: 'in-progress' }, 'nikhil');
+    items.update(wp, blocked.id, { status: 'blocked', blockedReason: 'Needs the vendor build.', waitingOn: 'external' }, 'nikhil');
+    // Asha is mid-turn: the first digest waits in the queue.
+    manager.alert(wp, stalled(blocked.id, blocked.title), t0);
+    await tick();
+    assert.ok(manager.digest(wp, t0 + 61 * MIN));
+    assert.ok(manager.list(wp).some(r => r.key.startsWith('digest:') && r.state === 'queued'));
+    // Still not delivered twenty minutes later: the next digest says it all again and replaces the queued one.
+    const again = manager.digest(wp, t0 + 82 * MIN)!;
+    assert.match(again, /QA the bundle/);
+    assert.equal(manager.list(wp).filter(r => r.key.startsWith('digest:') && r.state === 'queued').length, 1, 'one digest waits, not two');
+    of(fake, 'asha')[0]!.result();
+    await tick(30);
+    assert.equal(manager.deliver(wp, t0 + 83 * MIN), 1);
+    await tick(30);
+    assert.equal(told(fake, 'asha').filter(t => t.includes('Manager digest')).length, 1);
+    assert.equal(manager.digest(wp, t0 + 103 * MIN), null, 'delivered now: nothing new');
+    await tick(30);
   } finally {
     done();
   }
