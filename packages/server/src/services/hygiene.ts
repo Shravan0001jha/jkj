@@ -14,6 +14,21 @@ import { githubMode } from './review-policy.js';
 import { chiefOfStaffId, epicOf, humanDuration, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { rowsJson } from './store.js';
 import { log } from '../util/logger.js';
+import { branchFor, git } from './worktrees.js';
+
+/** Commits on the story's branch ahead of its trunk; true when it can't tell (keep the rule strict). */
+function hasCommits(wp: Workplace, w: WorkItem): boolean {
+  const emp = w.employeeId ? wp.org.employees.find(e => e.id === w.employeeId) : undefined;
+  if (!emp) return true;
+  const branch = branchFor(emp, w.id);
+  try { git(emp.workspace.repo, ['rev-parse', '--git-dir']); } catch { return true; }   // not a repo here: can't tell
+  try {
+    git(emp.workspace.repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
+  } catch { return false; }   // no branch at all: nothing to submit
+  try {
+    return Number(git(emp.workspace.repo, ['rev-list', '--count', `${emp.workspace.branch ?? 'main'}..${branch}`]).trim()) > 0;
+  } catch { return true; }
+}
 
 /**
  * The hygiene monitor (docs/HLD-jira-lifecycle.md §4): is the board true? A sweep every 2 minutes
@@ -147,7 +162,9 @@ export function conditions(wp: Workplace): Condition[] {
     // (d) In review needs a reviewer, and in mode `on` a story needs its PR.
     if (w.status === 'in-review') {
       if (!w.reviewerId) out.push({ key: `bad-review:${w.id}`, rule: 'bad-review', w, what: 'In review with no reviewer', fix: `name a reviewer (item_update ${w.id} reviewerId <reviewer>)`, since: w.statusSince ?? w.updatedAt });
-      else if (!w.pr && levelOf(w) === 'story' && githubMode(wp) === 'on') out.push({ key: `bad-review:${w.id}`, rule: 'bad-review', w, what: 'In review with no pull request', fix: `${nameOf(wp, w.employeeId)} submits with report_done so the Workplace opens the PR, or it goes back to In progress`, since: w.statusSince ?? w.updatedAt });
+      // Only a story with code to submit needs its PR: a sign-off wait on a no-code story (a live check
+      // with a teammate, flag_stall kind review) is In review without one (Asha, 5 Oct).
+      else if (!w.pr && levelOf(w) === 'story' && githubMode(wp) === 'on' && hasCommits(wp, w)) out.push({ key: `bad-review:${w.id}`, rule: 'bad-review', w, what: 'In review with no pull request', fix: `${nameOf(wp, w.employeeId)} submits with report_done so the Workplace opens the PR, or it goes back to In progress`, since: w.statusSince ?? w.updatedAt });
     }
     // (e) Done with an open PR that is not approved: the board says Done, GitHub says otherwise.
     if (w.status === 'done' && (w.resolution ?? 'done') === 'done' && w.pr && !w.pr.merged && trueStatus(wp, w) === 'done') {

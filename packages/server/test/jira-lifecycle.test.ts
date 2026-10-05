@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -249,12 +253,24 @@ test('(d) In review with no reviewer, or (mode on) a story with no PR', async ()
     const a = story('No reviewer', 'tara');
     patch(a.id, { status: 'in-review', state: 'review', statusSince: new Date().toISOString() });
     writeGithubMode(wp, 'on');
+    // Kabir's repo: one story branch with a commit (code to submit), another story with no branch.
+    const repo = mkdtempSync(join(tmpdir(), 'hyg-'));
+    const g = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe' });
+    g('init', '-q', '-b', 'trunk'); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'base');
+    const kabir = wp.org.employees.find(e => e.id === 'kabir')!;
+    kabir.workspace = { ...kabir.workspace, repo, branch: 'trunk' };
     const b = story('No PR', 'kabir');
+    g('checkout', '-q', '-b', `emp/kabir/${b.id}`); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'work'); g('checkout', '-q', 'trunk');
     items.update(wp, b.id, { status: 'in-progress' }, 'kabir');
     items.update(wp, b.id, { status: 'in-review', reviewerId: 'dev' }, 'kabir');
+    const c = story('Live check with a teammate, no code', 'kabir');
+    items.update(wp, c.id, { status: 'in-progress' }, 'kabir');
+    items.update(wp, c.id, { status: 'in-review', reviewerId: 'tara' }, 'kabir');
     const d = hygiene.sweep(wp, Date.now()).violations.filter(v => v.rule === 'bad-review');
     assert.match(d.find(v => v.itemId === a.id)!.what, /no reviewer/);
     assert.match(d.find(v => v.itemId === b.id)!.what, /no pull request/);
+    assert.ok(!d.some(v => v.itemId === c.id), 'a sign-off wait with no code needs no PR');
+    rmSync(repo, { recursive: true, force: true });
   } finally { await done(); }
 });
 
