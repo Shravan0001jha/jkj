@@ -197,6 +197,10 @@ test('a session never runs in a main checkout, gets the guard hook and the forbi
     writeFileSync(join(s.options.cwd, 'services', 'agent-svc', 'phone.py'), 'p');
     writeFileSync(join(s.options.cwd, 'mobile', 'ok.txt'), 'fine');
     assert.deepEqual(employees.foreignChanges(wp, tara, { path: s.options.cwd, branch: '', base: 'feat/mobile', repo: repo.root, created: true }), []);
+    // A contributor charter's change passes too, as the edit hook already allows it (Dev, app.py, 5 Oct).
+    wp.org.map.unshift({ kind: 'path', key: 'iris-mobile:services/agent-svc/phone.py', primary: 'experts', contributors: [...tara.charterIds], consulted: [] });
+    writeFileSync(join(s.options.cwd, 'services', 'agent-svc', 'phone.py'), 'contributed');
+    assert.deepEqual(employees.foreignChanges(wp, tara, { path: s.options.cwd, branch: '', base: 'feat/mobile', repo: repo.root, created: true }), []);
   } finally {
     fake.restore();
     tmp.cleanup();

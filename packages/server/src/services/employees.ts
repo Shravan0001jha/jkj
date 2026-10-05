@@ -312,7 +312,8 @@ export function foreignChanges(wp: Workplace, emp: Employee, worktree: Worktree)
   const repoId = wp.org.repos.find(r => r.root === worktree.repo)?.id ?? 'iris';
   return changedFiles(worktree.path, worktree.base).filter(f => {
     const owner = resolveOwner(wp.org.map, { kind: 'path', key: `${repoId}:${f}` });
-    return !owner || !emp.charterIds.includes(owner.primary);
+    // A contributor charter may change the path too (map.yaml): Dev's conversation fix in agent-svc/app.py, 5 Oct.
+    return !owner || !(emp.charterIds.includes(owner.primary) || owner.contributors.some(c => emp.charterIds.includes(c)));
   });
 }
 
