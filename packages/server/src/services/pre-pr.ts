@@ -41,7 +41,14 @@ export function passes(r: PrePrResult | null, sha: string): boolean {
 
 /** Null when `r` is a passing result for exactly `sha`; else the one refusal sentence. */
 export function refusal(r: PrePrResult | null, sha: string): string | null {
-  return passes(r, sha) ? null : PRE_PR_REFUSAL;
+  if (passes(r, sha)) return null;
+  // Say WHY (5 Oct: Mira re-ran a partial --only run three times against the generic sentence).
+  const why = !r ? `no scripts/pre-pr.sh result for ${sha.slice(0, 7)}`
+    : r.sha !== sha ? `the result is for ${r.sha.slice(0, 7)}, not ${sha.slice(0, 7)}`
+    : !r.ok ? 'the last run failed'
+    : r.mode !== 'full' ? `the last run was a ${r.mode} run, which doesn't count`
+    : `the last run was partial (--only ${Array.isArray(r.only) ? r.only.join(',') : String(r.only)}), which doesn't count`;
+  return `${PRE_PR_REFUSAL} Now: ${why}. Run plain scripts/pre-pr.sh (no --only, no --fast) on the head commit.`;
 }
 
 /** The workplace/tests description: "mobile-android unit 16 passed · iris-api unit 379 passed — run by tara on bbd2d88". */

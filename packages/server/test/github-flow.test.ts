@@ -447,7 +447,9 @@ test('pre-PR gate: report_done and request_review refuse without a passing pre-p
     writePrePr(s.wt, head, { mode: 'fast' });
     assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
     writePrePr(s.wt, head, { only: ['agent-svc'] });
-    assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
+    const partial = JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content);
+    assert.match(partial, refusal);
+    assert.match(partial, /partial \(--only agent-svc\)/, 'the refusal says why');
     // Not in review yet: request_review never submits, it points at report_done.
     assert.match(JSON.stringify((await client.callTool({ name: 'request_review', arguments: { assignmentId: s.storyId } })).content), /Not requested: .* not in review.*call report_done/);
     // Passed on the head: recorded, pushed, workplace/tests green.
