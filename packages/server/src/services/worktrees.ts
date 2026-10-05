@@ -124,10 +124,14 @@ export function excludeLinked(path: string): void {
   appendFileSync(file, `${prefix}# Added by the Iris Workplace: untracked build/test dirs, never committed\n${missing.join('\n')}\n`);
 }
 
+/** Regenerable build output, restored rather than auto-saved (globs, repo-relative). */
+export const BUILD_OUTPUT = ['services/agent-svc/dist-*/**', 'services/agent-svc/build-*/**', 'services/agent-svc/dist/**', 'services/agent-svc/build/**', 'desktop/release/**', 'desktop/dist/**'];
+
 /**
  * Put an existing worktree on `branch`. Uncommitted work on the previous
  * branch (tracked changes and untracked files, minus the excluded dirs) is
- * committed to that branch first: no stash that can be lost, nothing discarded.
+ * committed to that branch first: no stash that can be lost, nothing discarded except
+ * regenerable build output (BUILD_OUTPUT), which is restored to the branch's version.
  */
 function switchTo(employee: Employee, path: string, branch: string, base: string, workItemId: string | null): void {
   const current = currentBranch(path);
@@ -139,6 +143,13 @@ function switchTo(employee: Employee, path: string, branch: string, base: string
       const busy = ['MERGE_HEAD', 'REBASE_HEAD', 'CHERRY_PICK_HEAD', 'rebase-merge', 'rebase-apply']
         .find(f => existsSync(resolve(path, git(path, ['rev-parse', '--git-path', f]).trim())));
       if (busy) fail(`${current} has an unfinished merge, rebase or cherry-pick (${busy}); finish or abort it by hand`);
+      // Build output is regenerable and never a WIP (5 Oct: two auto-saves committed a rebuilt
+      // dist-arm64 from a live check; the revert then tripped the secret scan on yt-dlp's bundled keys).
+      // Put it back to the branch's version first, so only real work is auto-saved.
+      for (const spec of BUILD_OUTPUT) {
+        try { git(path, ['checkout', '-q', '--', `:(glob)${spec}`]); } catch { /* nothing tracked there */ }
+        try { git(path, ['clean', '-fdq', '--', `:(glob)${spec}`]); } catch { /* nothing untracked there */ }
+      }
       // info/exclude (excludeLinked) keeps the venvs and linked dirs out of this add.
       git(path, ['add', '-A']);
       git(path, ['commit', '-q', '--no-verify', '-m', `WIP (auto-saved by the Workplace before switching to ${workItemId ?? 'general'})`]);

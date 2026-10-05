@@ -53,6 +53,9 @@ test('a dirty tree on another branch is auto-saved to that branch, then switched
     writeFileSync(join(parked.path, 'services', 'agent-svc', 'new_gate.py'), 'new\n');
     mkdirSync(join(parked.path, '.venv-x64', 'bin'), { recursive: true });
     writeFileSync(join(parked.path, '.venv-x64', 'bin', 'python'), '#!');
+    // Rebuilt build output from a live check is restored, never auto-saved (5 Oct).
+    mkdirSync(join(parked.path, 'services', 'agent-svc', 'dist-arm64', 'iris-agent'), { recursive: true });
+    writeFileSync(join(parked.path, 'services', 'agent-svc', 'dist-arm64', 'iris-agent', 'iris-agent'), 'binary');
 
     const p0 = ensureWorktree(workDir, emp, 'as_p0');
     assert.equal(p0.branch, 'emp/dev/as_p0');
