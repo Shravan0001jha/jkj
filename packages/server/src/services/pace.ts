@@ -3,6 +3,7 @@ import { readOauthToken } from './employees.js';
 import * as employees from './employees.js';
 import { now } from './store.js';
 import { log } from '../util/logger.js';
+import * as ceiling from './usage-ceiling.js';
 
 /**
  * Weekly pacing (owner, 3 Oct): the subscription's weekly limit is spread evenly over the week.
@@ -18,7 +19,7 @@ export const PER_DAY = 0.14;
 const DAY_MS = 86_400_000;
 const KEY = 'pace:until';
 
-export interface Reading { utilization: number; resetsAtMs: number }
+export interface Reading { utilization: number; resetsAtMs: number; fiveHour?: { utilization: number; resetsAtMs: number } }
 export interface Verdict { dayIndex: number; allowance: number; over: boolean; nextDayMs: number }
 
 /** Pure: day N of the week (1-based), its allowance, and whether the reading is past it. */
@@ -97,7 +98,10 @@ export async function probe(wp: Workplace): Promise<Reading | null> {
     const u = Number(res.headers.get('anthropic-ratelimit-unified-7d-utilization'));
     const reset = Number(res.headers.get('anthropic-ratelimit-unified-7d-reset'));
     if (!res.headers.has('anthropic-ratelimit-unified-7d-utilization') || !Number.isFinite(u) || !reset) return null;
-    return { utilization: u, resetsAtMs: reset * 1000 };
+    const u5 = Number(res.headers.get('anthropic-ratelimit-unified-5h-utilization'));
+    const reset5 = Number(res.headers.get('anthropic-ratelimit-unified-5h-reset'));
+    const fiveHour = res.headers.has('anthropic-ratelimit-unified-5h-utilization') && Number.isFinite(u5) && reset5 ? { utilization: u5, resetsAtMs: reset5 * 1000 } : undefined;
+    return { utilization: u, resetsAtMs: reset * 1000, ...(fiveHour ? { fiveHour } : {}) };
   } catch (err) {
     log.warn('pace', `probe failed: ${err instanceof Error ? err.message : err}`);
     return null;
@@ -105,9 +109,11 @@ export async function probe(wp: Workplace): Promise<Reading | null> {
 }
 
 /** Probe now and then every `minutes`; returns the stop function. */
-export function start(wp: Workplace, minutes = 15): () => void {
+export function start(wp: Workplace, minutes = 5): () => void {
   const run = async () => {
     const r = await probe(wp);
+    // The usage ceiling runs whether pacing is on or off (owner, 5 Oct).
+    if (r) { try { ceiling.apply(wp, r); } catch (err) { log.warn('ceiling', String(err)); } }
     if (r) { try { apply(wp, r); } catch (err) { log.warn('pace', String(err)); } }
     else if (!holdUntil(wp) && wp.db.prepare('select 1 from settings where key = ?').get(KEY)) {
       // No reading, but the hold expired: the next day has begun regardless.

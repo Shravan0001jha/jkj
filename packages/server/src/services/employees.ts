@@ -707,6 +707,19 @@ export function pauseScope(wp: Workplace, scope: string): void {
   }
 }
 
+/** The usage ceiling: interrupt every running unattended turn (the owner's and the COO's talk is not touched). Returns how many. */
+export function interruptUnattended(wp: Workplace, note: string): number {
+  let n = 0;
+  for (const s of allSessions()) {
+    const a = runs.getRunAgent(s.agentId);
+    if (!a || a.status !== 'running' || s.ownerTalk) continue;
+    runs.note(s.agentId, 'Paused', note);
+    void runs.interruptRun(s.agentId).catch(() => {});
+    n += 1;
+  }
+  return n;
+}
+
 export function unpauseAll(wp: Workplace): void {
   for (const e of wp.org.employees) {
     if (stateOverride.get(e.id) === 'paused') setState(wp, e.id, sessionsOf(e.id).length ? 'working' : 'idle');
