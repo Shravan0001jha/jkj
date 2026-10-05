@@ -607,6 +607,25 @@ test('auto-merge: a GitHub merge failure alerts the COO once, forces nothing, is
   } finally { await s.done(); }
 });
 
+test('auto-merge: a conflict with trunk reopens the story to its author instead of leaving it Done', async () => {
+  const s = setup('on');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'dev');
+    s.gh.failNext('merge', 1, 'GitHub PUT /repos/o/r/pulls/1/merge failed (405): Pull Request has merge conflicts');
+    await flow.approve(s.wp, s.storyId, 'nikhil');
+    const w = rawGet(s.wp, s.storyId)!;
+    assert.equal(w.status, 'in-progress', 'back with the author');
+    assert.equal(w.employeeId, 'kabir');
+    assert.equal(pr(s).merged, undefined);
+    assert.ok(!coo.listItems(s.wp).some(i => /auto-merge/i.test(i.title) && i.itemId === s.storyId), 'not left for the COO');
+    const calls = s.gh.count('merge');
+    await flow.autoMergeSweep(s.wp);
+    assert.equal(s.gh.count('merge'), calls, 'not retried');
+  } finally { await s.done(); }
+});
+
 test('auto-merge: the sweep merges a story approved in shadow once the mode is on; shadow never merges', async () => {
   const s = setup('shadow');
   try {

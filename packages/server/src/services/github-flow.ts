@@ -720,11 +720,34 @@ export async function autoMerge(wp: Workplace, itemId: string): Promise<AutoMerg
     });
     return 'merged';
   } catch (err) {
-    blockAuto(wp, rawGet(wp, itemId) ?? w, errText(err));
+    const why = errText(err);
+    // A conflict with trunk is the author's to resolve, not the COO's (as_muuuumbovh9zc, 5 Oct): the
+    // story was Done by approval but never merged, so it goes back to them In progress.
+    if (/merge conflict/i.test(why) && reopenForConflict(wp, rawGet(wp, itemId) ?? w)) return 'blocked';
+    blockAuto(wp, rawGet(wp, itemId) ?? w, why);
     return 'blocked';
   } finally {
     autoInFlight.delete(itemId);
   }
+}
+
+/** Done by approval, not merged because it conflicts with trunk: back to its author, who merges trunk and resubmits. */
+function reopenForConflict(wp: Workplace, w: WorkItem): boolean {
+  const pr = w.pr!;
+  if (!w.employeeId || !isAgent(wp, w.employeeId)) return false;
+  const note = `PR #${pr.number} conflicts with ${pr.base}, so it was not merged. Merge origin/${pr.base} into ${pr.branch}, resolve the conflict keeping both sides' intent, ` +
+    'run scripts/pre-pr.sh, then report_done: the new commit needs both approvals again.';
+  try {
+    items.update(wp, w.id, { status: 'in-progress', assigneeId: w.employeeId, note: `Reopened by the Workplace: ${note}` }, 'workplace');
+  } catch (err) {
+    log.warn('github', `${w.id}: reopen after a merge conflict failed: ${errText(err)}`);
+    return false;
+  }
+  putSetting(wp, AUTO_BLOCKED_PREFIX + w.id, pr.headSha);
+  trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'note', text: `Automatic merge hit a conflict with ${pr.base}; reopened for ${nameOf(wp, w.employeeId)}` });
+  tellAuthor(wp, w.id, 'workplace', note);
+  log.warn('github', `${w.id}: PR #${pr.number} conflicts with ${pr.base}; reopened for ${w.employeeId}`);
+  return true;
 }
 
 /** The sweep's half for merges: every approved, unmerged story in `on`. Returns the merged ids. */

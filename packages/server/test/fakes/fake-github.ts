@@ -30,14 +30,15 @@ export class FakeGitHub implements GitHubPort {
     execFileSync('git', ['clone', '-q', '--bare', trunkRepo, this.bare], { stdio: 'ignore' });
   }
 
-  failNext(op: Op, n = 1): void { this.failures.set(op, (this.failures.get(op) ?? 0) + n); }
+  failNext(op: Op, n = 1, message?: string): void { this.failures.set(op, (this.failures.get(op) ?? 0) + n); if (message) this.failMessage.set(op, message); }
+  private readonly failMessage = new Map<Op, string>();
 
   private enter(op: Op, ...args: unknown[]): void {
     this.calls.push({ op, args });
     const left = this.failures.get(op) ?? 0;
     if (left > 0) {
       this.failures.set(op, left - 1);
-      throw new Error(`fake GitHub: ${op} failed (503)`);
+      throw new Error(this.failMessage.get(op) ?? `fake GitHub: ${op} failed (503)`);
     }
   }
 
