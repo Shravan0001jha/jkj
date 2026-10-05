@@ -19,9 +19,17 @@ import { log } from '../util/logger.js';
  * room.ts for the Team Room context layer).
  */
 
-/** One reply turn per mention: do not re-wake the same employee about the same thread inside this window. */
+/** A mention carries the whole comment (its details), up to this. */
 export const MENTION_TEXT_MAX = 4000;
-const MENTION_COOLDOWN_MS = 10 * 60_000;
+/** One reply turn per mention: do not re-wake the same employee about the same thread inside this window. */
+export let MENTION_COOLDOWN_MS = 10 * 60_000;
+
+/**
+ * Item mentions inside the cooldown are held, not dropped (5 Oct: the COO's "your live window is
+ * open" to Dev fell 4 min after Nikhil's mention and never arrived): they go as one turn when the
+ * window ends. The owner and the COO are never held.
+ */
+const held = new Map<string, { comments: { by: string; text: string }[]; timer: NodeJS.Timeout }>();
 
 const lastTurnAt = new Map<string, number>(); // `${employeeId}:${threadId}` -> epoch ms
 
@@ -49,20 +57,39 @@ function handleComment(wp: Workplace, comment: Comment): void {
     const emp = wp.org.employees.find(e => e.id === id);
     if (!emp || emp.virtual) continue;
     const key = `${id}:item:${comment.itemId}`;
-    if (Date.now() - (lastTurnAt.get(key) ?? 0) < MENTION_COOLDOWN_MS) continue;
-    lastTurnAt.set(key, Date.now());
     const who = comment.by === 'owner' ? 'the owner' : (wp.org.employees.find(e => e.id === comment.by)?.name ?? comment.by);
-    const prompt = [
-      `${who} mentioned you on "${title}" (${comment.itemId}):`,
-      '',
-      // The whole comment: a long one is stored as a short line + details, and the short line ends "…" (5 Oct).
-      `"${(comment.details ?? comment.text).slice(0, MENTION_TEXT_MAX)}"`,
-      '',
-      'Reply with item_comment on that item, in a few short lines, only if you have something to say. Use status_of if you need the item\'s state.',
-    ].join('\n');
-    try { employees.talk(wp, id, prompt, [], { autonomous: true, probe: true }); }
-    catch (err) { log.warn('mentions', `${id} on ${comment.itemId}: ${err instanceof Error ? err.message : err}`); }
+    // The whole comment: a long one is stored as a short line + details, and the short line ends "…" (5 Oct).
+    const one = { by: who, text: (comment.details ?? comment.text).slice(0, MENTION_TEXT_MAX) };
+    const urgent = comment.by === 'owner' || coo.isCoo(comment.by);
+    const since = Date.now() - (lastTurnAt.get(key) ?? 0);
+    if (!urgent && since < MENTION_COOLDOWN_MS) {
+      const h = held.get(key);
+      if (h) { h.comments.push(one); continue; }
+      const timer = setTimeout(() => {
+        const due = held.get(key);
+        held.delete(key);
+        if (due) deliverItemMention(wp, id, key, comment.itemId, title, due.comments);
+      }, MENTION_COOLDOWN_MS - since);
+      timer.unref?.();
+      held.set(key, { comments: [one], timer });
+      continue;
+    }
+    deliverItemMention(wp, id, key, comment.itemId, title, [one]);
   }
+}
+
+function deliverItemMention(wp: Workplace, id: string, key: string, itemId: string, title: string, comments: { by: string; text: string }[]): void {
+  lastTurnAt.set(key, Date.now());
+  const head = comments.length === 1
+    ? [`${comments[0]!.by} mentioned you on "${title}" (${itemId}):`, '', `"${comments[0]!.text}"`]
+    : [`You were mentioned ${comments.length} times on "${title}" (${itemId}):`, ...comments.flatMap(c => ['', `${c.by}: "${c.text}"`])];
+  const prompt = [
+    ...head,
+    '',
+    'Reply with item_comment on that item, in a few short lines, only if you have something to say. Use status_of if you need the item\'s state.',
+  ].join('\n');
+  try { employees.talk(wp, id, prompt, [], { autonomous: true, probe: true }); }
+  catch (err) { log.warn('mentions', `${id} on ${itemId}: ${err instanceof Error ? err.message : err}`); }
 }
 
 function handle(wp: Workplace, thread: RoomThread, message: RoomMessage): void {
@@ -162,6 +189,10 @@ export function notifyTalkMention(wp: Workplace, spec: { threadId: string; threa
 }
 
 /** Test-only: let a test move past the cooldown without waiting for it. */
+export function setCooldownForTest(ms: number): void { MENTION_COOLDOWN_MS = ms; }
+
 export function resetForTest(): void {
   lastTurnAt.clear();
+  for (const h of held.values()) clearTimeout(h.timer);
+  held.clear();
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as items from '../src/services/items.js';
 import * as trail from '../src/services/trail.js';
 import { intentFor } from '../src/services/push.js';
-import { wireMentionReplies, resetForTest } from '../src/services/mentions.js';
+import { wireMentionReplies, resetForTest, setCooldownForTest } from '../src/services/mentions.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
 import { testWorkplace } from './fakes/workplace.js';
 
@@ -57,6 +57,7 @@ test('an @mention in an item comment wakes that employee with the item as contex
     off();
     fake.restore();
     tmp.cleanup();
+    setCooldownForTest(10 * 60_000);
   }
 });
 
@@ -77,5 +78,35 @@ test('a long comment reaches the mentioned employee whole, not its shortened lin
     off();
     fake.restore();
     tmp.cleanup();
+    setCooldownForTest(10 * 60_000);
+  }
+});
+
+test('a mention inside the cooldown is held and delivered when it ends; the COO and the owner are never held', async () => {
+  setCooldownForTest(300);
+  const fake = installFakeRuntime();
+  const { wp, tmp } = testWorkplace();
+  const off = wireMentionReplies(wp);
+  try {
+    resetForTest();
+    const epic = items.create(wp, { level: 'epic', title: 'Voice' }, 'owner');
+    const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Ack latency', assigneeId: 'dev' }, 'asha');
+    trail.comment(wp, s.id, { by: 'nikhil', text: '@dev first' });
+    await tick();
+    const heard = () => fake.sessions.flatMap(x => [String(x.options.prompt), ...x.sent.map(m => m.text)]).join('\n---\n');
+    trail.comment(wp, s.id, { by: 'mira', text: '@dev second, inside the cooldown' });
+    await tick();
+    assert.doesNotMatch(heard(), /second, inside the cooldown/, 'held, not delivered yet');
+    trail.comment(wp, s.id, { by: 'coo', text: '@dev your live window is open' });
+    await tick();
+    assert.match(heard(), /live window is open/, 'the COO is never held');
+    await new Promise(r => setTimeout(r, 400));
+    await tick();
+    assert.match(heard(), /second, inside the cooldown/, 'the held one arrives when the window ends');
+  } finally {
+    off();
+    fake.restore();
+    tmp.cleanup();
+    setCooldownForTest(10 * 60_000);
   }
 });
