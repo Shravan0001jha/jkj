@@ -88,6 +88,7 @@ test('the owner\'s personal folders are off limits even to read, for every tool 
     join(home, 'Pictures', 'p.png'), join(home, 'Movies', 'm.mov'), join(home, 'Music', 's.mp3'),
     join(home, 'Library', 'Mail', 'x'), join(home, 'Library', 'Messages', 'x'), join(home, 'Library', 'Calendars', 'x'),
     join(home, 'Library', 'Application Support', 'AddressBook', 'x'), join(home, 'Library', 'Containers', 'x'),
+    join(home, 'iris-ops', 'state', 'test_token'), join(home, 'Library', 'Application Support', 'Iris', 'credentials.json'), join(home, '.aws', 'credentials'), join(home, '.ssh', 'id_ed25519'),
   ];
   for (const p of paths) {
     assert.equal(guardTool('Read', { file_path: p }, ctx).decision, 'deny', p);
@@ -97,6 +98,7 @@ test('the owner\'s personal folders are off limits even to read, for every tool 
   assert.equal(guardCommand(`cat ${join(home, 'Documents', 'taxes.pdf')}`, ctx).decision, 'deny');
   assert.equal(guardCommand('ls ~/Desktop', ctx).decision, 'deny');
   assert.equal(guardCommand('cat $HOME/Downloads/x', ctx).decision, 'deny');
+  assert.equal(guardCommand('TOKEN=$(cat ~/iris-ops/state/test_token) xcodebuild test', ctx).decision, 'deny', 'secrets stay with the COO');
   // Reading ordinary code is still free, and a live-check window never reopens these folders.
   assert.equal(guardTool('Read', { file_path: '/Users/o/claude-dev/README.md' }, ctx).decision, 'allow');
   const open = { ...ctx, liveWindowUntil: Date.now() + 60_000 };

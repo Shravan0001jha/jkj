@@ -52,6 +52,9 @@ const PROTECTED_RELATIVE = [
   'Documents', 'Desktop', 'Downloads', 'Pictures', 'Movies', 'Music',
   'Library/Mail', 'Library/Messages', 'Library/Calendars',
   'Library/Application Support/AddressBook', 'Library/Containers',
+  // Secrets and the owner's own Iris profile (5 Oct: an employee read a long-lived account token from
+  // ~/iris-ops/state and wrote it into a /tmp log). Test plumbing secrets stay with the COO.
+  'iris-ops', 'Library/Application Support/Iris', '.aws', '.ssh', '.claude',
 ];
 
 const PROTECTED_ABS = PROTECTED_RELATIVE.map(rel => resolve(homedir(), rel));
