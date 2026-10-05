@@ -187,7 +187,10 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
   if (isMainCheckout(wp.org, worktree.path)) throw new BadRequest(`Refusing to run ${emp.name} in a main checkout (${worktree.path}).`);
   const repoId = wp.org.repos.find(r => r.root === emp.workspace.repo)?.id ?? 'iris';
   const guard: GuardContext = {
-    worktree: worktree.path, repoId, charterIds: emp.charterIds, map: wp.org.map, mainCheckouts: wp.org.repos.map(r => r.root),
+    worktree: worktree.path, repoId, charterIds: emp.charterIds,
+    // Read live, so POST /api/coo/reload-org reaches running sessions too (5 Oct).
+    get map() { return wp.org.map; },
+    mainCheckouts: wp.org.repos.map(r => r.root),
     ...(coo.liveWindowUntil(wp, employeeId) ? { liveWindowUntil: coo.liveWindowUntil(wp, employeeId)! } : {}),
     ...(!budget.ok ? { readOnly: `${emp.name} is paused by the ${budget.scope} spend cap: read and answer, but do not edit or run commands until the owner says "continue" in this talk` } : {}),
   };

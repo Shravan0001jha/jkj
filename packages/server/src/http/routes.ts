@@ -458,6 +458,13 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     }),
 
     // "Pause all" (owner, 4 Oct): nothing unattended starts while it is on; talk still works.
+    // Reload the org (map.yaml, charters, roles) without a restart (5 Oct: map fixes waited on live windows).
+    // New sessions and guard checks read wp.org, so a fixed map applies at once.
+    r('POST', '/api/coo/reload-org', (req, res) => {
+      requireLocal(req);
+      const org = wp.reloadOrg();
+      json(res, 200, { employees: org.employees.length, charters: org.charters.size, mapEntries: org.map.length });
+    }),
     r('GET', '/api/coo/floor', (req, res) => { requireLocal(req); json(res, 200, floor.state(wp)); }),
     r('POST', '/api/coo/floor', async (req, res) => {
       requireLocal(req);
