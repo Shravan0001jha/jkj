@@ -225,7 +225,7 @@ test('the idle alert: queued focus work and idle 10+ minutes; a spend cap is the
     dispatch.sweep(wp, t0 + 11 * MIN);
     assert.equal(alerts().length, 1);
     assert.equal(alerts()[0]!.title, 'Dev idle with 1 queued item');
-    assert.match(alerts()[0]!.body, /^Dev idle with 1 queued item: paused by the employee:dev spend cap/);
+    assert.match(alerts()[0]!.body, /^Dev idle with 1 queued item \(next: \S+\): paused by the employee:dev spend cap/);
     assert.equal(alerts()[0]!.itemId, s.id);
     dispatch.sweep(wp, t0 + 20 * MIN);
     dispatch.sweep(wp, t0 + 40 * MIN);
@@ -256,7 +256,8 @@ test('the idle alert for any other reason goes to Asha first; the COO hears only
     assert.deepEqual(dispatch.sweep(wp, t0 + 11 * MIN).alerts, ['dev']);
     await tick();
     const alert = manager.list(wp).find(r => r.title === 'Dev idle with 1 queued item')!;
-    assert.match(alert.body, /Dev has "Mic gate" In progress/);
+    assert.match(alert.body, /Dev has "Mic gate" \(\S+\) In progress/);
+    assert.match(alert.body, new RegExp(`\\(next: ${alert.itemId}\\)`));
     assert.ok(told(fake, 'asha').some(t => /Dev idle with 1 queued item/.test(t)), 'Asha is told');
     assert.equal(coo.listItems(wp).filter(i => /idle with/.test(i.title)).length, 0, 'not the COO');
     manager.escalate(wp, t0 + 20 * MIN);

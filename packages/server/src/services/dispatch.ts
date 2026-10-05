@@ -80,7 +80,7 @@ export function busyReason(wp: Workplace, employeeId: string, nowMs = Date.now()
     }
   }
   const wip = inProgress(wp, employeeId)[0];
-  if (wip) return `${name} has "${wip.title}" In progress`;
+  if (wip) return `${name} has "${wip.title}" (${wip.id}) In progress`;
   return null;
 }
 
@@ -251,10 +251,12 @@ export function idleAlerts(wp: Workplace, nowMs = Date.now()): string[] {
     const name = nameOf(wp, id);
     const reason = reasonsOf(wp).get(id) ?? busyReason(wp, id, nowMs) ?? 'no reason recorded';
     const title = `${name} idle with ${n} queued item${n === 1 ? '' : 's'}`;
+    // The alert sits on the next queued item; the reason may quote another story, so each names its own id.
+    const anchor = reviews[0] ?? stories[0]!.id;
     // Asha first (LLD §19.6e); a cap is a spend decision above her, so the COO hears of that at once.
     const capped = /spend cap|concurrency cap/.test(reason);
     manager.alert(wp, {
-      key: `idle-emp:${id}:${ep.since}`, itemId: reviews[0] ?? stories[0]!.id, title, body: `${title}: ${reason}.`, by: 'workplace', subjectId: id,
+      key: `idle-emp:${id}:${ep.since}`, itemId: anchor, title, body: `${title} (next: ${anchor}): ${reason}.`, by: 'workplace', subjectId: id,
       ...(capped ? { decision: 'spend' as const } : {}),
     }, nowMs);
     put(wp, key, JSON.stringify({ ...ep, alerted: true }));
