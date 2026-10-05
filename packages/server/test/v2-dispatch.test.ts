@@ -118,7 +118,7 @@ test('held Backlog is never started: a COO/owner move, a hold note, or hold: tru
     const h2 = story('Weather line', 'dev');
     items.update(wp, h2.id, { status: 'backlog', note: 'parked until the P0 ships' }, 'asha');
     const h3 = story('Speaker primitive', 'dev');
-    items.update(wp, h3.id, { hold: true }, 'owner');
+    items.update(wp, h3.id, { hold: true, note: 'needs the owner at the Mac' }, 'owner');
     const side = story('Side quest', 'dev', other.id);
     items.update(wp, side.id, { status: 'backlog', note: 'Moved to Backlog by Asha: not in focus' }, 'asha');
 

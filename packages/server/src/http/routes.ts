@@ -35,6 +35,7 @@ import * as githubFlow from '../services/github-flow.js';
 import * as talk from '../services/talk.js';
 import * as talkStore from '../services/talk-store.js';
 import * as evidence from '../services/evidence.js';
+import * as hygiene from '../services/hygiene.js';
 import type { Telegram } from '../services/telegram.js';
 import type { Tunnel } from '../services/tunnel.js';
 import type { Push } from '../services/push.js';
@@ -549,6 +550,8 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     /* ---------- v2: the plan (LLD §19.8) — owner-facing, ordinary auth, relay allowed ---------- */
     r('GET', '/api/plan', (_req, res, url) => json(res, 200, items.plan(wp, url.searchParams.get('view') === 'board' ? 'board' : undefined))),
     r('GET', '/api/focus', (_req, res) => json(res, 200, items.getFocus(wp))),
+    // Is the board true (docs/HLD-jira-lifecycle.md §5): the current violations and the clean percentage.
+    r('GET', '/api/hygiene', (_req, res) => json(res, 200, hygiene.report(wp))),
     r('POST', '/api/focus', async (req, res) => json(res, 200, items.setFocus(wp, strs((await readJson(req))['epicIds']), actorOf(req)))),
     r('GET', '/api/items', (_req, res, url) => {
       const q = (k: string) => url.searchParams.get(k) ?? undefined;

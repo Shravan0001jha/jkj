@@ -1234,8 +1234,8 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         }),
       /* ---------- v2: the plan (LLD §19.12) ---------- */
       tool('item_create', 'Create an epic (Chief of Staff only; no parentId, optional targetDate YYYY-MM-DD; the COO decides focus), a story under an epic (Chief of Staff or the epic owner) or a task under a story (the story\'s assignee). One item per outcome: an open item with the same title under the same parent is returned instead of a copy.',
-        { level: z.enum(['epic', 'story', 'task']), parentId: z.string().optional(), title: z.string(), body: z.string().optional(), assigneeId: z.string().optional(), points: z.number().int().optional(), acceptance: z.array(z.string()).optional(), targetDate: z.string().optional() },
-        async ({ level, parentId, title, body, assigneeId, points, acceptance, targetDate }) => {
+        { level: z.enum(['epic', 'story', 'task']), parentId: z.string().optional(), title: z.string(), body: z.string().optional(), assigneeId: z.string().optional(), points: z.number().int().optional(), acceptance: z.array(z.string()).optional(), targetDate: z.string().optional(), type: z.enum(['bug']).optional().describe('bug: a story-level bug (level story).'), startsAfter: z.string().optional().describe('The item id this one starts after.') },
+        async ({ level, parentId, title, body, assigneeId, points, acceptance, targetDate, type, startsAfter }) => {
           const emp = employee(wp, employeeId);
           const isCos = emp.charterIds.includes('chief-of-staff') || (emp.level === 0 && !emp.virtual);
           // Epics (owner, 3 Oct: the team does creation, the COO decides): the Chief of Staff files
@@ -1255,22 +1255,23 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           const twin = items.duplicateOf(wp, parentId, title);
           if (twin) return ok(`Already exists as ${twin.id} (${twin.status}); work on that one.`);
           try {
-            const it = items.create(wp, { level, parentId, title, ...(body ? { body } : {}), ...(assigneeId ? { assigneeId } : {}), ...(points ? { points: points as never } : {}), ...(acceptance ? { acceptance } : {}) }, employeeId);
+            const it = items.create(wp, { level, parentId, title, ...(type ? { type } : {}), ...(startsAfter ? { startsAfter } : {}), ...(body ? { body } : {}), ...(assigneeId ? { assigneeId } : {}), ...(points ? { points: points as never } : {}), ...(acceptance ? { acceptance } : {}) }, employeeId);
             return ok(`Created ${it.id} (${it.level}, ${it.status}).`);
           } catch (err) { return ok(`Not created: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('item_update', 'Move one of your items (start, block with a reason and who you wait on, send to review with a reviewer), or set its points. You never mark your own work done; the reviewer does. ' +
-        'Blocked is only for a wait on the owner (waitingOn owner, with your recommendation), the COO (coo) or someone outside the team (external). ' +
+        'Blocked is only for a wait on the owner (waitingOn owner, with your recommendation), the COO (coo), the release (release), another item (its id), or someone outside the team (external); it always needs blockedReason. ' +
+        'startsAfter <itemId> records a dependency: the item starts after that one finishes, and flips to Ready by itself then. While it stays Blocked you can update waitingOn, blockedReason and startsAfter to keep the blocker current. ' +
         'Waiting on a teammate is never Blocked: status blocked with waitingOn a teammate becomes In review with them reviewing when it is a review or sign-off (kind review), ' +
         'or hands the item to them when it is their work (kind work): they work on it and give it back with item_handback.',
-        { itemId: z.string(), status: z.enum(['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked']).optional(), blockedReason: z.string().optional(), waitingOn: z.string().optional(), kind: z.enum(['review', 'work']).optional(), recommendation: z.string().optional(), reviewerId: z.string().optional(), points: z.number().int().optional(), note: z.string().optional(), assigneeId: z.string().optional().describe('Chief of Staff only: route the item to this employee.') },
-        async ({ itemId, status, blockedReason, waitingOn, kind, recommendation, reviewerId, points, note, assigneeId }) => {
+        { itemId: z.string(), status: z.enum(['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked']).optional(), blockedReason: z.string().optional(), waitingOn: z.string().optional(), startsAfter: z.string().optional().describe('The item id this one starts after; "" clears it.'), kind: z.enum(['review', 'work']).optional(), recommendation: z.string().optional(), reviewerId: z.string().optional(), points: z.number().int().optional(), note: z.string().optional(), assigneeId: z.string().optional().describe('Chief of Staff only: route the item to this employee.') },
+        async ({ itemId, status, blockedReason, waitingOn, startsAfter, kind, recommendation, reviewerId, points, note, assigneeId }) => {
           if (status === 'blocked' && waitingOn === 'owner' && !recommendation?.trim()) return ok('Not changed: blocked on the owner raises a decision in his Inbox; give your recommendation.');
           if (assigneeId && !isChiefOfStaff(wp, employeeId)) return ok('Not changed: only the Chief of Staff routes an item to someone; hand it over with status blocked, waitingOn and kind work instead.');
           try {
-            const it = items.update(wp, itemId, { ...(assigneeId ? { assigneeId } : {}), ...(status ? { status } : {}), ...(blockedReason ? { blockedReason } : {}), ...(waitingOn ? { waitingOn } : {}), ...(kind ? { kind } : {}), ...(recommendation ? { recommendation } : {}), ...(reviewerId ? { reviewerId } : {}), ...(points ? { points: points as never } : {}), ...(note ? { note } : {}) }, employeeId);
+            const it = items.update(wp, itemId, { ...(assigneeId ? { assigneeId } : {}), ...(status ? { status } : {}), ...(startsAfter !== undefined ? { startsAfter } : {}), ...(blockedReason ? { blockedReason } : {}), ...(waitingOn ? { waitingOn } : {}), ...(kind ? { kind } : {}), ...(recommendation ? { recommendation } : {}), ...(reviewerId ? { reviewerId } : {}), ...(points ? { points: points as never } : {}), ...(note ? { note } : {}) }, employeeId);
             if (status === 'blocked' && it.status !== 'blocked') return ok(notBlocked(wp, it));
-            return ok(`${it.id} is ${it.status}.`);
+            return ok(`${it.id} is ${it.trueStatus ? it.trueStatus : it.status}${it.blocker ? `, waiting on ${it.blocker.label} (${it.blocker.status})` : ''}.`);
           } catch (err) { return ok(`Not changed: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('item_comment', 'Comment on an item (a few short lines; mention people with @id). Status and notes about the work go here, not in chat.',
@@ -1285,7 +1286,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         async ({ itemId, reason, waitingOn, kind, recommendation }) => {
           const id = itemId ?? session().assignmentId;
           if (!id) return ok('Name the item: no item is attached to this session.');
-          if (waitingOn && !isWaitable(wp, waitingOn)) return ok(`waitingOn must be an employee id, coo, owner or external; "${waitingOn}" is none.`);
+          if (waitingOn && !isWaitable(wp, waitingOn)) return ok(`waitingOn must be an employee id, an item id, coo, owner, release or external; "${waitingOn}" is none.`);
           if (waitingOn === 'owner' && !recommendation?.trim()) return ok('Not flagged: waiting on the owner raises a decision in his Inbox; give your recommendation.');
           try {
             const before = rawGet(wp, id)?.status;

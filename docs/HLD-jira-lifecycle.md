@@ -66,6 +66,9 @@ on it flips to Ready (held Backlog stays held) and its assignee is told, once.
 
 - Blocked without `waitingOn` + `blockedReason` (and no `startsAfter`): refused.
 - On hold (`hold: true`) without a `note`: refused. Implicit holds keep the note as `holdReason`.
+- While an item stays Blocked, `waitingOn`, `blockedReason` and `startsAfter` can be edited in place
+  (the block keeps its `blockedSince`; a teammate wait still converts to a review or a handoff).
+- `startsAfter` must name an existing story/task and must not loop.
 - In review without a reviewer: refused (unchanged).
 - PR merged: the story is set Done (resolution done) if it was not, trueStatus Merged, and Asha is told
   to close it. A sweep repairs a merge that happened outside the Workplace.
