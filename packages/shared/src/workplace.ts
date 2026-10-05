@@ -328,6 +328,32 @@ export interface EvidenceRunRecord {
   note?: string;
   /** The shared copy (one self-contained HTML in the evidence bucket); absent when the upload failed. */
   share?: EvidenceShare;
+  /** The iris-api + cloud-agent commit staging ran for this run (absent on runs before 5 Oct). */
+  server?: EvidenceServer;
+}
+
+/**
+ * The server side of a run: a story that changes services/iris-api or services/cloud-agent deploys
+ * its own commit to staging first (`deployed`); any other run notes what staging was on.
+ */
+export interface EvidenceServer {
+  /** The commit staging's iris-api and cloud-agent were deployed from; null when unknown. */
+  sha: string | null;
+  /** This run deployed it (the story's own commit). */
+  deployed: boolean;
+  /** Set when another run redeployed staging while this one ran: the new commit, or null (unknown). */
+  changedTo?: string | null;
+}
+
+/** What staging's iris-api and cloud-agent run, as the Workplace's evidence deploys left it. */
+export interface StagingServerState {
+  /** unknown: no evidence run has deployed it; failed: the last deploy failed (staging may be half-deployed). */
+  state: 'unknown' | 'deploying' | 'deployed' | 'failed';
+  sha: string | null;
+  itemId?: string;
+  run?: string;
+  at?: string;
+  note?: string;
 }
 
 /** A presigned link to a run's shared copy; re-signed from `key` when it expires. */

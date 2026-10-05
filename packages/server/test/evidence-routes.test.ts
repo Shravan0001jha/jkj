@@ -96,6 +96,11 @@ test('GET /api/evidence/<item>/<run>/…: serves the report and its files; refus
     const state = JSON.parse(q.body) as { slots: unknown[]; queued: unknown[]; recent: unknown[] };
     assert.equal(state.slots.length, 2);
     assert.deepEqual(state.queued, []);
+    assert.equal((state as unknown as { staging: { state: string } }).staging.state, 'unknown', 'which server commit staging runs');
+    const staging = await rawGet(port, '/api/coo/evidence/staging');
+    assert.equal(staging.status, 200);
+    assert.deepEqual(JSON.parse(staging.body), { state: 'unknown', sha: null });
+    assert.equal((await rawGet(port, '/api/coo/evidence/staging', { 'x-via-tunnel': '1' })).status, 400);
     assert.equal((await rawGet(port, '/api/coo/evidence', { 'x-via-tunnel': '1' })).status, 400, 'the queue is for this Mac only');
   } finally {
     await running.stop();

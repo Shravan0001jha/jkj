@@ -91,6 +91,8 @@ export interface EvidenceConfig {
   keepBuilds: number;
   /** Where each app lives in the repo; its tree is the build cache key. */
   appPaths: { android: string; ios: string };
+  /** A story whose diff from the trunk touches these deploys its own commit to staging before the suite. */
+  serverPaths: string[];
 }
 
 export interface GitHubConfig {
@@ -175,6 +177,7 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
       slots: 2,
       keepBuilds: 4,
       appPaths: { android: 'mobile/android', ios: 'mobile/ios' },
+      serverPaths: ['services/iris-api', 'services/cloud-agent'],
     },
   };
 }

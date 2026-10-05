@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { EvidenceConfig } from '../config.js';
+import { linkUntracked } from './worktrees.js';
 
 /**
  * The three things run_evidence drives on this Mac (docs/LLD-evidence.md §2): the robot runner, the
@@ -64,7 +65,22 @@ export interface Staging {
   ensureUp(): Promise<void>;
 }
 
-/** The app did not build at this commit. */
+/** `scripts/staging.sh deploy` from the server-owned checkout at the story's commit. */
+export interface ServerDeployRequest {
+  /** The Iris repo the checkout belongs to (its .venv is linked in for the deploy's local tests). */
+  repo: string;
+  /** The checkout, at `sha`. */
+  checkout: string;
+  sha: string;
+  log: string;
+  onSpawn?: (pid: number) => void;
+}
+
+export interface ServerDeployer {
+  /** Deploys the checkout's iris-api and cloud-agent to staging. Throws with the reason when it does not. */
+  deploy(r: ServerDeployRequest): Promise<void>;
+}
+
 /**
  * Staging "in use" while an evidence run is queued or running (owner, 4 Oct). `hold(until)` touches a
  * successful request (which alone keeps the idle stopper away) carrying the lock's expiry, and writes
@@ -354,5 +370,32 @@ export class RealStaging implements Staging {
       }
     }
     throw new Error(`staging did not answer by name within ${Math.round(this.nameWaitMs / 60_000)} min (last staging.sh start exit ${ran.code}${ran.timedOut ? ', timed out' : ''}; see ${this.logFile})`);
+  }
+}
+
+/* ---------- the story's server code on staging ---------- */
+
+/**
+ * `bash <checkout>/scripts/staging.sh deploy`: the checkout's own deploy scripts push its iris-api and
+ * cloud-agent to staging (staging.sh exports STAGING_HOST, the one switch deploy-api.sh and
+ * deploy-agent.sh have for a non-production target, via scripts/deploy-target.sh; it is also set
+ * here). Staging must already be up (ensureUp). Allow-listed environment, so no Workplace token
+ * reaches it.
+ */
+export class RealServerDeployer implements ServerDeployer {
+  constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 25 * 60_000) {}
+
+  async deploy(r: ServerDeployRequest): Promise<void> {
+    const script = join(r.checkout, 'scripts', 'staging.sh');
+    if (!existsSync(script)) throw new Error(`there is no scripts/staging.sh at ${r.sha.slice(0, 8)} to deploy with`);
+    // deploy-api.sh and deploy-agent.sh run their tests with ../../.venv first.
+    linkUntracked(r.repo, r.checkout);
+    const env = childEnvFor({ STAGING_HOST: new URL(this.cfg.stagingUrl).host });
+    const ran = await runLogged('bash', [script, 'deploy'], { cwd: r.checkout, env, logFile: r.log, timeoutMs: this.timeoutMs, ...(r.onSpawn ? { onSpawn: r.onSpawn } : {}) });
+    if (ran.code !== 0) {
+      const lines = ran.tail.split('\n').map(l => l.trim()).filter(Boolean);
+      const why = [...lines].reverse().find(l => /❌|error|fail|refus|not running/i.test(l)) ?? lines.at(-1) ?? '';
+      throw new Error(`staging.sh deploy ${ran.timedOut ? 'timed out' : `exit ${ran.code ?? ran.signal}`}: ${why.slice(0, 200)}`);
+    }
   }
 }

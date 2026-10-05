@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AppBuilder, BuildRequest, EvidenceRunner, RunnerOutcome, RunnerRequest, Staging } from '../../src/services/evidence-ports.js';
+import type { AppBuilder, BuildRequest, EvidenceRunner, RunnerOutcome, RunnerRequest, ServerDeployer, ServerDeployRequest, Staging } from '../../src/services/evidence-ports.js';
 import { BuildError } from '../../src/services/evidence-ports.js';
 
 /**
@@ -127,4 +127,23 @@ export class FakeLock {
   releases = 0;
   async hold(untilMs: number): Promise<void> { this.holds.push(untilMs); }
   async release(): Promise<void> { this.releases += 1; }
+}
+
+/** `staging.sh deploy` from the evidence checkout, faked: records the commit the checkout was on. */
+export class FakeDeployer implements ServerDeployer {
+  readonly calls: ServerDeployRequest[] = [];
+  /** The commit the checkout was on at each deploy. */
+  readonly heads: string[] = [];
+  /** How many suite runs had started when each deploy ran (a deploy comes before its run). */
+  readonly runsBefore: number[] = [];
+  /** When set, the next deploy fails with this message. */
+  failNext: string | null = null;
+  constructor(private readonly headOf: (checkout: string) => string = () => '', private readonly runsSoFar: () => number = () => 0) {}
+
+  async deploy(r: ServerDeployRequest): Promise<void> {
+    this.calls.push(r);
+    this.heads.push(this.headOf(r.checkout));
+    this.runsBefore.push(this.runsSoFar());
+    if (this.failNext) { const why = this.failNext; this.failNext = null; throw new Error(why); }
+  }
 }

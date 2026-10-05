@@ -495,6 +495,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     // run_evidence (docs/LLD-evidence.md §5): the queue for the COO (loopback only), and the reports
     // for the owner and reviewers (same auth as every /api route, so the tunnel and the token work).
     r('GET', '/api/coo/evidence', (req, res) => { requireLocal(req); json(res, 200, evidence.state(wp)); }),
+    r('GET', '/api/coo/evidence/staging', (req, res) => { requireLocal(req); json(res, 200, evidence.stagingServer(wp)); }),
     r('GET', '/api/evidence/:item/:run(?:/(.*))?', (_req, res, _url, [item, run, rest]) => {
       const file = evidence.reportFile(wp, item ?? '', run ?? '', rest);
       if (!file) return json(res, 404, { error: 'No such report file.' });

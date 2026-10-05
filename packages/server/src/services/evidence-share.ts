@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
-import type { EvidenceRunRecord, EvidenceShare } from '@jkj/shared';
+import type { EvidenceRunRecord, EvidenceServer, EvidenceShare } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import { underTest } from './test-guard.js';
 
@@ -106,6 +106,14 @@ function inRun(runDir: string, ref: string): string | null {
   return file.startsWith(runDir + sep) && existsSync(file) && statSync(file).isFile() ? file : null;
 }
 
+/** Which server the run tested against: the story's own deployed commit, or what staging was on. */
+export function serverLine(srv: EvidenceServer): string {
+  if (srv.deployed) return `server: iris-api and cloud-agent at ${(srv.sha ?? '').slice(0, 8)} on staging`;
+  const was = srv.sha ? `staging was on iris-api and cloud-agent at ${srv.sha.slice(0, 8)}` : 'staging\'s iris-api and cloud-agent commit is unknown';
+  const moved = srv.changedTo === undefined ? '' : `; staging was redeployed${srv.changedTo ? ` to ${srv.changedTo.slice(0, 8)}` : ''} during the run`;
+  return `server: ${was} (this story does not change them)${moved}`;
+}
+
 /**
  * One self-contained HTML: index.html with every screenshot it shows inlined as base64, links to
  * files not carried (logs, full-size images) disabled, and summary.txt appended. Null without a report.
@@ -130,7 +138,7 @@ export function bundle(runDir: string, rec: EvidenceRunRecord, title: string): s
   html = html.replace(/(<a\b[^>]*?\bhref=)(["'])([^"'#][^"']*)\2/gi, (all, pre: string, q: string, ref: string) =>
     /^[a-z]+:/i.test(ref) ? all : `${pre}${q}#${q} title=${q}${esc(ref)} is on the Mac, not in this copy${q}`);
   const header = `<div style="font:13px system-ui,sans-serif;padding:8px 12px;background:#f3f4f6;color:#111;border-bottom:1px solid #ddd">` +
-    `Iris Workplace evidence: ${esc(title)} — ${esc(rec.sha.slice(0, 12))} — ${esc(rec.state)} (${rec.passed} passed, ${rec.failed} failed) — run ${esc(rec.run)}</div>`;
+    `Iris Workplace evidence: ${esc(title)} — ${esc(rec.sha.slice(0, 12))} — ${esc(rec.state)} (${rec.passed} passed, ${rec.failed} failed) — run ${esc(rec.run)}${rec.server ? ` — ${esc(serverLine(rec.server))}` : ''}</div>`;
   const tail = `<section style="font:13px system-ui,sans-serif;padding:12px"><h2>summary.txt</h2><pre style="white-space:pre-wrap">${esc(summary)}</pre></section>`;
   if (!html) return `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title>${header}${tail}`;
   html = /<body[^>]*>/i.test(html) ? html.replace(/<body[^>]*>/i, m => m + header) : header + html;

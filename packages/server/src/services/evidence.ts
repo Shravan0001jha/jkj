@@ -2,10 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, sep } from 'node:path';
-import type { EvidenceRunRecord, EvidenceState, WorkItem } from '@jkj/shared';
+import type { EvidenceRunRecord, EvidenceServer, EvidenceState, StagingServerState, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
-import type { AppBuilder, EvidenceRunner, Platform, RunnerOutcome, Staging, StagingLock } from './evidence-ports.js';
-import { BUILDER_VERSION, BuildError, killGroupIfOurs, RealBuilder, RealRunner, RealStaging, RealStagingLock } from './evidence-ports.js';
+import type { AppBuilder, EvidenceRunner, Platform, RunnerOutcome, ServerDeployer, Staging, StagingLock } from './evidence-ports.js';
+import { BUILDER_VERSION, BuildError, killGroupIfOurs, RealBuilder, RealRunner, RealServerDeployer, RealStaging, RealStagingLock } from './evidence-ports.js';
 import * as work from './work.js';
 import * as trail from './trail.js';
 import * as coo from './coo.js';
@@ -28,6 +28,12 @@ import { log } from '../util/logger.js';
  * (the runner's device slots). A run checks out the head in a server-owned checkout for its slot,
  * builds the apps (cached by the app's tree; one build at a time), runs the runner, and records the
  * outcome on the item, on the PR's workplace/evidence status (shadow/on) and in the caller's session.
+ *
+ * A story that changes services/iris-api or services/cloud-agent (its diff from the trunk merge-base)
+ * first deploys THAT commit's server code to staging (`scripts/staging.sh deploy` from the run's
+ * checkout), so a server fix is proved before production. Staging is shared, so at most one such run
+ * at a time; app-only runs still run beside it and note which server commit staging was on. Staging
+ * is left as the last server run left it (GET /api/coo/evidence/staging says what that is).
  */
 
 export const DESKTOP_REFUSAL = 'Mac desktop checks need a live window from the COO; ask on the item.';
@@ -81,11 +87,13 @@ export interface EvidenceJob {
   phase?: string;
   result?: EvidenceRunRecord;
   delivered?: 'session' | 'item';
+  /** The commit changes the server (iris-api, cloud-agent): it deploys to staging, one such run at a time. */
+  server?: boolean;
 }
 
 /* ---------- the ports ---------- */
 
-export interface EvidencePorts { runner: EvidenceRunner; builder: AppBuilder; staging: Staging; lock: StagingLock }
+export interface EvidencePorts { runner: EvidenceRunner; builder: AppBuilder; staging: Staging; lock: StagingLock; deployer: ServerDeployer }
 
 const ports = new WeakMap<Workplace, Partial<EvidencePorts>>();
 
@@ -100,6 +108,8 @@ function portsOf(wp: Workplace): EvidencePorts {
   p.staging ??= new RealStaging(cfg, join(cfg.dir, '_logs', 'staging.log'));
   // Tests never touch staging or SSM: without a fake, the lock does nothing.
   p.lock ??= underTest() ? { hold: async () => undefined, release: async () => undefined } : new RealStagingLock(cfg);
+  // Nor deploy to it.
+  p.deployer ??= underTest() ? { deploy: async () => { throw new Error('no staging deploys under test'); } } : new RealServerDeployer(cfg);
   ports.set(wp, p);
   return p as EvidencePorts;
 }
@@ -114,12 +124,14 @@ interface Engine {
   scheduled: boolean;
   /** The "in use" heartbeat while anything is queued or running. */
   lockTimer?: ReturnType<typeof setInterval>;
+  /** Server-touching runs, one at a time: deploy + suite (staging is shared). */
+  serverChain: Promise<unknown>;
 }
 
 const engines = new WeakMap<Workplace, Engine>();
 function engine(wp: Workplace): Engine {
   let e = engines.get(wp);
-  if (!e) { e = { jobs: new Map(), queue: [], active: new Map(), stopped: false, scheduled: false }; engines.set(wp, e); }
+  if (!e) { e = { jobs: new Map(), queue: [], active: new Map(), stopped: false, scheduled: false, serverChain: Promise.resolve() }; engines.set(wp, e); }
   return e;
 }
 
@@ -224,7 +236,8 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
       : `Already running for ${ctx.head.slice(0, 8)}: don't wait for it; the summary comes back to you and onto the story when it finishes.` };
   }
 
-  const job: EvidenceJob = { id: newJobId(), itemId: w.id, by: spec.by, platforms: plats, features: feats, state: 'queued', requestedSha: ctx.head, queuedAt: now(), attempts: 0 };
+  const server = serverChange(wp, ctx.repo, ctx.trunk, ctx.head).touched;
+  const job: EvidenceJob = { id: newJobId(), itemId: w.id, by: spec.by, platforms: plats, features: feats, state: 'queued', requestedSha: ctx.head, queuedAt: now(), attempts: 0, ...(server ? { server } : {}) };
   persist(wp, job);
   e.queue.push(job.id);
   const position = e.queue.length;
@@ -234,6 +247,7 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
     ok: true, job, position,
     message: `Evidence run queued (position ${position}): ${plats.join(',')} / ${feats.join(',')} on ${ctx.head.slice(0, 8)} (${ctx.branch}). ` +
       'It runs on the Mac\'s simulators against the staging server and links a report with screenshots to your story. ' +
+      (server ? 'Your commit changes the server, so it deploys your iris-api and cloud-agent to staging first (one such run at a time). ' : '') +
       'Don\'t wait for it: the summary comes back to you and onto the story when it finishes.',
   };
 }
@@ -275,8 +289,12 @@ function pump(wp: Workplace): void {
   if (e.stopped) { keepStagingInUse(wp); return; }
   for (let slot = 1; slot <= wp.config.evidence.slots && e.queue.length; slot++) {
     if (e.active.has(slot)) continue;
-    const job = e.jobs.get(e.queue.shift()!);
-    if (!job) continue;
+    // The first queued job that may start: a server-touching one waits while another holds staging.
+    const serverBusy = [...e.active.values()].some(a => a.job.server);
+    const at = e.queue.findIndex(id => !(serverBusy && e.jobs.get(id)?.server));
+    if (at < 0) break;
+    const job = e.jobs.get(e.queue.splice(at, 1)[0]!);
+    if (!job) { slot--; continue; }
     const entry = { job, promise: Promise.resolve() };
     e.active.set(slot, entry);
     entry.promise = execute(wp, job, slot)
@@ -353,6 +371,49 @@ function pruneBuilds(wp: Workplace, platform: Platform): void {
   for (const m of metas.slice(wp.config.evidence.keepBuilds)) rmSync(join(dir, m.d), { recursive: true, force: true });
 }
 
+/* ---------- the server on staging ---------- */
+
+/** The scripts a server deploy runs: a story that changes them is never deployed automatically. */
+export const DEPLOY_SCRIPTS: readonly string[] = ['scripts/staging.sh', 'scripts/deploy-target.sh', 'scripts/deploy-api.sh', 'scripts/deploy-agent.sh'];
+
+/**
+ * Whether the story's diff from the trunk merge-base touches the server (config serverPaths), and
+ * which deploy scripts it changes. No merge base: treated as not touching (storyOf already demands
+ * commits past the trunk, so there is one).
+ */
+export function serverChange(wp: Workplace, repo: string, trunk: string, sha: string): { touched: boolean; scripts: string[] } {
+  try {
+    const base = git(repo, ['merge-base', trunk, sha]).trim();
+    const touched = git(repo, ['diff', '--name-only', base, sha, '--', ...wp.config.evidence.serverPaths]).trim() !== '';
+    const scripts = touched ? git(repo, ['diff', '--name-only', base, sha, '--', ...DEPLOY_SCRIPTS]).split('\n').map(l => l.trim()).filter(Boolean) : [];
+    return { touched, scripts };
+  } catch { return { touched: false, scripts: [] }; }
+}
+
+const STAGING_SERVER_KEY = 'evidence:staging-server';
+
+/** What staging's iris-api and cloud-agent run, as the last evidence deploy left it. */
+export function stagingServer(wp: Workplace): StagingServerState {
+  const row = wp.db.prepare('select value from settings where key = ?').get(STAGING_SERVER_KEY) as { value: string } | undefined;
+  if (row) { try { return JSON.parse(row.value) as StagingServerState; } catch { /* unreadable: unknown */ } }
+  return { state: 'unknown', sha: null };
+}
+
+function setStagingServer(wp: Workplace, st: StagingServerState): void {
+  wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(STAGING_SERVER_KEY, JSON.stringify(st));
+}
+
+/** The server commit staging is known to run, or null. */
+const knownSha = (st: StagingServerState): string | null => (st.state === 'deployed' ? st.sha : null);
+
+/** One server-touching run (deploy + suite) at a time. */
+function underServerLock<T>(wp: Workplace, fn: () => Promise<T>): Promise<T> {
+  const e = engine(wp);
+  const next = e.serverChain.then(fn);
+  e.serverChain = next.catch(() => undefined);
+  return next;
+}
+
 /* ---------- the checkout ---------- */
 
 function checkoutFor(wp: Workplace, repo: string, slot: number): string {
@@ -377,7 +438,7 @@ function prepareCheckout(repo: string, path: string, sha: string): void {
 
 /* ---------- one run ---------- */
 
-interface Outcome { state: EvidenceState; passed: number; failed: number; failures: string[]; note?: string }
+interface Outcome { state: EvidenceState; passed: number; failed: number; failures: string[]; note?: string; server?: EvidenceServer }
 
 async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<void> {
   const cfg = wp.config.evidence;
@@ -401,9 +462,17 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
   const logs = join(cfg.dir, '_logs', job.itemId, job.run);
   mkdirSync(logs, { recursive: true });
   const onSpawn = (pid: number): void => { job.pid = pid; persist(wp, job); };
+  const errorOf = (note: string): Outcome => ({ state: 'error', passed: 0, failed: 0, failures: [], note });
+
+  // The commit decides, not the request: the branch may have moved since it was queued.
+  const server = serverChange(wp, ctx.repo, ctx.trunk, sha);
+  if (server.touched !== !!job.server) { if (server.touched) job.server = true; else delete job.server; persist(wp, job); }
 
   let outcome: Outcome | undefined;
-  try {
+  if (server.scripts.length) {
+    outcome = errorOf(`this story changes the deploy scripts (${server.scripts.join(', ')}), so its server code is not deployed to staging automatically; ask the COO to deploy it by hand`);
+  }
+  if (!outcome) try {
     const checkout = checkoutFor(wp, ctx.repo, slot);
     prepareCheckout(ctx.repo, checkout, sha);
     const stagingUp = p.staging.ensureUp().then(() => null, (err: unknown) => errText(err));
@@ -452,9 +521,34 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
       if (down) outcome = { state: 'error', passed: 0, failed: 0, failures: [], note: `staging is not available: ${down}` };
     }
     if (!outcome) {
-      job.state = 'running'; job.phase = 'running the suite'; persist(wp, job);
-      const res = await p.runner.run({ checkout, platforms: job.platforms, features: job.features, api: cfg.stagingUrl, apps, slot, out: runDir, log: join(logs, 'runner.log'), onSpawn });
-      outcome = readOutcome(runDir, res);
+      const suite = async (): Promise<Outcome> => {
+        let srv: EvidenceServer;
+        if (job.server) {
+          job.phase = 'deploying the server to staging'; persist(wp, job);
+          const base = { sha, itemId: job.itemId, run: job.run! };
+          setStagingServer(wp, { state: 'deploying', ...base, at: now() });
+          try {
+            await p.deployer.deploy({ repo: ctx.repo, checkout, sha, log: join(logs, 'deploy.log'), onSpawn });
+          } catch (err) {
+            const why = `staging deploy of ${sha.slice(0, 8)} failed: ${errText(err)}`;
+            setStagingServer(wp, { state: 'failed', ...base, at: now(), note: why });
+            return errorOf(why);
+          }
+          setStagingServer(wp, { state: 'deployed', ...base, at: now() });
+          log.info('evidence', `${job.id}: deployed iris-api and cloud-agent at ${sha.slice(0, 8)} to staging`);
+          srv = { sha, deployed: true };
+        } else {
+          srv = { sha: knownSha(stagingServer(wp)), deployed: false };
+        }
+        const before = JSON.stringify(stagingServer(wp));
+        job.state = 'running'; job.phase = 'running the suite'; persist(wp, job);
+        const res = await p.runner.run({ checkout, platforms: job.platforms, features: job.features, api: cfg.stagingUrl, apps, slot, out: runDir, log: join(logs, 'runner.log'), onSpawn });
+        const afterState = stagingServer(wp);
+        if (!job.server && JSON.stringify(afterState) !== before) srv.changedTo = knownSha(afterState);
+        return { ...readOutcome(runDir, res), server: srv };
+      };
+      if (job.server) { job.phase = 'waiting for staging (another server run)'; persist(wp, job); }
+      outcome = job.server ? await underServerLock(wp, suite) : await suite();
     }
   } catch (err) {
     outcome = { state: 'error', passed: 0, failed: 0, failures: [], note: errText(err) };
@@ -513,6 +607,7 @@ export function summaryText(rec: EvidenceRunRecord, title: string): string {
   const link = rec.share ? rec.share.url : 'link unavailable (the upload failed; the evidence still counts)';
   return [
     `Evidence ${WORD[rec.state]} for "${title}" on ${rec.sha.slice(0, 8)} (${rec.platforms.join(',')} / ${rec.features.join(',')}): ${rec.passed} passed, ${rec.failed} failed, ${dur(rec.durationS)}. Report: ${link}`,
+    ...(rec.server ? [evidenceShare.serverLine(rec.server)] : []),
     ...(rec.note && rec.state !== 'failure' ? [`Why: ${rec.note}.`] : []),
     ...(rec.failures.length ? ['Failures:', ...rec.failures.slice(0, 5).map(f => `- ${f}`), ...(rec.failures.length > 5 ? [`- … ${rec.failures.length - 5} more in the report`] : [])] : []),
     `Next: ${NEXT[rec.state]}`,
@@ -524,7 +619,7 @@ async function finish(wp: Workplace, job: EvidenceJob, outcome: Outcome, started
     run: job.run!, sha: job.sha!, state: outcome.state, platforms: job.platforms, features: job.features,
     passed: outcome.passed, failed: outcome.failed, failures: outcome.failures,
     durationS: Math.round((Date.now() - started) / 1000), report: reportPath(job.itemId, job.run!),
-    by: job.by, at: now(), ...(outcome.note ? { note: outcome.note } : {}),
+    by: job.by, at: now(), ...(outcome.note ? { note: outcome.note } : {}), ...(outcome.server ? { server: outcome.server } : {}),
   };
   const w = rawGet(wp, job.itemId);
   const title = w?.title ?? job.itemId;
@@ -579,6 +674,8 @@ export interface QueueView {
   slots: { slot: number; job?: EvidenceJob & { title: string } }[];
   queued: (EvidenceJob & { title: string; position: number })[];
   recent: (EvidenceJob & { title: string })[];
+  /** Which iris-api + cloud-agent commit staging runs (as the last evidence deploy left it). */
+  staging: StagingServerState;
 }
 
 export function state(wp: Workplace): QueueView {
@@ -591,6 +688,7 @@ export function state(wp: Workplace): QueueView {
     }),
     queued: e.queue.map((id, i) => ({ ...titled(e.jobs.get(id)!), position: i + 1 })),
     recent: storedJobs(wp).filter(j => j.state === 'done').sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? '')).slice(0, 10).map(titled),
+    staging: stagingServer(wp),
   };
 }
 

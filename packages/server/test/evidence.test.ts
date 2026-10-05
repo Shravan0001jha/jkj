@@ -18,7 +18,7 @@ import { rawGet } from '../src/services/v2-map.js';
 import { testWorkplace } from './fakes/workplace.js';
 import { FakeGitHub } from './fakes/fake-github.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
-import { FakeBuilder, FakeLock, FakeRunner, FakeStaging, FakeStore } from './fakes/fake-evidence.js';
+import { FakeBuilder, FakeDeployer, FakeLock, FakeRunner, FakeStaging, FakeStore } from './fakes/fake-evidence.js';
 import { useEvidenceStore } from '../src/services/evidence-share.js';
 
 /**
@@ -38,6 +38,7 @@ interface Setup {
   staging: FakeStaging;
   store: FakeStore;
   lock: FakeLock;
+  deployer: FakeDeployer;
   repo: string;
   storyId: string;
   wt: string;
@@ -65,7 +66,8 @@ function setup(opts: { auto?: boolean } = {}): Setup {
   const builder = new FakeBuilder(checkout => git(checkout, ['rev-parse', 'HEAD']).trim());
   const staging = new FakeStaging();
   const lock = new FakeLock();
-  evidence.useEvidencePorts(wp, { runner, builder, staging, lock });
+  const deployer = new FakeDeployer(checkout => git(checkout, ['rev-parse', 'HEAD']).trim(), () => runner.calls.length);
+  evidence.useEvidencePorts(wp, { runner, builder, staging, lock, deployer });
   const store = new FakeStore();
   useEvidenceStore(wp, store);
 
@@ -76,7 +78,7 @@ function setup(opts: { auto?: boolean } = {}): Setup {
   };
   const first = make('Recall the last song');
   const st: Setup = {
-    wp, runner, builder, staging, store, lock, repo, storyId: first.id, wt: first.wt,
+    wp, runner, builder, staging, store, lock, deployer, repo, storyId: first.id, wt: first.wt,
     commit: (file, content, storyId = st.storyId) => {
       const at = st.wt;
       git(at, ['checkout', '-q', `emp/kabir/${storyId}`]);
@@ -620,5 +622,136 @@ test('staging is held "in use" while a run is queued or running (about 25 min ah
     s.runner.finish();
     await evidence.settled(s.wp);
     await until(() => s.lock.releases === 1, 'the release');
+  } finally { await s.done(); }
+});
+
+/* ---------- the story's own server code on staging (Kabir via Asha, 5 Oct) ---------- */
+
+const short = (sha: string): string => sha.slice(0, 8);
+
+test('a story that changes iris-api deploys THAT commit to staging before the suite; the report and the PR comment name it; GET shows staging\'s commit', async () => {
+  const s = setup({ auto: true });
+  const gh = shadow(s);
+  try {
+    const head = s.commit('services/iris-api/app.py', 'ROUTE = "/v1/new"\n');
+    work.reportDone(s.wp, s.storyId, { tests: { passed: 1, failed: 0 }, commits: ['x'], liveVerified: [], notVerified: [] }, 'kabir');
+    await (await flow.onReview(s.wp, s.storyId, 'kabir')).tests;
+    const r = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    assert.ok(r.ok, r.ok ? '' : r.message);
+    await evidence.settled(s.wp);
+    assert.equal(s.deployer.calls.length, 1, 'deployed once');
+    assert.equal(s.deployer.heads[0], head, 'from the evidence checkout at the story\'s commit');
+    assert.equal(s.deployer.runsBefore[0], 0, 'before the suite ran');
+    assert.ok(s.deployer.calls[0]!.checkout.includes('_evidence'), 'the server-owned checkout, never the employee worktree');
+    assert.equal(s.runner.calls.length, 1);
+    const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
+    assert.equal(rec.state, 'success');
+    assert.deepEqual(rec.server, { sha: head, deployed: true });
+    const line = `server: iris-api and cloud-agent at ${short(head)} on staging`;
+    assert.ok(comments(s.wp, s.storyId).some(c => c.includes(line)), 'the item comment names the deployed commit');
+    const posted = gh.comments.get(gh.prs[0]!.number) ?? [];
+    assert.ok(posted.some(c => c.includes(line)), 'the PR comment names the deployed commit');
+    const st = evidence.state(s.wp).staging;
+    assert.equal(st.state, 'deployed');
+    assert.equal(st.sha, head);
+    assert.equal(st.itemId, s.storyId);
+    assert.deepEqual(evidence.stagingServer(s.wp), st);
+  } finally { await flow.settled(); gh.cleanup(); await s.done(); }
+});
+
+test('a cloud-agent change deploys too; an app-only story never deploys and its report says which server commit staging was on', async () => {
+  const s = setup({ auto: true });
+  try {
+    // Before any evidence deploy, staging's server commit is unknown.
+    s.commit('mobile/android/app/Main.kt', 'fun main() { println(2) }\n');
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    await evidence.settled(s.wp);
+    assert.equal(s.deployer.calls.length, 0, 'app-only: no deploy');
+    let rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
+    assert.deepEqual(rec.server, { sha: null, deployed: false });
+    assert.ok(comments(s.wp, s.storyId).some(c => /server: staging's iris-api and cloud-agent commit is unknown/.test(c)));
+    assert.equal(evidence.state(s.wp).staging.state, 'unknown');
+
+    const b = s.story('Agent change');
+    const agentHead = s.commit('services/cloud-agent/agent.py', 'x = 1\n', b.id);
+    evidence.request(s.wp, { itemId: b.id, by: 'kabir', platforms: 'android', features: 'queries' });
+    await evidence.settled(s.wp);
+    assert.equal(s.deployer.calls.length, 1, 'cloud-agent change: deployed');
+    assert.equal(s.deployer.heads[0], agentHead);
+
+    s.commit('mobile/android/app/Main.kt', 'fun main() { println(3) }\n');
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    await evidence.settled(s.wp);
+    assert.equal(s.deployer.calls.length, 1, 'still no deploy for the app-only story');
+    rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
+    assert.deepEqual(rec.server, { sha: agentHead, deployed: false });
+    assert.ok(comments(s.wp, s.storyId).some(c => c.includes(`server: staging was on iris-api and cloud-agent at ${short(agentHead)}`)), 'the app-only report names staging\'s commit');
+  } finally { await s.done(); }
+});
+
+test('server-touching runs are serialised; an app-only run still takes the free slot meanwhile', async () => {
+  const s = setup();
+  try {
+    const aHead = s.commit('services/iris-api/a.py', 'a = 1\n');
+    const b = s.story('Second server story'); const bHead = s.commit('services/iris-api/b.py', 'b = 1\n', b.id);
+    const c = s.story('App-only story'); s.commit('services/agent-svc/c.py', 'c = 1\n', c.id);
+    assert.ok(evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' }).ok);
+    assert.ok(evidence.request(s.wp, { itemId: b.id, by: 'kabir', platforms: 'android', features: 'memory' }).ok);
+    assert.ok(evidence.request(s.wp, { itemId: c.id, by: 'kabir', platforms: 'android', features: 'files' }).ok);
+    await until(() => s.runner.calls.length === 2, 'two runs');
+    await new Promise(r => setTimeout(r, 30));
+    assert.deepEqual(s.runner.calls.map(x => x.features[0]).sort(), ['files', 'queries'], 'the second server story waits; the app-only one runs');
+    assert.deepEqual(s.deployer.heads, [aHead], 'one deploy so far');
+    assert.deepEqual(evidence.state(s.wp).queued.map(j => j.itemId), [b.id]);
+
+    const first = s.runner.pending.find(p => p.request.features[0] === 'queries')!;
+    first.release();
+    await until(() => s.runner.calls.length === 3, 'the second server story');
+    assert.deepEqual(s.deployer.heads, [aHead, bHead], 'redeployed for the next server story');
+    assert.equal(s.deployer.runsBefore[1], 2, 'its deploy came after the first server run finished');
+    while (s.runner.pending.length) s.runner.finish();
+    await evidence.settled(s.wp);
+    const appOnly = rawGet(s.wp, c.id)!.evidenceRun!.server!;
+    assert.equal(appOnly.deployed, false);
+    assert.equal(appOnly.changedTo, bHead, 'the app-only run notes that staging was redeployed under it');
+    assert.ok(comments(s.wp, c.id).some(t => t.includes(`staging was redeployed to ${short(bHead)} during the run`)));
+    assert.equal(evidence.state(s.wp).staging.sha, bHead, 'staging is left as the last server run left it');
+  } finally { await s.done(); }
+});
+
+test('a failed deploy is an error with the reason, never a pass; nothing runs against the old server', async () => {
+  const s = setup({ auto: true });
+  const gh = shadow(s);
+  try {
+    const head = s.commit('services/iris-api/app.py', 'broken = (\n');
+    work.reportDone(s.wp, s.storyId, { tests: { passed: 1, failed: 0 }, commits: ['x'], liveVerified: [], notVerified: [] }, 'kabir');
+    await (await flow.onReview(s.wp, s.storyId, 'kabir')).tests;
+    s.deployer.failNext = 'staging.sh deploy exit 1: ❌ /healthz did not come back green';
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    await evidence.settled(s.wp);
+    assert.equal(s.runner.calls.length, 0, 'the suite never ran');
+    const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
+    assert.equal(rec.state, 'error');
+    assert.match(rec.note ?? '', new RegExp(`staging deploy of ${short(head)} failed: .*healthz did not come back green`));
+    assert.notEqual(gh.status(head, 'workplace/evidence')?.state, 'success');
+    const st = evidence.state(s.wp).staging;
+    assert.equal(st.state, 'failed');
+    assert.equal(st.sha, head);
+    assert.match(st.note ?? '', /healthz/);
+  } finally { await flow.settled(); gh.cleanup(); await s.done(); }
+});
+
+test('a story that changes the deploy scripts themselves is refused as an error; nothing is deployed', async () => {
+  const s = setup({ auto: true });
+  try {
+    s.commit('services/iris-api/app.py', 'x = 1\n');
+    s.commit('scripts/deploy-target.sh', 'EIP=production\n');
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    await evidence.settled(s.wp);
+    assert.equal(s.deployer.calls.length, 0);
+    assert.equal(s.runner.calls.length, 0);
+    const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
+    assert.equal(rec.state, 'error');
+    assert.match(rec.note ?? '', /deploy scripts.*scripts\/deploy-target\.sh/);
   } finally { await s.done(); }
 });

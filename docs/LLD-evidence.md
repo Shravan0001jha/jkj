@@ -123,7 +123,7 @@ Registry: `useEvidencePorts(wp, partial)` / `portsOf(wp)` (WeakMap, real ones bu
    (`delivered: 'session'|'item'`).
 10. `state=done`, slot freed, `pump()`.
 
-`state(wp)` → `{ slots: [{slot, job?}], queued: Job[] (with position), recent: Job[] }`.
+`state(wp)` → `{ slots: [{slot, job?}], queued: Job[] (with position), recent: Job[], staging }` (§3b).
 
 `startEvidence(wp)` (boot): load jobs; `building`/`running` → kill the recorded process group if it
 is still a runner/build of ours (`ps -o command=` contains the run dir or checkout path), `attempts<2`
@@ -144,6 +144,35 @@ Wording (handbook, "A story's life" step 4):
 - result: `Evidence <PASS|FAIL|STALE|ERROR> for "<title>" on <sha8>: <n> passed, <m> failed
   (<duration>). Report: <link>.` + failures (max 5 lines) + the next step (`stale`: run it again on
   the new commit; `failure`: open the screenshots of the failures only, fix, commit, run again).
+
+## 3b. The story's own server on staging (5 Oct, Kabir via Asha)
+
+Before this, run_evidence tested the apps against whatever server code staging ran, so a story that
+fixed iris-api or cloud-agent could not prove its fix before production.
+
+- **Which runs deploy.** `serverChange(repo, trunk, sha)`: the diff from the trunk merge-base touches
+  `evidence.serverPaths` (`services/iris-api`, `services/cloud-agent`). Computed at request (the
+  job's `server` flag, for the pump) and again at execute on the commit actually built.
+- **Deploy.** After the builds and `ensureUp`, `ports.deployer.deploy({repo, checkout, sha})`:
+  `RealServerDeployer` runs `bash <checkout>/scripts/staging.sh deploy` from the slot's server-owned
+  checkout at that commit (allow-listed env plus `STAGING_HOST`; the repo's `.venv` linked in for the
+  deploy scripts' local tests; 25 min cap; log `workplace/deploy.log` in the report). staging.sh
+  exports `STAGING_HOST`, the only switch deploy-api.sh / deploy-agent.sh have (deploy-target.sh).
+  A story that changes any of `scripts/{staging,deploy-target,deploy-api,deploy-agent}.sh` is never
+  deployed automatically: `error`, ask the COO.
+- **A failed deploy** is `error` with `staging deploy of <sha8> failed: <reason>`; the suite does not
+  run. Never a pass.
+- **Serialised.** At most one server-touching run at a time (deploy + suite): the pump skips a queued
+  server job while another is active (app-only jobs behind it still take free slots), and the
+  deploy + suite runs under a per-engine promise chain as the backstop.
+- **Recorded.** `EvidenceRunRecord.server = { sha, deployed, changedTo? }`. Deployed: the summary (item,
+  session, PR comment) says `server: iris-api and cloud-agent at <sha8> on staging`. App-only: what
+  staging was on at the start of the suite (or unknown), and `changedTo` when a server run redeployed
+  it meanwhile.
+- **Staging is left as it is** after a run; the next server-touching run redeploys. The settings row
+  `evidence:staging-server` = `{ state: unknown|deploying|deployed|failed, sha, itemId, run, at, note }`,
+  shown by `GET /api/coo/evidence` (`staging`) and `GET /api/coo/evidence/staging` (this Mac only).
+  It only knows evidence deploys: a deploy by hand is not seen.
 
 ## 3a. The global link (`services/evidence-share.ts`, HLD D13)
 
