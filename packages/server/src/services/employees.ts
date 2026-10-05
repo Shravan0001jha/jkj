@@ -1107,11 +1107,13 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           setState(wp, employeeId, 'needs-owner');
           return ok(`Filed as ${item.id}. Continue with other work; the answer arrives in your next session's context.`);
         }),
-      tool('request_review', 'Ask the reviewer (your lead, or QA for a lead) to verify an assignment in review. With pull requests on, run scripts/pre-pr.sh on your latest commit first, or the request is refused.',
+      tool('request_review', 'Nudge the reviewer of a story that is already in review; it never submits one (report_done does). With pull requests on, run scripts/pre-pr.sh on your latest commit first, or the request is refused.',
         { assignmentId: z.string(), note: z.string().optional() },
         async ({ assignmentId, note }) => {
           const item = work.get(wp, assignmentId);
           if (!item) return ok(`No assignment ${assignmentId}.`);
+          // It pings the reviewer of a story already in review; it never submits one (Rohan, 5 Oct).
+          if (item.status !== 'in-review') return ok(`Not requested: ${assignmentId} is ${item.status}, not in review. request_review only nudges the reviewer of a story already in review; to submit it, call report_done.`);
           const gate = githubFlow.prePrGate(wp, assignmentId);
           if (gate) return ok(`Not requested: ${gate}`);
           // The reviewer is a different identity (lead, or QA for a lead), never the owner (HOWTO

@@ -162,6 +162,9 @@ test('report_done and request_review drive the push through the Workplace tools'
     await server.instance.connect(st);
     const client = new Client({ name: 'test', version: '1' });
     await client.connect(ct);
+    const early = await client.callTool({ name: 'request_review', arguments: { assignmentId: s.storyId } });
+    assert.match(JSON.stringify(early.content), /call report_done/);
+    assert.equal(s.gh.prs.length, 0, 'request_review never submits');
     const done = await client.callTool({ name: 'report_done', arguments: { assignmentId: s.storyId, testsPassed: 3, testsFailed: 0, commits: ['abc'], liveVerified: [], notVerified: ['live'] } });
     assert.match(JSON.stringify(done.content), /in review/);
     assert.match(JSON.stringify(done.content), /pull request #\d+/);
@@ -445,7 +448,8 @@ test('pre-PR gate: report_done and request_review refuse without a passing pre-p
     assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
     writePrePr(s.wt, head, { only: ['agent-svc'] });
     assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
-    assert.match(JSON.stringify((await client.callTool({ name: 'request_review', arguments: { assignmentId: s.storyId } })).content), refusal);
+    // Not in review yet: request_review never submits, it points at report_done.
+    assert.match(JSON.stringify((await client.callTool({ name: 'request_review', arguments: { assignmentId: s.storyId } })).content), /Not requested: .* not in review.*call report_done/);
     // Passed on the head: recorded, pushed, workplace/tests green.
     writePrePr(s.wt, head);
     assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), /in review/);
