@@ -17,6 +17,8 @@ import { nameOf, STATUS_LABEL } from './v2-map.js';
 export const MAX_CHARS = 8000;
 const BODY_MAX = 1500;
 const COMMENT_MAX = 600;
+/** A comment's details are its whole text (one-line.ts short()); never cut mid-argument. */
+const DETAILS_MAX = 2000;
 const ACTIVITY_MAX = 200;
 const ACTIVITY_LAST = 30;
 const CHILDREN_MAX = 15;
@@ -116,7 +118,7 @@ export function readItem(wp: Workplace, q: string): string {
   if (linked.length > 10) head.push(`  +${linked.length - 10} more`);
 
   const comments = d.comments.map(c => {
-    const details = c.details ? `\n      details: ${named(wp, c.details, COMMENT_MAX)}` : '';
+    const details = c.details ? `\n      details: ${named(wp, c.details, DETAILS_MAX)}` : '';
     return `  - ${who(wp, c.by)} at ${c.at}: ${named(wp, c.text, COMMENT_MAX)}${details}`;
   });
   const activity = d.activity.slice(-ACTIVITY_LAST).map(a => {
@@ -177,6 +179,6 @@ function readOne(wp: Workplace, id: string): string {
     const label = i.options.find(o => o.id === i.answer!.optionId)?.label ?? i.answer.optionId;
     head.push(`Answer: ${label}${i.answer.note ? ` — "${clip(i.answer.note, 400)}"` : ''} (at ${i.answer.at}, via ${i.answer.via})`);
   } else head.push(`Answer: none yet (${i.state})`);
-  const msgs = inbox.messages(wp, id).map(m => `  - ${m.by === 'owner' ? 'owner' : who(wp, m.by)} at ${m.at}: ${named(wp, m.text, COMMENT_MAX)}${m.details ? `\n      details: ${named(wp, m.details, COMMENT_MAX)}` : ''}`);
+  const msgs = inbox.messages(wp, id).map(m => `  - ${m.by === 'owner' ? 'owner' : who(wp, m.by)} at ${m.at}: ${named(wp, m.text, COMMENT_MAX)}${m.details ? `\n      details: ${named(wp, m.details, DETAILS_MAX)}` : ''}`);
   return fit(head, [{ title: `Thread (${msgs.length} messages)`, noun: 'message', lines: msgs }]);
 }

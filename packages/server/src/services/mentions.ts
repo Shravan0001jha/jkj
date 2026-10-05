@@ -20,7 +20,8 @@ import { log } from '../util/logger.js';
  */
 
 /** One reply turn per mention: do not re-wake the same employee about the same thread inside this window. */
-export const MENTION_COOLDOWN_MS = 10 * 60_000;
+export const MENTION_TEXT_MAX = 4000;
+const MENTION_COOLDOWN_MS = 10 * 60_000;
 
 const lastTurnAt = new Map<string, number>(); // `${employeeId}:${threadId}` -> epoch ms
 
@@ -42,7 +43,7 @@ function handleComment(wp: Workplace, comment: Comment): void {
   for (const id of comment.mentions) {
     if (id === comment.by) continue;
     if (coo.isCoo(id)) {
-      try { coo.notifyMention(wp, { threadId: `item:${comment.itemId}`, threadTitle: title, by: comment.by, text: comment.text }); } catch (err) { log.warn('mentions', String(err)); }
+      try { coo.notifyMention(wp, { threadId: `item:${comment.itemId}`, threadTitle: title, by: comment.by, text: comment.details ?? comment.text }); } catch (err) { log.warn('mentions', String(err)); }
       continue;
     }
     const emp = wp.org.employees.find(e => e.id === id);
@@ -54,7 +55,8 @@ function handleComment(wp: Workplace, comment: Comment): void {
     const prompt = [
       `${who} mentioned you on "${title}" (${comment.itemId}):`,
       '',
-      `"${comment.text.slice(0, 500)}"`,
+      // The whole comment: a long one is stored as a short line + details, and the short line ends "…" (5 Oct).
+      `"${(comment.details ?? comment.text).slice(0, MENTION_TEXT_MAX)}"`,
       '',
       'Reply with item_comment on that item, in a few short lines, only if you have something to say. Use status_of if you need the item\'s state.',
     ].join('\n');

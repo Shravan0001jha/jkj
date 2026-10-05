@@ -59,3 +59,23 @@ test('an @mention in an item comment wakes that employee with the item as contex
     tmp.cleanup();
   }
 });
+
+test('a long comment reaches the mentioned employee whole, not its shortened line', async () => {
+  const fake = installFakeRuntime();
+  const { wp, tmp } = testWorkplace();
+  const off = wireMentionReplies(wp);
+  try {
+    resetForTest();
+    const epic = items.create(wp, { level: 'epic', title: 'Voice' }, 'owner');
+    const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Ack latency', assigneeId: 'dev' }, 'asha');
+    const long = `@dev ${'numbers from the four scripted runs. '.repeat(20)}CAVEAT-AT-THE-END`;
+    const c = trail.comment(wp, s.id, { by: 'nikhil', text: long });
+    assert.ok(c.text.endsWith('…') && c.details, 'stored as a short line plus details');
+    await tick();
+    assert.match(fake.last().options.prompt, /CAVEAT-AT-THE-END/);
+  } finally {
+    off();
+    fake.restore();
+    tmp.cleanup();
+  }
+});
