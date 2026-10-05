@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
@@ -470,6 +471,22 @@ export function routePrompt(item: WorkItem): string {
   return `Route this: assign it to the right developer by the ownership map. ${item.id}: ${item.title}\n\n${item.body ?? ''}\n\n` +
     'Read it (item_read), find the owning charter for what it changes, then item_update it with assigneeId set to that developer and say why in one line with item_comment. ' +
     'Do not plan or build it yourself.';
+}
+
+/**
+ * The story a tool call means when it names none: the one whose branch (emp/<id>/<story>) is checked out
+ * in the session's worktree, else the session's assignment. Mira (5 Oct) worked a second story on its own
+ * branch while her session still pointed at the first, and three run_evidence calls landed on the first.
+ */
+export function currentStory(s: { assignmentId?: string; worktree?: Worktree; employeeId: string }): string | undefined {
+  try {
+    if (s.worktree?.path) {
+      const branch = execFileSync('git', ['-C', s.worktree.path, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const m = new RegExp(`^emp/${s.employeeId}/(as_[a-z0-9]+)$`).exec(branch);
+      if (m) return m[1];
+    }
+  } catch { /* fall back to the assignment */ }
+  return s.assignmentId;
 }
 
 /** A turn is running, or parked on a tool approval: not the moment to move the tree under it. */
@@ -1084,7 +1101,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           commits: z.array(z.string()), liveVerified: z.array(z.string()), notVerified: z.array(z.string()), notes: z.string().optional(),
         },
         async (args) => {
-          const id = args.assignmentId ?? session().assignmentId;
+          const id = args.assignmentId ?? currentStory(session());
           if (!id) return ok('No assignment is attached to this session; say what you did in your handoff instead.');
           const evidence: Evidence = { tests: { passed: args.testsPassed, failed: args.testsFailed, ...(args.testCommand ? { command: args.testCommand } : {}) }, commits: args.commits, liveVerified: args.liveVerified, notVerified: args.notVerified, ...(args.notes ? { notes: args.notes } : {}) };
           // Before a commit counts as evidence: every changed file must be owned by one of the employee's charters.
@@ -1166,10 +1183,10 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         'Evidence belongs to one commit: a new commit makes it stale, so run it again. Mac desktop features run only in a live window the COO opens (ask on the item); Windows evidence is a cloud run QA schedules.',
         { itemId: z.string().optional(), platforms: z.string(), features: z.string() },
         async ({ itemId, platforms, features }) => {
-          const id = itemId ?? session().assignmentId;
+          const id = itemId ?? currentStory(session());
           if (!id) return ok(evidenceRuns.platformRefusal(platforms) ?? 'Name the story: no story is attached to this session, so call run_evidence again with its itemId.');
           const r = evidenceRuns.request(wp, { itemId: id, by: employeeId, platforms, features });
-          return ok(r.ok ? r.message : `Not queued: ${r.message}`);
+          return ok(r.ok ? `${id} (${rawGet(wp, id)?.title ?? ''}): ${r.message}` : `Not queued for ${id}: ${r.message}`);
         }),
       tool('write_spec', 'Chief of Staff only: attach the spec (acceptance criteria) to a stated feature. It becomes "specced" and can be decomposed.',
         { featureId: z.string(), spec: z.string() },
@@ -1306,7 +1323,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         'Waiting on a teammate is not a stall: a review or sign-off puts it In review with them (kind review); their work hands the item to them (kind work) until they give it back with item_handback.',
         { itemId: z.string().optional(), reason: z.string(), waitingOn: z.string().optional(), kind: z.enum(['review', 'work']).optional(), recommendation: z.string().optional() },
         async ({ itemId, reason, waitingOn, kind, recommendation }) => {
-          const id = itemId ?? session().assignmentId;
+          const id = itemId ?? currentStory(session());
           if (!id) return ok('Name the item: no item is attached to this session.');
           if (waitingOn && !isWaitable(wp, waitingOn)) return ok(`waitingOn must be an employee id, an item id, coo, owner, release or external; "${waitingOn}" is none.`);
           if (waitingOn === 'owner' && !recommendation?.trim()) return ok('Not flagged: waiting on the owner raises a decision in his Inbox; give your recommendation.');
@@ -1320,7 +1337,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
       tool('item_handback', 'Give back an item a teammate handed you (because they were waiting on your work), with a short note of what you did. It goes back to them, In progress, and they are woken.',
         { itemId: z.string().optional(), note: z.string() },
         async ({ itemId, note }) => {
-          const id = itemId ?? session().assignmentId;
+          const id = itemId ?? currentStory(session());
           if (!id) return ok('Name the item: no item is attached to this session.');
           if (awaitingReview(rawGet(wp, id))) return ok(`Not handed back: ${HANDBACK_IN_REVIEW}`);
           try { const it = items.handback(wp, id, note, employeeId); return ok(`Handed ${it.id} back to ${nameOf(wp, it.assigneeId)}.`); }
