@@ -287,6 +287,15 @@ export interface WorkItem {
   queuedFor?: string;
   /** The story's pull request on GitHub (docs/LLD-github-flow.md §1); set only in shadow/on mode. */
   pr?: PrRecord;
+  /** 'bug': a story-level bug (docs/HLD-jira-lifecycle.md §1). */
+  type?: 'bug';
+  /** An explicit dependency: this item starts after that one finishes. */
+  startsAfter?: string;
+  /** On hold: why it is parked. */
+  holdReason?: string;
+  /** Merged and closed (Merged → Done) by Asha, the owner, the COO or the reviewer. */
+  closedAt?: string;
+  closedBy?: string;
   /** The last time the server refused to push the story's branch (a planted key, build output, a bad name). */
   prRefused?: { at: string; sha: string; reasons: string[] };
   /** The story's latest finished robot-suite run (run_evidence, docs/LLD-evidence.md §1). */
@@ -646,7 +655,7 @@ export interface CooMessage {
   attachments?: TalkAttachment[];
 }
 
-export type CooItemKind = 'escalation' | 'mention' | 'stall';
+export type CooItemKind = 'escalation' | 'mention' | 'stall' | 'hygiene';
 
 /**
  * Something Asha would raise above her own authority, or an `@coo` Room mention, delivered to the

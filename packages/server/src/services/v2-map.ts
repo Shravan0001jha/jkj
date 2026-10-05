@@ -84,7 +84,12 @@ export function nameOf(wp: Workplace, id: string | undefined): string {
   if (id === 'owner') return 'you';
   if (id === 'workplace') return 'the Workplace';
   if (id === 'external') return 'someone outside the team';
-  return wp.org.employees.find(e => e.id === id)?.name ?? id;
+  if (id === 'release') return 'the release';
+  const person = wp.org.employees.find(e => e.id === id)?.name;
+  if (person) return person;
+  // A wait on another item (docs/HLD-jira-lifecycle.md §2) reads as its title.
+  const item = /^[a-z]{2,3}_/.test(id) ? rawGet(wp, id) : undefined;
+  return item ? `"${item.title}"` : id;
 }
 
 export const isAgent = (wp: Workplace, id: string | undefined): boolean =>
@@ -94,8 +99,12 @@ export const isAgent = (wp: Workplace, id: string | undefined): boolean =>
 export const isPerson = (wp: Workplace, id: string | undefined): boolean =>
   !!id && (id === 'owner' || wp.org.employees.some(e => e.id === id));
 
-/** Who a Blocked item may wait on: a person, or someone outside the team (`external`, LLD §19.6c). */
-export const isWaitable = (wp: Workplace, id: string | undefined): boolean => id === 'external' || isPerson(wp, id);
+/**
+ * Who or what a Blocked item may wait on: a person, someone outside the team (`external`, LLD §19.6c),
+ * the release, or another item by id (docs/HLD-jira-lifecycle.md §2).
+ */
+export const isWaitable = (wp: Workplace, id: string | undefined): boolean =>
+  id === 'external' || id === 'release' || isPerson(wp, id) || (!!id && !!rawGet(wp, id));
 
 export const STATUS_LABEL: Record<ItemStatus, string> = {
   backlog: 'Backlog', ready: 'Ready', 'in-progress': 'In progress', 'in-review': 'In review', done: 'Done', blocked: 'Blocked',

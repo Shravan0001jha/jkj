@@ -34,6 +34,8 @@ import * as handoff from './services/handoff.js';
 import * as dispatch from './services/dispatch.js';
 import * as manager from './services/manager.js';
 import * as stuck from './services/stuck.js';
+import * as hygiene from './services/hygiene.js';
+import * as lifecycleWatch from './services/lifecycle-watch.js';
 import * as githubFlow from './services/github-flow.js';
 import * as evidence from './services/evidence.js';
 import * as spend from './services/spend.js';
@@ -134,6 +136,10 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   // The stuck-story watchdog (dry run, 4 Oct): In progress with no session, In review with no reviewer
   // on it, or with Asha unrouted, for 10 min: one alert to Asha (the manager escalates after 15). Every 2 min.
   const stopStuck = stuck.startStuckWatch(wp);
+  // The Jira lifecycle (docs/HLD-jira-lifecycle.md): a finished blocker flips its dependents to Ready;
+  // the hygiene monitor tells Asha (10 min) and the COO (60 min) where the board is not true.
+  const stopLifecycle = lifecycleWatch.startLifecycleWatch(wp);
+  const stopHygiene = hygiene.startHygieneWatch(wp);
   // The GitHub flow's sweep (docs/HLD-github-flow.md D3): a new commit on a story in review is re-pushed
   // and resets its approvals. Does nothing while the mode is local (the default).
   const stopGitHubFlow = githubFlow.startGitHubFlow(wp);
@@ -232,6 +238,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       stopDispatch();
       stopManager();
       stopStuck();
+      stopLifecycle();
+      stopHygiene();
       stopGitHubFlow();
       stopEvidence();
       clearInterval(awsTimer);

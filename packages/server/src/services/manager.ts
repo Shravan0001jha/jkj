@@ -23,7 +23,12 @@ import { log } from '../util/logger.js';
  * one compact digest.
  *
  * Records in settings: `mgr-alert:<key>` (one per alert key; keys carry the episode), `manager-digest`
- * (when the last digest went).
+ * (when the last digest went), `manager-digest-seen` (what the last delivered digest told her, per entry).
+ *
+ * The digest repeats nothing (Asha, 5 Oct): an entry is in it only when its state changed since the
+ * last digest delivered to her (status, waiting on, blocked reason, reviewer, PR checks, the idle
+ * queue and its reason) or it newly crossed an age threshold; the rest is one line. A digest with
+ * nothing new is not sent at all.
  */
 
 const MIN = 60_000;
@@ -60,6 +65,8 @@ interface AlertRecord extends AlertSpec {
   assigneeAt?: string;
   escalated?: boolean;
   resolved?: boolean;
+  /** Digests only: every entry's state token when it was composed; stored as "seen" once delivered. */
+  seen?: Record<string, string>;
 }
 
 export type AlertResult = 'asha' | 'queued' | 'coo' | 'dropped' | 'duplicate';
@@ -164,9 +171,12 @@ const INTRO = 'Manager alerts: you own stall handling for the team. For each one
   'chase whoever it waits on, or escalate with a recommendation if it is above you) and say what you did with item_comment on the item. ' +
   'Unanswered alerts go to the COO after 15 minutes.';
 
+/** A digest or a hygiene report (hygiene.ts): its own text, and it may start a session although it is a notice. */
+const report = (r: AlertRecord): boolean => r.key.startsWith('digest:') || r.key.startsWith('hygiene:');
+
 function compose(list: AlertRecord[]): string {
-  const lines = list.map(r => r.key.startsWith('digest:') ? r.text ?? r.body : `- ${r.notice ? '(FYI) ' : ''}${r.text ?? `${r.title}: ${r.body}`} [${r.itemId}]`);
-  const alerts = list.some(r => !r.key.startsWith('digest:'));
+  const lines = list.map(r => report(r) ? r.text ?? r.body : `- ${r.notice ? '(FYI) ' : ''}${r.text ?? `${r.title}: ${r.body}`} [${r.itemId}]`);
+  const alerts = list.some(r => !report(r));
   return [alerts ? INTRO : '', ...lines].filter(Boolean).join('\n');
 }
 
@@ -191,7 +201,7 @@ export function deliver(wp: Workplace, nowMs = Date.now()): number {
       // Notices never start a session of their own: they ride along with the next alert or digest.
       // "Pause all": nothing starts a session for Asha; what waits goes to her after the resume.
       if (floor.paused(wp)) return 0;
-      if (!queued.some(r => !r.notice || r.key.startsWith('digest:'))) return 0;
+      if (!queued.some(r => !r.notice || report(r))) return 0;
       if (ashaStuck(wp, nowMs)) return 0;
       employees.talk(wp, asha, text, [], { autonomous: true });
     }
@@ -202,6 +212,7 @@ export function deliver(wp: Workplace, nowMs = Date.now()): number {
   const at = new Date(nowMs).toISOString();
   for (const r of queued) {
     write(wp, { ...r, state: 'delivered', deliveredAt: at });
+    if (r.seen) put(wp, SEEN, JSON.stringify(r.seen));
     if (rawGet(wp, r.itemId)) trail.record(wp, { itemId: r.itemId, by: 'workplace', kind: 'stall', text: `Told Asha: ${r.title}` });
   }
   log.info('manager', `told Asha ${queued.length} alert(s): ${queued.map(r => r.key).join(', ')}`);
@@ -247,10 +258,28 @@ export function escalate(wp: Workplace, nowMs = Date.now()): string[] {
 /* ---------- the digest ---------- */
 
 const quote = (t: string): string => `"${t}"`;
+const SEEN = 'manager-digest-seen';
 
-/** The digest's text from the current state, or null when there is nothing to act on. */
-export function digestText(wp: Workplace, nowMs = Date.now()): string | null {
-  const idle: string[] = [];
+/** Age thresholds (minutes) a waiting entry is told again at, even unchanged; then once a day. */
+const AGE_STEPS = [60, 120, 240, 480, 1440];
+function ageStep(ms: number): number {
+  const m = ms / MIN;
+  const n = AGE_STEPS.filter(t => m >= t).length;
+  return n < AGE_STEPS.length ? n : n - 1 + Math.floor(m / 1440);
+}
+
+type Section = 'idle' | 'stale' | 'blocked';
+interface Entry { key: string; section: Section; line: string; token: string }
+
+const prToken = (w: WorkItem): string => {
+  const p = w.pr;
+  if (!p) return '';
+  return [p.headSha, p.tests?.state ?? '', p.tests?.sha ?? '', p.evidence, p.devApproval?.sha ?? '', p.qaApproval?.sha ?? '', p.sendBack?.at ?? '', p.merged ? 'merged' : ''].join(',');
+};
+
+/** Everything the digest could say now, one entry per thing, each with the state that makes it news. */
+function digestEntries(wp: Workplace, nowMs: number): Entry[] {
+  const out: Entry[] = [];
   for (const e of wp.org.employees) {
     if (e.virtual) continue;
     const reviews = reviewWake.queued(wp, e.id);
@@ -262,23 +291,62 @@ export function digestText(wp: Workplace, nowMs = Date.now()): string | null {
     if (a && (a.status === 'running' || a.approval)) continue;
     const titles = [...reviews.map(id => `review ${quote(rawGet(wp, id)?.title ?? id)}`), ...stories.map(w => quote(w.title))].slice(0, 3).join(', ');
     const why = dispatch.lastReason(wp, e.id) ?? dispatch.busyReason(wp, e.id, nowMs);
-    idle.push(`${e.name} (${n} queued: ${titles})${why ? `: ${why}` : ''}`);
+    out.push({
+      key: `idle:${e.id}`, section: 'idle',
+      line: `${e.name} (${n} queued: ${titles})${why ? `: ${why}` : ''}`,
+      token: JSON.stringify([[...reviews, ...stories.map(w => w.id)].sort(), why ?? '']),
+    });
   }
   const reviewMs = wp.config.stallReviewMinutes * MIN;
-  const stale = rowsJson<WorkItem>(wp.db.prepare("select json from work where status = 'in-review'").all())
-    .filter(w => !w.mergedInto && nowMs - Date.parse(w.statusSince ?? w.updatedAt) > reviewMs)
-    .map(w => `${quote(w.title)} In review ${humanDuration(nowMs - Date.parse(w.statusSince ?? w.updatedAt))} with ${nameOf(wp, w.reviewerId)}`);
-  const blocked = rowsJson<WorkItem>(wp.db.prepare("select json from work where status = 'blocked'").all())
-    .filter(w => !w.mergedInto)
-    .map(w => `${quote(w.title)} (${nameOf(wp, w.employeeId)}) waiting on ${nameOf(wp, w.waitingOn)}: ${oneLine(w.blockedReason ?? 'no reason given', 100).summary}`);
-  if (!idle.length && !stale.length && !blocked.length) return null;
-  const section = (head: string, lines: string[]): string => (lines.length ? `${head}\n${lines.map(l => `- ${l}`).join('\n')}` : '');
-  return [
+  for (const w of rowsJson<WorkItem>(wp.db.prepare("select json from work where status = 'in-review'").all())) {
+    const age = nowMs - Date.parse(w.statusSince ?? w.updatedAt);
+    if (w.mergedInto || age <= reviewMs) continue;
+    out.push({
+      key: `item:${w.id}`, section: 'stale',
+      line: `${quote(w.title)} In review ${humanDuration(age)} with ${nameOf(wp, w.reviewerId)}`,
+      token: JSON.stringify([w.status, w.statusSince ?? '', w.reviewerId ?? '', w.employeeId ?? '', prToken(w), ageStep(age)]),
+    });
+  }
+  for (const w of rowsJson<WorkItem>(wp.db.prepare("select json from work where status = 'blocked'").all())) {
+    if (w.mergedInto) continue;
+    const age = nowMs - Date.parse(w.blockedSince ?? w.statusSince ?? w.updatedAt);
+    out.push({
+      key: `item:${w.id}`, section: 'blocked',
+      line: `${quote(w.title)} (${nameOf(wp, w.employeeId)}) waiting on ${nameOf(wp, w.waitingOn)}: ${oneLine(w.blockedReason ?? 'no reason given', 100).summary}`,
+      token: JSON.stringify([w.status, w.statusSince ?? '', w.waitingOn ?? '', w.blockedReason ?? '', w.reviewerId ?? '', w.employeeId ?? '', prToken(w), ageStep(age)]),
+    });
+  }
+  return out;
+}
+
+function lastSeen(wp: Workplace): Record<string, string> {
+  try { return JSON.parse(get(wp, SEEN) ?? '{}') as Record<string, string>; } catch { return {}; }
+}
+
+/**
+ * The digest from the current state: only entries that are new or changed against `seen` (what Asha
+ * was last told; omitted, everything), the rest in one line. Null when there is nothing new.
+ */
+function composeDigest(wp: Workplace, nowMs: number, seen?: Record<string, string>): { text: string; seen: Record<string, string> } | null {
+  const entries = digestEntries(wp, nowMs);
+  const fresh = entries.filter(e => !seen || seen[e.key] !== e.token);
+  if (!fresh.length) return null;
+  const unchanged = entries.length - fresh.length;
+  const lines = (s: Section): string[] => fresh.filter(e => e.section === s).map(e => e.line);
+  const section = (head: string, ls: string[]): string => (ls.length ? `${head}\n${ls.map(l => `- ${l}`).join('\n')}` : '');
+  const text = [
     `Manager digest (every ${wp.config.managerDigestMinutes} min while work is active): act on what needs you, and say what you did with item_comment on the item.`,
-    section('Idle with queued focus work:', idle),
-    section('Stale reviews:', stale),
-    section('Blocked:', blocked),
+    section('Idle with queued focus work:', lines('idle')),
+    section('Stale reviews:', lines('stale')),
+    section('Blocked:', lines('blocked')),
+    unchanged ? `${unchanged} ${unchanged === 1 ? 'item' : 'items'} unchanged since your last digest.` : '',
   ].filter(Boolean).join('\n');
+  return { text, seen: Object.fromEntries(entries.map(e => [e.key, e.token])) };
+}
+
+/** The full digest's text from the current state (nothing left out), or null when there is nothing to act on. */
+export function digestText(wp: Workplace, nowMs = Date.now()): string | null {
+  return composeDigest(wp, nowMs)?.text ?? null;
 }
 
 /** Any work moving or waiting: In progress, In review, Blocked, or focus work queued for someone. */
@@ -294,11 +362,15 @@ export function digest(wp: Workplace, nowMs = Date.now()): string | null {
   if (!workActive(wp)) return null;
   const stuck = ashaStuck(wp, nowMs);
   if (stuck) { log.info('manager', `no digest: ${stuck}`); return null; }
-  const text = digestText(wp, nowMs);
-  if (!text) return null;
+  // Nothing new since the last delivered digest: nothing sent, no session; checked again next tick.
+  const d = composeDigest(wp, nowMs, lastSeen(wp));
+  if (!d) return null;
+  const { text, seen } = d;
   const at = new Date(nowMs).toISOString();
   put(wp, 'manager-digest', at);
-  write(wp, { key: `digest:${at}`, itemId: '', title: 'Manager digest', body: text, text, notice: true, at, state: 'queued', statusAt: '' });
+  // An earlier digest still waiting for her is superseded: this one is measured against the same last delivery.
+  for (const r of all(wp)) if (r.key.startsWith('digest:') && r.state === 'queued') wp.db.prepare('delete from settings where key = ?').run(PREFIX + r.key);
+  write(wp, { key: `digest:${at}`, itemId: '', title: 'Manager digest', body: text, text, notice: true, at, state: 'queued', statusAt: '', seen });
   deliver(wp, nowMs);
   return text;
 }

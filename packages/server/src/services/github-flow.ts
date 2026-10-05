@@ -10,6 +10,7 @@ import * as work from './work.js';
 import * as trail from './trail.js';
 import * as coo from './coo.js';
 import * as manager from './manager.js';
+import * as lifecycleWatch from './lifecycle-watch.js';
 import * as employees from './employees.js';
 import * as runs from './runs.js';
 import { now } from './store.js';
@@ -644,6 +645,8 @@ export async function merge(wp: Workplace, itemId: string, by: string): Promise<
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, merged: { at: now(), sha: mergedSha ?? '', by } } }));
   trail.record(wp, { itemId, by, kind: 'merged', text: `Merged PR #${pr.number} (${pr.branch}) into ${pr.base} on GitHub${mergedSha ? ` as ${mergedSha.slice(0, 8)}` : ''}` });
   log.info('github', `${itemId}: merged PR #${pr.number} (by ${by})`);
+  // Merged (docs/HLD-jira-lifecycle.md §3): the story is Done-by-merge and Asha is told to close it.
+  try { lifecycleWatch.onMerged(wp, itemId, by); } catch (err) { log.warn('github', `${itemId}: after merge: ${errText(err)}`); }
   try { await port.deleteBranch(pr.branch); } catch (err) {
     recordFailure(wp, 'delete branch', itemId, Date.now(), errText(err));
     trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Merged, but ${pr.branch} was not deleted on GitHub: ${errText(err)}` });
