@@ -91,6 +91,13 @@ function saveMessage(wp: Workplace, message: CooMessage): CooMessage {
   return message;
 }
 
+/** A message from the COO to the owner that answers nothing in particular (the usage ping). */
+export function messageOwner(wp: Workplace, text: string): CooMessage {
+  if (!text.trim()) throw new BadRequest('Nothing to send.');
+  const message: CooMessage = { id: newId('com'), at: now(), from: 'coo', text: text.trim(), summary: text.trim() };
+  return saveMessage(wp, message);
+}
+
 /** The owner talking to the COO: appended to the inbox file the lead tails, and to the transcript. */
 export function sendOwnerMessage(wp: Workplace, text: string, files: { attachment: TalkAttachment; path: string }[] = []): CooMessage {
   if (!text.trim() && !files.length) throw new BadRequest('Nothing to send.');

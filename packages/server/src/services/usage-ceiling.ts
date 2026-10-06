@@ -1,23 +1,22 @@
 import type { Workplace } from './workplace.js';
 import type { Reading } from './pace.js';
 import * as floor from './floor.js';
-import * as employees from './employees.js';
+import * as coo from './coo.js';
 import { log } from '../util/logger.js';
 
 /**
- * The usage ceiling (owner, 5 Oct): "if the daily or weekly limit is at 98% you need to start
- * parking, I don't want to be in a phase where I can't even talk." The plan's 5-hour or 7-day
- * utilization at or past 98% pauses the floor and interrupts running unattended turns, so the
- * last 2% stays for the owner and the COO. Pacing on or off makes no difference. It resumes on its
- * own once every window is back under the line, and only lifts a pause it set itself.
+ * The usage line (owner). 5 Oct: "if the daily or weekly limit is at 98% you need to start
+ * parking". Replaced 6 Oct: "Don't park at 98, just ping me at 99." So the plan's 5-hour or 7-day
+ * utilization at or past 99% sends the owner ONE message per window and reset (never a pause, never
+ * an interrupt); the owner decides. A pause this module set under the old rule is lifted on sight.
  */
 
-export const CEILING = 0.98;
+export const CEILING = 0.99;
 export const BY = 'usage-ceiling';
 
 export interface CeilingVerdict { over: boolean; window?: '5h' | '7d'; utilization: number; resetsAtMs?: number }
 
-/** Pure: the worst window at or past the ceiling, if any. */
+/** Pure: the worst window at or past the line, if any. */
 export function evaluate(r: Reading, line = CEILING): CeilingVerdict {
   const windows: { window: '5h' | '7d'; utilization: number; resetsAtMs: number }[] = [{ window: '7d', utilization: r.utilization, resetsAtMs: r.resetsAtMs }];
   if (r.fiveHour) windows.push({ window: '5h', ...r.fiveHour });
@@ -25,17 +24,23 @@ export function evaluate(r: Reading, line = CEILING): CeilingVerdict {
   return worst.utilization >= line ? { over: true, ...worst } : { over: false, utilization: worst.utilization };
 }
 
+const pingKey = (v: CeilingVerdict): string => `usage-ceiling:pinged:${v.window}:${v.resetsAtMs ?? 'none'}`;
+
 export function apply(wp: Workplace, r: Reading): CeilingVerdict {
   const v = evaluate(r);
+  // The old rule parked the floor; the owner withdrew it, so a pause it left behind is lifted.
   const st = floor.state(wp);
-  if (v.over && !st.paused) {
-    const until = v.resetsAtMs ? new Date(v.resetsAtMs).toISOString() : 'the window resets';
-    floor.setPaused(wp, true, `usage ceiling: ${v.window} limit at ${Math.round(v.utilization * 100)}% (>= ${Math.round(CEILING * 100)}%), parked until ${until}`, BY);
-    const n = employees.interruptUnattended(wp, `Parked: the plan's ${v.window} usage is at ${Math.round(v.utilization * 100)}%. Work resumes when it drops back under ${Math.round(CEILING * 100)}%.`);
-    log.warn('ceiling', `${v.window} at ${Math.round(v.utilization * 100)}%: floor paused, ${n} running turn(s) interrupted`);
-  } else if (!v.over && st.paused && st.by === BY) {
-    floor.setPaused(wp, false, `usage back to ${Math.round(v.utilization * 100)}%`, BY);
-    log.info('ceiling', `usage back to ${Math.round(v.utilization * 100)}%: floor resumed`);
+  if (st.paused && st.by === BY) {
+    floor.setPaused(wp, false, 'usage line now pings the owner instead of parking (owner, 6 Oct)', BY);
+    log.info('ceiling', 'lifted a usage-ceiling pause: the rule is now ping-only');
   }
+  if (!v.over) return v;
+  const key = pingKey(v);
+  const seen = wp.db.prepare('select value from settings where key = ?').get(key) as { value: string } | undefined;
+  if (seen) return v;
+  const until = v.resetsAtMs ? new Date(v.resetsAtMs).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'the window resets';
+  coo.messageOwner(wp, `Heads-up: the plan's ${v.window === '5h' ? '5-hour' : 'weekly'} usage is at ${Math.round(v.utilization * 100)}% (resets ${until}). Nothing is paused; say "park" if you want the team stopped.`);
+  wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(key, new Date().toISOString());
+  log.warn('ceiling', `${v.window} at ${Math.round(v.utilization * 100)}%: owner pinged (no pause)`);
   return v;
 }
