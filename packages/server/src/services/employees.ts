@@ -465,8 +465,10 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
   // A dead session (interrupted, errored) is closed first, whatever its age: work goes to a live one.
   closeDead(wp, item.employeeId);
   const open = openSession(item.employeeId);
-  // Dry run #17: a story assigned to the Chief of Staff is hers to route, not to build.
-  const routing = isChiefOfStaff(wp, item.employeeId);
+  // Dry run #17: a story assigned to the Chief of Staff is hers to route, not to build. Org design
+  // (owner, 7 Oct): she also authors work (the product doc, the batch sign-off); a story with a
+  // reviewer is work she delivers for someone to check, so it gets the author's prompt, not routing.
+  const routing = isChiefOfStaff(wp, item.employeeId) && !item.reviewerId;
   if (open && carryOver.has(item.employeeId)) {
     const carried = carryOver.get(item.employeeId)!;
     runs.sendMessage(open.agentId, redeliveryText(carried), [], { from: carried[0]!.from });

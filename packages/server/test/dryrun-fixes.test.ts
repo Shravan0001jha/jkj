@@ -85,7 +85,21 @@ test('#17: a story assigned to the Chief of Staff starts a routing session, not 
     assert.match(await (await toolsFor(wp, 'dev'))('item_update', { itemId: story.id, assigneeId: 'tara' }), /only the Chief of Staff routes/);
     assert.match(await (await toolsFor(wp, 'asha', story.id))('item_update', { itemId: story.id, assigneeId: 'tara' }), /is /);
     assert.equal(rawGet(wp, story.id)!.employeeId, 'tara');
+
   } finally { tmp.cleanup(); }
+});
+
+test('org design (7 Oct): a story assigned to the Chief of Staff WITH a reviewer is hers to write, not route', async () => {
+  const { wp, tmp } = testWorkplace();
+  withOauth(tmp.dir);
+  try {
+    const epic = items.create(wp, { level: 'epic', title: 'Grounded awareness' }, 'owner');
+    const doc = items.create(wp, { level: 'story', parentId: epic.id, title: 'Product doc: grounded awareness', assigneeId: 'asha', reviewerId: 'dev' }, 'owner');
+    employees.assign(wp, doc.id);
+    const prompt = runtime.last().options.prompt;
+    assert.doesNotMatch(prompt, /^Route this/, 'a reviewed story is work she delivers');
+    assert.match(prompt, /Product doc: grounded awareness/);
+  } finally { await new Promise(r => setTimeout(r, 200)); tmp.cleanup(); }
 });
 
 test('#22: an owner message or @coo mention with no COO response in 15 min raises one push; answered ones and system kinds do not', async () => {
