@@ -34,6 +34,7 @@ import { now } from './store.js';
 import * as talkStore from './talk-store.js';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
+import { QA_DOC_FORMAT as qaDocFormat } from './qa-doc.js';
 
 /**
  * Employees and their sessions (HLD D3, D4, D10).
@@ -1198,10 +1199,10 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           return ok(`Review requested.${gh.message ? ` ${gh.message}` : ''}`);
         }),
       // The GitHub flow's two approvals (docs/HLD-github-flow.md D4): in local mode they answer "review as before".
-      tool('review_approve', 'Reviewers only: approve a story in review. Approval 1 of 2 is the developer approver\'s (a lead who is not the author); approval 2 of 2 is QA\'s, only after the developer approval. QA\'s approval marks the story done, and the Workplace merges it once the tests check is green (blockers go to the COO). Any new commit resets both approvals.',
-        { itemId: z.string(), note: z.string().optional() },
-        async ({ itemId, note }) => {
-          try { return ok((await githubFlow.approve(wp, itemId, employeeId, note)).message); } catch (err) { return ok(`Not approved: ${err instanceof Error ? err.message : String(err)}`); }
+      tool('review_approve', 'Reviewers only: approve a story in review. Approval 1 of 2 is the developer approver\'s (a lead who is not the author); approval 2 of 2 is QA\'s, only after the developer approval, and needs qaDoc: the edge cases where the change might break, each checked, and a report. QA\'s approval marks the story done, and the Workplace merges it once the tests check is green (blockers go to the COO). Any new commit resets both approvals.',
+        { itemId: z.string(), note: z.string().optional(), qaDoc: z.string().optional().describe(`QA only, required for approval 2 of 2: ${qaDocFormat}`) },
+        async ({ itemId, note, qaDoc }) => {
+          try { return ok((await githubFlow.approve(wp, itemId, employeeId, note, qaDoc)).message); } catch (err) { return ok(`Not approved: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('review_send_back', 'Reviewers only (the developer approver or QA): send a story in review back to its author with exactly what to change; QA adds the root cause (what failed, where, and why). It resets both approvals.',
         { itemId: z.string(), note: z.string() },

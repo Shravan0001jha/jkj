@@ -19,6 +19,7 @@ import { branchFor, worktreePath } from './worktrees.js';
 import * as prePr from './pre-pr.js';
 import { GITHUB_MODES, githubMode, holds, isDeveloper, isQa, qaReviewer, writeGithubMode } from './review-policy.js';
 import { freshLink } from './evidence-share.js';
+import * as qaDoc from './qa-doc.js';
 import { BadRequest, Conflict, NotFound } from '../util/errors.js';
 import { log } from '../util/logger.js';
 
@@ -454,7 +455,7 @@ async function reviewable(wp: Workplace, itemId: string): Promise<WorkItem> {
 
 export interface ApproveResult { stage: 'dev' | 'qa'; message: string }
 
-export async function approve(wp: Workplace, itemId: string, by: string, note?: string): Promise<ApproveResult> {
+export async function approve(wp: Workplace, itemId: string, by: string, note?: string, qaText?: string): Promise<ApproveResult> {
   if (mode(wp) === 'local') throw new BadRequest(LOCAL_REVIEW);
   const w = await reviewable(wp, itemId);
   const pr = w.pr!;
@@ -478,8 +479,11 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
 
   if (!isQa(who)) throw new BadRequest(`It already has the developer approval (1 of 2), and approval 2 of 2 is QA's (${qaNames(wp)}); leave it to QA.`);
   if (by === pr.devApproval!.by) throw new BadRequest('You gave approval 1 of 2, so approval 2 of 2 must come from another person in QA; leave it to them.');
+  // Owner's review flow step 2 (6 Oct): no QA approval without the edge-case doc and its report.
+  const doc = qaDoc.require$(qaText);
+  const qaPath = qaDoc.file(wp, itemId, { title: w.title, by, sha: pr.headSha, at: approval.at }, qaText!);
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, qaApproval: approval } }));
-  trail.record(wp, { itemId, by, kind: 'note', text: `QA approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}${approval.note ? `: ${approval.note}` : ''}` });
+  trail.record(wp, { itemId, by, kind: 'note', text: `QA approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)} with a QA doc of ${doc.cases.length} edge cases (${qaPath})${approval.note ? `: ${approval.note}` : ''}` });
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
   items.update(wp, itemId, { status: 'done', reviewerId: by, note: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer) and ${nameOf(wp, by)} (QA)` }, by);
   const auto = await autoMerge(wp, itemId);

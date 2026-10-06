@@ -21,6 +21,10 @@ import { FakeGitHub } from './fakes/fake-github.js';
 import { writePrePr } from './fakes/pre-pr.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
 
+/** A QA doc that allows approval 2 of 2 (owner's review flow, step 2). */
+import * as qaDoc from '../src/services/qa-doc.js';
+const QA_DOC = '## Edge cases\n- PASS: empty input — unit test\n- PASS: provider down — killed the provider and checked the reply\n- N/A: Windows path — no Windows code touched\n## Report\nChecked both failure paths by hand and in tests; Windows untouched; residual risk low.';
+
 /**
  * Checkpoints 8 and 9 (docs/HLD-github-flow.md): the server pushes a story's branch and opens its PR
  * when it moves to review, two approvals in order gate "done" and the merge, a new commit resets
@@ -225,7 +229,7 @@ test('two approvals in order: a lead who is not the author, then QA; identities 
     const head = s.commit('services/agent-svc/recall.py', 'x = 1\n');
     await reviewed(s);
     await assert.rejects(flow.approve(s.wp, s.storyId, 'kabir'), /author/i);
-    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil'), /^BadRequest: QA reviews after a developer approval; ask a lead to review first\.$/);
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC), /^BadRequest: QA reviews after a developer approval; ask a lead to review first\.$/);
     await assert.rejects(flow.approve(s.wp, s.storyId, 'arjun'), /lead/i);   // an engineer is not a developer approver
     const dev = await flow.approve(s.wp, s.storyId, 'dev', 'reads well');
     assert.equal(dev.stage, 'dev');
@@ -234,7 +238,7 @@ test('two approvals in order: a lead who is not the author, then QA; identities 
     assert.equal(rawGet(s.wp, s.storyId)!.reviewerId, 'nikhil', 'the review moves to QA');
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'in-review');
     await assert.rejects(flow.approve(s.wp, s.storyId, 'mira'), /QA/);       // a second lead is not QA
-    const qa = await flow.approve(s.wp, s.storyId, 'nikhil');
+    const qa = await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     assert.equal(qa.stage, 'qa');
     assert.equal(pr(s).qaApproval?.by, 'nikhil');
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
@@ -249,7 +253,7 @@ test("a lead's own story needs a peer lead; Zoya (quality charter) can give the 
     s.commit('services/agent-svc/recall.py', 'x = 1\n');
     await reviewed(s);
     await flow.approve(s.wp, s.storyId, 'tara');
-    const qa = await flow.approve(s.wp, s.storyId, 'zoya');
+    const qa = await flow.approve(s.wp, s.storyId, 'zoya', undefined, QA_DOC);
     assert.equal(qa.stage, 'qa');
     assert.equal(pr(s).devApproval?.by, 'tara');
     assert.equal(pr(s).qaApproval?.by, 'zoya');
@@ -263,13 +267,13 @@ test('a new commit resets both approvals, marks evidence stale, and is pushed', 
     await reviewed(s);
     await flow.approve(s.wp, s.storyId, 'dev');
     const newer = s.commit('services/agent-svc/recall.py', 'x = 2\n');
-    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil'), /new commit/i);
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC), /new commit/i);
     assert.equal(pr(s).headSha, newer);
     assert.equal(s.gh.remoteSha(`emp/kabir/${s.storyId}`), newer);
     assert.equal(pr(s).evidence, 'stale');
     assert.equal(flow.approvalHolds(rawGet(s.wp, s.storyId)!, 'dev'), false);
     // The developer approval is needed again, on the new head.
-    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil'), /developer approval/i);
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC), /developer approval/i);
     await flow.approve(s.wp, s.storyId, 'dev');
     assert.equal(pr(s).devApproval?.sha, newer);
   } finally { await s.done(); }
@@ -319,7 +323,7 @@ test('on: done needs both approvals (the owner excepted); shadow enforces nothin
     assert.throws(() => items.update(on.wp, on.storyId, { status: 'done' }, 'nikhil'), /approval/i);
     await flow.approve(on.wp, on.storyId, 'dev');
     assert.throws(() => items.update(on.wp, on.storyId, { status: 'done' }, 'nikhil'), /approval/i);
-    await flow.approve(on.wp, on.storyId, 'nikhil');
+    await flow.approve(on.wp, on.storyId, 'nikhil', undefined, QA_DOC);
     assert.equal(rawGet(on.wp, on.storyId)!.status, 'done');
   } finally { await on.done(); }
   const shadow = setup('shadow');
@@ -541,7 +545,7 @@ test('merge: dry run in shadow; in on refused until review and tests are green, 
     await flow.approve(s.wp, s.storyId, 'dev');
     const before = git(s.trunkRepo, ['rev-parse', TRUNK]).trim();
     // The QA approval (2 of 2) with workplace/tests green: the Workplace merges it itself.
-    const qa = await flow.approve(s.wp, s.storyId, 'nikhil');
+    const qa = await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     assert.match(qa.message, /merged/i);
     assert.equal(s.gh.count('merge'), 1);
     assert.equal(pr(s).merged?.by, 'workplace');
@@ -561,7 +565,7 @@ test('merge: refused when tests are red, or the head moved since the approvals',
     s.commit('services/agent-svc/recall.py', 'x = 1\n', undefined, 'fail');
     await reviewed(s);
     await flow.approve(s.wp, s.storyId, 'dev');
-    await flow.approve(s.wp, s.storyId, 'nikhil');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     assert.equal(pr(s).merged, undefined, 'red tests: no auto-merge');
     await flow.autoMergeSweep(s.wp);
     assert.equal(pr(s).merged, undefined, 'nor from the sweep');
@@ -577,7 +581,7 @@ test('auto-merge tells Asha on success', async () => {
     s.commit('services/agent-svc/recall.py', 'x = 1\n');
     await reviewed(s);
     await flow.approve(s.wp, s.storyId, 'dev');
-    await flow.approve(s.wp, s.storyId, 'nikhil');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     const told = manager.list(s.wp).find(a => a.key.startsWith(`merged:${s.storyId}`));
     assert.ok(told, 'Asha is told');
     assert.match(told!.text ?? told!.body, /merged/i);
@@ -592,7 +596,7 @@ test('auto-merge: a GitHub merge failure alerts the COO once, forces nothing, is
     await reviewed(s);
     await flow.approve(s.wp, s.storyId, 'dev');
     s.gh.failNext('merge', 1);
-    const qa = await flow.approve(s.wp, s.storyId, 'nikhil');   // never throws on a merge problem
+    const qa = await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);   // never throws on a merge problem
     assert.equal(qa.stage, 'qa');
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
     assert.equal(pr(s).merged, undefined);
@@ -616,7 +620,7 @@ test('auto-merge: a conflict with trunk reopens the story to its author instead 
     await reviewed(s);
     await flow.approve(s.wp, s.storyId, 'dev');
     s.gh.failNext('merge', 1, 'GitHub PUT /repos/o/r/pulls/1/merge failed (405): Pull Request has merge conflicts');
-    await flow.approve(s.wp, s.storyId, 'nikhil');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     const w = rawGet(s.wp, s.storyId)!;
     assert.equal(w.status, 'in-progress', 'back with the author');
     assert.equal(w.employeeId, 'kabir');
@@ -635,7 +639,7 @@ test('auto-merge: a PR GitHub already shows merged is recorded as merged, not al
     await reviewed(s);
     await flow.approve(s.wp, s.storyId, 'dev');
     const fakePr = s.gh.prs[0]!; fakePr.state = 'closed'; fakePr.merged = true;   // its commits reached trunk via another PR
-    await flow.approve(s.wp, s.storyId, 'nikhil');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     assert.equal(pr(s).merged?.by, 'github');
     assert.ok(!coo.listItems(s.wp).some(i => /auto-merge/i.test(i.title) && i.itemId === s.storyId), 'no alert for the COO');
   } finally { await s.done(); }
@@ -647,7 +651,7 @@ test('auto-merge: the sweep merges a story approved in shadow once the mode is o
     s.commit('services/agent-svc/recall.py', 'x = 1\n');
     await reviewed(s);
     await flow.approve(s.wp, s.storyId, 'dev');
-    await flow.approve(s.wp, s.storyId, 'nikhil');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     await flow.autoMergeSweep(s.wp);
     assert.equal(s.gh.count('merge'), 0, 'shadow never merges');
     flow.setMode(s.wp, 'on', 'coo');
@@ -669,7 +673,7 @@ test('merge: a trunk checkout that cannot fast-forward alerts the COO and is nev
     git(s.trunkRepo, ['add', '-A']);
     git(s.trunkRepo, ['commit', '-q', '-m', 'local only']);
     const local = git(s.trunkRepo, ['rev-parse', 'HEAD']).trim();
-    await flow.approve(s.wp, s.storyId, 'nikhil');   // merges on GitHub, then the sync refuses to force
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);   // merges on GitHub, then the sync refuses to force
     assert.ok(pr(s).merged, 'merged on GitHub');
     assert.equal(git(s.trunkRepo, ['rev-parse', 'HEAD']).trim(), local, 'nothing forced, nothing merged locally');
     assert.ok(coo.listItems(s.wp).some(i => /fast-forward/i.test(i.body)), 'the COO is alerted');
@@ -730,5 +734,27 @@ test('on: a story with no commits of its own (a check, a live verification) can 
     items.update(s.wp, s.storyId, { status: 'in-review', reviewerId: 'arjun' }, 'owner');
     items.update(s.wp, s.storyId, { status: 'done' }, 'arjun');
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
+  } finally { await s.done(); }
+});
+
+test("QA's approval needs the QA doc: missing, thin or failing docs are refused; a complete one is filed for the staging cycle", async () => {
+  const s = setup('shadow');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'dev');
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil'), /needs the QA doc/);
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, '## Edge cases\n- PASS: one\n## Report\nshort'), /not complete/);
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC.replace('- PASS: empty input', '- FAIL: empty input')), /review_send_back/);
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, '## Edge cases\n- N/A: a\n- N/A: b\n- PASS: c\n## Report\nNothing was really checked here, only marked not applicable.'), /PASS/);
+    assert.equal(rawGet(s.wp, s.storyId)!.status, 'in-review', 'a refused QA approval leaves the story in review');
+    assert.equal(pr(s).qaApproval, undefined);
+    const qa = await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
+    assert.equal(qa.stage, 'qa');
+    const filed = qaDoc.since(s.wp, '2000-01-01');
+    assert.equal(filed.length, 1);
+    assert.equal(filed[0]!.itemId, s.storyId);
+    assert.match(filed[0]!.text, /provider down/);
+    assert.equal(qaDoc.since(s.wp, '2999-01-01').length, 0, 'only docs approved since the last batch');
   } finally { await s.done(); }
 });
