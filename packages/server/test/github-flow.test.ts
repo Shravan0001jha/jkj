@@ -707,3 +707,28 @@ test('a first push GitHub failed is retried by the sweep; a refused head is not'
     assert.equal(r.gh.calls.length, 0);
   } finally { await r.done(); }
 });
+
+/* ---------- done means on the trunk (landing.ts RCA, 6 Oct) ---------- */
+
+test('on: a story whose branch has changes the trunk never got cannot be marked done without a PR', async () => {
+  const s = setup('on');
+  try {
+    s.commit('services/agent-svc/landed_check.py', 'x = 1\n');
+    items.update(s.wp, s.storyId, { status: 'in-progress' }, 'kabir');
+    items.update(s.wp, s.storyId, { status: 'in-review', reviewerId: 'arjun' }, 'owner');
+    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done' }, 'arjun'), /never reached the trunk/);
+    // The owner can still close it deliberately.
+    items.update(s.wp, s.storyId, { status: 'done' }, 'owner');
+    assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
+  } finally { await s.done(); }
+});
+
+test('on: a story with no commits of its own (a check, a live verification) can still be closed by its reviewer', async () => {
+  const s = setup('on');
+  try {
+    items.update(s.wp, s.storyId, { status: 'in-progress' }, 'kabir');
+    items.update(s.wp, s.storyId, { status: 'in-review', reviewerId: 'arjun' }, 'owner');
+    items.update(s.wp, s.storyId, { status: 'done' }, 'arjun');
+    assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
+  } finally { await s.done(); }
+});
