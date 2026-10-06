@@ -344,3 +344,23 @@ test('a shutdown-then-boot cycle resumes work blocked only by the Workplace\'s o
     tmp.cleanup();
   }
 });
+
+test('a session that hits the SDK budget stop is ended, so the work restarts in a fresh one', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+    employees.talk(wp, 'nikhil', 'hi', [], { autonomous: true });
+    await tick();
+    const s = fake.last();
+    assert.ok(employees.openSession('nikhil'), 'open before the stop');
+    s.result({ subtype: 'error_max_budget_usd' });
+    for (let i = 0; i < 40 && employees.openSession('nikhil'); i++) await tick();
+    assert.equal(employees.openSession('nikhil'), undefined, 'the stuck session is closed');
+    assert.equal(employees.hitSessionBudget('success'), false);
+    employees.closeAll(wp, 'test');
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});

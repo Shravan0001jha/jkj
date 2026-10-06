@@ -68,6 +68,11 @@ const sessions = new Map<string, Session>();   // by agent id
 export const OWNER_TALK_TURN_INR = 100;
 
 /** The owner saying, in a talk, that paused work may go on. */
+/** An SDK result that means the session's runaway budget is spent: no later turn in it can run. */
+export function hitSessionBudget(subtype: string): boolean {
+  return subtype === 'error_max_budget_usd';
+}
+
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
 export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence'] as const;
@@ -245,7 +250,17 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
       maxBudgetUsd: Math.max(options.ownerTalk ? OWNER_TALK_TURN_INR / wp.config.usdInr : 0.05, remaining, wp.config.sessionRunawayUsd),
       mcpServers: { workplace: workplaceTools(wp, employeeId, () => session) },
     },
-    onResult: result => recordUsage(wp, session, result),
+    onResult: result => {
+      recordUsage(wp, session, result);
+      // The SDK's runaway stop counts the whole resumed conversation, so once hit every later turn
+      // stops at once and the employee sits stuck (Dev, Nikhil, 6 Oct). End the session: the
+      // dispatcher resumes the assignment in a fresh one from the branch and the last handoff.
+      // No handoff turn: a capped session cannot run one (it would only wait out the timeout).
+      if (hitSessionBudget(result.subtype)) {
+        log.warn('employees', `${emp.name}: ${agent.id} hit the session budget stop; ending it so the work restarts fresh`);
+        setImmediate(() => { endSession(wp, agent.id, 0).catch(err => log.warn('employees', `end ${agent.id} after budget stop: ${err instanceof Error ? err.message : err}`)); });
+      }
+    },
     onRateLimit: info => spend.recordRateLimit(wp, info),
     onSessionId: sdkId => {
       if (session.assignmentId) work.setSession(wp, session.assignmentId, sdkId);
