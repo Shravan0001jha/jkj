@@ -364,3 +364,27 @@ test('a session that hits the SDK budget stop is ended, so the work restarts in 
     tmp.cleanup();
   }
 });
+
+test('a mention to someone whose story session died resumes the story, not a general talk', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+    const a = work.create(wp, { kind: 'assignment', title: 'Coverage', body: 'x', charterId: 'memory' });
+    const first = employees.assign(wp, a.id);
+    await tick();
+    const who = work.require$(wp, a.id).employeeId!;
+    employees.close(wp, first.id, 'test: session died');
+    assert.equal(employees.openSession(who), undefined);
+    assert.equal(work.require$(wp, a.id).status, 'in-progress');
+
+    const agent = employees.talk(wp, who, 'are you resuming?', [], { autonomous: true });
+    await tick();
+    assert.equal(employees.openSession(who)?.assignmentId, a.id, 'the new session is on the story');
+    assert.ok(fake.last().sent.some(m => m.text.includes('are you resuming?')), 'the mention is still delivered');
+    employees.close(wp, agent.id, 'test');
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});

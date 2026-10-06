@@ -392,7 +392,26 @@ export function talk(wp: Workplace, employeeId: string, text: string, attachment
     runs.sendMessage(open.agentId, text, attachments, { from, ...(opts.talkId ? { talkId: opts.talkId } : {}) });
     return runs.getRunAgent(open.agentId)!;
   }
+  // RCA (6 Oct, Rohan): a mention to someone whose story session had died spawned a talk session on
+  // the general branch, which auto-saved and parked the story; he said "resuming now" from the wrong
+  // branch and the story sat sessionless. Work in progress comes first: resume it, then deliver.
+  const resumed = opts.probe ? undefined : resumeInProgress(wp, employeeId);
+  if (resumed) {
+    runs.sendMessage(resumed.id, text, attachments, { from, ...(opts.talkId ? { talkId: opts.talkId } : {}) });
+    return resumed;
+  }
   return spawn(wp, employeeId, { prompt: text, attachments, from, ...(opts.talkId ? { talkId: opts.talkId } : {}), ...(opts.probe ? { probe: true } : {}), ...(ownerTalk ? { ownerTalk: true } : {}) });
+}
+
+/** The employee's in-progress assignment restarted in its own session (on its branch), if there is one to resume. */
+function resumeInProgress(wp: Workplace, employeeId: string): Agent | undefined {
+  if (floor.paused(wp)) return undefined;
+  const item = work.list(wp, { kind: 'assignment', employeeId }).find(a => a.status === 'in-progress');
+  if (!item) return undefined;
+  try { return assign(wp, item.id); } catch (err) {
+    log.warn('employees', `talk: could not resume ${item.id} for ${employeeId}: ${err instanceof Error ? err.message : err}`);
+    return undefined;
+  }
 }
 
 /** "Go ahead and continue" to a cap-paused employee: lift the pause for today, unlock the session, resume the work. */
