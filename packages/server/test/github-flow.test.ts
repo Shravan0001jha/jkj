@@ -758,3 +758,22 @@ test("QA's approval needs the QA doc: missing, thin or failing docs are refused;
     assert.equal(qaDoc.since(s.wp, '2999-01-01').length, 0, 'only docs approved since the last batch');
   } finally { await s.done(); }
 });
+
+test('auto-merge holds a design doc for the COO: both approvals and green tests are not enough; the COO merges it by hand', async () => {
+  const s = setup('on');
+  try {
+    s.commit('docs/tech/grounded-awareness.md', '# Technical doc\n');
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
+    assert.equal(pr(s).merged, undefined, 'a design doc never auto-merges');
+    const held = coo.listItems(s.wp).filter(i => /auto-merge/i.test(i.title) && i.itemId === s.storyId);
+    assert.equal(held.length, 1, 'the COO is asked once');
+    assert.match(held[0]!.body, /design docs \(docs\/tech\/grounded-awareness\.md\)/);
+    await flow.autoMergeSweep(s.wp);
+    assert.equal(pr(s).merged, undefined, 'the sweep does not merge it either');
+    const m = await flow.merge(s.wp, s.storyId, 'coo');
+    assert.equal(m.merged, true, 'the COO merges it after review');
+    assert.ok(flow.DESIGN_DOC.test('docs/experts/HLD-grounded-awareness.md') && flow.DESIGN_DOC.test('docs/product/x.md') && !flow.DESIGN_DOC.test('docs/experts/info.md'));
+  } finally { await s.done(); }
+});

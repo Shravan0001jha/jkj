@@ -15,7 +15,7 @@ import * as employees from './employees.js';
 import * as runs from './runs.js';
 import { now } from './store.js';
 import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
-import { branchFor, worktreePath } from './worktrees.js';
+import { branchFor, worktreePath, git as gitIn } from './worktrees.js';
 import * as prePr from './pre-pr.js';
 import { GITHUB_MODES, githubMode, holds, isDeveloper, isQa, qaReviewer, writeGithubMode } from './review-policy.js';
 import { freshLink } from './evidence-share.js';
@@ -690,6 +690,18 @@ function autoReady(w: WorkItem): 'ready' | 'waiting' | 'red' {
   return pr.tests.state === 'pending' ? 'waiting' : 'red';
 }
 
+/** Product, technical and HLD/LLD/TDD docs: reviewed and merged by the COO (org design, 7 Oct). */
+export const DESIGN_DOC = /^docs\/(product|tech)\/|(^|\/)(HLD|LLD|TDD)-[^/]*\.md$/;
+
+/** The design docs a story's branch changes against the trunk; none when its branch cannot be read. */
+export function designDocsIn(wp: Workplace, w: WorkItem): string[] {
+  const ctx = contextOf(wp, w);
+  if (typeof ctx === 'string') return [];
+  try {
+    return gitIn(ctx.repo, ['diff', '--name-only', `${ctx.base}...${w.pr?.headSha ?? ctx.head}`]).split('\n').map(f => f.trim()).filter(f => DESIGN_DOC.test(f));
+  } catch { return []; }
+}
+
 function blockAuto(wp: Workplace, w: WorkItem, why: string): void {
   const pr = w.pr!;
   putSetting(wp, AUTO_BLOCKED_PREFIX + w.id, pr.headSha);
@@ -715,6 +727,10 @@ export async function autoMerge(wp: Workplace, itemId: string): Promise<AutoMerg
   const ready = autoReady(w);
   if (ready === 'waiting') return 'waiting';
   if (ready === 'red') { blockAuto(wp, w, `workplace/tests is ${w.pr.tests!.state} on ${w.pr.headSha.slice(0, 8)}`); return 'blocked'; }
+  // Org design (owner, 7 Oct): design docs are approved by the COO, not by a developer and QA.
+  // Two merged without his review that night (the HLD and the product doc), so they never auto-merge.
+  const docs = designDocsIn(wp, w);
+  if (docs.length) { blockAuto(wp, w, `it changes design docs (${docs.join(', ')}), which merge only after the COO reviews them`); return 'blocked'; }
   if (autoInFlight.has(itemId)) return 'waiting';
   autoInFlight.add(itemId);
   try {
