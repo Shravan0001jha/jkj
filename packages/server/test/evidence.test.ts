@@ -781,3 +781,15 @@ test('a slot held by a manual local-run.sh (its lock pid alive) is skipped; a st
   assert.equal(evidence.slotHeldOutside(2, [dir]), false, 'a dead pid is a stale lock');
   assert.equal(evidence.slotHeldOutside(3, [dir]), false, 'no lock');
 });
+
+test('iOS staging patch handles the old static base line and the 7 Oct resolveBase form; refuses anything ambiguous', async () => {
+  const ports = await import('../src/services/evidence-ports.js');
+  const old = 'struct Api {\n    static let base = "https://api.irisforu.com"\n}\n';
+  assert.match(ports.patchIosApi(old, 'https://staging.irisforu.com'), /static let base = "https:\/\/staging\.irisforu\.com"/);
+  const now = 'static func resolveBase(env: [String: String]) -> String {\n    #if DEBUG\n    if let o = env["IRIS_API_URL"], !o.isEmpty { return o }\n    #endif\n    return "https://api.irisforu.com"\n}\n';
+  const patched = ports.patchIosApi(now, 'https://staging.irisforu.com');
+  assert.match(patched, /return "https:\/\/staging\.irisforu\.com"/);
+  assert.doesNotMatch(patched, /api\.irisforu\.com/);
+  assert.throws(() => ports.patchIosApi('nothing here', 'https://staging.irisforu.com'), /exactly one prod API base/);
+  assert.throws(() => ports.patchIosApi(old + now, 'https://staging.irisforu.com'), /found 1 and 1/);
+});

@@ -243,9 +243,20 @@ async function ensureNodeDeps(dir: string, log: string): Promise<void> {
 
 /* ---------- the real builder ---------- */
 
-/** The one line iOS takes its API base from (mobile/ios/Iris/Net/Api.swift); no runtime override exists. */
+/** Where iOS takes its API base from (mobile/ios/Iris/Net/Api.swift). */
 export const IOS_API_FILE = 'Iris/Net/Api.swift';
 export const IOS_API_LINE = 'static let base = "https://api.irisforu.com"';
+/** Since 7 Oct (as_muxogbal9wcrd) the prod default is resolveBase's fallback return, with a DEBUG-only env override. */
+export const IOS_API_RETURN = 'return "https://api.irisforu.com"';
+
+/** Api.swift with its prod API base pointed at `api`; both the old and the resolveBase form, exactly one hit required. */
+export function patchIosApi(original: string, api: string): string {
+  const count = (needle: string): number => original.split(needle).length - 1;
+  const oldHits = count(IOS_API_LINE), newHits = count(IOS_API_RETURN);
+  if (oldHits === 1 && newHits === 0) return original.replace(IOS_API_LINE, `static let base = "${api}"`);
+  if (newHits === 1 && oldHits === 0) return original.replace(IOS_API_RETURN, `return "${api}"`);
+  throw new BuildError(`ios build refused: expected exactly one prod API base in ${IOS_API_FILE} ('${IOS_API_LINE}' or '${IOS_API_RETURN}'), found ${oldHits} and ${newHits}; the staging patch needs updating (COO)`);
+}
 
 export class RealBuilder implements AppBuilder {
   constructor(private readonly cfg: EvidenceConfig) {}
@@ -302,12 +313,11 @@ export class RealBuilder implements AppBuilder {
     if (!existsSync(apiFile)) throw new BuildError(`ios build failed: no ${r.appDir}/${IOS_API_FILE}`);
     const env = childEnvFor({ DEVELOPER_DIR: this.cfg.developerDir });
     const original = readFileSync(apiFile, 'utf8');
-    const hits = original.split(IOS_API_LINE).length - 1;
-    if (hits !== 1) throw new BuildError(`ios build refused: expected the line '${IOS_API_LINE}' once in ${IOS_API_FILE}, found it ${hits} times; the staging patch needs updating (COO)`);
+    const patched = patchIosApi(original, r.api);
     const host = new URL(r.api).host;
     const dd = join(dir, 'build', 'evidence-dd');
     try {
-      writeFileSync(apiFile, original.replace(IOS_API_LINE, `static let base = "${r.api}"`));
+      writeFileSync(apiFile, patched);
       if (existsSync(join(dir, 'project.yml'))) await this.step(r, 'xcodegen', 'xcodegen', ['generate', '--spec', 'project.yml'], dir, env, 5);
       await this.step(r, 'xcodebuild', 'xcodebuild', ['-project', 'Iris.xcodeproj', '-scheme', 'Iris', '-configuration', 'Debug', '-sdk', 'iphonesimulator',
         '-destination', 'generic/platform=iOS Simulator', '-derivedDataPath', dd, 'build'], dir, env, 40);
