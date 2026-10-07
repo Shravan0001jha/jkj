@@ -777,3 +777,20 @@ test('auto-merge holds a design doc for the COO: both approvals and green tests 
     assert.ok(flow.DESIGN_DOC.test('docs/experts/HLD-grounded-awareness.md') && flow.DESIGN_DOC.test('docs/product/x.md') && !flow.DESIGN_DOC.test('docs/experts/info.md'));
   } finally { await s.done(); }
 });
+
+test('a full pre-pr.sh result that arrives after approval is re-read: the sweep merges the story instead of waiting forever', async () => {
+  const s = setup('on');
+  try {
+    const head = s.commit('services/agent-svc/recall.py', 'x = 1\n', undefined, false);
+    writePrePr(s.wt, head, { mode: 'fast' });          // passes the submit gate, but only a full run turns tests green
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
+    assert.equal(pr(s).tests?.state, 'pending');
+    assert.equal(pr(s).merged, undefined, 'approved but waiting for a full run');
+    writePrePr(s.wt, head, { mode: 'full' });           // the author (or the COO) runs the full checks later
+    await flow.autoMergeSweep(s.wp);
+    assert.equal(pr(s).tests?.state, 'success', 'the later result is read');
+    assert.ok(pr(s).merged, 'and the story merges');
+  } finally { await s.done(); }
+});

@@ -630,6 +630,7 @@ export async function merge(wp: Workplace, itemId: string, by: string): Promise<
     await onReview(wp, itemId, 'workplace');
     blockers.push(`new commits on ${ctx0.branch} since the review (${ctx0.head.slice(0, 8)}): approvals reset`);
   }
+  if (typeof ctx0 !== 'string' && ctx0.head === w0.pr.headSha && w0.pr.tests?.state === 'pending') await recordTests(wp, itemId, ctx0);
   const w = rawGet(wp, itemId)!;
   const pr = w.pr!;
   if (!holds(pr.devApproval, w)) blockers.push('needs the developer approval');
@@ -724,7 +725,10 @@ export async function autoMerge(wp: Workplace, itemId: string): Promise<AutoMerg
   const w = rawGet(wp, itemId);
   if (!w?.pr || w.pr.merged) return 'off';
   if (getSetting(wp, AUTO_BLOCKED_PREFIX + itemId) === w.pr.headSha) return 'blocked';
-  const ready = autoReady(w);
+  // A pre-pr.sh result that arrives after review (B7, 7 Oct: approved, tests stuck pending all night)
+  // is only read at submit time, so re-read it here before deciding to wait.
+  if (w.pr.tests?.state === 'pending') { const ctx = contextOf(wp, w); if (typeof ctx !== 'string' && ctx.head === w.pr.headSha) await recordTests(wp, itemId, ctx); }
+  const ready = autoReady(rawGet(wp, itemId) ?? w);
   if (ready === 'waiting') return 'waiting';
   if (ready === 'red') { blockAuto(wp, w, `workplace/tests is ${w.pr.tests!.state} on ${w.pr.headSha.slice(0, 8)}`); return 'blocked'; }
   // Org design (owner, 7 Oct): design docs are approved by the COO, not by a developer and QA.
