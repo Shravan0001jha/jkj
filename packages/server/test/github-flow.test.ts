@@ -24,6 +24,7 @@ import { installFakeRuntime } from './fakes/fake-runtime.js';
 
 /** A QA doc that allows approval 2 of 2 (owner's review flow, step 2). */
 import * as qaDoc from '../src/services/qa-doc.js';
+import { qaReviewer } from '../src/services/review-policy.js';
 const QA_DOC = '## Edge cases\n- PASS: empty input — unit test\n- PASS: provider down — killed the provider and checked the reply\n- N/A: Windows path — no Windows code touched\n## Report\nChecked both failure paths by hand and in tests; Windows untouched; residual risk low.';
 
 /**
@@ -830,4 +831,14 @@ test("owner, 7 Oct: the COO may close stale or unlanded work as won't-do or dupl
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
     assert.equal(rawGet(s.wp, s.storyId)!.resolution, 'wont-do');
   } finally { await s.done(); }
+});
+
+test('QA review goes to the QA-capable person with the fewest reviews waiting, not always the first QA (7 Oct)', () => {
+  const emp = (id: string, roleId: string) => ({ id, name: id, roleId, level: 2, charterIds: id === 'kabir' ? ['memory'] : ['qa-release'], reportsTo: 'cto' }) as unknown as import('@jkj/shared').Employee;
+  const staff = [emp('nikhil', 'qa'), emp('zoya', 'engineer'), emp('kabir', 'lead')];
+  const w = { id: 'as_x', employeeId: 'kabir', reviewerId: 'dev' } as unknown as WorkItem;
+  assert.equal(qaReviewer(staff, w, ['dev']), 'nikhil', 'quiet floor: the qa role first, as before');
+  assert.equal(qaReviewer(staff, w, ['dev'], { nikhil: 3, zoya: 0 }), 'zoya', 'Nikhil has three waiting: Zoya takes it');
+  assert.equal(qaReviewer(staff, w, ['dev'], { nikhil: 1, zoya: 1 }), 'nikhil', 'a tie keeps the qa role first');
+  assert.equal(qaReviewer(staff, { ...w, reviewerId: 'zoya' }, ['dev'], { zoya: 5 }), 'zoya', 'a QA already named on the item keeps it');
 });

@@ -80,9 +80,16 @@ export function earlyQaMoveProblem(wp: Workplace, w: WorkItem, by: string, from:
 }
 
 /** Who takes the QA approval: the item's reviewer if QA, else the `qa` role, else the quality charter; never the excluded. */
-export function qaReviewer(employees: Employee[], w: WorkItem, exclude: string[]): string | undefined {
+export function qaReviewer(employees: Employee[], w: WorkItem, exclude: string[], load: Record<string, number> = {}): string | undefined {
   const ok = (e: Employee | undefined): e is Employee => !!e && isQa(e) && !exclude.includes(e.id) && e.id !== w.employeeId;
   const current = employees.find(e => e.id === w.reviewerId);
   if (ok(current)) return current.id;
-  return employees.find(e => ok(e) && e.roleId === 'qa')?.id ?? employees.find(e => ok(e))?.id;
+  // RCA (7 Oct): this always returned the first `qa`-role employee (Nikhil), so every QA review queued on
+  // one person while Zoya sat idle, and a QA the COO had routed elsewhere was overwritten at the developer
+  // approval. Pick the QA-capable person with the fewest reviews waiting; ties keep the org order
+  // (the `qa` role first), so a quiet floor behaves exactly as before.
+  const pool = employees.filter(ok);
+  if (!pool.length) return undefined;
+  const rank = (e: Employee) => (load[e.id] ?? 0) * 2 + (e.roleId === 'qa' ? 0 : 1);
+  return pool.reduce((best, e) => (rank(e) < rank(best) ? e : best)).id;
 }

@@ -471,7 +471,9 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
     }
     savePr(wp, itemId, c => ({ pr: { ...c.pr!, devApproval: approval } }));
     trail.record(wp, { itemId, by, kind: 'note', text: `Developer approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}${approval.note ? `: ${approval.note}` : ''}` });
-    const qa = qaReviewer(wp.org.employees, w, [by]);
+    const load: Record<string, number> = {};
+    for (const i of items.list(wp, { status: 'in-review' })) if (i.reviewerId && i.id !== itemId) load[i.reviewerId] = (load[i.reviewerId] ?? 0) + 1;
+    const qa = qaReviewer(wp.org.employees, w, [by], load);
     if (qa && qa !== w.reviewerId) items.update(wp, itemId, { reviewerId: qa, note: 'Developer approval given; QA reviews next' }, by);
     try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
     return { stage: 'dev', message: `Developer approval recorded (approval 1 of 2) on ${pr.headSha.slice(0, 8)}. QA reviews next${qa ? ` (${nameOf(wp, qa)})` : ''} for approval 2 of 2. Any new commit resets both approvals.` };
