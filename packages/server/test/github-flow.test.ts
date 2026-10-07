@@ -1,7 +1,8 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -730,6 +731,29 @@ test('on: a story whose branch has changes the trunk never got cannot be marked 
 test('on: a story with no commits of its own (a check, a live verification) can still be closed by its reviewer', async () => {
   const s = setup('on');
   try {
+    items.update(s.wp, s.storyId, { status: 'in-progress' }, 'kabir');
+    items.update(s.wp, s.storyId, { status: 'in-review', reviewerId: 'arjun' }, 'owner');
+    items.update(s.wp, s.storyId, { status: 'done' }, 'arjun');
+    assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
+  } finally { await s.done(); }
+});
+
+test('done check: a stale origin/<trunk> does not count newer trunk commits the story branch carries as unlanded (7 Oct)', async () => {
+  const s = setup('on');
+  try {
+    const trunk = s.wp.config.github.trunk;
+    git(s.trunkRepo, ['remote', 'add', 'origin', s.gh.bare]);
+    git(s.trunkRepo, ['fetch', '-q', 'origin']);                     // origin/<trunk> = T0
+    // Another story merges on GitHub: the trunk moves to T1, but this repo's origin ref is not fetched forward.
+    const other = mkdtempSync(join(tmpdir(), 'iris-other-'));
+    git(other, ['clone', '-q', '-b', trunk, s.gh.bare, '.']);
+    writeFileSync(join(other, 'other.py'), 'y = 2\n');
+    git(other, ['add', '-A']);
+    git(other, ['-c', 'user.email=o@iris.local', '-c', 'user.name=other', 'commit', '-q', '-m', 'another story']);
+    git(other, ['push', '-q', 'origin', trunk]);
+    // The story branch picks up T1 (an agent pulled the trunk), with no commits of its own.
+    git(s.wt, ['fetch', '-q', s.gh.bare, trunk]);
+    git(s.wt, ['merge', '-q', '--ff-only', 'FETCH_HEAD']);
     items.update(s.wp, s.storyId, { status: 'in-progress' }, 'kabir');
     items.update(s.wp, s.storyId, { status: 'in-review', reviewerId: 'arjun' }, 'owner');
     items.update(s.wp, s.storyId, { status: 'done' }, 'arjun');

@@ -23,6 +23,10 @@ export function unlandedPatches(wp: Workplace, w: WorkItem): number {
   } catch { return 0; }
   let base = trunk;
   try { git(repo, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${trunk}`]); base = `origin/${trunk}`; } catch { /* local trunk only */ }
+  // RCA (7 Oct): the origin ref is only as fresh as the last fetch. A story branch that pulled newer
+  // trunk merges counted them as its own unlanded changes, so a zero-commit verification story could
+  // not be closed. Bring origin/<trunk> up to date first; offline, fall back to the ref as it is.
+  if (base !== trunk) { try { git(repo, ['fetch', '-q', 'origin', `${trunk}:refs/remotes/origin/${trunk}`]); } catch { /* offline: use the ref we have */ } }
   try {
     return git(repo, ['cherry', base, branch]).split('\n').filter(l => l.startsWith('+')).length;
   } catch { return 0; }
