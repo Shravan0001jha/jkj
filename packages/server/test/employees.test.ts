@@ -388,3 +388,25 @@ test('a mention to someone whose story session died resumes the story, not a gen
     tmp.cleanup();
   }
 });
+
+test('a restart revives in-progress work that is not yet building: a proposed or planned story is marked and resumed (Neel, 7 Oct)', async () => {
+  const { wp, tmp } = testWorkplace();
+  installFakeRuntime();
+  try {
+    withOauth(tmp.dir);
+    const proposed = work.create(wp, { kind: 'assignment', title: 'Proposed work', body: 'x', employeeId: 'tara', charterId: 'mobile' });
+    employees.assign(wp, proposed.id);
+    const planned = work.create(wp, { kind: 'assignment', title: 'Mira work', body: 'x', employeeId: 'mira', charterId: 'experts' });
+    work.attachPlan(wp, planned.id, 'p', 'mira');
+    assert.equal(work.get(wp, planned.id)!.state, 'planned');
+    employees.assign(wp, planned.id);
+    await tick();
+    const before = { p: work.get(wp, proposed.id)!.state };
+    employees.closeAll(wp, 'shutdown');
+    assert.ok(wp.db.prepare('select 1 from settings where key = ?').get(`resume:${proposed.id}`), `a ${before.p} story is marked for the boot`);
+    const result = await employees.resumeAfterShutdown(wp, 5);
+    await tick();
+    assert.ok(result.resumed.includes(proposed.id), 'and resumed');
+    assert.ok(employees.openSession('tara'), 'with a live session');
+  } finally { tmp.cleanup(); }
+});

@@ -834,10 +834,15 @@ function reportInterrupted(wp: Workplace, s: { agentId: string; employeeId: stri
  */
 const RESUME_KEY = (id: string): string => `resume:${id}`;
 
+/** The assignment states a restart may interrupt and the boot restarts. */
+const RESUMABLE = new Set(['planned', 'building', 'proposed']);
+
 function markForResume(wp: Workplace, assignmentId: string, sessionId: string, note: string): void {
   try {
     const item = work.get(wp, assignmentId);
-    if (!item || item.state !== 'building') return;
+    // Any active state, not only 'building': a story whose plan was posted ('planned') was dropped by
+    // a restart and sat sessionless until hygiene (Neel, B9, 7 Oct).
+    if (!item || !RESUMABLE.has(item.state)) return;
     wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(RESUME_KEY(assignmentId), sessionId);
     trail.record(wp, { itemId: assignmentId, by: 'workplace', kind: 'note', text: note });
   } catch (err) { log.warn('employees', String(err)); }
@@ -933,7 +938,7 @@ export async function resumeAfterShutdown(wp: Workplace, staggerMs = 1500): Prom
   for (const id of marked) {
     const item = work.get(wp, id);
     // Moved on since (the owner reassigned, parked or closed it): nothing to resume.
-    if (!item || item.state !== 'building' || !item.employeeId) { wp.db.prepare('delete from settings where key = ?').run(RESUME_KEY(id)); continue; }
+    if (!item || !RESUMABLE.has(item.state) || !item.employeeId) { wp.db.prepare('delete from settings where key = ?').run(RESUME_KEY(id)); continue; }
     items.push(item);
   }
   // Rows blocked by a shutdown before 2 Oct (the old behaviour) are still resumed once.
