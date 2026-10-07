@@ -121,7 +121,28 @@ export function replyFromCoo(wp: Workplace, spec: { inReplyTo: string; text: str
     inReplyTo: spec.inReplyTo, ...(spec.details?.trim() ? { details: spec.details.trim() } : {}),
     ...(files.length ? { attachments: files } : {}),
   };
-  return saveMessage(wp, message);
+  const saved = saveMessage(wp, message);
+  // RCA (7 Oct): a COO reply to a mention or stall went only to the COO chat, never to the story or
+  // Team Room thread the agent watches, so Zoya, Rohan and Asha re-asked questions already answered.
+  // Mirror it where the conversation actually is.
+  try {
+    const where = threadOf(wp, spec.inReplyTo);
+    if (where && text) threadReply(wp, { ...where, text });
+  } catch { /* the chat reply stands even if the mirror fails */ }
+  return saved;
+}
+
+/** The story or Team Room thread a bridge entry (cbi_…) came from, via its COO item, if any. */
+function threadOf(wp: Workplace, bridgeId: string): { itemId?: string; threadId?: string } | undefined {
+  if (!bridgeId.startsWith('cbi_') || !existsSync(inboxFile(wp))) return undefined;
+  const line = readFileSync(inboxFile(wp), 'utf8').split('\n').reverse().find(l => l.includes(`"id":"${bridgeId}"`));
+  if (!line) return undefined;
+  const entry = JSON.parse(line) as { coiId?: string; itemId?: string };
+  const coiId = entry.coiId ?? (entry.itemId?.startsWith('coi_') ? entry.itemId : undefined);
+  const item = coiId ? getItem(wp, coiId) : undefined;
+  if (item?.itemId) return { itemId: item.itemId };
+  if (item?.threadId) return { threadId: item.threadId };
+  return undefined;
 }
 
 /* ---------- escalation and mention routing ---------- */

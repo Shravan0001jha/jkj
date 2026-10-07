@@ -178,3 +178,21 @@ test('the approved live-check window is off by default, opens for a fixed number
     tmp.cleanup();
   }
 });
+
+test('a COO reply to a stall or mention also lands on the story it came from, where the agent reads it (7 Oct RCA)', async () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const items = await import('../src/services/items.js');
+    const trail = await import('../src/services/trail.js');
+    const epic = items.create(wp, { level: 'epic', title: 'E' }, 'owner');
+    const story = items.create(wp, { level: 'story', parentId: epic.id, title: 'S', assigneeId: 'kabir' }, 'owner');
+    coo.notifyStall(wp, { itemId: story.id, title: 'Blocked: S', body: 'waiting on the COO', by: 'workplace' });
+    const bridge = coo.readInboxFileForTest(wp).trim().split('\n').map(l => JSON.parse(l) as { id: string; kind: string }).filter(e => e.kind === 'stall').at(-1)!;
+    coo.replyFromCoo(wp, { inReplyTo: bridge.id, text: 'Yes, it is live on prod.' });
+    assert.ok(trail.comments(wp, story.id).some(c => c.by === 'coo' && c.text === 'Yes, it is live on prod.'), 'the answer is on the story');
+    // A reply to the owner's own message stays in the COO chat only.
+    const sent = coo.sendOwnerMessage(wp, 'hi');
+    coo.replyFromCoo(wp, { inReplyTo: sent.id, text: 'hello' });
+    assert.ok(!trail.comments(wp, story.id).some(c => c.text === 'hello'));
+  } finally { tmp.cleanup(); }
+});
