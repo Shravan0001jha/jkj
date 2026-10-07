@@ -755,3 +755,17 @@ test('a story that changes the deploy scripts themselves is refused as an error;
     assert.match(rec.note ?? '', /deploy scripts.*scripts\/deploy-target\.sh/);
   } finally { await s.done(); }
 });
+
+test('a deploy the Workplace did not run (the twice-daily batch) records what staging runs, so reports stop citing a stale commit', async () => {
+  const { testWorkplace } = await import('./fakes/workplace.js');
+  const evidence = await import('../src/services/evidence.js');
+  const { wp, tmp } = testWorkplace();
+  try {
+    assert.equal(evidence.stagingServer(wp).state, 'unknown');
+    evidence.recordStagingDeploy(wp, 'a94dcb9c31a6ca5d2eeccd4f212ce066bf6e9aa5', 'staging-batch');
+    const st = evidence.stagingServer(wp);
+    assert.equal(st.state, 'deployed');
+    assert.equal(st.sha, 'a94dcb9c31a6ca5d2eeccd4f212ce066bf6e9aa5');
+    assert.throws(() => evidence.recordStagingDeploy(wp, 'not-a-sha', 'x'), /git commit/);
+  } finally { tmp.cleanup(); }
+});

@@ -1,3 +1,4 @@
+import { BadRequest } from '../util/errors.js';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -401,6 +402,18 @@ export function stagingServer(wp: Workplace): StagingServerState {
 
 function setStagingServer(wp: Workplace, st: StagingServerState): void {
   wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(STAGING_SERVER_KEY, JSON.stringify(st));
+}
+
+/**
+ * A deploy the Workplace did not run itself (the twice-daily batch, staging-follow-trunk.sh) records
+ * what staging now runs. Without it, evidence reports repeated a 5 Oct commit for two days
+ * (Zoya's RCA, 7 Oct).
+ */
+export function recordStagingDeploy(wp: Workplace, sha: string, by: string): StagingServerState {
+  if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new BadRequest('sha must be a git commit (7-40 hex)');
+  const st: StagingServerState = { state: 'deployed', sha, at: now(), run: `external:${by}` };
+  setStagingServer(wp, st);
+  return st;
 }
 
 /** The server commit staging is known to run, or null. */
