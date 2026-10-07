@@ -1151,6 +1151,10 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         async (args) => {
           const id = args.assignmentId ?? currentStory(session());
           if (!id) return ok('No assignment is attached to this session; say what you did in your handoff instead.');
+          // 7 Oct (B9): Neel submitted while the story was assigned to Mira mid hand-off, and the push took
+          // the ASSIGNEE's branch (Mira's docstring) as the PR. Only the assignee submits their story.
+          const owner = work.get(wp, id)?.employeeId;
+          if (owner && owner !== employeeId) return ok(`Not recorded: ${id} is assigned to ${employee(wp, owner).name}, not you, so a submit would push their branch. Ask Asha to hand it back to you first, then report_done.`);
           const evidence: Evidence = { tests: { passed: args.testsPassed, failed: args.testsFailed, ...(args.testCommand ? { command: args.testCommand } : {}) }, commits: args.commits, liveVerified: args.liveVerified, notVerified: args.notVerified, ...(args.notes ? { notes: args.notes } : {}) };
           // Before a commit counts as evidence: every changed file must be owned by one of the employee's charters.
           const wt = session().worktree;

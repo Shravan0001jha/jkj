@@ -137,3 +137,16 @@ test('#22: an owner message or @coo mention with no COO response in 15 min raise
     assert.match(alerts.at(-1)!.title, /your message on the COO chat/);
   } finally { off(); tmp.cleanup(); }
 });
+
+test('report_done by someone who is not the story\'s assignee is refused, so it never pushes the assignee\'s branch (B9, 7 Oct)', async () => {
+  const { wp, tmp } = testWorkplace();
+  withOauth(tmp.dir);
+  try {
+    const epic = items.create(wp, { level: 'epic', title: 'Grounded awareness' }, 'owner');
+    const story = items.create(wp, { level: 'story', parentId: epic.id, title: 'B9 activity line', assigneeId: 'mira' }, 'owner');
+    const neel = await toolsFor(wp, 'dev', story.id);   // a session bound to the story, but not its assignee
+    const out = await neel('report_done', { assignmentId: story.id, testsPassed: 1, testsFailed: 0, commits: [], liveVerified: [], notVerified: [] });
+    assert.match(out, /is assigned to Mira, not you/);
+    assert.notEqual(rawGet(wp, story.id)!.status, 'in-review', 'not submitted');
+  } finally { await new Promise(r => setTimeout(r, 200)); tmp.cleanup(); }
+});
