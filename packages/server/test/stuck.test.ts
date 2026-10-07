@@ -122,3 +122,18 @@ test('the paused floor: nothing is checked or raised, and the clock starts again
     assert.equal(stuck.sweep(wp, t0 + 42 * MIN).length, 1);
   } finally { await done(); }
 });
+
+test('In progress while the assignee is working another story: queued, not stuck; no alert (8 Oct)', async () => {
+  const { wp, story, done } = setup();
+  try {
+    const a = story('Story she is on', 'tara');
+    const b = story('Second story, queued behind it', 'tara');
+    employees.assign(wp, a.id);
+    assert.ok(employees.sessionOn('tara', a.id));
+    items.update(wp, b.id, { status: 'in-progress' }, 'tara');
+    const t0 = Date.now();
+    stuck.sweep(wp, t0);
+    assert.deepEqual(stuck.sweep(wp, t0 + 11 * MIN), [], 'busy elsewhere is not stuck');
+    assert.equal(alertsFor(wp, b.id).length, 0);
+  } finally { await done(); }
+});

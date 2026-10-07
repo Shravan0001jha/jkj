@@ -84,6 +84,11 @@ export function condition(wp: Workplace, w: WorkItem): Stuck | null {
   }
   if (w.status === 'in-progress' && who && isAgent(wp, who)) {
     if (employees.sessionOn(who, w.id)) return null;
+    // RCA (8 Oct): an engineer with one session and two In-progress stories is working the other one;
+    // this story is queued behind it, not stalled. Alerting made Asha cycle its status, which pulled the
+    // engineer off the story they were on and reset their context, repeatedly. Busy elsewhere is not stuck.
+    const open = employees.openSession(who);
+    if (open && open.assignmentId && open.assignmentId !== w.id) return null;
     const name = nameOf(wp, who);
     return {
       state: `in-progress:${who}:${episode}`, status: 'In progress', expected: `${name} (assignee)`, expectedId: who,
