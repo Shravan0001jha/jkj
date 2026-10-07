@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, sep } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { EvidenceRunRecord, EvidenceServer, EvidenceState, StagingServerState, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { AppBuilder, EvidenceRunner, Platform, RunnerOutcome, ServerDeployer, Staging, StagingLock } from './evidence-ports.js';
@@ -285,11 +286,25 @@ function keepStagingInUse(wp: Workplace): void {
   }
 }
 
+/** local-run.sh's own slot lock ($TMPDIR/iris-e2e-slot-N.lock/pid) held by a live process. */
+export function slotHeldOutside(slot: number, dirs: string[] = [process.env['TMPDIR'] ?? '', tmpdir(), '/tmp']): boolean {
+  for (const d of new Set(dirs.filter(Boolean))) {
+    try {
+      const pid = Number(readFileSync(join(d, `iris-e2e-slot-${slot}.lock`, 'pid'), 'utf8').trim());
+      if (pid > 0) { try { process.kill(pid, 0); return true; } catch { /* dead: a stale lock the runner clears */ } }
+    } catch { /* no lock here */ }
+  }
+  return false;
+}
+
 function pump(wp: Workplace): void {
   const e = engine(wp);
   if (e.stopped) { keepStagingInUse(wp); return; }
   for (let slot = 1; slot <= wp.config.evidence.slots && e.queue.length; slot++) {
     if (e.active.has(slot)) continue;
+    // A slot someone runs by hand (scripts/local-run.sh --slot N, outside this queue) holds its lock;
+    // starting there fails in seconds (Mira, 7 Oct: four runs died on Nikhil's manual ios-uitests run).
+    if (portsOf(wp).runner instanceof RealRunner && slotHeldOutside(slot)) { setTimeout(() => schedulePump(wp), 30_000).unref?.(); continue; }
     // The first queued job that may start: a server-touching one waits while another holds staging.
     const serverBusy = [...e.active.values()].some(a => a.job.server);
     const at = e.queue.findIndex(id => !(serverBusy && e.jobs.get(id)?.server));

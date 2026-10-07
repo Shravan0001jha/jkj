@@ -769,3 +769,15 @@ test('a deploy the Workplace did not run (the twice-daily batch) records what st
     assert.throws(() => evidence.recordStagingDeploy(wp, 'not-a-sha', 'x'), /git commit/);
   } finally { tmp.cleanup(); }
 });
+
+test('a slot held by a manual local-run.sh (its lock pid alive) is skipped; a stale lock is not (Mira, 7 Oct)', async () => {
+  const evidence = await import('../src/services/evidence.js');
+  const { mkdtempSync, mkdirSync: mk, writeFileSync: wf } = await import('node:fs');
+  const { tmpdir: td } = await import('node:os');
+  const dir = mkdtempSync(join(td(), 'slotlock-'));
+  mk(join(dir, 'iris-e2e-slot-1.lock')); wf(join(dir, 'iris-e2e-slot-1.lock', 'pid'), String(process.pid));
+  mk(join(dir, 'iris-e2e-slot-2.lock')); wf(join(dir, 'iris-e2e-slot-2.lock', 'pid'), '999999');
+  assert.equal(evidence.slotHeldOutside(1, [dir]), true, 'live pid holds the slot');
+  assert.equal(evidence.slotHeldOutside(2, [dir]), false, 'a dead pid is a stale lock');
+  assert.equal(evidence.slotHeldOutside(3, [dir]), false, 'no lock');
+});
