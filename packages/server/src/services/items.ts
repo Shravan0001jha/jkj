@@ -237,7 +237,11 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
   // GitHub flow (shadow/on): QA does not move a story back before the developer approval (finding #3).
   const early = earlyQaMoveProblem(wp, w, by, from, to);
   if (early) throw new BadRequest(early);
-  if (to === 'done') {
+  // Owner, 7 Oct: the COO decides on his behalf. Closing as won't-do / duplicate / can't-reproduce claims
+  // nothing landed, so the owner or the COO may do it with a reason, whatever the status or the branch holds.
+  const dropping = to === 'done' && (by === 'owner' || by === 'coo') && !!req.resolution && req.resolution !== 'done';
+  if (dropping && !req.note?.trim()) throw new BadRequest(`Closing as ${req.resolution} needs a note: why.`);
+  if (to === 'done' && !dropping) {
     // GitHub flow `on` (docs/LLD-github-flow.md §3): a story with a PR is done by its two approvals. Local/shadow: null.
     const github = doneProblem(wp, next, by);
     if (github) throw new BadRequest(github);

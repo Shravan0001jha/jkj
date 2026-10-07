@@ -794,3 +794,16 @@ test('a full pre-pr.sh result that arrives after approval is re-read: the sweep 
     assert.ok(pr(s).merged, 'and the story merges');
   } finally { await s.done(); }
 });
+
+test("owner, 7 Oct: the COO may close stale or unlanded work as won't-do or duplicate with a reason; 'done' still needs the trunk", async () => {
+  const s = setup('on');
+  try {
+    s.commit('services/agent-svc/landed_check.py', 'x = 1\n');            // unlanded change on the branch
+    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done' }, 'coo'), /never reached the trunk|owner's call/, "done still means landed");
+    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done', resolution: 'wont-do' }, 'coo'), /needs a note/);
+    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done', resolution: 'wont-do', note: 'stale' }, 'arjun'), /never reached the trunk|owner's call|reviewer/, 'not for anyone else');
+    items.update(s.wp, s.storyId, { status: 'done', resolution: 'wont-do', note: 'Superseded by the CTO doc' }, 'coo');
+    assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
+    assert.equal(rawGet(s.wp, s.storyId)!.resolution, 'wont-do');
+  } finally { await s.done(); }
+});
