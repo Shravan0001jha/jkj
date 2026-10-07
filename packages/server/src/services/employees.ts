@@ -396,7 +396,10 @@ export function talk(wp: Workplace, employeeId: string, text: string, attachment
   // RCA (6 Oct, Rohan): a mention to someone whose story session had died spawned a talk session on
   // the general branch, which auto-saved and parked the story; he said "resuming now" from the wrong
   // branch and the story sat sessionless. Work in progress comes first: resume it, then deliver.
-  const resumed = opts.probe ? undefined : resumeInProgress(wp, employeeId);
+  // Mentions arrive as autonomous probes (mentions.ts), so skipping every probe skipped every mention
+  // (Kabir, 7 Oct: a mention put him on emp/kabir/general and parked his story). Only a true probe,
+  // the owner's verification question, stays out of the story.
+  const resumed = opts.probe && !opts.autonomous ? undefined : resumeInProgress(wp, employeeId);
   if (resumed) {
     runs.sendMessage(resumed.id, text, attachments, { from, ...(opts.talkId ? { talkId: opts.talkId } : {}) });
     return resumed;

@@ -378,7 +378,8 @@ test('a mention to someone whose story session died resumes the story, not a gen
     assert.equal(employees.openSession(who), undefined);
     assert.equal(work.require$(wp, a.id).status, 'in-progress');
 
-    const agent = employees.talk(wp, who, 'are you resuming?', [], { autonomous: true });
+    // Exactly as mentions.ts calls it (autonomous + probe): the 6 Oct fix skipped probes, so real mentions never resumed (Kabir, 7 Oct).
+    const agent = employees.talk(wp, who, 'are you resuming?', [], { autonomous: true, probe: true });
     await tick();
     assert.equal(employees.openSession(who)?.assignmentId, a.id, 'the new session is on the story');
     assert.ok(fake.last().sent.some(m => m.text.includes('are you resuming?')), 'the mention is still delivered');
