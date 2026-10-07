@@ -411,3 +411,20 @@ test('orphan: an idle session left on a finished story does not hide the person\
     done();
   }
 });
+
+test('a throttled orphan resume never falls through to starting new work: the In-progress story comes first (Neel, 7 Oct)', async () => {
+  const { wp, fake, story, done } = setup();
+  try {
+    const a = story('Activity line (B9)', 'mira');
+    items.update(wp, a.id, { status: 'in-progress' }, 'mira');
+    // Resumed once already within the throttle window, so resumeOrphan returns null.
+    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`orphan-resumed:${a.id}`, new Date().toISOString());
+    const b = story('Lower-ranked story', 'mira');
+    const r = dispatch.dispatch(wp, 'mira', Date.now() + 60_000);
+    assert.notEqual(r.action, 'story', 'nothing new starts');
+    assert.equal(of(fake, 'mira').length, 0, 'no session for the lower-ranked story');
+    assert.notEqual(items.require$(wp, b.id).status, 'in-progress');
+  } finally {
+    done();
+  }
+});

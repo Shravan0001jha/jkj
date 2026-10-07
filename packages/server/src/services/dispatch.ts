@@ -162,6 +162,11 @@ export function dispatch(wp: Workplace, employeeId: string, nowMs = Date.now()):
   if (resumed) return resumed;
   const busy = busyReason(wp, employeeId, nowMs);
   if (busy) return skipped(wp, employeeId, busy);
+  // Someone with an In-progress story is never free for new work, whatever their session is doing:
+  // Neel (7 Oct) had an idle session on his B9 story (and a throttled orphan resume), and "next in
+  // focus" moved that session onto a lower-ranked story. The story resumes first, by a nudge or resume.
+  const wip = inProgress(wp, employeeId).find(w => !w.hold && levelOf(w) !== 'epic');
+  if (wip) return skipped(wp, employeeId, `"${wip.title}" is in progress; it resumes before anything new starts`);
   const name = nameOf(wp, employeeId);
 
   // Reviews first: someone's finished work is waiting on this person.
