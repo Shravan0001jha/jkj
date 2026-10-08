@@ -545,9 +545,37 @@ export function redirectTo(wp: Workplace, itemId: string, prompt: string): boole
   if (!item.employeeId) return false;
   const open = openSession(item.employeeId);
   if (!open || open.assignmentId === itemId) return false;
+  const left = open.assignmentId;
   if (midTurn(open.agentId)) queueSwitch(wp, open.agentId, itemId, prompt);
   else handOver(wp, open, item, prompt);
+  if (left) releasePhantom(wp, left, item.employeeId);
   return true;
+}
+
+/** A story auto-started this recently, with no plan yet, was never really begun (8 Oct, Asha). */
+export const PHANTOM_START_MS = 5 * 60_000;
+
+/**
+ * The dispatcher starts the next Ready story the moment an engineer goes free after a submit. When a
+ * send-back lands seconds later, the session is switched back to the sent-back story and the one just
+ * started is left In progress with no work behind it: a phantom that trips the stall alarm and needs a
+ * manual revert (3 times on 8 Oct). If the story the session leaves was started under PHANTOM_START_MS
+ * ago and has no plan, put it back to Ready. A story with a plan, or started earlier, is real work and
+ * stays as it is.
+ */
+function releasePhantom(wp: Workplace, itemId: string, employeeId: string): void {
+  const it = items.get(wp, itemId);
+  const raw = rawGet(wp, itemId);
+  if (!it || !raw || it.status !== 'in-progress' || raw.plan) return;
+  const since = Date.parse(it.statusSince ?? '');
+  if (!Number.isFinite(since) || Date.now() - since > PHANTOM_START_MS) return;
+  try {
+    items.update(wp, itemId, { status: 'ready' }, 'workplace');
+    trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Back to Ready: ${nameOf(wp, employeeId)}'s session was switched back to a sent-back story before this one was begun.` });
+    log.info('employees', `${employeeId}: ${itemId} released to ready (phantom start)`);
+  } catch (e) {
+    log.warn('employees', `${employeeId}: could not release ${itemId}: ${(e as Error).message}`);
+  }
 }
 
 function midTurn(agentId: string): boolean {

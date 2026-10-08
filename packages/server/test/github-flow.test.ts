@@ -408,6 +408,42 @@ test('a send-back switches the author\'s open session back to the story when it 
   } finally { await s.done(); }
 });
 
+test('a send-back releases a story the dispatcher had only just started, back to Ready (8 Oct phantom)', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    const epicId = rawGet(s.wp, s.storyId)!.parentId!;
+    const other = items.create(s.wp, { level: 'story', title: 'Next story', parentId: epicId, assigneeId: 'kabir' }, 'owner');
+    employees.assign(s.wp, other.id);
+    const kabirs = () => runtime.sessions.filter(x => x.options.cwd.includes('/kabir/'));
+    kabirs().at(-1)!.result();
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(items.get(s.wp, other.id)!.status, 'in-progress');
+    await flow.sendBack(s.wp, s.storyId, 'dev', 'the recall test is missing');
+    assert.equal(employees.openSession('kabir')?.assignmentId, s.storyId);
+    assert.equal(items.get(s.wp, other.id)!.status, 'ready', 'the phantom start is released');
+    assert.ok(trail.activityFor(s.wp, other.id).some(a => /Back to Ready/.test(a.text)));
+  } finally { await s.done(); }
+});
+
+test('a send-back leaves a story that was really begun (it has a plan) In progress', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    const epicId = rawGet(s.wp, s.storyId)!.parentId!;
+    const other = items.create(s.wp, { level: 'story', title: 'Next story', parentId: epicId, assigneeId: 'kabir' }, 'owner');
+    employees.assign(s.wp, other.id);
+    const kabirs = () => runtime.sessions.filter(x => x.options.cwd.includes('/kabir/'));
+    kabirs().at(-1)!.result();
+    await new Promise(r => setTimeout(r, 20));
+    work.attachPlan(s.wp, other.id, 'Plan: do it', 'kabir');
+    await flow.sendBack(s.wp, s.storyId, 'dev', 'the recall test is missing');
+    assert.equal(items.get(s.wp, other.id)!.status, 'in-progress', 'real work stays');
+  } finally { await s.done(); }
+});
+
 test('the evidence hook sets workplace/evidence on the head', async () => {
   const s = setup('shadow');
   try {
