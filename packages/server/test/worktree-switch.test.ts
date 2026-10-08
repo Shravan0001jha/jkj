@@ -43,6 +43,19 @@ function setup(): { repo: string; workDir: string; emp: Employee; cleanup: () =>
   return { repo: r.root, workDir, emp: dev(r.root), cleanup: () => { r.cleanup(); rmSync(workDir, { recursive: true, force: true }); } };
 }
 
+test('a tree dirty only with build output switches cleanly, with no WIP commit (8 Oct)', () => {
+  const { repo, workDir, emp, cleanup } = setup();
+  try {
+    const parked = ensureWorktree(workDir, emp, 'as_parked');
+    const before = out(repo, ['rev-parse', 'emp/dev/as_parked']);
+    mkdirSync(join(parked.path, 'services', 'agent-svc', 'dist-arm64', 'iris-agent'), { recursive: true });
+    writeFileSync(join(parked.path, 'services', 'agent-svc', 'dist-arm64', 'iris-agent', 'iris-agent'), 'binary');
+    const next = ensureWorktree(workDir, emp, 'as_next');
+    assert.equal(next.branch, 'emp/dev/as_next');
+    assert.equal(out(repo, ['rev-parse', 'emp/dev/as_parked']), before, 'no empty WIP commit on the parked branch');
+  } finally { cleanup(); }
+});
+
 test('a dirty tree on another branch is auto-saved to that branch, then switched; venvs are never committed', () => {
   const { repo, workDir, emp, cleanup } = setup();
   try {

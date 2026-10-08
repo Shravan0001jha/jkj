@@ -152,7 +152,11 @@ function switchTo(employee: Employee, path: string, branch: string, base: string
       }
       // info/exclude (excludeLinked) keeps the venvs and linked dirs out of this add.
       git(path, ['add', '-A']);
-      git(path, ['commit', '-q', '--no-verify', '-m', `WIP (auto-saved by the Workplace before switching to ${workItemId ?? 'general'})`]);
+      // Only build output was dirty (restored above): nothing left to save, and an empty commit
+      // fails, which blocked the switch (8 Oct, Aditi). `diff --cached --quiet` exits 1 on changes.
+      let staged = false;
+      try { git(path, ['diff', '--cached', '--quiet']); } catch { staged = true; }
+      if (staged) git(path, ['commit', '-q', '--no-verify', '-m', `WIP (auto-saved by the Workplace before switching to ${workItemId ?? 'general'})`]);
       log.warn('worktrees', `${employee.id}: auto-saved uncommitted work on ${current} before switching to ${branch}`);
       if (!isClean(path, true)) fail(`uncommitted work on ${current} could not be auto-saved`);
     }
