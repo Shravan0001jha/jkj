@@ -143,7 +143,7 @@ export function guardEdit(filePath: string, ctx: GuardContext): GuardDecision {
  * --continue and the read-only merge-base are blanked out before the forbidden rules run, so
  * anything else in the same command is still judged.
  */
-const TRUNK_MERGE = /\bgit\s+(-C\s+\S+\s+)?merge(\s+(--no-edit|--no-ff|--ff-only|--ff|--no-commit|--stat|-q|--quiet|-m\s+("[^"]*"|'[^']*'|\S+)))*\s+feat\/[\w.\/-]+(\s+(--no-edit|--no-ff|--no-commit|-m\s+("[^"]*"|'[^']*'|\S+)))*(?=\s*(\d?>&?\d|\d?>\s*\S+)?\s*($|[;&|)]))/gi;
+const TRUNK_MERGE = /\bgit\s+(-C\s+\S+\s+)?merge(\s+(--no-edit|--no-ff|--ff-only|--ff|--no-commit|--stat|-q|--quiet|-m\s+("[^"]*"|'[^']*'|\S+)))*\s+(origin\/)?feat\/[\w.\/-]+(\s+(--no-edit|--no-ff|--no-commit|-m\s+("[^"]*"|'[^']*'|\S+)))*(?=\s*(\d?>&?\d|\d?>\s*\S+)?\s*($|[;&|)]))/gi;
 const MERGE_SAFE = /\bgit\s+(-C\s+\S+\s+)?merge(-base\b|\s+--(abort|continue)\b)/gi;
 export function withoutTrunkMerges(command: string): string {
   return command.replace(TRUNK_MERGE, 'true').replace(MERGE_SAFE, 'true');
