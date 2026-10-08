@@ -15,6 +15,7 @@ import * as trail from '../src/services/trail.js';
 import * as manager from '../src/services/manager.js';
 import * as flow from '../src/services/github-flow.js';
 import { childEnv, employee, workplaceTools } from '../src/services/employees.js';
+import * as employees from '../src/services/employees.js';
 import { ensureWorktree } from '../src/services/worktrees.js';
 import { rawGet } from '../src/services/v2-map.js';
 import { testWorkplace } from './fakes/workplace.js';
@@ -382,6 +383,28 @@ test('#20: a send-back reaches the author at once: a message into an idle open s
     await flow.sendBack(s.wp, s.storyId, 'dev', 'rename the helper');
     assert.equal(kabirs().length, before + 1, 'no second session');
     assert.match(kabirs().at(-1)!.sent.at(-1)!.text, /Sent back by Dev: .*rename the helper/s);
+  } finally { await s.done(); }
+});
+
+test('a send-back switches the author\'s open session back to the story when it is on another one (8 Oct)', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    // Kabir moved on: his one open session is on another story, idle between turns.
+    const epicId = rawGet(s.wp, s.storyId)!.parentId!;
+    const other = items.create(s.wp, { level: 'story', title: 'Next story', parentId: epicId, assigneeId: 'kabir' }, 'owner');
+    employees.assign(s.wp, other.id);
+    const kabirs = () => runtime.sessions.filter(x => x.options.cwd.includes('/kabir/'));
+    kabirs().at(-1)!.result();
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(employees.openSession('kabir')?.assignmentId, other.id);
+    const before = kabirs().length;
+    await flow.sendBack(s.wp, s.storyId, 'dev', 'the recall test is missing');
+    assert.equal(kabirs().length, before, 'no second session');
+    assert.equal(employees.openSession('kabir')?.assignmentId, s.storyId, 'the session is back on the sent-back story');
+    assert.match(kabirs().at(-1)!.sent.at(-1)!.text, /Sent back by Dev: .*the recall test is missing/s);
+    assert.ok(trail.activityFor(s.wp, s.storyId).some(a => /switched back to this story/.test(a.text)));
   } finally { await s.done(); }
 });
 

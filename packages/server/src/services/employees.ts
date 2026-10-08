@@ -533,6 +533,23 @@ export function currentStory(s: { assignmentId?: string; worktree?: Worktree; em
 }
 
 /** A turn is running, or parked on a tool approval: not the moment to move the tree under it. */
+/**
+ * Point the author's open session back at `itemId` with `prompt` (a send-back). RCA (8 Oct): the
+ * send-back message went into whatever story the open session was on (Ira had moved to the next
+ * story), so it was read in the wrong worktree and twice never acted on. Same rules as a new
+ * assignment: switched now between turns, queued until the turn ends mid-turn. Returns false when the
+ * open session is already on the item (or there is none), so the caller just delivers the message.
+ */
+export function redirectTo(wp: Workplace, itemId: string, prompt: string): boolean {
+  const item = work.require$(wp, itemId);
+  if (!item.employeeId) return false;
+  const open = openSession(item.employeeId);
+  if (!open || open.assignmentId === itemId) return false;
+  if (midTurn(open.agentId)) queueSwitch(wp, open.agentId, itemId, prompt);
+  else handOver(wp, open, item, prompt);
+  return true;
+}
+
 function midTurn(agentId: string): boolean {
   const a = runs.getRunAgent(agentId);
   return !a || a.status === 'running' || !!a.approval;

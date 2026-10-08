@@ -533,7 +533,9 @@ function tellAuthor(wp: Workplace, itemId: string, by: string, note: string): vo
   const text = sendBackText(wp, w, by, note);
   try {
     const open = employees.openSession(author);
-    if (open) {
+    if (open && employees.redirectTo(wp, itemId, text)) {
+      trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Send-back delivered to ${nameOf(wp, author)}: their open session is switched back to this story` });
+    } else if (open) {
       runs.sendMessage(open.agentId, text, [], { from: 'workplace' });
       trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Send-back delivered to ${nameOf(wp, author)} in the open session` });
     } else {
