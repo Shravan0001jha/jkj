@@ -408,6 +408,17 @@ test('a send-back switches the author\'s open session back to the story when it 
   } finally { await s.done(); }
 });
 
+test('a CTO named as reviewer keeps the developer review; it is not swapped for a lead (8 Oct)', async () => {
+  const s = setup('shadow');
+  try {
+    s.wp.org.employees.push({ ...employee(s.wp, 'kabir'), id: 'cto', name: 'Vikram', roleId: 'cto', level: 0, charterIds: [], reportsTo: undefined } as never);
+    items.update(s.wp, s.storyId, { reviewerId: 'cto' }, 'coo');
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    assert.equal(rawGet(s.wp, s.storyId)!.reviewerId, 'cto', 'the named CTO stays the reviewer');
+  } finally { await s.done(); }
+});
+
 test('a send-back releases a story the dispatcher had only just started, back to Ready (8 Oct phantom)', async () => {
   const s = setup('shadow');
   try {

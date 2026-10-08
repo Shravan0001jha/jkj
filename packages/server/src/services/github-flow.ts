@@ -17,7 +17,7 @@ import { now } from './store.js';
 import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { branchFor, worktreePath, git as gitIn } from './worktrees.js';
 import * as prePr from './pre-pr.js';
-import { GITHUB_MODES, githubMode, holds, isDeveloper, isQa, qaReviewer, writeGithubMode } from './review-policy.js';
+import { GITHUB_MODES, githubMode, holds, isDeveloper, canApproveAsDeveloper, isQa, qaReviewer, writeGithubMode } from './review-policy.js';
 import { freshLink } from './evidence-share.js';
 import * as qaDoc from './qa-doc.js';
 import { BadRequest, Conflict, NotFound } from '../util/errors.js';
@@ -271,7 +271,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   // named first refused and sent it back, a wasted round). The reviewer change wakes them.
   const fresh = rawGet(wp, itemId)!;
   const named = fresh.reviewerId ?? '';
-  if (!holds(fresh.pr?.devApproval, fresh) && (!isDeveloper(employeeOf(wp, named)) || named === fresh.employeeId)) {
+  if (!holds(fresh.pr?.devApproval, fresh) && (!canApproveAsDeveloper(employeeOf(wp, named)) || named === fresh.employeeId)) {
     const dev = devReviewer(wp, fresh);
     if (dev) items.update(wp, itemId, { reviewerId: dev, note: 'A developer reviews first, then QA' }, 'workplace');
   }
@@ -465,7 +465,7 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
   const approval: PrApproval = { by, at: now(), sha: pr.headSha, episode: w.statusSince ?? '', ...(note?.trim() ? { note: note.trim() } : {}) };
 
   if (!holds(pr.devApproval, w)) {
-    if (!isDeveloper(who)) {
+    if (!canApproveAsDeveloper(who)) {
       if (isQa(who)) throw new BadRequest('QA reviews after a developer approval; ask a lead to review first.');
       throw new BadRequest(`${nameOf(wp, by)} is not a lead, and approval 1 of 2 comes from the developer approver (a lead who is not the author); ask a lead to review.`);
     }
@@ -504,9 +504,9 @@ export async function sendBack(wp: Workplace, itemId: string, by: string, note: 
   if (!w.pr) throw new BadRequest('This story has no pull request, so send it back with item_update (status in-progress, with what to change).');
   if (by === w.employeeId) throw new BadRequest('You are the author: only a reviewer (the developer approver or QA) sends a story back.');
   const who = employeeOf(wp, by);
-  if (!isDeveloper(who) && !isQa(who)) throw new BadRequest(`${nameOf(wp, by)} is not a reviewer: only the developer approver (a lead who is not the author) or QA sends a story back; add your view with item_comment instead.`);
+  if (!canApproveAsDeveloper(who) && !isQa(who)) throw new BadRequest(`${nameOf(wp, by)} is not a reviewer: only the developer approver (a lead who is not the author) or QA sends a story back; add your view with item_comment instead.`);
   if (w.status !== 'in-review') throw new BadRequest(`This story is not in review (it is ${w.status}), so there is nothing to send back.`);
-  if (!isDeveloper(who) && !holds(w.pr.devApproval, w)) throw new BadRequest(QA_WAIT);
+  if (!canApproveAsDeveloper(who) && !holds(w.pr.devApproval, w)) throw new BadRequest(QA_WAIT);
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, sendBack: { by, at: now(), note: note.trim() } } }));
   items.update(wp, itemId, { status: 'in-progress', note: `Sent back by ${nameOf(wp, by)}: ${note.trim()}` }, by);
   tellAuthor(wp, itemId, by, note.trim());

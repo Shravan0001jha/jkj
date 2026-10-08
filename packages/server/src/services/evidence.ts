@@ -17,7 +17,7 @@ import * as githubFlow from './github-flow.js';
 import { now } from './store.js';
 import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { branchFor, excludeLinked } from './worktrees.js';
-import { isDeveloper, isQa } from './review-policy.js';
+import { canApproveAsDeveloper, isQa } from './review-policy.js';
 import { assertNotRealPath, underTest } from './test-guard.js';
 import * as evidenceShare from './evidence-share.js';
 import { log } from '../util/logger.js';
@@ -216,7 +216,7 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
   if (!w) return no(`There is no story ${spec.itemId}; find its id with status_of, then call run_evidence again.`);
   if (levelOf(w) === 'epic') return no('An epic has no branch of its own; run evidence on the story that changed the code.');
   const caller = wp.org.employees.find(e => e.id === spec.by);
-  const allowed = spec.by === w.employeeId || spec.by === w.reviewerId || isDeveloper(caller) || isQa(caller) || spec.by === coo.COO_ID;
+  const allowed = spec.by === w.employeeId || spec.by === w.reviewerId || canApproveAsDeveloper(caller) || isQa(caller) || spec.by === coo.COO_ID;
   if (!allowed) return no(`Only the story's author, its reviewers, a lead or QA run evidence on it; ask ${nameOf(wp, w.employeeId)} on the item.`);
   const ctx = storyOf(wp, w);
   if (typeof ctx === 'string') return no(ctx);

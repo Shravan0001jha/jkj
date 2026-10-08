@@ -26,6 +26,11 @@ export function writeGithubMode(wp: Workplace, mode: GitHubMode): void {
 }
 
 export const isDeveloper = (e: Employee | undefined): boolean => !!e && e.roleId === 'lead';
+/** Who may give the developer approval (1 of 2): a lead, or the CTO when named as the reviewer (8 Oct:
+ * Vikram was set as reviewer on a QA process doc and silently replaced by Dev because `cto` is not a
+ * lead role). Automatic assignment still picks leads only (devReviewer), so the CTO is never loaded
+ * with routine reviews; he reviews what he is explicitly given. */
+export const canApproveAsDeveloper = (e: Employee | undefined): boolean => !!e && (e.roleId === 'lead' || e.roleId === 'cto');
 export const isQa = (e: Employee | undefined): boolean => !!e && (e.roleId === 'qa' || e.charterIds.includes(QUALITY_CHARTER));
 
 /**
@@ -71,7 +76,7 @@ export const QA_WAIT = 'Wait: developer approval first. QA reviews after the dev
 export function qaTooEarly(wp: Workplace, w: WorkItem, by: string): boolean {
   if (!w.pr || w.pr.merged || githubMode(wp) === 'local') return false;
   const who = wp.org.employees.find(e => e.id === by);
-  return isQa(who) && !isDeveloper(who) && !approvalHolds(w, 'dev');
+  return isQa(who) && !canApproveAsDeveloper(who) && !approvalHolds(w, 'dev');
 }
 
 /** An In review story with a PR moved back by QA before the developer approval: refused (finding #3). */
