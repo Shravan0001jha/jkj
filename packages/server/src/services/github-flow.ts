@@ -739,6 +739,8 @@ export async function autoMerge(wp: Workplace, itemId: string): Promise<AutoMerg
   // Two merged without his review that night (the HLD and the product doc), so they never auto-merge.
   const docs = designDocsIn(wp, w);
   if (docs.length) { blockAuto(wp, w, `it changes design docs (${docs.join(', ')}), which merge only after the COO reviews them`); return 'blocked'; }
+  const late = unansweredCtoComment(wp, w);
+  if (late) { blockAuto(wp, w, `the CTO commented after the developer approval (${late.at.slice(11, 19)} UTC: "${late.text.slice(0, 120)}"), so his feedback rides on no review`); return 'blocked'; }
   if (autoInFlight.has(itemId)) return 'waiting';
   autoInFlight.add(itemId);
   try {
@@ -763,6 +765,20 @@ export async function autoMerge(wp: Workplace, itemId: string): Promise<AutoMerg
   } finally {
     autoInFlight.delete(itemId);
   }
+}
+
+/**
+ * A CTO comment newer than the developer approval, with no new commit since (8 Oct: Vikram's review
+ * feedback on the QA escape doc landed between the developer approval and QA's, and the story merged
+ * 54 s later with it unread). Only the CTO's: his comments are reviews, while the COO and Asha post
+ * status notes that must not stall a merge. A new commit resets both approvals, so it clears this.
+ */
+export function unansweredCtoComment(wp: Workplace, w: WorkItem): { at: string; text: string } | null {
+  const since = w.pr?.devApproval?.at;
+  if (!since) return null;
+  const late = trail.activityFor(wp, w.id).filter(a => a.kind === 'comment' && a.by === 'cto' && a.at > since);
+  const last = late[late.length - 1];
+  return last ? { at: last.at, text: last.text } : null;
 }
 
 /** Done by approval, not merged because it conflicts with trunk: back to its author, who merges trunk and resubmits. */

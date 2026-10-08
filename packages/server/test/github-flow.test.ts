@@ -647,6 +647,33 @@ test('merge: refused when tests are red, or the head moved since the approvals',
   } finally { await s.done(); }
 });
 
+test('auto-merge holds when the CTO commented after the developer approval (8 Oct)', async () => {
+  const s = setup('on');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'dev');
+    await new Promise(r => setTimeout(r, 5));
+    trail.record(s.wp, { itemId: s.storyId, by: 'cto', kind: 'comment', text: 'Restructure: verdicts first.' });
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
+    assert.equal(pr(s).merged, undefined, 'not merged over the late CTO comment');
+    assert.equal(coo.listItems(s.wp).filter(i => /auto-merge/i.test(i.title) && /CTO commented/.test(i.body)).length, 1, 'the COO is told why');
+  } finally { await s.done(); }
+});
+
+test('auto-merge is not held by a CTO comment from before the developer approval', async () => {
+  const s = setup('on');
+  try {
+    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    trail.record(s.wp, { itemId: s.storyId, by: 'cto', kind: 'comment', text: 'Looks fine to start.' });
+    await new Promise(r => setTimeout(r, 5));
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
+    assert.ok(pr(s).merged, 'merged');
+  } finally { await s.done(); }
+});
+
 test('auto-merge tells Asha on success', async () => {
   const s = setup('on');
   try {
