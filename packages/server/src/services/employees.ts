@@ -38,6 +38,7 @@ import * as testAccounts from './test-accounts.js';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
 import { QA_DOC_FORMAT as qaDocFormat } from './qa-doc.js';
+import * as docs from './docs.js';
 
 /**
  * Employees and their sessions (HLD D3, D4, D10).
@@ -79,7 +80,7 @@ export function hitSessionBudget(subtype: string): boolean {
 
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence', 'request_mac', 'release_mac', 'lease_test_account', 'return_test_account'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence', 'request_mac', 'release_mac', 'lease_test_account', 'return_test_account', 'doc_write', 'doc_read', 'doc_comment'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -1539,6 +1540,17 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         'You never answer the owner\'s decisions: only he does. Use it to verify that a decision was filed or answered.',
         { itemId: z.string().optional(), state: z.enum(['open', 'answered', 'expired', 'all']).optional() },
         async ({ itemId, state }) => ok(readTools.readInbox(wp, { ...(itemId ? { itemId } : {}), ...(state ? { state } : {}) }))),
+      /* ---------- Notion docs (LLD W7): big documents live in Notion, one per story ---------- */
+      tool('doc_write', 'Write the story\'s doc in Notion (the "Iris Docs" database): designs, RCAs, research, QA and release reports, incidents, decisions. One doc per story: the first call creates it (with the type\'s template headings), later calls replace its content. ' +
+        'Markdown: # headings, paragraphs, - bullets, 1. lists, - [ ] to-dos, ``` code (```mermaid for diagrams), | pipe | tables |, > quotes, **bold**, *italic*, `code`, [links](url). The doc is linked on the item; returns its URL. Read it first with doc_read before rewriting someone else\'s doc.',
+        { itemId: z.string(), type: z.enum(docs.DOC_TYPES), title: z.string(), markdown: z.string(), status: z.enum(docs.DOC_STATUSES).optional().describe('Draft (default for a new doc), In review or Final.') },
+        async ({ itemId, type, title, markdown, status }) => ok(await docs.docWrite(wp, employeeId, { itemId, type, title, markdown, ...(status ? { status } : {}) }))),
+      tool('doc_read', 'Read a story\'s Notion doc as markdown (at most 30k characters; it says when it was cut).',
+        { itemId: z.string() },
+        async ({ itemId }) => ok(await docs.docRead(wp, itemId))),
+      tool('doc_comment', 'Comment on a story\'s Notion doc under your name. With `quote` (text copied from the doc) the comment is anchored to the first block containing it; otherwise it goes on the page. Answer the owner\'s doc comments this way.',
+        { itemId: z.string(), text: z.string(), quote: z.string().optional() },
+        async ({ itemId, text, quote }) => ok(await docs.docComment(wp, employeeId, { itemId, text, ...(quote ? { quote } : {}) }))),
       tool('propose_org_change', 'Propose a hire, split, merge, reassign or restructure with a reason. The owner approves it in the Inbox. `paramsJson` is a JSON object as a string (see the handbook for the shape of each kind).',
         // A z.record() here makes the MCP SDK fail to list ANY tool of this server; a JSON string does not.
         { kind: z.enum(['hire', 'retire', 'split', 'merge', 'reassign', 'restructure']), reason: z.string(), paramsJson: z.string() },

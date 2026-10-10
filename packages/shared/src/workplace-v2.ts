@@ -135,6 +135,8 @@ export interface Item {
   mergedInto?: string;
   /** The release post it shipped in. */
   releasedIn?: string;
+  /** The story's Notion doc (W7, doc_write): one per story. */
+  docUrl?: string;
   /** The old engine's view of the same row (the /api/work adapters). */
   legacy: { kind: WorkKind; state: string; charterId?: string; featureId?: string };
   /** epic, story, task or bug (a story-level bug). */
@@ -260,7 +262,7 @@ export interface Comment {
 
 export type ActivityKind =
   | 'created' | 'status' | 'assigned' | 'reviewer' | 'points' | 'field' | 'comment'
-  | 'commit' | 'test' | 'note' | 'stall' | 'merged' | 'reopen' | 'started';
+  | 'commit' | 'test' | 'note' | 'stall' | 'merged' | 'reopen' | 'started' | 'doc';
 
 export interface Activity {
   id: string;

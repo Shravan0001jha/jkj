@@ -67,6 +67,10 @@ export interface Config {
   github: GitHubConfig;
   /** run_evidence (docs/LLD-evidence.md §1): the robot suite on this Mac against staging. */
   evidence: EvidenceConfig;
+  /** Notion docs (W7): the integration key's file (read on every call, never logged). Absent → docs are off. */
+  notionKeyPath: string;
+  /** The Notion page the "Iris Docs" database lives under. */
+  notionRootPageId: string;
 }
 
 export interface EvidenceConfig {
@@ -155,6 +159,8 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
     push: !argv.includes('--no-push') && env['WORKPLACE_PUSH'] !== '0',
     ownerHandles: (env['WORKPLACE_OWNER_HANDLES'] ?? 'owner,shravan').split(',').map(s => s.trim()).filter(Boolean),
     ...(env['WORKPLACE_PUSH_QUIET'] ? { pushQuiet: env['WORKPLACE_PUSH_QUIET'] } : {}),
+    notionKeyPath: env['WORKPLACE_NOTION_KEY'] ?? join(env['IRIS_OPS_DIR'] ?? join(homedir(), 'iris-ops'), 'notion.key'),
+    notionRootPageId: env['WORKPLACE_NOTION_ROOT'] ?? '3f5df729-a77e-80d6-b41c-eddb74e67ec6',
     github: {
       org: env['WORKPLACE_GITHUB_ORG'] ?? 'shravan0001jha-iris-hq',
       repo: env['WORKPLACE_GITHUB_REPO'] ?? 'iris',
