@@ -538,6 +538,14 @@ export function update(wp: Workplace, id: string, given0: UpdateItemRequest, giv
   if (req.kind !== undefined && req.kind !== 'review' && req.kind !== 'work') throw new BadRequest('kind must be review or work');
   if (req.title !== undefined) { if (!req.title.trim()) throw new BadRequest('An item needs a title.'); next.title = req.title.trim(); }
   if (req.body !== undefined) next.body = req.body;
+  if (req.type !== undefined) {
+    if (req.type !== null && req.type !== 'bug' && req.type !== 'rca') throw new BadRequest('type must be bug, rca or null');
+    if (level !== 'story') throw new BadRequest('Only a story has a type (bug or rca).');
+    const emp = wp.org.employees.find(e => e.id === by);
+    const may = by === 'owner' || by === 'coo' || by === 'workplace' || (emp && (emp.roleId === 'qa' || emp.charterIds.includes('chief-of-staff')));
+    if (!may) throw new Forbidden('Forbidden: only the owner, the COO, the Chief of Staff or QA can set a story\'s type.');
+    if (req.type) next.type = req.type; else delete next.type;
+  }
   if (req.assigneeId !== undefined && req.assigneeId !== prev.employeeId) {
     checkAssignee(wp, req.assigneeId);
     setAssignee(wp, next, req.assigneeId);

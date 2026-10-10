@@ -350,3 +350,18 @@ test('ask_owner: refused for an engineer, allowed for Asha', async () => {
     await arjun.client.close(); await asha.client.close();
   } finally { tmp.cleanup(); }
 });
+
+test('a story\'s type: owner, COO, Chief of Staff or QA can mark it a bug or an RCA ticket; nobody else', () => {
+  const { wp, tmp } = treeWorkplace();
+  try {
+  const id = story(wp, 'arjun');
+  assert.throws(() => items.update(wp, id, { type: 'bug' }, 'arjun'), /only the owner, the COO, the Chief of Staff or QA/);
+  items.update(wp, id, { type: 'bug' }, 'coo');
+  assert.equal(rawGet(wp, id)!.type, 'bug');
+  items.update(wp, id, { type: 'rca' }, 'asha');
+  assert.equal(rawGet(wp, id)!.type, 'rca');
+  items.update(wp, id, { type: null }, 'owner');
+  assert.equal(rawGet(wp, id)!.type, undefined);
+  assert.throws(() => items.update(wp, id, { type: 'feature' as never }, 'coo'), /type must be bug, rca or null/);
+  } finally { tmp.cleanup(); }
+});

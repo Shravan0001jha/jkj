@@ -458,6 +458,8 @@ export interface CreateItemRequest {
 
 export interface UpdateItemRequest {
   title?: string;
+  /** Story type (rework, Oct 2026): 'bug' turns on the RCA gate, 'rca' makes it an RCA-only ticket, null clears it. Owner, COO, Chief of Staff or QA. */
+  type?: 'bug' | 'rca' | null;
   body?: string;
   assigneeId?: string;
   reviewerId?: string;
