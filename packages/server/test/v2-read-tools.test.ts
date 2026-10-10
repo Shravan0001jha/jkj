@@ -40,8 +40,8 @@ test('item_read: title, status, people, acceptance, body, children, comments, ac
   const { wp, tmp } = testWorkplace();
   try {
     const { story, task, decision } = seed(wp);
-    items.update(wp, story.id, { status: 'in-progress' }, 'mira');
-    items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil' }, 'mira');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
+    items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'mira');
     const nikhil = await toolsFor(wp, 'nikhil');
     const out = await nikhil.call('item_read', { itemId: story.id });
     assert.match(out, /Decide the greeting voice/);

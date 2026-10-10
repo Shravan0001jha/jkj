@@ -60,38 +60,38 @@ test('the six states: reviewer to enter review, reason and waiting-on to block, 
   const { wp, tmp } = testWorkplace();
   try {
     const { story } = tree(wp);
-    let s = items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    let s = items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     assert.equal(s.status, 'in-progress');
-    assert.throws(() => items.update(wp, story.id, { status: 'in-review' }, 'dev'), /reviewer/i);
-    assert.throws(() => items.update(wp, story.id, { status: 'in-review', reviewerId: 'dev' }, 'dev'), /assignee/i);
-    s = items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
+    assert.throws(() => items.update(wp, story.id, { status: 'in-review', reason: 'test: moved' }, 'dev'), /reviewer/i);
+    assert.throws(() => items.update(wp, story.id, { status: 'in-review', reviewerId: 'dev', reason: 'test: moved' }, 'dev'), /assignee/i);
+    s = items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'dev');
     assert.equal(s.status, 'in-review');
     assert.equal(s.reviewerId, 'nikhil');
     assert.equal(s.legacy.state, 'review');
-    assert.throws(() => items.update(wp, story.id, { status: 'done' }, 'dev'), /reviewer|assignee/i);
-    s = items.update(wp, story.id, { status: 'done' }, 'nikhil');
+    assert.throws(() => items.update(wp, story.id, { status: 'done', reason: 'test: moved' }, 'dev'), /reviewer|assignee/i);
+    s = items.update(wp, story.id, { status: 'done', reason: 'test: moved' }, 'nikhil');
     assert.equal(s.status, 'done');
     assert.equal(s.resolution, 'done');
     assert.equal(s.legacy.state, 'done');
 
-    assert.throws(() => items.update(wp, story.id, { status: 'in-progress' }, 'owner'), /note/i, 'a reopen says why');
+    assert.throws(() => items.update(wp, story.id, { status: 'in-progress' }, 'owner'), /note|give a reason/i, 'a reopen says why');
     s = items.update(wp, story.id, { status: 'in-progress', note: 'echo is back on the iPad' }, 'owner');
     assert.equal(s.status, 'in-progress');
     assert.equal(s.resolution, undefined);
     assert.ok(trail.activityFor(wp, story.id).some(a => a.kind === 'reopen' && /iPad/.test(a.text)));
 
-    assert.throws(() => items.update(wp, story.id, { status: 'blocked' }, 'dev'), /reason/i);
-    assert.throws(() => items.update(wp, story.id, { status: 'blocked', blockedReason: 'needs the Speaker API' }, 'dev'), /waiting/i);
-    assert.throws(() => items.update(wp, story.id, { status: 'blocked', blockedReason: 'x', waitingOn: 'nobody' }, 'dev'), /waiting/i);
-    s = items.update(wp, story.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'external' }, 'dev');
+    assert.throws(() => items.update(wp, story.id, { status: 'blocked', reason: 'test: moved' }, 'dev'), /reason/i);
+    assert.throws(() => items.update(wp, story.id, { status: 'blocked', blockedReason: 'needs the Speaker API', reason: 'test: moved' }, 'dev'), /waiting/i);
+    assert.throws(() => items.update(wp, story.id, { status: 'blocked', blockedReason: 'x', waitingOn: 'nobody', reason: 'test: moved' }, 'dev'), /waiting/i);
+    s = items.update(wp, story.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'external', reason: 'test: moved' }, 'dev');
     assert.deepEqual({ reason: s.blocked?.reason, waitingOn: s.blocked?.waitingOn }, { reason: 'needs the Speaker API', waitingOn: 'external' });
     assert.equal(s.legacy.state, 'blocked');
-    s = items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    s = items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     assert.equal(s.blocked, undefined, 'leaving blocked clears the reason');
 
     const other = items.create(wp, { level: 'story', parentId: s.parentId!, title: 'Never started', assigneeId: 'mira' }, 'asha');
-    assert.throws(() => items.update(wp, other.id, { status: 'in-review', reviewerId: 'nikhil' }, 'owner'), /cannot go from ready to in-review/);
-    assert.throws(() => items.update(wp, other.id, { status: 'done' }, 'asha'), /owner/i, 'closing unstarted work is the owner\'s call');
+    assert.throws(() => items.update(wp, other.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'owner'), /cannot go from ready to in-review/);
+    assert.throws(() => items.update(wp, other.id, { status: 'done', reason: 'test: moved' }, 'asha'), /owner/i, 'closing unstarted work is the owner\'s call');
     const closed = items.update(wp, other.id, { status: 'done', resolution: 'wont-do', note: 'superseded' }, 'owner');
     assert.equal(closed.resolution, 'wont-do');
     assert.equal(closed.legacy.state, 'rejected');
@@ -107,12 +107,12 @@ test('blocked on the owner goes to his Inbox with the recommendation; unblocking
   const { wp, tmp } = testWorkplace();
   try {
     const { story } = tree(wp);
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
-    items.update(wp, story.id, { status: 'blocked', blockedReason: 'which TTS voice ships?', waitingOn: 'owner', recommendation: 'Keep the current voice' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
+    items.update(wp, story.id, { status: 'blocked', blockedReason: 'which TTS voice ships?', waitingOn: 'owner', recommendation: 'Keep the current voice', reason: 'test: moved' }, 'dev');
     const open = inbox.ownerList(wp, 'open').filter(i => i.context['itemId'] === story.id);
     assert.equal(open.length, 1);
     assert.match(open[0]!.body, /Keep the current voice/);
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     assert.equal(inbox.ownerList(wp, 'open').filter(i => i.context['itemId'] === story.id).length, 0);
   } finally {
     tmp.cleanup();
@@ -163,10 +163,10 @@ test('reassigning, re-reviewing and re-pointing are activity; every change has a
   const { wp, tmp } = testWorkplace();
   try {
     const { story } = tree(wp);
-    items.update(wp, story.id, { assigneeId: 'mira', reviewerId: 'nikhil', points: 5, title: 'Mic stays live at any volume' }, 'asha');
+    items.update(wp, story.id, { assigneeId: 'mira', reviewerId: 'nikhil', points: 5, title: 'Mic stays live at any volume', reason: 'test: moved' }, 'asha');
     const s = items.require$(wp, story.id);
     assert.equal(s.assigneeId, 'mira');
-    assert.equal(s.legacy.charterId, 'experts', 'the charter follows the new assignee');
+    assert.equal(s.legacy.charterId, 'conversation', 'the charter stays with the item (rework, Oct 2026: a misroute leaves it alone)');
     assert.equal(s.points, 5);
     const kinds = trail.activityFor(wp, story.id).map(a => a.kind);
     for (const k of ['created', 'assigned', 'reviewer', 'points', 'field']) assert.ok(kinds.includes(k as never), `has ${k}`);
@@ -185,7 +185,7 @@ test('start, block, unblock and ship are one-line updates with names, and named 
   try {
     const area = areas.create(wp, { title: 'Voice & audio' }, 'owner');
     const { epic, story } = tree(wp, { areaId: area.id });
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     let feed = trail.updates(wp);
     assert.equal(feed[0]!.kind, 'started');
     assert.equal(feed[0]!.line, 'Started: Mic stays live at volume 0 — Dev, 3 pts');
@@ -202,15 +202,15 @@ test('start, block, unblock and ship are one-line updates with names, and named 
     assert.equal(last.kind, 'update');
     assert.equal(last.text, "Story 'Mic stays live at volume 0' started — Dev");
 
-    items.update(wp, story.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'external' }, 'dev');
+    items.update(wp, story.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'external', reason: 'test: moved' }, 'dev');
     feed = trail.updates(wp);
     assert.equal(feed[0]!.line, 'Blocked: Mic stays live at volume 0 — waiting on someone outside the team: needs the Speaker API');
     assert.equal(feed[0]!.push, true);
     assert.equal(room.messages(wp, thread.id).at(-1)!.text, "Story 'Mic stays live at volume 0' is blocked: waiting on someone outside the team");
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     assert.equal(trail.updates(wp)[0]!.line, 'Unblocked: Mic stays live at volume 0 — Dev');
-    items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
-    items.update(wp, story.id, { status: 'done' }, 'nikhil');
+    items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'dev');
+    items.update(wp, story.id, { status: 'done', reason: 'test: moved' }, 'nikhil');
     feed = trail.updates(wp);
     assert.equal(feed[0]!.kind, 'shipped');
     assert.equal(feed[0]!.line, 'Shipped: Mic stays live at volume 0 — Dev, 3 pts');
@@ -234,12 +234,12 @@ test('epic progress is points done over points total; the plan groups epics by a
     const s5 = items.create(wp, { level: 'story', parentId: epic.id, title: 'Duck music under speech', assigneeId: 'mira', points: 5 }, 'asha');
     items.create(wp, { level: 'story', parentId: epic.id, title: 'Unpointed', assigneeId: 'kabir' }, 'asha');
     const dropped = items.create(wp, { level: 'story', parentId: epic.id, title: 'Dropped', assigneeId: 'kabir', points: 8 }, 'asha');
-    items.update(wp, dropped.id, { status: 'done', resolution: 'wont-do' }, 'owner');
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
-    items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
-    items.update(wp, story.id, { status: 'done' }, 'nikhil');
-    items.update(wp, s5.id, { status: 'in-progress' }, 'mira');
-    items.update(wp, s5.id, { status: 'blocked', blockedReason: 'no ducking API on macOS 15', waitingOn: 'external' }, 'mira');
+    items.update(wp, dropped.id, { status: 'done', resolution: 'wont-do', reason: 'test: moved' }, 'owner');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
+    items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'dev');
+    items.update(wp, story.id, { status: 'done', reason: 'test: moved' }, 'nikhil');
+    items.update(wp, s5.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
+    items.update(wp, s5.id, { status: 'blocked', blockedReason: 'no ducking API on macOS 15', waitingOn: 'external', reason: 'test: moved' }, 'mira');
     const loose = items.create(wp, { level: 'epic', title: 'Unfiled epic' }, 'owner');
     const mine = items.create(wp, { level: 'story', parentId: loose.id, title: 'Approve the 0.2.16 release', assigneeId: 'owner' }, 'asha');
 
@@ -276,7 +276,7 @@ test('merging a duplicate keeps its history as a comment on the survivor and mov
     const a = items.create(wp, { level: 'story', parentId: epic.id, title: 'Greeting context contract', assigneeId: 'dev' }, 'asha');
     const b = items.create(wp, { level: 'story', parentId: epic.id, title: 'Greeting context contract (Mira)', assigneeId: 'mira' }, 'mira');
     const t = items.create(wp, { level: 'task', parentId: b.id, title: 'Write the schema', assigneeId: 'mira' }, 'mira');
-    items.update(wp, b.id, { status: 'in-progress' }, 'mira');
+    items.update(wp, b.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
     const survivor = items.merge(wp, b.id, a.id, 'coo');
     assert.equal(survivor.id, a.id);
     const merged = items.require$(wp, b.id);
@@ -319,7 +319,7 @@ test('an epic is in progress once any of its stories is, by either engine', () =
   try {
     const { epic, story } = tree(wp);
     assert.equal(items.require$(wp, epic.id).status, 'ready');
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     assert.equal(items.require$(wp, epic.id).status, 'in-progress');
     assert.ok(trail.activityFor(wp, epic.id).some(a => a.kind === 'status' && a.to === 'in-progress'));
     const other = items.create(wp, { level: 'epic', title: 'Old-path epic' }, 'owner');
@@ -338,18 +338,18 @@ test('Plan order: needs the owner, then live work, then focus not started, then 
     const idle = mk('Idle, not in focus');
     const done = mk('Finished');
     const fin = items.create(wp, { level: 'story', parentId: done.id, title: 'only story', assigneeId: 'kabir' }, 'asha');
-    items.update(wp, fin.id, { status: 'in-progress' }, 'kabir');
-    items.update(wp, fin.id, { status: 'in-review', reviewerId: 'nikhil' }, 'kabir');
-    items.update(wp, fin.id, { status: 'done' }, 'nikhil');
+    items.update(wp, fin.id, { status: 'in-progress', reason: 'test: moved' }, 'kabir');
+    items.update(wp, fin.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'kabir');
+    items.update(wp, fin.id, { status: 'done', reason: 'test: moved' }, 'nikhil');
     const focused = mk('In focus, not started');
     items.create(wp, { level: 'story', parentId: focused.id, title: 'ready story', assigneeId: 'mira' }, 'asha');
     const live = mk('In progress');
     const s = items.create(wp, { level: 'story', parentId: live.id, title: 'working', assigneeId: 'dev' }, 'asha');
-    items.update(wp, s.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     const needs = mk('Needs the owner');
     const b = items.create(wp, { level: 'story', parentId: needs.id, title: 'waiting on owner', assigneeId: 'tara' }, 'asha');
-    items.update(wp, b.id, { status: 'in-progress' }, 'tara');
-    items.update(wp, b.id, { status: 'blocked', blockedReason: 'needs the Samsung', waitingOn: 'owner' }, 'tara');
+    items.update(wp, b.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
+    items.update(wp, b.id, { status: 'blocked', blockedReason: 'needs the Samsung', waitingOn: 'owner', reason: 'test: moved' }, 'tara');
     items.setFocus(wp, [focused.id], 'owner');
     assert.deepEqual(items.plan(wp).unfiled.map(c => c.epic.title).filter(t => t !== 'Iris works while music plays'),
       ['Needs the owner', 'In progress', 'In focus, not started', 'Idle, not in focus', 'Finished']);

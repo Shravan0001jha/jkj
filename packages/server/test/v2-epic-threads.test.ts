@@ -65,7 +65,7 @@ test('the boot migration reopens an epic thread resolved before the rule, idempo
     migrateV2(wp);
     assert.equal(room.getThread(wp, thread.id)!.state, 'open');
 
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     assert.equal(room.getThread(wp, thread.id)!.state, 'open');
     assert.equal(room.messages(wp, thread.id).at(-1)!.kind, 'update');
   } finally {
@@ -78,7 +78,7 @@ test('the Workplace\'s own update lines do not hand a thread to the moderator; a
   try {
     const { thread, story } = setup(wp);
     room.markSeen(wp, 'asha', new Date(Date.now() - 1000).toISOString());
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     assert.ok(!room.needsModeration(wp, 'asha').some(t => t.id === thread.id), 'an update line is not a conversation');
     room.post(wp, thread.id, { text: '@asha is this on track?', by: 'owner' });
     assert.ok(room.needsModeration(wp, 'asha').some(t => t.id === thread.id));

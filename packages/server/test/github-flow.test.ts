@@ -119,7 +119,7 @@ test('local is the default: a review move pushes nothing, opens no PR, and the n
     await assert.rejects(flow.merge(s.wp, s.storyId, 'coo'), /local/);
     // The old rule holds: the reviewer marks it done.
     const reviewer = rawGet(s.wp, s.storyId)!.reviewerId!;
-    assert.equal(items.update(s.wp, s.storyId, { status: 'done' }, reviewer).status, 'done');
+    assert.equal(items.update(s.wp, s.storyId, { status: 'done', reason: 'test: moved' }, reviewer).status, 'done');
     assert.equal(await flow.syncHeads(s.wp).then(x => x.length), 0);
     assert.equal(s.gh.calls.length, 0);
   } finally { await s.done(); }
@@ -325,9 +325,10 @@ test('on: done needs both approvals (the owner excepted); shadow enforces nothin
   try {
     on.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(on);
-    assert.throws(() => items.update(on.wp, on.storyId, { status: 'done' }, 'nikhil'), /approval/i);
+    // Not the reviewer yet (the developer approver is): the tree refuses it before the approval rule (rework, Oct 2026).
+    assert.throws(() => items.update(on.wp, on.storyId, { status: 'done', reason: 'test: moved' }, 'nikhil'), /approval|Forbidden/i);
     await flow.approve(on.wp, on.storyId, 'arjun');
-    assert.throws(() => items.update(on.wp, on.storyId, { status: 'done' }, 'nikhil'), /approval/i);
+    assert.throws(() => items.update(on.wp, on.storyId, { status: 'done', reason: 'test: moved' }, 'nikhil'), /approval/i);
     await flow.approve(on.wp, on.storyId, 'nikhil', undefined, QA_DOC);
     assert.equal(rawGet(on.wp, on.storyId)!.status, 'done');
   } finally { await on.done(); }
@@ -338,7 +339,7 @@ test('on: done needs both approvals (the owner excepted); shadow enforces nothin
     // Shadow routes review to a developer approver first (finding #3) but enforces no approvals: the reviewer marks it done.
     const reviewer = rawGet(shadow.wp, shadow.storyId)!.reviewerId!;
     assert.notEqual(reviewer, 'nikhil');
-    assert.equal(items.update(shadow.wp, shadow.storyId, { status: 'done' }, reviewer).status, 'done');
+    assert.equal(items.update(shadow.wp, shadow.storyId, { status: 'done', reason: 'test: moved' }, reviewer).status, 'done');
   } finally { await shadow.done(); }
 });
 
@@ -380,7 +381,7 @@ test('#20: a send-back reaches the author at once: a message into an idle open s
 
     // An open session sitting idle (waiting) gets it as a message, not a second session.
     kabirs().at(-1)!.result();
-    items.update(s.wp, s.storyId, { status: 'in-review' }, 'kabir');
+    items.update(s.wp, s.storyId, { status: 'in-review', reason: 'test: moved' }, 'kabir');
     await flow.onReview(s.wp, s.storyId, 'kabir');
     await flow.sendBack(s.wp, s.storyId, 'arjun', 'rename the helper');
     assert.equal(kabirs().length, before + 1, 'no second session');
@@ -821,11 +822,11 @@ test('on: a story whose branch has changes the trunk never got cannot be marked 
   const s = setup('on');
   try {
     s.commit('services/agent-svc/landed_check.py', 'x = 1\n');
-    items.update(s.wp, s.storyId, { status: 'in-progress' }, 'kabir');
-    items.update(s.wp, s.storyId, { status: 'in-review', reviewerId: 'arjun' }, 'owner');
-    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done' }, 'arjun'), /never reached the trunk/);
+    items.update(s.wp, s.storyId, { status: 'in-progress', reason: 'test: moved' }, 'kabir');
+    items.update(s.wp, s.storyId, { status: 'in-review', reviewerId: 'arjun', reason: 'test: moved' }, 'owner');
+    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done', reason: 'test: moved' }, 'arjun'), /never reached the trunk/);
     // The owner can still close it deliberately.
-    items.update(s.wp, s.storyId, { status: 'done' }, 'owner');
+    items.update(s.wp, s.storyId, { status: 'done', reason: 'test: moved' }, 'owner');
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
   } finally { await s.done(); }
 });
@@ -833,9 +834,9 @@ test('on: a story whose branch has changes the trunk never got cannot be marked 
 test('on: a story with no commits of its own (a check, a live verification) can still be closed by its reviewer', async () => {
   const s = setup('on');
   try {
-    items.update(s.wp, s.storyId, { status: 'in-progress' }, 'kabir');
-    items.update(s.wp, s.storyId, { status: 'in-review', reviewerId: 'arjun' }, 'owner');
-    items.update(s.wp, s.storyId, { status: 'done' }, 'arjun');
+    items.update(s.wp, s.storyId, { status: 'in-progress', reason: 'test: moved' }, 'kabir');
+    items.update(s.wp, s.storyId, { status: 'in-review', reviewerId: 'arjun', reason: 'test: moved' }, 'owner');
+    items.update(s.wp, s.storyId, { status: 'done', reason: 'test: moved' }, 'arjun');
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
   } finally { await s.done(); }
 });
@@ -856,9 +857,9 @@ test('done check: a stale origin/<trunk> does not count newer trunk commits the 
     // The story branch picks up T1 (an agent pulled the trunk), with no commits of its own.
     git(s.wt, ['fetch', '-q', s.gh.bare, trunk]);
     git(s.wt, ['merge', '-q', '--ff-only', 'FETCH_HEAD']);
-    items.update(s.wp, s.storyId, { status: 'in-progress' }, 'kabir');
-    items.update(s.wp, s.storyId, { status: 'in-review', reviewerId: 'arjun' }, 'owner');
-    items.update(s.wp, s.storyId, { status: 'done' }, 'arjun');
+    items.update(s.wp, s.storyId, { status: 'in-progress', reason: 'test: moved' }, 'kabir');
+    items.update(s.wp, s.storyId, { status: 'in-review', reviewerId: 'arjun', reason: 'test: moved' }, 'owner');
+    items.update(s.wp, s.storyId, { status: 'done', reason: 'test: moved' }, 'arjun');
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
   } finally { await s.done(); }
 });
@@ -919,9 +920,9 @@ test("owner, 7 Oct: the COO may close stale or unlanded work as won't-do or dupl
   const s = setup('on');
   try {
     s.commit('services/agent-svc/landed_check.py', 'x = 1\n');            // unlanded change on the branch
-    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done' }, 'coo'), /never reached the trunk|owner's call/, "done still means landed");
-    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done', resolution: 'wont-do' }, 'coo'), /needs a note/);
-    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done', resolution: 'wont-do', note: 'stale' }, 'arjun'), /never reached the trunk|owner's call|reviewer/, 'not for anyone else');
+    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done', reason: 'test: moved' }, 'coo'), /never reached the trunk|owner's call/, "done still means landed");
+    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done', resolution: 'wont-do' }, 'coo'), /needs a note|give a reason/);
+    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done', resolution: 'wont-do', note: 'stale' }, 'arjun'), /never reached the trunk|owner's call|reviewer|Forbidden/, 'not for anyone else');
     items.update(s.wp, s.storyId, { status: 'done', resolution: 'wont-do', note: 'Superseded by the CTO doc' }, 'coo');
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
     assert.equal(rawGet(s.wp, s.storyId)!.resolution, 'wont-do');

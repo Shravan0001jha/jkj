@@ -8,7 +8,7 @@ import type { TalkAttachment } from './talk.js';
  * package outside @jkj/shared. See docs/LLD-workplace.md §2 and §14.
  */
 import type { Agent, PermissionMode } from './types.js';
-import type { ItemLevel, ItemResolution, ItemStatus, Points } from './workplace-v2.js';
+import type { ExtraReviewer, ItemLevel, ItemResolution, ItemStatus, Points } from './workplace-v2.js';
 
 /* ---------- organisation ---------- */
 
@@ -287,10 +287,21 @@ export interface WorkItem {
   queuedFor?: string;
   /** The story's pull request on GitHub (docs/LLD-github-flow.md §1); set only in shadow/on mode. */
   pr?: PrRecord;
-  /** 'bug': a story-level bug (docs/HLD-jira-lifecycle.md §1); 'rca': a root-cause-only ticket (no code). */
+  /** 'bug': a story-level bug (docs/HLD-jira-lifecycle.md §1); 'rca': a root-cause-only story, done when the RCA is posted. */
   type?: 'bug' | 'rca';
+  /** Status waiting (rework, Oct 2026): on an employee id, 'owner' or 'coo'. */
+  waiting?: { on: string; reason: string; since: string; recommendation?: string };
+  /** Status parked: set aside on purpose until `resumeWhen`. */
+  parked?: { reason: string; resumeWhen: string; by: string; since: string };
   /** The five-part "## RCA" captured from the assignee's comment (rework W3). */
   rca?: { text: string; at: string; by: string };
+  /** The story's Notion doc (W7, doc_write): its page URL and page id. One doc per story. */
+  docUrl?: string;
+  docId?: string;
+  /** Reviewers added for real code in other teams' charters (mirrors pr.extraReviewers; the PR record is the source of truth). */
+  extraReviewers?: ExtraReviewer[];
+  /** Routed to a lead by the Chief of Staff: the lead assigns it within the team (W2). */
+  routedAt?: string;
   /** An explicit dependency: this item starts after that one finishes. */
   startsAfter?: string;
   /** On hold: why it is parked. */
@@ -302,9 +313,6 @@ export interface WorkItem {
   prRefused?: { at: string; sha: string; reasons: string[] };
   /** The story's latest finished robot-suite run (run_evidence, docs/LLD-evidence.md §1). */
   evidenceRun?: EvidenceRunRecord;
-  /** The story's Notion doc (W7, doc_write): its page URL and page id. One doc per story. */
-  docUrl?: string;
-  docId?: string;
 }
 
 /* ---------- evidence runs (docs/LLD-evidence.md) ---------- */
@@ -403,17 +411,13 @@ export interface PrRecord {
   /** The one QA for this story (set at the developer approval); only they give approval 2 of 2. */
   qaReviewer?: string;
   /** Leads of other teams whose charters' code the diff changes: each approves their files before QA. */
-  extraReviewers?: ExtraReviewer[];
+  extraReviewers?: PrExtraReviewer[];
   /** A PR touching CI or infra (spend) merges only after POST /api/coo/approve-spend. */
   spendApprovedAt?: string;
 }
 
 /** An extra reviewer's approval holds, like the two approvals, only for its commit and its stay in review. */
-export interface ExtraReviewer {
-  id: string;
-  /** The files that put them here (empty when the author asked for them with request_review). */
-  files: string[];
-  approvedAt?: string;
+export interface PrExtraReviewer extends ExtraReviewer {
   /** The head and the review episode the approval was given on. */
   sha?: string;
   episode?: string;

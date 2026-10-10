@@ -208,7 +208,7 @@ test('an agent flags its own stall the moment it happens: Asha hears at once', a
   const { wp, tmp, epic } = setup();
   try {
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Needs Rohan', assigneeId: 'dev' }, 'asha');
-    items.update(wp, s.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     const server = workplaceTools(wp, 'dev', () => ({ agentId: 'a', employeeId: 'dev', assignmentId: s.id, startedAt: '', seen: {}, planCaptured: false }));
     const [ct, st] = InMemoryTransport.createLinkedPair();
     await server.instance.connect(st);

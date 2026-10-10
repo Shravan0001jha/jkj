@@ -82,7 +82,8 @@ test('the agents\' v2 tools: one story per outcome, tasks by the story owner, no
     assert.match(dup, new RegExp(`Already exists as ${storyId}`), 'the fifth copy of the same story is refused');
 
     const mira = await toolsFor(wp, 'mira');
-    assert.match(await mira.call('item_create', { level: 'story', parentId: epic.id, title: 'Mira\'s own story' }), /Only the Chief of Staff or the epic owner/);
+    // Rework (Oct 2026): anyone files a story; one filed by a lead goes to her manager (Asha), Ready.
+    assert.match(await mira.call('item_create', { level: 'story', parentId: epic.id, title: 'Mira\'s own story' }), /Created as_\w+ \(story, ready, with Asha\)/);
     const epicMade = await asha.call('item_create', { level: 'epic', title: 'Alpha testers site', targetDate: '2026-10-07' });
     assert.match(epicMade, /Created ft_\w+ \(epic\)/);
     assert.match(await mira.call('item_create', { level: 'epic', title: 'Mira\'s epic' }), /Only the Chief of Staff creates epics/);
@@ -92,12 +93,12 @@ test('the agents\' v2 tools: one story per outcome, tasks by the story owner, no
     const t = await dev.call('item_create', { level: 'task', parentId: storyId, title: 'Write the schema', assigneeId: 'mira' });
     assert.match(t, /Created as_/);
 
-    assert.match(await dev.call('item_update', { itemId: storyId, status: 'in-progress' }), /in-progress/);
-    assert.match(await dev.call('item_update', { itemId: storyId, status: 'in-review', reviewerId: 'nikhil' }), /in-review/);
-    assert.match(await dev.call('item_update', { itemId: storyId, status: 'done' }), /Not changed/);
+    assert.match(await dev.call('item_update', { itemId: storyId, status: 'in-progress', reason: 'starting the schema' }), /in-progress/);
+    assert.match(await dev.call('item_update', { itemId: storyId, status: 'in-review', reviewerId: 'nikhil', reason: 'schema is written' }), /in-review/);
+    assert.match(await dev.call('item_update', { itemId: storyId, status: 'done', reason: 'I think it is done' }), /Not changed/);
     assert.equal(items.require$(wp, storyId).status, 'in-review');
     const nikhil = await toolsFor(wp, 'nikhil');
-    assert.match(await nikhil.call('item_update', { itemId: storyId, status: 'done' }), /done/);
+    assert.match(await nikhil.call('item_update', { itemId: storyId, status: 'done', reason: 'verified the schema' }), /done/);
 
     assert.match(await dev.call('item_comment', { itemId: storyId, text: 'Schema is in contracts/greeting.json' }), /Commented/);
     assert.equal(trail.comments(wp, storyId).at(-1)!.by, 'dev');
@@ -118,22 +119,25 @@ test('the new tools are in the always-allowed list', () => {
   }
 });
 
-test('item_update hold: the Chief of Staff parks an item (backlog, held) and the dispatcher leaves it; nobody else can', async () => {
+test('item_update hold: the Chief of Staff parks an item (parked) and the dispatcher leaves it; nobody else can', async () => {
   const fake = installFakeRuntime();
   const { wp, tmp } = testWorkplace();
   try {
     const epic = items.create(wp, { level: 'epic', title: 'Music' }, 'owner');
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Stream-first playback', assigneeId: 'mira' }, 'asha');
-    items.update(wp, s.id, { status: 'in-progress' }, 'mira');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
     const mira = await toolsFor(wp, 'mira');
     assert.match(await mira.call('item_update', { itemId: s.id, status: 'backlog', hold: true }), /only the Chief of Staff/);
     const asha = await toolsFor(wp, 'asha');
     await asha.call('item_update', { itemId: s.id, hold: true, note: 'after launch work' });
-    const raw = items.require$(wp, s.id) as unknown as { status: string; hold?: boolean };
-    assert.equal(raw.status, 'backlog');
-    assert.equal(raw.hold, true);
-    await asha.call('item_update', { itemId: s.id, hold: false });
-    assert.equal((items.require$(wp, s.id) as unknown as { hold?: boolean }).hold ?? false, false);
+    // Rework (Oct 2026): a new hold parks the item; lifting it puts it back in Backlog.
+    const raw = items.require$(wp, s.id);
+    assert.equal(raw.status, 'parked');
+    assert.equal(raw.parked?.reason, 'after launch work');
+    await asha.call('item_update', { itemId: s.id, hold: false, note: 'launch work is done' });
+    const lifted = items.require$(wp, s.id);
+    assert.equal(lifted.status, 'backlog');
+    assert.equal(lifted.hold ?? false, false);
     await mira.client.close(); await asha.client.close();
   } finally { fake.restore(); tmp.cleanup(); }
 });

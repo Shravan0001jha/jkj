@@ -8,18 +8,26 @@
 import type { InboxItem, RoomThread, WorkKind } from './workplace.js';
 
 export type ItemLevel = 'epic' | 'story' | 'task';
-export type ItemStatus = 'backlog' | 'ready' | 'in-progress' | 'in-review' | 'done' | 'blocked';
+/**
+ * October 2026 rework (LLD "Shared contract"): `waiting` is a wait on a person (an employee, the owner
+ * or the COO) with `waiting` set; `parked` is set aside on purpose with `parked` set; `blocked` is for
+ * external causes only (`external`, `release` or another item).
+ */
+export type ItemStatus = 'backlog' | 'ready' | 'in-progress' | 'in-review' | 'waiting' | 'parked' | 'blocked' | 'done';
 export type ItemResolution = 'done' | 'wont-do' | 'duplicate' | 'cant-reproduce';
 /** The Jira type (docs/HLD-jira-lifecycle.md §1): a bug is a story-level item. */
-export type ItemType = 'epic' | 'story' | 'task' | 'bug';
+export type ItemType = 'epic' | 'story' | 'task' | 'bug' | 'rca';
+/** A story-level type: a `bug` unlocks code once its RCA is posted; an `rca` story is done when the RCA is posted (no code). */
+export type StoryType = 'bug' | 'rca';
 /**
  * The true status the board shows (docs/HLD-jira-lifecycle.md §1), computed on every read from the
  * stored status, the hold, the PR's stage and merge, and any open `startsAfter`.
  */
-export type TrueStatus = 'backlog' | 'on-hold' | 'ready' | 'in-progress' | 'in-review' | 'qa' | 'approved' | 'merged' | 'done' | 'blocked';
+export type TrueStatus = 'backlog' | 'on-hold' | 'ready' | 'in-progress' | 'in-review' | 'qa' | 'approved' | 'merged' | 'done' | 'blocked' | 'waiting' | 'parked';
 export const TRUE_STATUS_LABEL: Record<TrueStatus, string> = {
   backlog: 'Backlog', 'on-hold': 'On hold', ready: 'Ready', 'in-progress': 'In progress', 'in-review': 'In review',
   qa: 'QA', approved: 'Approved', merged: 'Merged', done: 'Done', blocked: 'Blocked',
+  waiting: 'Waiting on', parked: 'Parked',
 };
 
 /** What a Blocked item waits on, and where that blocker stands now (computed on read). */
@@ -84,7 +92,7 @@ export interface HygieneReport {
 }
 export type Points = 1 | 2 | 3 | 5 | 8;
 
-export const ITEM_STATUSES: readonly ItemStatus[] = ['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked'];
+export const ITEM_STATUSES: readonly ItemStatus[] = ['backlog', 'ready', 'in-progress', 'in-review', 'waiting', 'parked', 'done', 'blocked'];
 export const POINTS: readonly Points[] = [1, 2, 3, 5, 8];
 /** At most this many areas are active at once (owner, 2 Oct). */
 export const MAX_ACTIVE_AREAS = 5;
@@ -135,8 +143,6 @@ export interface Item {
   mergedInto?: string;
   /** The release post it shipped in. */
   releasedIn?: string;
-  /** The story's Notion doc (W7, doc_write): one per story. */
-  docUrl?: string;
   /** The old engine's view of the same row (the /api/work adapters). */
   legacy: { kind: WorkKind; state: string; charterId?: string; featureId?: string };
   /** epic, story, task or bug (a story-level bug). */
@@ -152,9 +158,65 @@ export interface Item {
   /** Merged and closed by Asha (Merged → Done). */
   closedAt?: string;
   pr?: ItemPr;
+  /** Waiting: on whom (an employee id, 'owner' or 'coo'), why, since when. */
+  waiting?: ItemWaiting;
+  /** Parked: why, what resumes it, who parked it, since when. */
+  parked?: ItemParked;
+  /** The posted five-part RCA (bug and rca stories). */
+  rca?: ItemRca;
+  /** The story's Notion doc (W7, doc_write): one per story. */
+  docUrl?: string;
+  docId?: string;
+  /** Reviewers added for real code in other teams' charters. */
+  extraReviewers?: ExtraReviewer[];
   createdAt: string;
   updatedAt: string;
 }
+
+export interface ItemWaiting {
+  /** An employee id, 'owner' or 'coo'. */
+  on: string;
+  reason: string;
+  since: string;
+}
+
+export interface ItemParked {
+  reason: string;
+  /** What has to happen for it to resume ("after the 0.2.22 release"). */
+  resumeWhen: string;
+  by: string;
+  since: string;
+}
+
+export interface ItemRca { text: string; at: string; by: string }
+
+export interface ExtraReviewer { id: string; files: string[]; approvedAt?: string }
+
+/** One row of a story's audit (GET /api/items/:id): every change and why. `reason` undefined reads "not recorded". */
+export interface AuditEntry {
+  at: string;
+  by: string;
+  kind: 'created' | 'assigned' | 'status' | 'reviewer' | 'parked' | 'reopened' | 'doc';
+  from?: string;
+  to?: string;
+  reason?: string;
+}
+
+/** Everyone a story passes through, from the org tree and the PR. */
+export interface StoryChain {
+  developer?: string;
+  devReviewer?: string;
+  extraReviewers: string[];
+  qa?: string;
+  charterId?: string;
+  charterTitle?: string;
+  lead?: string;
+  chiefOfStaff: string;
+  cto?: string;
+}
+
+/** Owner-only quiet-hours override (W4): pushes go out at night while `until` is in the future. */
+export interface SuperFocus { until: string | null }
 
 /** A handoff on an item (LLD §19.6c). */
 export interface ItemHandoff {
@@ -288,6 +350,10 @@ export interface ItemDetail {
   progress?: EpicProgress;
   /** The epic's thread in its area room, once it has one. */
   threadId?: string;
+  /** Every change with its reason, oldest first. */
+  audit: AuditEntry[];
+  /** Who the story passes through. */
+  chain: StoryChain;
 }
 
 export type UpdateKind = 'started' | 'shipped' | 'blocked' | 'unblocked' | 'decided' | 'brief' | 'review';
@@ -384,8 +450,8 @@ export interface CreateItemRequest {
   targetDate?: string;
   acceptance?: string[];
   rank?: number;
-  /** 'bug' files a story-level bug. */
-  type?: 'bug';
+  /** 'bug' files a story-level bug; 'rca' a root-cause-only story (no code). */
+  type?: StoryType;
   /** An explicit dependency: it starts after this item finishes. */
   startsAfter?: string;
 }
@@ -405,12 +471,19 @@ export interface UpdateItemRequest {
   status?: ItemStatus;
   resolution?: ItemResolution;
   blockedReason?: string;
-  /** An employee id, 'owner', 'coo' or 'external'. A teammate turns Blocked into In review or a handoff (LLD §19.6c). */
+  /**
+   * Status waiting: an employee id, 'owner' or 'coo'. Status blocked: 'external', 'release' or an item id
+   * (a legacy block on a person is stored as waiting).
+   */
   waitingOn?: string;
-  /** With status blocked on a teammate: 'review' (→ In review, them reviewing) or 'work' (→ handed to them). Guessed from the reason when absent. */
+  /** With a wait on a teammate: 'review' (→ In review, them reviewing) or 'work' (→ handed to them). Without it the item stays waiting. */
   kind?: 'review' | 'work';
-  /** Why (a reopen needs one; recorded on the activity row). */
+  /** Why: required whenever the status or the assignee changes (at least 3 characters). `note` is its alias. */
+  reason?: string;
+  /** Alias of `reason` (recorded on the activity row). */
   note?: string;
+  /** Status parked: what has to happen for it to resume. */
+  resumeWhen?: string;
   /** Blocked on the owner: what the asker recommends (goes into the Inbox item). */
   recommendation?: string;
   /** Moving to in-progress: also start the assignee's session. */

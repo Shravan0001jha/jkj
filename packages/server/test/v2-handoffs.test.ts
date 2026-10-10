@@ -28,6 +28,8 @@ import type { ItemDetail, PlanResponse } from '@jkj/shared';
  * review (→ In review with them as reviewer) or their work (→ a handoff: assigned to them, In
  * progress, back to the original assignee with item_handback). Blocked stays for the owner (his
  * Inbox) and for the COO / someone outside the team (the COO is told, again after 15 minutes).
+ * Rework (Oct 2026): the rewrite to a review or a handoff happens only with an explicit `kind`;
+ * without one, a wait on a teammate is `waiting` on them and the item stays with its assignee.
  */
 
 const tick = (ms = 10) => new Promise(r => setTimeout(r, ms));
@@ -44,7 +46,7 @@ const cooItems = (wp: Wp, itemId: string) => coo.listItems(wp).filter(i => i.ite
 function plan(wp: Wp) {
   const epic = items.create(wp, { level: 'epic', title: 'P0 Iris during music' }, 'owner');
   const qaStory = items.create(wp, { level: 'story', parentId: epic.id, title: 'QA the music bundle', assigneeId: 'nikhil' }, 'asha');
-  items.update(wp, qaStory.id, { status: 'in-progress' }, 'nikhil');
+  items.update(wp, qaStory.id, { status: 'in-progress', reason: 'test: moved' }, 'nikhil');
   return { epic, qaStory };
 }
 
@@ -63,7 +65,7 @@ async function toolsFor(wp: Wp, employeeId: string, assignmentId?: string) {
   return async (name: string, args: Record<string, unknown>) => JSON.stringify((await client.callTool({ name, arguments: args })).content);
 }
 
-test('classify: owner and outside waits block; a teammate is a review or a handoff; kind wins over the keywords', () => {
+test('classify: owner and outside waits block; a teammate is a review or a handoff by kind, else a wait', () => {
   const { wp, tmp } = testWorkplace();
   try {
     const c = (waitingOn: string, reason: string, kind?: 'review' | 'work') => waits.classify(wp, { assigneeId: 'nikhil', waitingOn, reason, ...(kind ? { kind } : {}) });
@@ -71,11 +73,10 @@ test('classify: owner and outside waits block; a teammate is a review or a hando
     assert.equal(c('coo', 'Needs the relay redeployed'), 'block');
     assert.equal(c('external', 'Apple review of the build'), 'block', 'outside the team stays a block, keyword or not');
     assert.equal(c('nikhil', 'myself'), 'block', 'waiting on yourself is not a handoff');
-    assert.equal(c('dev', 'Needs Dev to review the ducking curve'), 'review');
-    assert.equal(c('dev', 'Waiting for his sign-off'), 'review');
-    assert.equal(c('dev', 'Needs Dev to approve the change'), 'review');
-    assert.equal(c('dev', 'Needs the duck build to test against'), 'handoff');
-    assert.equal(c('dev', 'Previewing the build'), 'handoff', 'word-bounded: "previewing" is not a review');
+    // No more guessing from the reason: without kind it is a wait on them.
+    assert.equal(c('dev', 'Needs Dev to review the ducking curve'), 'wait');
+    assert.equal(c('dev', 'Waiting for his sign-off'), 'wait');
+    assert.equal(c('dev', 'Needs the duck build to test against'), 'wait');
     assert.equal(c('dev', 'Needs the duck build', 'review'), 'review');
     assert.equal(c('dev', 'Fix what the review found', 'work'), 'handoff');
   } finally {
@@ -83,14 +84,14 @@ test('classify: owner and outside waits block; a teammate is a review or a hando
   }
 });
 
-test('review wait: Blocked on a teammate for a sign-off becomes In review with them as reviewer, and wakes them', async () => {
+test('review wait: Blocked on a teammate with kind review becomes In review with them as reviewer, and wakes them', async () => {
   const { wp, tmp } = testWorkplace();
   const { fake, stop } = started(wp);
   try {
     withOauth(tmp.dir);
     coo.touchHeartbeatForTest(wp);
     const { qaStory } = plan(wp);
-    const it = items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Needs Dev to sign off the test plan.', waitingOn: 'dev' }, 'nikhil');
+    const it = items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Needs Dev to sign off the test plan.', waitingOn: 'dev', kind: 'review', reason: 'test: moved' }, 'nikhil');
     assert.equal(it.status, 'in-review');
     assert.equal(it.reviewerId, 'dev');
     assert.equal(it.assigneeId, 'nikhil');
@@ -131,7 +132,7 @@ test('work wait: a handoff — reassigned, In progress, recorded, the teammate w
     withOauth(tmp.dir);
     coo.touchHeartbeatForTest(wp);
     const { epic, qaStory } = plan(wp);
-    const it = items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Needs the duck build to test against.', waitingOn: 'dev' }, 'nikhil');
+    const it = items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Needs the duck build to test against.', waitingOn: 'dev', kind: 'work', reason: 'test: moved' }, 'nikhil');
     assert.equal(it.status, 'in-progress', 'kept In progress, never Blocked');
     assert.equal(it.assigneeId, 'dev');
     assert.equal(it.blocked, undefined);
@@ -188,7 +189,7 @@ test('work wait through flag_stall: a handoff, and the COO gets no "Flagged" ite
     of(fake, 'dev')[0]!.result();
     await tick();
     const nikhil = await toolsFor(wp, 'nikhil', qaStory.id);
-    const reply = await nikhil('flag_stall', { reason: 'Needs the duck build.', waitingOn: 'dev' });
+    const reply = await nikhil('flag_stall', { reason: 'Needs the duck build.', waitingOn: 'dev', kind: 'work' });
     assert.match(reply, /Dev/);
     assert.equal(items.get(wp, qaStory.id)!.assigneeId, 'dev');
     assert.equal(items.get(wp, qaStory.id)!.status, 'in-progress');
@@ -207,8 +208,8 @@ test('handback over the API, and nested handoffs unwind in order', async () => {
   try {
     const wp = b.running.wp;
     const { qaStory } = plan(wp);
-    items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Needs the duck build.', waitingOn: 'dev' }, 'nikhil');
-    items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Needs the memory API.', waitingOn: 'kabir' }, 'dev');
+    items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Needs the duck build.', waitingOn: 'dev', kind: 'work', reason: 'test: moved' }, 'nikhil');
+    items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Needs the memory API.', waitingOn: 'kabir', kind: 'work', reason: 'test: moved' }, 'dev');
     assert.equal(items.get(wp, qaStory.id)!.assigneeId, 'kabir');
     assert.equal(items.get(wp, qaStory.id)!.handoff?.fromId, 'dev');
     let r = await call<ItemDetail>(b.base, 'POST', `/api/items/${qaStory.id}/handback`, { note: 'API landed.' });
@@ -240,7 +241,7 @@ test('owner wait stays Blocked and raises his Inbox question; the COO is not tol
     withOauth(tmp.dir);
     coo.touchHeartbeatForTest(wp);
     const { qaStory } = plan(wp);
-    const it = items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Which device do we sign off on?', waitingOn: 'owner', recommendation: 'iPhone 15' }, 'nikhil');
+    const it = items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Which device do we sign off on?', waitingOn: 'owner', recommendation: 'iPhone 15', reason: 'test: moved' }, 'nikhil');
     assert.equal(it.status, 'blocked', 'the owner is not a teammate, even for a sign-off');
     assert.equal(it.assigneeId, 'nikhil');
     assert.ok(inbox.list(wp, 'open').some(i => i.context['itemId'] === qaStory.id && /Blocked on you/.test(i.title)));
@@ -259,7 +260,7 @@ test('external wait stays Blocked: Asha is told at once and again after 15 minut
     withOauth(tmp.dir);
     coo.touchHeartbeatForTest(wp);
     const { qaStory } = plan(wp);
-    const it = items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Apple has to review the TestFlight build.', waitingOn: 'external' }, 'nikhil');
+    const it = items.update(wp, qaStory.id, { status: 'blocked', blockedReason: 'Apple has to review the TestFlight build.', waitingOn: 'external', reason: 'test: moved' }, 'nikhil');
     assert.equal(it.status, 'blocked');
     assert.equal(it.blocked?.waitingOn, 'external');
     await tick();
@@ -275,15 +276,15 @@ test('external wait stays Blocked: Asha is told at once and again after 15 minut
 
     // Waiting on the COO is a real block too.
     const other = items.create(wp, { level: 'story', parentId: it.parentId!, title: 'Relay deploy', assigneeId: 'dev' }, 'asha');
-    items.update(wp, other.id, { status: 'in-progress' }, 'dev');
-    assert.equal(items.update(wp, other.id, { status: 'blocked', blockedReason: 'Needs the relay redeployed.', waitingOn: 'coo' }, 'dev').status, 'blocked');
+    items.update(wp, other.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
+    assert.equal(items.update(wp, other.id, { status: 'blocked', blockedReason: 'Needs the relay redeployed.', waitingOn: 'coo', reason: 'test: moved' }, 'dev').status, 'blocked');
   } finally {
     stop();
     tmp.cleanup();
   }
 });
 
-test('migration: Blocked items waiting on a teammate are converted at boot, once; owner and outside blocks are left alone', async () => {
+test('migration: Blocked items waiting on a teammate become Waiting on them at boot, once; owner and outside blocks are left alone', async () => {
   const { wp, tmp } = testWorkplace();
   const { fake, stop } = started(wp);
   try {
@@ -291,7 +292,7 @@ test('migration: Blocked items waiting on a teammate are converted at boot, once
     const { epic, qaStory } = plan(wp);
     const mk = (title: string, assigneeId: string) => {
       const s = items.create(wp, { level: 'story', parentId: epic.id, title, assigneeId }, 'asha');
-      items.update(wp, s.id, { status: 'in-progress' }, assigneeId);
+      items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, assigneeId);
       return s;
     };
     const reviewOne = mk('Echo fix', 'mira');
@@ -299,30 +300,28 @@ test('migration: Blocked items waiting on a teammate are converted at boot, once
     const outside = mk('Store listing', 'rohan');
     // Old-style blocks (before this rule): written straight into the store.
     const oldBlock = (id: string, waitingOn: string, reason: string) => {
-      items.update(wp, id, { status: 'blocked', blockedReason: reason, waitingOn: 'coo' }, 'workplace');
+      items.update(wp, id, { status: 'blocked', blockedReason: reason, waitingOn: 'coo', reason: 'test: moved' }, 'workplace');
       const w = rawGet(wp, id)!;
       work.saveQuiet(wp, { ...w, waitingOn });
     };
     oldBlock(qaStory.id, 'dev', 'Needs the duck build.');
     oldBlock(reviewOne.id, 'nikhil', 'Waiting for Nikhil to review it.');
-    items.update(wp, ownerOne.id, { status: 'blocked', blockedReason: 'Which voice?', waitingOn: 'owner', recommendation: 'Aria' }, 'tara');
-    items.update(wp, outside.id, { status: 'blocked', blockedReason: 'Apple review.', waitingOn: 'external' }, 'rohan');
+    items.update(wp, ownerOne.id, { status: 'blocked', blockedReason: 'Which voice?', waitingOn: 'owner', recommendation: 'Aria', reason: 'test: moved' }, 'tara');
+    items.update(wp, outside.id, { status: 'blocked', blockedReason: 'Apple review.', waitingOn: 'external', reason: 'test: moved' }, 'rohan');
     await tick();
 
+    // Rework (Oct 2026): no kind was ever given, so nothing is rewritten: each is Waiting on that person.
     assert.deepEqual(handoff.migrateBlockedWaits(wp).sort(), [qaStory.id, reviewOne.id].sort());
-    assert.equal(items.get(wp, qaStory.id)!.status, 'in-progress');
-    assert.equal(items.get(wp, qaStory.id)!.assigneeId, 'dev');
-    assert.equal(items.get(wp, qaStory.id)!.handoff?.fromId, 'nikhil');
-    assert.equal(items.get(wp, reviewOne.id)!.status, 'in-review');
-    assert.equal(items.get(wp, reviewOne.id)!.reviewerId, 'nikhil');
+    const qa = items.get(wp, qaStory.id)!;
+    assert.deepEqual([qa.status, qa.assigneeId, qa.waiting?.on, qa.handoff], ['waiting', 'nikhil', 'dev', undefined]);
+    const rv = items.get(wp, reviewOne.id)!;
+    assert.deepEqual([rv.status, rv.assigneeId, rv.waiting?.on, rv.waiting?.reason], ['waiting', 'mira', 'nikhil', 'Waiting for Nikhil to review it.']);
     assert.equal(items.get(wp, ownerOne.id)!.status, 'blocked');
     assert.equal(items.get(wp, outside.id)!.status, 'blocked');
     await tick();
-    assert.ok(told(fake, 'dev').some(t => t.includes(qaStory.id)), 'the new handoff wakes Dev');
-    assert.ok(told(fake, 'nikhil').some(t => t.includes(reviewOne.id)), 'the review wakes Nikhil');
+    assert.ok(!told(fake, 'dev').some(t => t.includes(qaStory.id) && /item_handback/.test(t)), 'nothing is handed to Dev');
 
     assert.deepEqual(handoff.migrateBlockedWaits(wp), [], 'idempotent');
-    assert.equal(rawGet(wp, qaStory.id)!.handoff?.prev, undefined, 'no double handoff');
   } finally {
     stop();
     tmp.cleanup();

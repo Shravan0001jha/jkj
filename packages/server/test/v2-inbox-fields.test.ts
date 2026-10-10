@@ -66,8 +66,8 @@ test('urgency follows the kind and the level: cap urgent; approval and release h
 
     const epic = items.create(wp, { level: 'epic', title: 'Iris during music' }, 'owner');
     const story = items.create(wp, { level: 'story', parentId: epic.id, title: 'Mic stays live', assigneeId: 'dev' }, 'asha');
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
-    items.update(wp, story.id, { status: 'blocked', blockedReason: 'which TTS voice?', waitingOn: 'owner', recommendation: 'Keep Aria' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
+    items.update(wp, story.id, { status: 'blocked', blockedReason: 'which TTS voice?', waitingOn: 'owner', recommendation: 'Keep Aria', reason: 'test: moved' }, 'dev');
     const q = inbox.ownerList(wp, 'open').find(i => i.context['itemId'] === story.id)!;
     assert.equal(q.urgency, 'high', 'a story waits on the owner');
     assert.equal(q.context['recommendation'], 'Keep Aria');
@@ -98,9 +98,12 @@ test('ask_owner and escalate require a recommendation and pass it through to the
   const fake = installFakeRuntime();
   const { wp, tmp } = testWorkplace();
   try {
+    // Rework (Oct 2026): only the Chief of Staff and the CTO ask the owner; a lead goes up the chain.
     const mira = await toolsFor(wp, 'mira');
-    assert.match(await mira('ask_owner', { title: 'Which TTS voice ships?', body: 'Two candidates.', options: ['Aria', 'Nova'] }), /recommendation/i, 'refused without one');
-    assert.match(await mira('ask_owner', { title: 'Which TTS voice ships?', body: 'Two candidates.', options: ['Aria', 'Nova'], recommendation: 'Nova' }), /Filed as/);
+    assert.match(await mira('ask_owner', { title: 'Which TTS voice ships?', body: 'Two candidates.', options: ['Aria', 'Nova'], recommendation: 'Nova' }), /Ask your manager/);
+    const cos = await toolsFor(wp, 'asha');
+    assert.match(await cos('ask_owner', { title: 'Which TTS voice ships?', body: 'Two candidates.', options: ['Aria', 'Nova'] }), /recommendation/i, 'refused without one');
+    assert.match(await cos('ask_owner', { title: 'Which TTS voice ships?', body: 'Two candidates.', options: ['Aria', 'Nova'], recommendation: 'Nova' }), /Filed as/);
     const asked = inbox.ownerList(wp, 'open').find(i => i.title === 'Which TTS voice ships?')!;
     assert.equal(asked.options.find(o => o.label === 'Nova')!.recommended, true);
 
@@ -116,7 +119,7 @@ test('ask_owner and escalate require a recommendation and pass it through to the
     // Blocked on the owner, from an agent: a recommendation is required too.
     const epic = items.create(wp, { level: 'epic', title: 'E' }, 'owner');
     const story = items.create(wp, { level: 'story', parentId: epic.id, title: 'S', assigneeId: 'dev' }, 'asha');
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     const dev = await toolsFor(wp, 'dev', story.id);
     assert.match(await dev('item_update', { itemId: story.id, status: 'blocked', blockedReason: 'which voice?', waitingOn: 'owner' }), /recommendation/i);
     assert.match(await dev('flag_stall', { reason: 'which voice?', waitingOn: 'owner' }), /recommendation/i);

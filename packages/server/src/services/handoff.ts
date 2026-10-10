@@ -92,7 +92,7 @@ export function migrateBlockedWaits(wp: Workplace): string[] {
     if (levelOf(w) === 'epic' || !w.waitingOn) continue;
     if (waits.classify(wp, { assigneeId: w.employeeId, waitingOn: w.waitingOn, reason: w.blockedReason }) === 'block') continue;
     try {
-      const it = items.update(wp, w.id, { status: 'blocked', blockedReason: w.blockedReason ?? 'No reason given', waitingOn: w.waitingOn }, 'workplace', { rewait: true });
+      const it = items.update(wp, w.id, { status: 'blocked', blockedReason: w.blockedReason ?? 'No reason given', waitingOn: w.waitingOn, note: 'system: a block on a person is re-applied as a wait' }, 'workplace', { rewait: true });
       if (it.status !== 'blocked') out.push(w.id);
     } catch (err) {
       log.warn('handoff', `migrate ${w.id}: ${err instanceof Error ? err.message : err}`);

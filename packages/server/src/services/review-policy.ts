@@ -1,5 +1,6 @@
 import type { Employee, GitHubMode, PrApproval, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
+import { teamMembers, teamOf } from './org.js';
 
 /**
  * Who may approve what, and whether an approval still holds (docs/LLD-github-flow.md §3). Pure
@@ -31,38 +32,7 @@ export const isCto = (e: Employee | undefined): boolean => !!e && e.roleId === '
 /** A reviewing role (a lead or the CTO): who may look at any story's evidence, whatever the team. */
 export const isReviewerRole = (e: Employee | undefined): boolean => isDeveloper(e) || isCto(e);
 
-/* ---------- the team (rework W3; private copies of the org-tree helpers, by reportsTo and roleId) ---------- */
-
-const isTeamLead = (e: Employee | undefined): boolean => !!e && (e.roleId === 'lead' || e.roleId === 'qa');
-
-/**
- * The lead of `id`'s team: themselves when their role is lead or qa, else the first manager up the
- * chain whose role is. Undefined for people above the teams (the CoS, the CTO, the COO) and strangers.
- */
-export function teamOf(employees: Employee[], id: string | undefined): string | undefined {
-  const byId = (x: string | undefined) => (x ? employees.find(e => e.id === x) : undefined);
-  let cur = byId(id);
-  const seen = new Set<string>();
-  while (cur && !seen.has(cur.id)) {
-    if (isTeamLead(cur)) return cur.id;
-    seen.add(cur.id);
-    cur = byId(cur.reportsTo ?? undefined);
-  }
-  return undefined;
-}
-
-/** A team: its lead and the lead's direct reports (virtual employees never review). */
-export function teamMembers(employees: Employee[], leadId: string | undefined): string[] {
-  if (!leadId) return [];
-  return employees.filter(e => !e.virtual && (e.id === leadId || e.reportsTo === leadId)).map(e => e.id);
-}
-
-/** The lead answering for a charter: a holder whose role is lead or qa, else the team lead of its first holder. */
-export function leadOfCharter(employees: Employee[], charterId: string): string | undefined {
-  const holders = employees.filter(e => !e.virtual && e.charterIds.includes(charterId));
-  const lead = holders.find(isTeamLead);
-  return lead ? lead.id : holders.length ? teamOf(employees, holders[0]!.id) : undefined;
-}
+/* ---------- the team (rework W3, on W1's org-tree helpers in org.ts) ---------- */
 
 /**
  * Who may give the developer approval (1 of 2) on `authorId`'s story (owner, 10 Oct): a member of the
@@ -74,8 +44,8 @@ export function canApproveAsDeveloper(employees: Employee[], actorId: string | u
   const actor = employees.find(e => e.id === actorId);
   if (!actor || actor.virtual) return false;
   if (isCto(actor)) return true;
-  const team = teamOf(employees, authorId);
-  return !!team && teamMembers(employees, team).includes(actorId);
+  const team = authorId ? teamOf({ employees }, authorId) : undefined;
+  return !!team && teamMembers({ employees }, team).includes(actorId);
 }
 export const isQa = (e: Employee | undefined): boolean => !!e && (e.roleId === 'qa' || e.charterIds.includes(QUALITY_CHARTER));
 

@@ -1,5 +1,5 @@
 import type { WorkItem } from '@jkj/shared';
-import type { Workplace, WorkplaceEvent } from './workplace.js';
+import type { Workplace } from './workplace.js';
 import * as runs from './runs.js';
 import * as employees from './employees.js';
 import * as trail from './trail.js';
@@ -7,6 +7,8 @@ import * as coo from './coo.js';
 import * as floor from './floor.js';
 import * as pace from './pace.js';
 import { inQuietHours } from './push.js';
+import { superFocusActive } from './focus.js';
+import { managerOf, teamOf } from './org.js';
 import { openStartsAfter } from './lifecycle.js';
 import { chiefOfStaffId, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { rowsJson } from './store.js';
@@ -38,7 +40,6 @@ const MIN = 60_000;
 export const STEP_MS = 10 * MIN;
 export const SWEEP_MS = MIN;
 const PREFIX = 'stall-chain:';
-export const SUPER_FOCUS_KEY = 'super-focus';
 
 export interface StallRecord { since: string; notified: number }
 
@@ -61,36 +62,10 @@ function records(wp: Workplace): string[] {
   return (wp.db.prepare('select key from settings where key like ?').all(`${PREFIX}%`) as { key: string }[]).map(r => r.key.slice(PREFIX.length));
 }
 
-/** Super focus is on (the owner wants every L4 ring, quiet hours or not). */
-export function superFocus(wp: Workplace, nowMs = Date.now()): boolean {
-  const v = getRow(wp, SUPER_FOCUS_KEY);
-  if (!v) return false;
-  try {
-    const until = (JSON.parse(v) as { until?: string | null }).until;
-    return !!until && Date.parse(until) > nowMs;
-  } catch { return false; }
-}
-
-/* ---------- the org tree (read from org data; W1's org.ts helpers replace these on merge) ---------- */
-
-const emp = (wp: Workplace, id: string | undefined) => (id ? wp.org.employees.find(e => e.id === id) : undefined);
-const isLeadRole = (wp: Workplace, id: string | undefined): boolean => { const r = emp(wp, id)?.roleId; return r === 'lead' || r === 'qa'; };
-const managerOf = (wp: Workplace, id: string): string | undefined => emp(wp, id)?.reportsTo ?? undefined;
-
-/** The employee's lead: themselves when they are a lead (or the QA lead), else the first such ancestor. */
-function teamOf(wp: Workplace, id: string): string | undefined {
-  const seen = new Set<string>();
-  for (let cur: string | undefined = id; cur && !seen.has(cur); cur = managerOf(wp, cur)) {
-    seen.add(cur);
-    if (isLeadRole(wp, cur)) return cur;
-  }
-  return undefined;
-}
-
 /** Who each level tells, for this assignee: lead (or their manager), the Chief of Staff, the COO, the owner. */
 export function targets(wp: Workplace, assignee: string): (string | undefined)[] {
-  const team = teamOf(wp, assignee);
-  const l1 = team && team !== assignee ? team : managerOf(wp, assignee);
+  const team = teamOf(wp.org, assignee);
+  const l1 = team && team !== assignee ? team : managerOf(wp.org, assignee);
   return [l1, chiefOfStaffId(wp), coo.COO_ID, 'owner'];
 }
 
@@ -191,15 +166,14 @@ export function sweep(wp: Workplace, nowMs = Date.now()): SweepResult {
   for (const id of records(wp)) if (!live.has(id)) drop(wp, id);
 
   if (ring.length) {
-    if (inQuietHours(wp.config.pushQuiet, nowMs) && !superFocus(wp, nowMs)) {
+    if (inQuietHours(wp.config.pushQuiet, nowMs) && !superFocusActive(wp, nowMs)) {
       log.info('stall-chain', `ring held (quiet hours): ${ring.map(r => r.w.id).join(', ')}`);
     } else {
       const list = ring.map(r => `"${r.w.title}" (${nameOf(wp, r.w.employeeId)}, ${r.mins} min)`).join('; ');
       const title = ring.length === 1 ? `Stalled 40+ min: ${ring[0]!.w.title}` : `${ring.length} stories stalled 40+ min`;
       const text = `Stalled 40+ min, the lead, Asha and the COO have been told: ${list}.`;
       const itemIds = ring.map(r => r.w.id);
-      // The ring level and itemIds are the rework's push contract (W4 sends it); cast until the shared type has them.
-      wp.emit({ type: 'alert', level: 'ring', title, body: text, text, itemIds } as unknown as WorkplaceEvent);
+      wp.emit({ type: 'alert', level: 'ring', title, body: text, itemIds });
       for (const r of ring) {
         put(wp, r.w.id, { ...r.rec, notified: 4 });
         trail.comment(wp, r.w.id, { by: 'workplace', text: `Stalled ${r.mins} min: the owner was rung.` });

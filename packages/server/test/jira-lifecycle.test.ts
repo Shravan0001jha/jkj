@@ -57,14 +57,20 @@ test('trueStatus: On hold with its reason, and the PR stages In review â†’ QA â†
   try {
     writeGithubMode(wp, 'shadow');
     const parked = story('Parked', 'tara');
+    // Rework (Oct 2026): a new hold parks the item; a held Backlog (the owner moving it there) still reads On hold.
     items.update(wp, parked.id, { status: 'backlog', hold: true, note: 'needs the owner at the Mac' }, 'owner');
     const p = items.require$(wp, parked.id);
-    assert.equal(p.trueStatus, 'on-hold');
-    assert.equal(p.holdReason, 'needs the owner at the Mac');
+    assert.equal(p.trueStatus, 'parked');
+    assert.equal(p.parked?.reason, 'needs the owner at the Mac');
+    const held = story('Held', 'tara');
+    items.update(wp, held.id, { status: 'backlog', note: 'needs the owner at the Mac' }, 'owner');
+    const h = items.require$(wp, held.id);
+    assert.equal(h.trueStatus, 'on-hold');
+    assert.equal(h.holdReason, 'needs the owner at the Mac');
 
     const s = story('Version footer', 'tara');
-    items.update(wp, s.id, { status: 'in-progress' }, 'tara');
-    items.update(wp, s.id, { status: 'in-review', reviewerId: 'dev' }, 'tara');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
+    items.update(wp, s.id, { status: 'in-review', reviewerId: 'dev', reason: 'test: moved' }, 'tara');
     patch(s.id, { pr: pr() });
     let it = items.require$(wp, s.id);
     assert.equal(it.trueStatus, 'in-review');
@@ -90,7 +96,7 @@ test('a bug is a story-level item of type bug; cant-reproduce is a resolution', 
     const b = story('Crash on launch', 'tara', { type: 'bug' });
     assert.equal(items.require$(wp, b.id).type, 'bug');
     assert.equal(items.require$(wp, b.id).level, 'story');
-    items.update(wp, b.id, { status: 'done', resolution: 'cant-reproduce' }, 'owner');
+    items.update(wp, b.id, { status: 'done', resolution: 'cant-reproduce', reason: 'test: moved' }, 'owner');
     assert.equal(items.require$(wp, b.id).resolution, 'cant-reproduce');
   } finally { await done(); }
 });
@@ -101,16 +107,16 @@ test('Blocked needs waitingOn and blockedReason (each refusal says the next step
   const { wp, story, done } = setup();
   try {
     const s = story('Store listing', 'tara');
-    items.update(wp, s.id, { status: 'in-progress' }, 'tara');
-    assert.throws(() => items.update(wp, s.id, { status: 'blocked', waitingOn: 'owner' }, 'tara'), /Blocked needs a reason: add blockedReason/);
-    assert.throws(() => items.update(wp, s.id, { status: 'blocked', blockedReason: 'the key' }, 'tara'), /Blocked needs who it is waiting on: set waitingOn/);
-    assert.throws(() => items.update(wp, s.id, { status: 'blocked', blockedReason: 'x', waitingOn: 'nobody-at-all' }, 'tara'), /not a person, an item id/);
-    const it = items.update(wp, s.id, { status: 'blocked', blockedReason: 'needs the release first', waitingOn: 'release' }, 'tara');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
+    assert.throws(() => items.update(wp, s.id, { status: 'blocked', waitingOn: 'owner', reason: 'test: moved' }, 'tara'), /Blocked needs a reason: add blockedReason/);
+    assert.throws(() => items.update(wp, s.id, { status: 'blocked', blockedReason: 'the key', reason: 'test: moved' }, 'tara'), /Blocked needs who it is waiting on: set waitingOn/);
+    assert.throws(() => items.update(wp, s.id, { status: 'blocked', blockedReason: 'x', waitingOn: 'nobody-at-all', reason: 'test: moved' }, 'tara'), /not a person, an item id/);
+    const it = items.update(wp, s.id, { status: 'blocked', blockedReason: 'needs the release first', waitingOn: 'release', reason: 'test: moved' }, 'tara');
     assert.equal(it.status, 'blocked');
     assert.deepEqual({ kind: it.blocker?.kind, status: it.blocker?.status }, { kind: 'release', status: 'no release planned' });
 
     const h = story('Mac-only check', 'tara');
-    assert.throws(() => items.update(wp, h.id, { hold: true }, 'owner'), /On hold needs a reason/);
+    assert.throws(() => items.update(wp, h.id, { hold: true }, 'owner'), /On hold needs a reason|give a reason/);
   } finally { await done(); }
 });
 
@@ -119,14 +125,14 @@ test('a block stays current: waitingOn and blockedReason edit in place, its sinc
   try {
     const dep = story('Server endpoint', 'kabir');
     const s = story('Client screen', 'tara');
-    items.update(wp, s.id, { status: 'in-progress' }, 'tara');
-    items.update(wp, s.id, { status: 'blocked', blockedReason: 'waits on the server', waitingOn: 'coo' }, 'tara');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
+    items.update(wp, s.id, { status: 'blocked', blockedReason: 'waits on the server', waitingOn: 'coo', reason: 'test: moved' }, 'tara');
     const since = raw(s.id).blockedSince;
     let it = items.update(wp, s.id, { waitingOn: dep.id, blockedReason: 'needs the endpoint' }, 'tara');
     assert.equal(it.status, 'blocked');
     assert.equal(raw(s.id).blockedSince, since, 'the block keeps its since');
     assert.deepEqual({ kind: it.blocker?.kind, label: it.blocker?.label, status: it.blocker?.status, reason: it.blocker?.reason }, { kind: 'item', label: 'Server endpoint', status: 'Ready', reason: 'needs the endpoint' });
-    items.update(wp, dep.id, { status: 'in-progress' }, 'kabir');
+    items.update(wp, dep.id, { status: 'in-progress', reason: 'test: moved' }, 'kabir');
     it = items.require$(wp, s.id);
     assert.equal(it.blocker?.status, 'In progress', 'the linked item moved: the blocker status shows it');
   } finally { await done(); }
@@ -139,8 +145,8 @@ test('startsAfter: shown with the blocker status, never dispatched early; on its
     const a = story('Schema', 'kabir');
     const b = story('Migration', 'tara', { startsAfter: a.id });
     const c = story('Backfill', 'mira');
-    items.update(wp, c.id, { status: 'in-progress' }, 'mira');
-    items.update(wp, c.id, { status: 'blocked', startsAfter: a.id }, 'mira');
+    items.update(wp, c.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
+    items.update(wp, c.id, { status: 'blocked', startsAfter: a.id, reason: 'test: moved' }, 'mira');
     let bi = items.require$(wp, b.id);
     assert.equal(bi.trueStatus, 'blocked');
     assert.deepEqual(bi.startsAfter, { id: a.id, title: 'Schema', status: 'Ready', done: false });
@@ -150,9 +156,9 @@ test('startsAfter: shown with the blocker status, never dispatched early; on its
     assert.ok(!hygiene.report(wp).violations.some(v => v.rule === 'bad-block'), 'a block with startsAfter is concrete: no violation');
     assert.throws(() => items.update(wp, a.id, { startsAfter: b.id }, 'owner'), /would make a loop/);
 
-    items.update(wp, a.id, { status: 'in-progress' }, 'kabir');
-    items.update(wp, a.id, { status: 'in-review', reviewerId: 'nikhil' }, 'kabir');
-    items.update(wp, a.id, { status: 'done' }, 'nikhil');
+    items.update(wp, a.id, { status: 'in-progress', reason: 'test: moved' }, 'kabir');
+    items.update(wp, a.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'kabir');
+    items.update(wp, a.id, { status: 'done', reason: 'test: moved' }, 'nikhil');
     lifecycleWatch.onItem(wp, a.id);
     bi = items.require$(wp, b.id);
     assert.equal(bi.trueStatus, 'ready');
@@ -169,16 +175,16 @@ test('PR merged: the story moves to Merged and Asha is told; she closes it to Do
   try {
     writeGithubMode(wp, 'on');
     const s = story('Settings version', 'tara');
-    items.update(wp, s.id, { status: 'in-progress' }, 'tara');
-    items.update(wp, s.id, { status: 'in-review', reviewerId: 'dev' }, 'tara');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
+    items.update(wp, s.id, { status: 'in-review', reviewerId: 'dev', reason: 'test: moved' }, 'tara');
     patch(s.id, { pr: pr({ merged: { at: '2026-10-05T11:00:00Z', sha: 'm1', by: 'coo' } }) });
     assert.equal(lifecycleWatch.onMerged(wp, s.id, 'coo'), 'moved');
     assert.equal(raw(s.id).status, 'done');
     assert.equal(items.require$(wp, s.id).trueStatus, 'merged');
     const told = manager.list(wp).find(a => a.key.startsWith(`merged:${s.id}`));
     assert.ok(told && /Close it: item_update/.test(told.text ?? ''));
-    assert.throws(() => items.update(wp, s.id, { status: 'done' }, 'tara'), /Asha's call/);
-    const it = items.update(wp, s.id, { status: 'done' }, 'asha');
+    assert.throws(() => items.update(wp, s.id, { status: 'done', reason: 'test: moved' }, 'tara'), /Asha's call/);
+    const it = items.update(wp, s.id, { status: 'done', reason: 'test: moved' }, 'asha');
     assert.equal(it.trueStatus, 'done');
     assert.ok(it.closedAt);
   } finally { await done(); }
@@ -220,7 +226,7 @@ test('(b) In progress with no live session for 10 min (the stuck rule), reported
   const { wp, story, done } = setup();
   try {
     const s = story('Orphan', 'tara');
-    items.update(wp, s.id, { status: 'in-progress' }, 'tara');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
     const t0 = Date.now();
     hygiene.sweep(wp, t0);
     const r = hygiene.sweep(wp, t0 + 11 * MIN);
@@ -236,9 +242,9 @@ test('(c) Blocked without a concrete blocker, or blocked on a closed item, at on
     patch(bare.id, { status: 'blocked', state: 'blocked', blockedReason: 'stuck', statusSince: new Date().toISOString() });
     const dep = story('Abandoned', 'kabir');
     const s = story('Waits on abandoned', 'mira');
-    items.update(wp, s.id, { status: 'in-progress' }, 'mira');
-    items.update(wp, s.id, { status: 'blocked', waitingOn: dep.id, blockedReason: 'needs it' }, 'mira');
-    items.update(wp, dep.id, { status: 'done', resolution: 'wont-do' }, 'owner');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
+    items.update(wp, s.id, { status: 'blocked', waitingOn: dep.id, blockedReason: 'needs it', reason: 'test: moved' }, 'mira');
+    items.update(wp, dep.id, { status: 'done', resolution: 'wont-do', reason: 'test: moved' }, 'owner');
     const r = hygiene.sweep(wp, Date.now());
     const c = r.violations.filter(v => v.rule === 'bad-block');
     assert.deepEqual(c.map(v => v.itemId).sort(), [bare.id, s.id].sort());
@@ -261,11 +267,11 @@ test('(d) In review with no reviewer, or (mode on) a story with no PR', async ()
     kabir.workspace = { ...kabir.workspace, repo, branch: 'trunk' };
     const b = story('No PR', 'kabir');
     g('checkout', '-q', '-b', `emp/kabir/${b.id}`); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'work'); g('checkout', '-q', 'trunk');
-    items.update(wp, b.id, { status: 'in-progress' }, 'kabir');
-    items.update(wp, b.id, { status: 'in-review', reviewerId: 'dev' }, 'kabir');
+    items.update(wp, b.id, { status: 'in-progress', reason: 'test: moved' }, 'kabir');
+    items.update(wp, b.id, { status: 'in-review', reviewerId: 'dev', reason: 'test: moved' }, 'kabir');
     const c = story('Live check with a teammate, no code', 'kabir');
-    items.update(wp, c.id, { status: 'in-progress' }, 'kabir');
-    items.update(wp, c.id, { status: 'in-review', reviewerId: 'tara' }, 'kabir');
+    items.update(wp, c.id, { status: 'in-progress', reason: 'test: moved' }, 'kabir');
+    items.update(wp, c.id, { status: 'in-review', reviewerId: 'tara', reason: 'test: moved' }, 'kabir');
     const d = hygiene.sweep(wp, Date.now()).violations.filter(v => v.rule === 'bad-review');
     assert.match(d.find(v => v.itemId === a.id)!.what, /no reviewer/);
     assert.match(d.find(v => v.itemId === b.id)!.what, /no pull request/);
@@ -281,8 +287,8 @@ test('(e) Done with an unmerged, unapproved PR is a violation; Approved-awaiting
     const bad = story('Done too early', 'tara');
     patch(bad.id, { status: 'done', state: 'done', resolution: 'done', pr: pr() });
     const ok = story('Approved', 'kabir');
-    items.update(wp, ok.id, { status: 'in-progress' }, 'kabir');
-    items.update(wp, ok.id, { status: 'in-review', reviewerId: 'dev' }, 'kabir');
+    items.update(wp, ok.id, { status: 'in-progress', reason: 'test: moved' }, 'kabir');
+    items.update(wp, ok.id, { status: 'in-review', reviewerId: 'dev', reason: 'test: moved' }, 'kabir');
     const ep = raw(ok.id).statusSince!;
     patch(ok.id, { status: 'done', state: 'done', resolution: 'done', pr: pr({ devApproval: approval('dev', ep), qaApproval: approval('nikhil', ep) }) });
     const e = hygiene.sweep(wp, Date.now()).violations.filter(v => v.rule === 'done-unmerged');
@@ -308,9 +314,9 @@ test('(g) the assignee is whoever works on it: a live session by someone else fo
   const { wp, story, done } = setup();
   try {
     const s = story('Shared screen', 'tara');
-    items.update(wp, s.id, { status: 'in-progress' }, 'tara');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
     employees.assign(wp, s.id);
-    items.update(wp, s.id, { assigneeId: 'dev' }, 'owner');
+    items.update(wp, s.id, { assigneeId: 'dev', reason: 'test: moved' }, 'owner');
     const t0 = Date.now();
     hygiene.sweep(wp, t0);
     const r = hygiene.sweep(wp, t0 + 11 * MIN);

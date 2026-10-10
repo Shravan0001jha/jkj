@@ -13,6 +13,7 @@ import { testWorkplace } from './fakes/workplace.js';
  * in_mutouze546paz (decision, ask_owner) + in_mutov5srivxoj ("Blocked on you", 8 s later). The agent
  * files ask_owner (no link to the work item), then blocks the item on the owner, and trail.ownerBlock
  * raises a second question with a different dedupe key. One thing must reach the owner once.
+ * (Rework, Oct 2026: only the Chief of Staff and the CTO ask the owner, so Asha files the asks here.)
  */
 
 type WP = ReturnType<typeof testWorkplace>['wp'];
@@ -29,7 +30,7 @@ async function toolsFor(wp: WP, employeeId: string, assignmentId?: string) {
 function story(wp: WP, assigneeId = 'rohan') {
   const epic = items.create(wp, { level: 'epic', title: 'Windows launch' }, 'owner');
   const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Installer is unsigned', assigneeId }, 'asha');
-  items.update(wp, s.id, { status: 'in-progress' }, assigneeId);
+  items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, assigneeId);
   return s;
 }
 
@@ -40,10 +41,10 @@ test('ask_owner then block on the owner (the live pattern): one Inbox item, the 
   const { wp, tmp } = testWorkplace();
   try {
     const s = story(wp);
-    const call = await toolsFor(wp, 'rohan', s.id);
+    const call = await toolsFor(wp, 'asha', s.id);
     const filed = await call('ask_owner', { title: 'Sign the installer or ship unsigned?', body: 'SmartScreen warns.', options: ['Sign', 'Ship unsigned'], recommendation: 'Ship unsigned' });
     const decisionId = /in_[a-z0-9]+/.exec(filed)![0];
-    items.update(wp, s.id, { status: 'blocked', blockedReason: `Decision filed in his Inbox (${decisionId})`, waitingOn: 'owner', recommendation: 'Ship unsigned' }, 'rohan');
+    items.update(wp, s.id, { status: 'blocked', blockedReason: `Decision filed in his Inbox (${decisionId})`, waitingOn: 'owner', recommendation: 'Ship unsigned', reason: 'test: moved' }, 'rohan');
     const open = ownerOpen(wp);
     assert.deepEqual(open.map(i => i.id), [decisionId]);
     assert.equal(open[0]!.context['itemId'], s.id, 'the decision is linked to the item (session assignment)');
@@ -56,7 +57,7 @@ test('another employee asks (Asha for Kabir) and the block names that Inbox id: 
   try {
     const s = story(wp, 'kabir');
     const d = inbox.raise(wp, { kind: 'decision', title: 'Approve deploying GET /admin/testers', body: 'Read-only endpoint.', raisedBy: 'asha', recommendation: 'Approve' });
-    items.update(wp, s.id, { status: 'blocked', blockedReason: `Deploy approval pending in owner's Inbox (${d.id})`, waitingOn: 'owner', recommendation: 'Approve the deploy' }, 'kabir');
+    items.update(wp, s.id, { status: 'blocked', blockedReason: `Deploy approval pending in owner's Inbox (${d.id})`, waitingOn: 'owner', recommendation: 'Approve the deploy', reason: 'test: moved' }, 'kabir');
     assert.deepEqual(ownerOpen(wp).map(i => i.id), [d.id]);
     assert.equal(inbox.get(wp, d.id)!.context['itemId'], s.id, 'the block links the existing decision to the item');
   } finally { tmp.cleanup(); fake.restore(); }
@@ -67,17 +68,17 @@ test('block first, then ask_owner about the same item: the decision replaces the
   const { wp, tmp } = testWorkplace();
   try {
     const s = story(wp);
-    items.update(wp, s.id, { status: 'blocked', blockedReason: 'Needs a signing decision', waitingOn: 'owner', recommendation: 'Ship unsigned' }, 'rohan');
+    items.update(wp, s.id, { status: 'blocked', blockedReason: 'Needs a signing decision', waitingOn: 'owner', recommendation: 'Ship unsigned', reason: 'test: moved' }, 'rohan');
     const q = ownerOpen(wp);
     assert.equal(q.length, 1);
     assert.match(q[0]!.title, /^Blocked on you/);
-    const call = await toolsFor(wp, 'rohan');
+    const call = await toolsFor(wp, 'asha');
     const filed = await call('ask_owner', { title: 'Sign or ship unsigned?', body: 'Details.', recommendation: 'Ship unsigned', itemId: s.id });
     const decisionId = /in_[a-z0-9]+/.exec(filed)![0];
     assert.deepEqual(ownerOpen(wp).map(i => i.id), [decisionId]);
     assert.equal(inbox.get(wp, q[0]!.id)!.state, 'expired');
     // Unblocking does not withdraw the owner's decision.
-    items.update(wp, s.id, { status: 'in-progress' }, 'rohan');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'rohan');
     assert.equal(inbox.get(wp, decisionId)!.state, 'open');
   } finally { tmp.cleanup(); fake.restore(); }
 });
@@ -87,7 +88,7 @@ test('a second ask about the same item returns the open one instead of raising a
   const { wp, tmp } = testWorkplace();
   try {
     const s = story(wp);
-    const call = await toolsFor(wp, 'rohan', s.id);
+    const call = await toolsFor(wp, 'asha', s.id);
     const first = /in_[a-z0-9]+/.exec(await call('ask_owner', { title: 'Sign it?', body: 'x', recommendation: 'No' }))![0];
     const again = await call('ask_owner', { title: 'Should we sign the installer?', body: 'y', recommendation: 'No' });
     assert.match(again, new RegExp(`Not filed: ${first} is already in the owner.s Inbox`));

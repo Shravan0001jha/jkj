@@ -41,8 +41,8 @@ function plan(wp: Wp) {
 }
 
 const toReview = (wp: Wp, id: string, reviewerId = 'nikhil') => {
-  items.update(wp, id, { status: 'in-progress' }, 'owner');
-  items.update(wp, id, { status: 'in-review', reviewerId }, 'owner');
+  items.update(wp, id, { status: 'in-progress', reason: 'test: moved' }, 'owner');
+  items.update(wp, id, { status: 'in-review', reviewerId, reason: 'test: moved' }, 'owner');
 };
 
 test('a free reviewer gets a short review session at once, naming the item; never a second one for the same item', async () => {
@@ -217,8 +217,8 @@ test('wired at boot: POST /api/items/:id to in-review wakes the reviewer', async
   try {
     const epic = await call<{ item: { id: string } }>(b.base, 'POST', '/api/items', { level: 'epic', title: 'Iris during music' });
     const s = await call<{ item: { id: string } }>(b.base, 'POST', '/api/items', { level: 'story', parentId: epic.body.item.id, title: 'Mic stays live', assigneeId: 'owner' });
-    await call(b.base, 'POST', `/api/items/${s.body.item.id}`, { status: 'in-progress' });
-    const r = await call(b.base, 'POST', `/api/items/${s.body.item.id}`, { status: 'in-review', reviewerId: 'nikhil' });
+    await call(b.base, 'POST', `/api/items/${s.body.item.id}`, { status: 'in-progress', reason: 'starting it' });
+    const r = await call(b.base, 'POST', `/api/items/${s.body.item.id}`, { status: 'in-review', reviewerId: 'nikhil', reason: 'ready for review' });
     assert.equal(r.status, 200);
     await tick(30);
     assert.ok(of(b.fake, 'nikhil').some(x => x.options.prompt.includes(s.body.item.id)));

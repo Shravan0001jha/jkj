@@ -112,10 +112,12 @@ const FIELDS: (keyof WorkItem)[] = ['title', 'body', 'targetDate', 'areaId', 'pa
 export function afterChange(wp: Workplace, prev: WorkItem | null, next: WorkItem, by: string, note?: string): void {
   const id = next.id;
   if (!prev) {
-    record(wp, { itemId: id, by, kind: 'created', text: `${levelOf(next)} created${next.employeeId ? `, assigned to ${nameOf(wp, next.employeeId)}` : ''}`, to: next.status });
+    // The reason, when the creator gave one ("filed by Arjun"), is the row's text (the audit reads it).
+    record(wp, { itemId: id, by, kind: 'created', text: note?.trim() || `${levelOf(next)} created${next.employeeId ? `, assigned to ${nameOf(wp, next.employeeId)}` : ''}`, to: next.status });
     return;
   }
-  if (prev.employeeId !== next.employeeId) record(wp, { itemId: id, by, kind: 'assigned', from: prev.employeeId ?? '', to: next.employeeId ?? '', text: `Assigned to ${nameOf(wp, next.employeeId)}` });
+  // Every new assign or status row stores the reason as its text (rework, Oct 2026: the audit).
+  if (prev.employeeId !== next.employeeId) record(wp, { itemId: id, by, kind: 'assigned', from: prev.employeeId ?? '', to: next.employeeId ?? '', text: note?.trim() || `Assigned to ${nameOf(wp, next.employeeId)}` });
   if (prev.reviewerId !== next.reviewerId) record(wp, { itemId: id, by, kind: 'reviewer', from: prev.reviewerId ?? '', to: next.reviewerId ?? '', text: `Reviewer: ${nameOf(wp, next.reviewerId)}` });
   if (prev.points !== next.points) record(wp, { itemId: id, by, kind: 'points', from: String(prev.points ?? ''), to: String(next.points ?? ''), text: next.points ? `${next.points} points` : 'Points cleared' });
   for (const f of FIELDS) {
@@ -132,6 +134,10 @@ export function afterChange(wp: Workplace, prev: WorkItem | null, next: WorkItem
     const reopen = prev.status === 'done' && next.status !== 'done';
     record(wp, { itemId: id, by, kind: reopen ? 'reopen' : 'status', from: prev.status ?? '', to: next.status, text: note ?? (reopen ? 'Reopened' : `${prev.status ?? '—'} → ${next.status}`) });
     announce(wp, prev, next, by);
+    ownerBlock(wp, prev, next);
+  } else if (next.status === 'waiting' && prev.waiting?.on !== next.waiting?.on) {
+    // Re-targeted while waiting: the record of the move, and the owner's Inbox kept in step.
+    record(wp, { itemId: id, by, kind: 'status', from: 'waiting', to: 'waiting', text: note ?? `Waiting on ${nameOf(wp, next.waiting?.on)}` });
     ownerBlock(wp, prev, next);
   }
 }
@@ -195,22 +201,28 @@ function lastBlockLine(wp: Workplace, itemId: string): UpdateKind | undefined {
   return row?.kind;
 }
 
-/** Blocked on the owner → one Inbox question with the recommendation; leaving blocked withdraws it. */
+/**
+ * Blocked or Waiting on the owner → one Inbox question with the recommendation; leaving it withdraws it.
+ * (Rework, Oct 2026: `waiting` on the owner is the new form; a legacy block on the owner still works.)
+ */
 function ownerBlock(wp: Workplace, prev: WorkItem, next: WorkItem): void {
   const key = `blocked:${next.id}`;
-  if (next.status === 'blocked' && next.waitingOn === 'owner') {
+  const waiting = next.status === 'waiting' && next.waiting?.on === 'owner';
+  if ((next.status === 'blocked' && next.waitingOn === 'owner') || waiting) {
+    const reason = waiting ? next.waiting!.reason : next.blockedReason;
+    const recommendation = waiting ? next.waiting!.recommendation : next.blockedRecommendation;
     // The block names an ask already in his Inbox ("filed in his Inbox (in_x)"): that ask IS this
     // block. Link it to the item and raise nothing (RCA in inbox.raiseOrReuse).
-    const named = inbox.openAsksNamedIn(wp, `${next.blockedReason ?? ''}\n${next.blockedRecommendation ?? ''}`);
+    const named = inbox.openAsksNamedIn(wp, `${reason ?? ''}\n${recommendation ?? ''}`);
     if (named.length) { for (const i of named) inbox.linkToItem(wp, i.id, next.id); return; }
     inbox.raise(wp, {
-      kind: 'question', title: `Blocked on you: ${next.title}`,
-      body: `${next.blockedReason ?? 'Needs you.'}${next.blockedRecommendation ? `\n\nRecommendation: ${next.blockedRecommendation}` : ''}`,
+      kind: 'question', title: `${waiting ? 'Waiting on' : 'Blocked on'} you: ${next.title}`,
+      body: `${reason ?? 'Needs you.'}${recommendation ? `\n\nRecommendation: ${recommendation}` : ''}`,
       raisedBy: next.employeeId && next.employeeId !== 'owner' ? next.employeeId : 'workplace',
-      context: { itemId: next.id, ...(next.blockedRecommendation ? { recommendation: next.blockedRecommendation } : {}) }, dedupeKey: key,
+      context: { itemId: next.id, ...(recommendation ? { recommendation } : {}) }, dedupeKey: key,
       links: [{ label: 'The item', href: `#/item/${next.id}` }],
     });
-  } else if (prev.status === 'blocked') {
+  } else if (prev.status === 'blocked' || prev.status === 'waiting') {
     for (const i of inbox.list(wp, 'open').filter(x => x.context['dedupeKey'] === key)) inbox.expire(wp, i.id, 'Unblocked.');
   }
 }

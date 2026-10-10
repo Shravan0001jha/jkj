@@ -56,12 +56,12 @@ test('plan: a finished epic sorts below every unfinished one, even with a stale 
   try {
     const done = items.create(wp, { level: 'epic', title: 'Done epic' }, 'owner');
     const s = items.create(wp, { level: 'story', parentId: done.id, title: 'Only story', assigneeId: 'dev' }, 'asha');
-    items.update(wp, s.id, { status: 'in-progress' }, 'dev');
-    items.update(wp, s.id, { status: 'blocked', blockedReason: 'needs you', waitingOn: 'owner', recommendation: 'go' }, 'dev');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
+    items.update(wp, s.id, { status: 'blocked', blockedReason: 'needs you', waitingOn: 'owner', recommendation: 'go', reason: 'test: moved' }, 'dev');
     const open = items.create(wp, { level: 'epic', title: 'Open epic' }, 'owner');
     items.create(wp, { level: 'story', parentId: open.id, title: 'Open story', assigneeId: 'dev' }, 'asha');
     // The epic is closed while its story still carries the owner flag.
-    items.update(wp, done.id, { status: 'done' }, 'owner');
+    items.update(wp, done.id, { status: 'done', reason: 'test: moved' }, 'owner');
     const titles = items.plan(wp).unfiled.map(c => c.epic.title);
     assert.deepEqual(titles, ['Open epic', 'Done epic']);
   } finally { tmp.cleanup(); fake.restore(); }
@@ -75,8 +75,8 @@ test('items list: text search, owner, several statuses, sort and finished last',
     const a = items.create(wp, { level: 'story', parentId: epic.id, title: 'Sign the installer', body: 'Authenticode', assigneeId: 'rohan' }, 'asha');
     const b = items.create(wp, { level: 'story', parentId: epic.id, title: 'Auto-update channel', assigneeId: 'rohan' }, 'asha');
     const c = items.create(wp, { level: 'story', parentId: epic.id, title: 'Crash reporter', assigneeId: 'dev' }, 'asha');
-    items.update(wp, b.id, { status: 'in-progress' }, 'rohan');
-    items.update(wp, c.id, { status: 'done' }, 'owner');
+    items.update(wp, b.id, { status: 'in-progress', reason: 'test: moved' }, 'rohan');
+    items.update(wp, c.id, { status: 'done', reason: 'test: moved' }, 'owner');
 
     assert.deepEqual(items.list(wp, { q: 'authenticode' }).map(i => i.id), [a.id]);
     assert.deepEqual(items.list(wp, { q: 'INSTALLER' }).map(i => i.id), [a.id]);

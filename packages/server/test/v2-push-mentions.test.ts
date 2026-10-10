@@ -16,17 +16,17 @@ test('no Update becomes a push intent (rework W4), not even a start or a block',
   try {
     const epic = items.create(wp, { level: 'epic', title: 'Music' }, 'owner');
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Mic stays live', assigneeId: 'dev', points: 3 }, 'asha');
-    items.update(wp, s.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     const started = trail.updates(wp)[0]!;
     assert.equal(started.line, 'Started: Mic stays live — Dev, 3 pts');
     assert.equal(intentFor(wp, { type: 'update.posted', update: started }, ['owner']), null);
 
-    items.update(wp, s.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'external' }, 'dev');
+    items.update(wp, s.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'external', reason: 'test: moved' }, 'dev');
     assert.equal(intentFor(wp, { type: 'update.posted', update: trail.updates(wp)[0]! }, ['owner']), null);
 
-    items.update(wp, s.id, { status: 'in-progress' }, 'dev');
-    items.update(wp, s.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
-    items.update(wp, s.id, { status: 'done' }, 'nikhil');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
+    items.update(wp, s.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'dev');
+    items.update(wp, s.id, { status: 'done', reason: 'test: moved' }, 'nikhil');
     const shipped = trail.updates(wp)[0]!;
     assert.equal(shipped.kind, 'shipped');
     assert.equal(intentFor(wp, { type: 'update.posted', update: shipped }, ['owner']), null);

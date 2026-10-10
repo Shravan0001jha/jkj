@@ -44,6 +44,9 @@ export function stateFromStatus(w: WorkItem, status: ItemStatus, resolution?: st
     case 'in-review': return 'review';
     case 'done': return resolution && resolution !== 'done' ? 'rejected' : 'done';
     case 'blocked': return 'blocked';
+    // Waiting keeps the work where it was (the plan and the build stand); parked is set aside, like Backlog.
+    case 'waiting': return w.state === 'planned' || w.state === 'building' ? w.state : 'proposed';
+    case 'parked': return 'proposed';
   }
 }
 
@@ -108,6 +111,7 @@ export const isWaitable = (wp: Workplace, id: string | undefined): boolean =>
 
 export const STATUS_LABEL: Record<ItemStatus, string> = {
   backlog: 'Backlog', ready: 'Ready', 'in-progress': 'In progress', 'in-review': 'In review', done: 'Done', blocked: 'Blocked',
+  waiting: 'Waiting on', parked: 'Parked',
 };
 
 /** The client shape (LLD §19.8), without the derived stall (items.ts adds it). */
@@ -119,6 +123,8 @@ export function projectItem(wp: Workplace, w: WorkItem): Item {
   const blocked = status === 'blocked' && w.blockedReason
     ? { reason: w.blockedReason, waitingOn: w.waitingOn ?? 'coo', since: w.blockedSince ?? w.statusSince ?? w.updatedAt }
     : undefined;
+  // The PR record is the source of truth for extra reviewers (W3); the item copy is the contract fallback.
+  const extra = w.pr?.extraReviewers ?? w.extraReviewers;
   return {
     id: w.id, level, title: w.title, body: w.body, status,
     statusSince: w.statusSince ?? w.updatedAt,
@@ -139,7 +145,12 @@ export function projectItem(wp: Workplace, w: WorkItem): Item {
     ...(w.queuedFor && status === 'ready' ? { queuedFor: w.queuedFor } : {}),
     ...(w.mergedInto ? { mergedInto: w.mergedInto } : {}),
     ...(w.releasedIn ? { releasedIn: w.releasedIn } : {}),
+    ...(w.waiting && status === 'waiting' ? { waiting: { on: w.waiting.on, reason: w.waiting.reason, since: w.waiting.since } } : {}),
+    ...(w.parked && status === 'parked' ? { parked: { ...w.parked } } : {}),
+    ...(w.rca ? { rca: { ...w.rca } } : {}),
     ...(w.docUrl ? { docUrl: w.docUrl } : {}),
+    ...(w.docId ? { docId: w.docId } : {}),
+    ...(extra?.length ? { extraReviewers: extra.map(r => ({ id: r.id, files: [...r.files], ...(r.approvedAt ? { approvedAt: r.approvedAt } : {}) })) } : {}),
     legacy: { kind: w.kind, state: w.state, ...(w.charterId ? { charterId: w.charterId } : {}), ...(w.featureId ? { featureId: w.featureId } : {}) },
     createdAt: w.createdAt,
     updatedAt: w.updatedAt,

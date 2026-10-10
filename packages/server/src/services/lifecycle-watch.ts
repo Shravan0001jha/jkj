@@ -68,7 +68,7 @@ export function onFinished(wp: Workplace, blockerId: string): string[] {
     const flip = d.status === 'blocked' || (d.status === 'backlog' && !d.hold && d.startsAfter === blockerId);
     if (flip) {
       try {
-        items.update(wp, d.id, { status: 'ready', note: `"${blocker!.title}" is ${state}: ready to start` }, 'workplace');
+        items.update(wp, d.id, { status: 'ready', note: `system: "${blocker!.title}" is ${state}: ready to start` }, 'workplace');
       } catch (err) {
         log.warn('lifecycle', `${d.id}: could not flip to Ready: ${err instanceof Error ? err.message : err}`);
         continue;

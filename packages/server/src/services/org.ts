@@ -316,6 +316,81 @@ function git(dir: string, args: string[]): string {
   return execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
+/* ---------- the tree (rework, Oct 2026: one org tree drives everything) ---------- */
+
+/**
+ * owner → coo → (asha, cto); asha → the charter leads and the QA lead → their team members. The
+ * pseudo-ids `owner` and `coo` are above everyone; `coo` is the root employee.
+ */
+const byId = (org: Pick<Org, 'employees'>, id: string): Employee | undefined => org.employees.find(e => e.id === id);
+
+/**
+ * Whether someone heads a team: role `lead`, or role `qa` whose manager is not `qa` (the QA lead;
+ * QA members such as Zoya and Aditi are role `qa` too, reporting to the QA lead).
+ */
+export function isTeamLead(org: Pick<Org, 'employees'>, id: string): boolean {
+  const e = byId(org, id);
+  if (!e) return false;
+  if (e.roleId === 'lead') return true;
+  return e.roleId === 'qa' && (!e.reportsTo || byId(org, e.reportsTo)?.roleId !== 'qa');
+}
+
+/** Who someone reports to (`reportsTo`); the COO's manager is the owner. */
+export function managerOf(org: Pick<Org, 'employees'>, id: string): string | undefined {
+  if (id === 'owner') return undefined;
+  if (id === 'coo') return 'owner';
+  return byId(org, id)?.reportsTo ?? undefined;
+}
+
+/** The ids from the manager up to the root employee (the owner is not listed; he is above everyone anyway). */
+export function ancestors(org: Pick<Org, 'employees'>, id: string): string[] {
+  const out: string[] = [];
+  for (let cur = byId(org, id)?.reportsTo ?? null; cur && !out.includes(cur) && out.length < 32; cur = byId(org, cur)?.reportsTo ?? null) out.push(cur);
+  return out;
+}
+
+/** Whether `a` is above `b` in the tree. The owner is above everyone, the COO above every employee. */
+export function isAbove(org: Pick<Org, 'employees'>, a: string, b: string): boolean {
+  if (!a || !b || a === b) return false;
+  if (a === 'owner') return true;
+  if (b === 'owner') return false;
+  if (a === 'coo') return true;
+  if (b === 'coo') return false;
+  return ancestors(org, b).includes(a);
+}
+
+/** Everyone below `id`. */
+export function subtree(org: Pick<Org, 'employees'>, id: string): string[] {
+  return org.employees.filter(e => e.id !== id && isAbove(org, id, e.id)).map(e => e.id);
+}
+
+/** The team someone is in, as its lead's id: the nearest of themselves and their ancestors who heads a team. */
+export function teamOf(org: Pick<Org, 'employees'>, id: string): string | undefined {
+  if (!byId(org, id)) return undefined;
+  if (isTeamLead(org, id)) return id;
+  return ancestors(org, id).find(a => isTeamLead(org, a));
+}
+
+/** A lead and their direct reports. */
+export function teamMembers(org: Pick<Org, 'employees'>, leadId: string): string[] {
+  if (!byId(org, leadId)) return [];
+  return [leadId, ...org.employees.filter(e => e.reportsTo === leadId).map(e => e.id)];
+}
+
+/** The lead of a charter: its holder who is a lead or the QA lead, else the team of its first holder. */
+export function leadOfCharter(org: Pick<Org, 'employees'>, charterId: string | undefined): string | undefined {
+  if (!charterId) return undefined;
+  const holders = org.employees.filter(e => e.charterIds.includes(charterId) && !e.virtual);
+  const lead = holders.find(e => isTeamLead(org, e.id));
+  if (lead) return lead.id;
+  return holders[0] ? teamOf(org, holders[0].id) : undefined;
+}
+
+/** The CTO: role `cto` (Vikram), a peer of the Chief of Staff with technical authority, outside the assignment chain. */
+export function ctoId(org: Pick<Org, 'employees'>): string | undefined {
+  return org.employees.find(e => e.roleId === 'cto' && !e.virtual)?.id;
+}
+
 /* ---------- tiny helpers ---------- */
 
 function readYaml<T>(path: string): T | null {

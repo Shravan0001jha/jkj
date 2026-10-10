@@ -55,8 +55,7 @@ function setup(env: Partial<Record<string, string>> = {}) {
   const patch = (id: string, p: Partial<WorkItem> | Record<string, unknown>) => work.saveQuiet(t.wp, { ...raw(id), ...p } as WorkItem);
   const rings: { text: string; itemIds: string[] }[] = [];
   const off = t.wp.on((e: WorkplaceEvent) => {
-    const a = e as unknown as { type: string; level?: string; text?: string; itemIds?: string[] };
-    if (a.type === 'alert' && a.level === 'ring') rings.push({ text: a.text ?? '', itemIds: a.itemIds ?? [] });
+    if (e.type === 'alert' && e.level === 'ring') rings.push({ text: e.body, itemIds: e.itemIds ?? [] });
   });
   return {
     ...t, epic, other, story, raw, patch, rings,

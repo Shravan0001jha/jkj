@@ -31,16 +31,20 @@ test('the plan, areas, items, comments, updates, focus, status, rooms and releas
     assert.equal(story.body.area?.id, area.body.id);
     const sid = story.body.item.id;
 
-    const bad = await call<{ error: string }>(b.base, 'POST', WORKPLACE_API.item(sid), { status: 'in-review' });
+    // Rework (Oct 2026): every status or assignee change says why.
+    const noReason = await call<{ error: string }>(b.base, 'POST', WORKPLACE_API.item(sid), { status: 'in-progress' });
+    assert.equal(noReason.status, 400);
+    assert.match(noReason.body.error, /give a reason for this change/);
+    const bad = await call<{ error: string }>(b.base, 'POST', WORKPLACE_API.item(sid), { status: 'in-review', reason: 'skip ahead' });
     assert.equal(bad.status, 400);
     assert.match(bad.body.error, /cannot go from ready to in-review/);
-    const started = await call<ItemDetail>(b.base, 'POST', WORKPLACE_API.item(sid), { status: 'in-progress' });
+    const started = await call<ItemDetail>(b.base, 'POST', WORKPLACE_API.item(sid), { status: 'in-progress', reason: 'starting it' });
     assert.equal(started.status, 200);
     assert.equal(started.body.item.status, 'in-progress');
-    const noReviewer = await call<{ error: string }>(b.base, 'POST', WORKPLACE_API.item(sid), { status: 'in-review' });
+    const noReviewer = await call<{ error: string }>(b.base, 'POST', WORKPLACE_API.item(sid), { status: 'in-review', reason: 'built' });
     assert.match(noReviewer.body.error, /reviewer/i);
-    await call(b.base, 'POST', WORKPLACE_API.item(sid), { status: 'in-review', reviewerId: 'nikhil', assigneeId: 'mira' });
-    const done = await call<ItemDetail>(b.base, 'POST', WORKPLACE_API.item(sid), { status: 'done' });
+    await call(b.base, 'POST', WORKPLACE_API.item(sid), { status: 'in-review', reviewerId: 'nikhil', assigneeId: 'mira', reason: 'Mira owns the review fixes' });
+    const done = await call<ItemDetail>(b.base, 'POST', WORKPLACE_API.item(sid), { status: 'done', reason: 'verified on device' });
     assert.equal(done.status, 200, 'the owner may close what is in review');
     assert.equal(done.body.item.assigneeId, 'mira', 'reassigned in the same request');
 

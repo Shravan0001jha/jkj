@@ -48,10 +48,10 @@ test('#19: item_handback is refused while the story is In review (or its PR wait
   try {
     const epic = items.create(wp, { level: 'epic', title: 'Practice' }, 'owner');
     const story = items.create(wp, { level: 'story', parentId: epic.id, title: 'About screen version', assigneeId: 'nikhil' }, 'asha');
-    items.update(wp, story.id, { status: 'in-progress' }, 'nikhil');
-    items.update(wp, story.id, { status: 'blocked', blockedReason: 'Needs the footer built.', waitingOn: 'dev', kind: 'work' }, 'nikhil');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'nikhil');
+    items.update(wp, story.id, { status: 'blocked', blockedReason: 'Needs the footer built.', waitingOn: 'dev', kind: 'work', reason: 'test: moved' }, 'nikhil');
     assert.equal(rawGet(wp, story.id)!.handoff?.fromId, 'nikhil');
-    items.update(wp, story.id, { status: 'in-review', reviewerId: 'kabir' }, 'dev');
+    items.update(wp, story.id, { status: 'in-review', reviewerId: 'kabir', reason: 'test: moved' }, 'dev');
     const dev = await toolsFor(wp, 'dev', story.id);
     const refused = await dev('item_handback', { itemId: story.id, note: 'Done' });
     assert.match(refused, /The story is in review; post progress as a comment \(item_comment\) instead of handing it back\./);
@@ -82,8 +82,8 @@ test('#17: a story assigned to the Chief of Staff starts a routing session, not 
     employees.assign(wp, built.id);
     assert.match(runtime.last().options.prompt, /Take assignment .*## Plan/s, 'a developer still gets the builder prompt');
 
-    assert.match(await (await toolsFor(wp, 'dev'))('item_update', { itemId: story.id, assigneeId: 'tara' }), /only the Chief of Staff routes/);
-    assert.match(await (await toolsFor(wp, 'asha', story.id))('item_update', { itemId: story.id, assigneeId: 'tara' }), /is /);
+    assert.match(await (await toolsFor(wp, 'dev'))('item_update', { itemId: story.id, assigneeId: 'tara' }), /Forbidden: only Asha or someone above them/);
+    assert.match(await (await toolsFor(wp, 'asha', story.id))('item_update', { itemId: story.id, assigneeId: 'tara', reason: 'Tara owns mobile' }), /is /);
     assert.equal(rawGet(wp, story.id)!.employeeId, 'tara');
 
   } finally { tmp.cleanup(); }

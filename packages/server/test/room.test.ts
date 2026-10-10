@@ -62,7 +62,8 @@ test('employees post through the tools; only the Chief of Staff resolves with fo
     assert.match(JSON.stringify(listed.content), /app\.py hunk needs sign-off/);
     const refused = await mira.callTool({ name: 'room_resolve', arguments: { threadId, summary: 'done' } });
     assert.match(JSON.stringify(refused.content), /Only the Chief of Staff/);
-    assert.match(JSON.stringify(await mira.callTool({ name: 'escalate', arguments: { threadId, title: 'x', body: 'y' } }).then(r => r.content)), /Only the Chief of Staff/);
+    // Rework (Oct 2026): anyone escalates, to their manager (Mira → Asha); only the Chief of Staff and the CTO go to the COO.
+    assert.match(JSON.stringify(await mira.callTool({ name: 'escalate', arguments: { threadId, title: 'x', body: 'y' } }).then(r => r.content)), /Escalated to Asha/);
 
     const asha = await toolsFor(wp, 'asha');
     const esc = await asha.callTool({ name: 'escalate', arguments: { threadId, title: 'Who owns app.py?', body: 'Three owners for one file.', options: ['experts', 'character'], recommendation: 'experts' } });

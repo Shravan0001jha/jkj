@@ -40,6 +40,8 @@ export function trueStatus(wp: Workplace, w: WorkItem): TrueStatus {
     case 'ready': return levelOf(w) !== 'epic' && openStartsAfter(wp, w) ? 'blocked' : 'ready';
     case 'in-progress': return 'in-progress';
     case 'blocked': return 'blocked';
+    case 'waiting': return 'waiting';
+    case 'parked': return 'parked';
     case 'in-review': {
       if (!openPr(wp, w)) return 'in-review';
       const s = stage(w);
@@ -67,7 +69,7 @@ function personStatus(wp: Workplace, id: string): string {
   return busy ? `on "${busy.title}" (${label(trueStatus(wp, busy))})` : 'nothing in progress';
 }
 
-/** What a Blocked item (or a Ready one with an open startsAfter) waits on, and that blocker's status now. */
+/** What a Blocked or Waiting item (or a Ready one with an open startsAfter) waits on, and that blocker's status now. */
 export function blockerOf(wp: Workplace, w: WorkItem): ItemBlocker | undefined {
   const status = w.status ?? 'ready';
   if (status === 'blocked') {
@@ -75,6 +77,9 @@ export function blockerOf(wp: Workplace, w: WorkItem): ItemBlocker | undefined {
     const base = { ...(w.blockedReason ? { reason: w.blockedReason } : {}), ...(w.blockedSince ?? w.statusSince ? { since: (w.blockedSince ?? w.statusSince)! } : {}) };
     if (!on) return undefined;
     return { ...describe(wp, on), ...base };
+  }
+  if (status === 'waiting' && w.waiting) {
+    return { ...describe(wp, w.waiting.on), reason: w.waiting.reason, since: w.waiting.since };
   }
   if (status === 'ready') {
     const dep = openStartsAfter(wp, w);
@@ -114,7 +119,7 @@ export function prOf(w: WorkItem): ItemPr | undefined {
 /** The lifecycle fields of the client shape (items.toItem adds them). */
 export function decorate(wp: Workplace, w: WorkItem, item: Item): Item {
   const level = levelOf(w);
-  item.type = w.type === 'bug' && level === 'story' ? 'bug' : level;
+  item.type = (w.type === 'bug' || w.type === 'rca') && level === 'story' ? w.type : level;
   item.trueStatus = trueStatus(wp, w);
   const blocker = level === 'epic' ? undefined : blockerOf(wp, w);
   if (blocker) item.blocker = blocker;

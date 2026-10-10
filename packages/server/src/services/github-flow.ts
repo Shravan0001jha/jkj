@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import type { Employee, ExtraReviewer, GitHubMode, PrApproval, PrRecord, WorkItem } from '@jkj/shared';
+import type { Employee, PrExtraReviewer as ExtraReviewer, GitHubMode, PrApproval, PrRecord, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { GitHubPort, StatusState } from './github-port.js';
 import { RealGitHub } from './github-port.js';
@@ -17,7 +17,8 @@ import { now } from './store.js';
 import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { branchFor, worktreePath } from './worktrees.js';
 import * as prePr from './pre-pr.js';
-import { GITHUB_MODES, githubMode, holds, canApproveAsDeveloper, isCto, isQa, qaReviewer, writeGithubMode, teamOf, teamMembers, leadOfCharter } from './review-policy.js';
+import { GITHUB_MODES, githubMode, holds, canApproveAsDeveloper, isCto, isQa, qaReviewer, writeGithubMode } from './review-policy.js';
+import { leadOfCharter, teamMembers, teamOf } from './org.js';
 import { resolve as resolveOwner } from './ownership.js';
 import { chiefOfStaffId } from './v2-map.js';
 import { freshLink } from './evidence-share.js';
@@ -394,9 +395,8 @@ export function realCodeChange(repo: string, base: string, head: string, file: s
 
 /** The other teams' leads whose charters own code this branch really changes, each with those files. */
 function codeReviewersFor(wp: Workplace, ctx: Ctx): ExtraReviewer[] {
-  const employees = wp.org.employees;
   const author = ctx.emp.id;
-  const authorLead = teamOf(employees, author) ?? author;
+  const authorLead = teamOf(wp.org, author) ?? author;
   const repoId = wp.org.repos.find(r => r.root === ctx.repo)?.id ?? 'iris';
   const byLead = new Map<string, string[]>();
   let files: string[];
@@ -405,7 +405,7 @@ function codeReviewersFor(wp: Workplace, ctx: Ctx): ExtraReviewer[] {
     if (notCode(f)) continue;
     const owner = resolveOwner(wp.org.map, { kind: 'path', key: `${repoId}:${f}` });
     if (!owner) continue;
-    const lead = leadOfCharter(employees, owner.primary);
+    const lead = leadOfCharter(wp.org, owner.primary);
     if (!lead || lead === authorLead || lead === author) continue;
     let real = false;
     try { real = realCodeChange(ctx.repo, ctx.base, ctx.head, f); } catch { real = false; }
@@ -431,7 +431,8 @@ export function requestExtraReviewers(wp: Workplace, itemId: string, by: string,
   const unknown = ids.filter(id => !wp.org.employees.some(e => e.id === id && !e.virtual));
   if (unknown.length) throw new BadRequest(`No such employee: ${unknown.join(', ')}.`);
   if (ids.includes(w.employeeId!)) throw new BadRequest('You never review your own story.');
-  const team = teamMembers(wp.org.employees, teamOf(wp.org.employees, w.employeeId));
+  const lead = w.employeeId ? teamOf(wp.org, w.employeeId) : undefined;
+  const team = lead ? teamMembers(wp.org, lead) : [];
   const mates = ids.filter(id => team.includes(id));
   if (mates.length) throw new BadRequest(`${mates.map(id => nameOf(wp, id)).join(', ')} ${mates.length === 1 ? 'is' : 'are'} in your team: your team gives the developer approval; extra reviewers are other teams' leads.`);
   const fresh: string[] = [];
@@ -589,9 +590,9 @@ export function devReviewer(wp: Workplace, w: WorkItem): string | undefined {
   const employees = wp.org.employees;
   const author = w.employeeId;
   if (!author) return undefined;
-  const lead = teamOf(employees, author);
+  const lead = teamOf(wp.org, author);
   if (lead && lead !== author) return lead;
-  const members = teamMembers(employees, lead ?? author).filter(id => id !== author);
+  const members = teamMembers(wp.org, lead ?? author).filter(id => id !== author && !employees.find(e => e.id === id)?.virtual);
   const pick = members.map((id, i) => ({ id, n: openReviews(wp, id), i })).sort((a, b) => a.n - b.n || a.i - b.i)[0]?.id;
   return pick ?? employees.find(e => isCto(e) && !e.virtual)?.id;
 }
@@ -657,7 +658,8 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
   if (!holds(pr.devApproval, w)) {
     if (!canApproveAsDeveloper(employees, by, author)) {
       if (isQa(who)) throw new BadRequest('QA reviews after a developer approval; ask the author\'s team to review first.');
-      const team = teamMembers(employees, teamOf(employees, author)).filter(id => id !== author).map(id => nameOf(wp, id));
+      const lead = author ? teamOf(wp.org, author) : undefined;
+      const team = (lead ? teamMembers(wp.org, lead) : []).filter(id => id !== author && !employees.find(e => e.id === id)?.virtual).map(id => nameOf(wp, id));
       throw new BadRequest(`${nameOf(wp, by)} is not in ${nameOf(wp, author)}'s team, and approval 1 of 2 comes from the developer approver (a member of the author's team who is not the author${team.length ? `: ${team.join(' or ')}` : ''}, or the CTO).${mine ? ' Your own approval as an extra reviewer is already recorded.' : ''}`);
     }
     savePr(wp, itemId, c => ({ pr: { ...c.pr!, devApproval: approval, devReviewer: c.pr!.devReviewer ?? by } }));
@@ -689,7 +691,7 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
   if (changed) trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `QA for this story is now ${nameOf(wp, by)} (changed by the Chief of Staff)` });
   trail.record(wp, { itemId, by, kind: 'note', text: `QA approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)} with a QA doc of ${doc.cases.length} edge cases (${qaPath})${approval.note ? `: ${approval.note}` : ''}` });
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
-  items.update(wp, itemId, { status: 'done', reviewerId: by, note: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer) and ${nameOf(wp, by)} (QA)` }, by);
+  items.update(wp, itemId, { status: 'done', reviewerId: by, note: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer) and ${nameOf(wp, by)} (QA)` }, by, { checked: true });
   const auto = await autoMerge(wp, itemId);
   const tail = auto === 'merged' ? 'The Workplace merged it into the trunk.'
     : auto === 'waiting' ? 'The Workplace merges it itself once the tests and evidence checks are green (or the QA doc says "Evidence: n/a"): approved is not merged.'
@@ -713,7 +715,7 @@ export async function sendBack(wp: Workplace, itemId: string, by: string, note: 
   if (w.status !== 'in-review') throw new BadRequest(`This story is not in review (it is ${w.status}), so there is nothing to send back.`);
   if (!developer && !extraReviewer && !holds(w.pr.devApproval, w)) throw new BadRequest(QA_WAIT);
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, sendBack: { by, at: now(), note: note.trim() } } }));
-  items.update(wp, itemId, { status: 'in-progress', note: `Sent back by ${nameOf(wp, by)}: ${note.trim()}` }, by);
+  items.update(wp, itemId, { status: 'in-progress', note: `Sent back by ${nameOf(wp, by)}: ${note.trim()}` }, by, { checked: true });
   tellAuthor(wp, itemId, by, note.trim());
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
   return rawGet(wp, itemId)!;
