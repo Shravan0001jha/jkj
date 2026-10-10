@@ -83,7 +83,9 @@ final class PlanStore {
     /// The board's columns in state-machine order; an unknown status gets its own column last.
     var columns: [(status: ItemStatus, items: [Item])] {
         guard let board else { return [] }
-        var out = ItemStatus.order.map { s in (status: s, items: board[s.rawValue] ?? []) }
+        // Waiting and Parked only when the server knows them (an older one never sends the keys).
+        var out = ItemStatus.order.filter { !ItemStatus.rework.contains($0) || board[$0.rawValue] != nil }
+            .map { s in (status: s, items: board[s.rawValue] ?? []) }
         let unknown = board.filter { ItemStatus(rawValue: $0.key) == nil }.flatMap(\.value)
         if !unknown.isEmpty { out.append((status: .unknown, items: unknown)) }
         return out
@@ -160,12 +162,20 @@ final class ItemsStore {
         }
     }
 
+    /// Refuses (without sending) a status or assignee change that has no reason: the server
+    /// requires one, and the audit shows it.
     func update(_ rest: RestClient, id: String, _ req: UpdateItemRequest) async throws {
+        if req.needsReason && !req.hasReason { throw StatusChange.Invalid.reason }
         busy.insert(id)
         defer { busy.remove(id) }
         let d = try await rest.updateItem(id, req)
         details[id] = d
         apply(d.item)
+    }
+
+    /// A status change from the sheet: validated first, sent only when complete.
+    func changeStatus(_ rest: RestClient, id: String, _ change: StatusChange) async throws {
+        try await update(rest, id: id, try change.request())
     }
 
     @discardableResult
@@ -354,4 +364,83 @@ final class ReleasePostsStore {
     }
 
     func post(_ id: String) -> ReleasePost? { posts.first { $0.id == id } }
+}
+
+// MARK: - Settings (rework): super focus and the Mac queue
+
+/// A 404 means an older server without the route: the section hides, it is not an error.
+private func isMissingRoute(_ error: Error) -> Bool {
+    if case WorkplaceError.server(let status, _) = error { return status == 404 }
+    return false
+}
+
+@MainActor @Observable
+final class SuperFocusStore {
+    private(set) var until: String?
+    private(set) var supported = false
+    private(set) var loaded = false
+    private(set) var error: String?
+    private(set) var busy = false
+    static let choices = [2, 4, 8]
+
+    func load(_ rest: RestClient) async {
+        do {
+            until = try await rest.superFocus().until
+            supported = true
+            error = nil
+        } catch {
+            if isMissingRoute(error) { supported = false; self.error = nil } else if let m = error.userMessage { self.error = m }
+        }
+        loaded = true
+    }
+
+    /// `hours` 0 switches it off. The state changes only once the server answered.
+    func set(_ rest: RestClient, hours: Int) async throws {
+        busy = true
+        defer { busy = false }
+        let answer = try await rest.setSuperFocus(hours: hours)
+        supported = true
+        error = nil
+        if answer.until == nil && hours > 0 { await load(rest) } else { until = answer.until }
+    }
+
+    func untilDate() -> Date? { until.flatMap(Format.date) }
+    func isActive(now: Date = Date()) -> Bool { untilDate().map { $0 > now } ?? false }
+}
+
+@MainActor @Observable
+final class MacQueueStore {
+    private(set) var entries: [MacQueueEntry] = []
+    private(set) var supported = false
+    private(set) var loaded = false
+    private(set) var error: String?
+    private(set) var granting: String?
+
+    func load(_ rest: RestClient) async {
+        do {
+            entries = try await rest.macQueue()
+            supported = true
+            error = nil
+        } catch {
+            if isMissingRoute(error) { supported = false; self.error = nil } else if let m = error.userMessage { self.error = m }
+        }
+        loaded = true
+    }
+
+    /// Who has the Mac now, then who waits, oldest first. Finished requests are not shown.
+    var shown: [MacQueueEntry] {
+        let granted = entries.filter { $0.state == .granted }
+        let queued = entries.filter { $0.state == .queued }.sorted { ($0.at ?? "", $0.id) < ($1.at ?? "", $1.id) }
+        return granted + queued
+    }
+
+    /// The next one in line: what "Grant now" acts on.
+    var head: MacQueueEntry? { shown.first { $0.state == .queued } }
+
+    func grant(_ rest: RestClient, id: String) async throws {
+        granting = id
+        defer { granting = nil }
+        try await rest.grantMac(id)
+        await load(rest)
+    }
 }

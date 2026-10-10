@@ -53,13 +53,22 @@ final class V2UITests: XCTestCase {
         XCTAssertTrue(assignee.waitForExistence(timeout: 8))
         assignee.tap()
         app.buttons["Me"].tap()
+        // Every reassign carries a reason (rework, Oct 2026).
+        let why = app.descendants(matching: .any).matching(identifier: "reason.text").firstMatch
+        XCTAssertTrue(why.waitForExistence(timeout: 4))
+        why.tap(); why.typeText("I will test it myself")
+        app.buttons["Reassign"].tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Assignee' AND label CONTAINS 'You'")).firstMatch.waitForExistence(timeout: 6), "reassigned to the owner once the server said so")
         shot("story-assigned-to-me")
-        // Into review without a reviewer: the server refuses, in its own words.
+        // Into review without a reviewer: the server refuses, in its own words, in the sheet.
         app.buttons["item.state"].tap()
         app.buttons["In review"].tap()
-        XCTAssertTrue(app.alerts.staticTexts["A reviewer is required before an item can enter review."].waitForExistence(timeout: 6))
-        app.alerts.buttons["OK"].tap()
+        let reason = app.descendants(matching: .any).matching(identifier: "status.reason").firstMatch
+        XCTAssertTrue(reason.waitForExistence(timeout: 4))
+        reason.tap(); reason.typeText("Ready for a look")
+        app.buttons["status.save"].tap()
+        XCTAssertTrue(app.staticTexts["A reviewer is required before an item can enter review."].waitForExistence(timeout: 6))
+        app.buttons["Cancel"].tap()
         let field = app.textFields["item.comment"]
         XCTAssertTrue(field.waitForExistence(timeout: 4))
         field.tap(); field.typeText("@nikhil can you review this?")

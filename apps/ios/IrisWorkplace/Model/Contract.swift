@@ -562,6 +562,37 @@ struct InboxItem: Codable, Equatable, Hashable, Identifiable {
     var messageCount: Int?
     var lastMessageAt: String?
     var urgency: InboxUrgency?
+    /// Rework: the COO's note when he passes an item on ("needs you because…"), shown on top.
+    var cooNote: CooNote?
+}
+
+/// The COO's note on an owner Inbox item. The server may send the text alone or an object with
+/// it; either decodes, and it re-encodes in the shape it came in.
+struct CooNote: Codable, Equatable, Hashable {
+    var text: String
+    var at: String?
+    var by: String?
+    private var plain = false
+
+    init(text: String, at: String? = nil, by: String? = nil) { self.text = text; self.at = at; self.by = by }
+
+    private enum Keys: String, CodingKey { case text, at, by }
+
+    init(from decoder: Decoder) throws {
+        if let s = try? decoder.singleValueContainer().decode(String.self) { text = s; plain = true; return }
+        let c = try decoder.container(keyedBy: Keys.self)
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        at = try c.decodeIfPresent(String.self, forKey: .at)
+        by = try c.decodeIfPresent(String.self, forKey: .by)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        if plain { var c = encoder.singleValueContainer(); try c.encode(text); return }
+        var c = encoder.container(keyedBy: Keys.self)
+        try c.encode(text, forKey: .text)
+        try c.encodeIfPresent(at, forKey: .at)
+        try c.encodeIfPresent(by, forKey: .by)
+    }
 }
 
 struct InboxLink: Codable, Equatable, Hashable {

@@ -12,7 +12,8 @@ import { fileURLToPath } from 'node:url';
 const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 const live = (name) => JSON.parse(readFileSync(join(dir, `live-${name}.json`), 'utf8'));
 
-export const STATUSES = ['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked'];
+// Rework (Oct 2026, docs/LLD-rework-2026-10.md): + waiting, parked.
+export const STATUSES = ['backlog', 'ready', 'in-progress', 'in-review', 'waiting', 'parked', 'done', 'blocked'];
 const NOW = '2026-10-02T06:10:00.000Z';
 const P0 = 'ft_mummakwyuew19';
 const OPEN_DECISION = 'in_muqel76q1h1i1';
@@ -33,6 +34,25 @@ export function v2State() {
     legacy: { kind: 'assignment', state: 'proposed', featureId: P0 }, createdAt: NOW, updatedAt: NOW,
   };
   items.push(mine);
+  // Rework (Oct 2026): a story waiting on a teammate, a parked one with a doc, and a finished epic
+  // for the Plan's "Done (N)".
+  const area = byId[P0]?.areaId;
+  items.push({
+    id: 'as_mock_waiting', level: 'story', title: 'Wake word in every accent', type: 'bug',
+    body: 'Hear "Iris" in every accent: acoustic keyword spotting, not transcript aliases.',
+    status: 'waiting', statusSince: NOW, parentId: P0, epicId: P0, areaId: area, assigneeId: 'dev', reviewerId: 'nikhil', points: 3, rank: 10,
+    acceptance: ['Hears Iris in en-IN, en-US and hi-IN'], legacy: { kind: 'assignment', state: 'in-progress', featureId: P0 },
+    trueStatus: 'waiting', waiting: { on: 'tara', reason: 'Needs the QA device profile for the accent set', since: NOW },
+    docUrl: 'https://www.notion.so/iris/wake-word-hld', createdAt: NOW, updatedAt: NOW,
+  }, {
+    id: 'as_mock_parked', level: 'story', title: 'Voice cloning for the pet', body: 'Parked until the voice pipeline is stable.',
+    status: 'parked', statusSince: NOW, parentId: P0, epicId: P0, areaId: area, assigneeId: 'dev', rank: 11, acceptance: [],
+    legacy: { kind: 'assignment', state: 'proposed', featureId: P0 }, trueStatus: 'parked',
+    parked: { reason: 'Not before the wake word ships', resumeWhen: 'after 0.2.22 ships', by: 'owner', since: NOW }, createdAt: NOW, updatedAt: NOW,
+  }, {
+    id: 'ft_mock_done', level: 'epic', title: 'Push notifications that need you', body: 'Shipped in 0.2.20.', status: 'done', statusSince: NOW,
+    epicId: 'ft_mock_done', areaId: area, ownerId: 'asha', rank: 50, acceptance: [], legacy: { kind: 'feature', state: 'released' }, createdAt: NOW, updatedAt: NOW,
+  });
 
   const details = {};
   for (const name of ['item-epic', 'item-story']) { const d = live(name); details[d.item.id] = d; }
@@ -53,6 +73,8 @@ export function v2State() {
   ];
   inboxThread.item.messageCount = 2;
   inboxThread.item.lastMessageAt = '2026-10-02T05:31:00.000Z';
+  // Rework: the COO passed it on with a note.
+  inboxThread.item.cooNote = { text: 'Routing for the P0 waits on this; Asha\'s option is the one I would pick.', at: '2026-10-02T05:40:00.000Z', by: 'coo' };
 
   const releasePosts = [{
     id: 'rp_mock_0215', at: '2026-10-01T12:00:00.000Z', title: 'Iris 0.2.15 (Mac arm64)', version: '0.2.15', shippable: 'desktop-mac', by: 'nikhil',
@@ -70,7 +92,13 @@ export function v2State() {
     items, areas: live('areas'), focus: live('focus'), details, comments, activity,
     updates: live('updates'), inboxThread, releasePosts,
     rooms: live('rooms'), roomDetails: { 'area:ar_muqhzr5khct7v': live('room-area'), general: live('room-general'), releases: live('room-releases') },
-    epicThread: live('room-thread-epic'), seq: 100,   // above the seeded *_mock_1, *_mock_2 ids
+    epicThread: live('room-thread-epic'), seq: 100,
+    superFocus: { until: null },
+    macQueue: [
+      { id: 'mq_mock_1', emp: 'tara', itemId: 'as_mock_waiting', minutes: 30, why: 'Robot suite on the Mac build', at: '2026-10-02T06:00:00.000Z', state: 'granted' },
+      { id: 'mq_mock_2', emp: 'dev', itemId: 'as_muqecr89jhjst', minutes: 20, why: 'Live voice test with music playing', at: '2026-10-02T06:02:00.000Z', state: 'queued' },
+      { id: 'mq_mock_3', emp: 'kavya', itemId: 'as_muqed3ed0cpmg', minutes: 15, why: 'Sign-in screenshots', at: '2026-10-02T06:05:00.000Z', state: 'queued' },
+    ],   // above the seeded *_mock_1, *_mock_2 ids
   };
 }
 
@@ -94,13 +122,14 @@ function card(s, epic) {
     else if (k.stall) flags.push({ kind: 'stalled', itemId: k.id, title: k.title, reason: k.stall.rule === 'unreviewed' ? `In review for ${k.stall.minutes} min, untouched` : `No activity for ${k.stall.minutes} min`, since: k.stall.since });
   }
   const nextItem = kids.find(isOpen);
-  const c = { epic, progress: progress(s, epic), flags, inFocus: s.focus.epicIds.includes(epic.id) };
+  const c = { epic, progress: progress(s, epic), flags, inFocus: s.focus.epicIds.includes(epic.id), finished: epic.status === 'done' };
   if (nextItem) c.next = { id: nextItem.id, title: nextItem.title };
   return c;
 }
 
 export function plan(s, board = false) {
-  const epics = s.items.filter(i => i.level === 'epic' && isOpen(i)).sort(byRank);
+  // Finished epics come too (rework): the app collects them into "Done (N)".
+  const epics = s.items.filter(i => i.level === 'epic').sort(byRank);
   const work = s.items.filter(i => i.level !== 'epic');
   const counts = Object.fromEntries(STATUSES.map(st => [st, work.filter(i => i.status === st).length]));
   const out = {
@@ -125,6 +154,19 @@ export function detail(s, id) {
   if (epic && epic.id !== id) d.epic = epic;
   if (area) d.area = area;
   if (item.level === 'epic') { d.progress = progress(s, item); d.threadId = `th_epic_${id}`; }
+  // Rework: the audit (from the activity; an auto "a → b" text is no reason) and the chain.
+  const kinds = { created: 'created', assigned: 'assigned', status: 'status', reviewer: 'reviewer', reopen: 'reopened' };
+  d.audit = [
+    { at: item.createdAt, by: 'asha', kind: 'created' },
+    ...(s.activity[id] ?? []).filter(a => kinds[a.kind]).map(a => {
+      const reason = a.reason ?? (/^\S+ → \S+$|changed$/.test(a.text) ? undefined : a.text);
+      return { at: a.at, by: a.by, kind: kinds[a.kind], ...(a.from ? { from: a.from } : {}), ...(a.to ? { to: a.to } : {}), ...(reason ? { reason } : {}) };
+    }),
+  ];
+  if (item.level !== 'epic') {
+    d.chain = { developer: item.assigneeId, devReviewer: item.reviewerId ?? 'nikhil', extraReviewers: item.type === 'bug' ? ['kavya'] : [], qa: 'tara',
+      charterId: 'voice', charterTitle: 'Voice & audio', lead: 'nikhil', chiefOfStaff: 'asha', cto: 'cto' };
+  }
   return d;
 }
 
@@ -135,20 +177,28 @@ export function update(s, id, body, by = 'owner') {
   const now = new Date().toISOString();
   const rec = (kind, text, from, to) => (s.activity[id] ??= []).push({ id: `act_mock_${s.seq++}`, at: now, itemId: id, by, kind, ...(from !== undefined ? { from: String(from) } : {}), ...(to !== undefined ? { to: String(to) } : {}), text });
   if (body.status === 'in-review' && !(body.reviewerId ?? item.reviewerId)) return { status: 400, body: { error: 'A reviewer is required before an item can enter review.' } };
+  // Rework: every status or assignee change needs a reason (or its alias, note).
+  const reason = (body.reason ?? body.note ?? '').trim();
+  if (((body.status && body.status !== item.status) || (body.assigneeId && body.assigneeId !== item.assigneeId)) && reason.length < 3) return { status: 400, body: { error: 'Bad request: give a reason for this change' } };
   if (body.status === 'blocked' && (!body.blockedReason || !body.waitingOn)) return { status: 400, body: { error: 'Blocked needs a reason and who it is waiting on.' } };
+  if (body.status === 'waiting' && !body.waitingOn) return { status: 400, body: { error: 'Waiting needs who it waits on.' } };
+  if (body.status === 'parked' && !body.resumeWhen) return { status: 400, body: { error: 'Parked needs a resume-when.' } };
   if (body.points !== undefined && body.points !== null && ![1, 2, 3, 5, 8].includes(body.points)) return { status: 400, body: { error: 'Points are 1, 2, 3, 5 or 8.' } };
   for (const k of ['title', 'body', 'assigneeId', 'reviewerId', 'ownerId', 'points', 'rank', 'areaId', 'targetDate', 'acceptance']) {
     if (body[k] === undefined) continue;
     const before = item[k];
     if (body[k] === null) delete item[k]; else item[k] = body[k];
-    rec(k === 'assigneeId' ? 'assigned' : k === 'reviewerId' ? 'reviewer' : k === 'points' ? 'points' : 'field', `${k} changed`, before ?? '', body[k] ?? '');
+    rec(k === 'assigneeId' ? 'assigned' : k === 'reviewerId' ? 'reviewer' : k === 'points' ? 'points' : 'field', k === 'assigneeId' && reason ? reason : `${k} changed`, before ?? '', body[k] ?? '');
   }
   if (body.status && body.status !== item.status) {
     const from = item.status;
     item.status = body.status; item.statusSince = now;
     if (body.status === 'blocked') item.blocked = { reason: body.blockedReason, waitingOn: body.waitingOn, since: now }; else delete item.blocked;
+    if (body.status === 'waiting') item.waiting = { on: body.waitingOn, reason, since: now }; else delete item.waiting;
+    if (body.status === 'parked') item.parked = { reason, resumeWhen: body.resumeWhen, by, since: now }; else delete item.parked;
+    item.trueStatus = body.status;
     if (body.resolution) item.resolution = body.resolution;
-    rec('status', `${from} → ${body.status}${body.note ? `: ${body.note}` : ''}`, from, body.status);
+    rec('status', reason || `${from} → ${body.status}`, from, body.status);
   }
   item.updatedAt = now;
   return { status: 200, body: detail(s, id), item };

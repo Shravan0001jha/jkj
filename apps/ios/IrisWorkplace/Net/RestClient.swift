@@ -126,6 +126,12 @@ final class RestClient {
     func releasePosts() async throws -> [ReleasePost] { try await get(API.releasePosts) }
     func releasePost(_ id: String) async throws -> ReleasePost { try await get(API.releasePost(id)) }
 
+    // Rework (Oct 2026)
+    func superFocus() async throws -> SuperFocus { try await get(API.superFocus) }
+    func setSuperFocus(hours: Int) async throws -> SuperFocus { try await post(API.superFocus, SuperFocusRequest(hours: hours)) }
+    func macQueue() async throws -> [MacQueueEntry] { (try await get(API.macQueue) as MacQueueResponse).entries }
+    func grantMac(_ id: String) async throws { let _: IgnoredResponse = try await post(API.macQueueGrant(id), Empty()) }
+
     // Relay-only routes (never proxied to the Mac).
     func relayHealth() async throws -> RelayHealth { try await get(API.relayHealth) }
     func registerPush(token: String, env: PushEnvironment, device: String?) async throws -> PushRegisterResponse {

@@ -1,16 +1,17 @@
 import SwiftUI
 
 /// An epic, story or task: description, acceptance criteria, children with assignee, reviewer,
-/// points and state; then the comments thread (post, @mention) and the activity log. The owner
-/// changes the assignee, reviewer, owner, state and points here.
+/// points and state; the story's chain of people and its audit; then the comments thread (post,
+/// @mention) and the activity log. The owner changes the assignee, reviewer, owner, state and
+/// points here. Every state or assignee change asks for a reason first (rework, Oct 2026).
 struct ItemDetailView: View {
     @Environment(AppModel.self) private var model
     let id: String
     @State private var draft = ""
     @State private var actionError: String?
-    @State private var blocking = false
-    @State private var reopening = false
-    @State private var note = ""
+    @State private var statusDraft: StatusDraft?
+    @State private var reassigning: ReassignDraft?
+    @State private var showAllAudit = false
     @State private var creatingChild: NewItemView.Draft?
     @State private var showAllActivity = false
     @State private var bodyExpanded = false
@@ -32,16 +33,19 @@ struct ItemDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: id) { await load() }
         .refreshable { await load() }
-        .sheet(isPresented: $blocking) { if let d = detail { BlockSheet(item: d.item) { reason, who in
-            update(UpdateItemRequest(status: .blocked, blockedReason: reason, waitingOn: who))
-        } } }
+        .sheet(item: $statusDraft) { draft in
+            if let d = detail { StatusChangeSheet(item: d.item, change: draft.change) { change in try await changeStatus(change) } }
+        }
+        .sheet(item: $reassigning) { draft in
+            if let d = detail {
+                ReasonSheet(title: "Reassign", subject: d.item.title,
+                            summary: "\(model.employeeName(d.item.assigneeId)) → \(model.employeeName(draft.to))",
+                            prompt: "Why this person?", action: "Reassign") { reason in
+                    try await send(UpdateItemRequest(assigneeId: draft.to, note: reason, reason: reason))
+                }
+            }
+        }
         .sheet(item: $creatingChild) { draft in NewItemView(draft: draft) { _ in Task { await load() } } }
-        .alert("Reopen", isPresented: $reopening) {
-            TextField("Why it is not done", text: $note)
-            Button("Reopen") { update(UpdateItemRequest(status: .inProgress, note: note)); note = "" }
-                .disabled(note.trimmingCharacters(in: .whitespaces).isEmpty)
-            Button("Cancel", role: .cancel) { note = "" }
-        } message: { Text("A reopen needs a note; it goes on the activity log.") }
         .alert("Couldn't do that", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(actionError ?? "") }
@@ -53,6 +57,18 @@ struct ItemDetailView: View {
             List {
                 header(d)
                 fields(item)
+                if let url = item.docUrl.flatMap(URL.init(string:)), url.scheme?.hasPrefix("http") == true {
+                    Section {
+                        Link(destination: url) {
+                            HStack {
+                                Label("Open the doc", systemImage: "doc.richtext")
+                                Spacer()
+                                Image(systemName: "safari").foregroundStyle(.secondary)
+                            }
+                        }
+                        .accessibilityIdentifier("item.doc")
+                    } footer: { Text(url.host ?? url.absoluteString).lineLimit(1) }
+                }
                 if !item.body.isEmpty {
                     Section {
                         // Short by default: five lines, the whole text on demand.
@@ -88,6 +104,17 @@ struct ItemDetailView: View {
                         }
                     } header: { SectionHeader(text: item.level == .epic ? "Stories (\(d.children.count))" : "Tasks (\(d.children.count))") }
                 }
+                if let rca = item.rca {
+                    Section {
+                        Prose(text: rca.text).font(.subheadline)
+                        if rca.by != nil || rca.at != nil {
+                            Text([rca.by.map { model.employeeName($0) }, rca.at.map { Format.ago($0) }].compactMap { $0 }.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } header: { SectionHeader(text: "RCA") }
+                }
+                if let chain = d.chain { chainSection(chain) }
+                if let audit = d.audit { auditSection(audit) }
                 comments(d)
                 activity(d)
                 if let t = d.threadId {
@@ -111,6 +138,11 @@ struct ItemDetailView: View {
                 Text(item.title).font(.title3.weight(.semibold)).accessibilityIdentifier("item.title")
                 HStack(spacing: 8) {
                     StateLabel(glyph: item.status.glyph, compact: true)
+                    if let t = item.trueStatus, t != .unknown, t.label != item.status.glyph.label, !(t == .waiting && item.status == .waiting) {
+                        Pill(text: t.label, tint: .secondary)
+                    }
+                    if item.type == .bug { Pill(text: "Bug", symbol: "ladybug", tint: .red) }
+                    if item.type == .rca { Pill(text: "RCA", symbol: "magnifyingglass", tint: .indigo) }
                     if model.plan.focusIds.contains(item.id) { Pill(text: "Focus", symbol: "scope", tint: .orange) }
                     if let r = item.resolution, r != .done { Pill(text: r == .wontDo ? "Won't do" : r == .duplicate ? "Duplicate" : "Closed", tint: .secondary) }
                     Spacer()
@@ -125,6 +157,12 @@ struct ItemDetailView: View {
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                } else if item.status == .waiting, let w = item.waiting {
+                    StatusBox(title: "Waiting on \(model.employeeName(w.on))", symbol: ItemStatus.waiting.glyph.symbol, tint: .orange,
+                              text: w.reason, since: w.since)
+                } else if item.status == .parked, let p = item.parked {
+                    StatusBox(title: "Parked" + (p.by.map { " by \(model.employeeName($0))" } ?? ""), symbol: ItemStatus.parked.glyph.symbol, tint: .gray,
+                              text: p.reason, extra: p.resumeWhen.map { "Resume when: \($0)" }, since: p.since)
                 } else if let s = item.stall {
                     Label(s.line, systemImage: "hourglass").font(.subheadline).foregroundStyle(.orange)
                 }
@@ -163,7 +201,9 @@ struct ItemDetailView: View {
                 }
                 .buttonStyle(.plain)
             } else {
-                PersonMenu(title: "Assignee", current: item.assigneeId) { who in if let who { update(UpdateItemRequest(assigneeId: who)) } } label: {
+                PersonMenu(title: "Assignee", current: item.assigneeId) { who in
+                    if let who, who != item.assigneeId { reassigning = ReassignDraft(to: who) }
+                } label: {
                     FieldRow(title: "Assignee", value: model.employeeName(item.assigneeId))
                 }
                 .tint(.primary)
@@ -191,14 +231,16 @@ struct ItemDetailView: View {
 
     private func stateMenu(_ item: Item) -> some View {
         Menu {
-            ForEach(ItemStatus.known.filter { $0 != item.status && $0 != .blocked }, id: \.self) { s in
-                Button { move(item, to: s) } label: { Label(s.glyph.label, systemImage: s.glyph.symbol) }
+            ForEach(ItemStatus.order.filter { $0 != item.status && $0 != .blocked }, id: \.self) { s in
+                Button { statusDraft = StatusDraft(change: StatusChange(to: s)) } label: {
+                    Label(s.glyph.label + (StatusChangeSheet.asksMore(s) ? "…" : ""), systemImage: s.glyph.symbol)
+                }
             }
             if item.status != .blocked {
-                Button(role: .destructive) { blocking = true } label: { Label("Blocked…", systemImage: "octagon") }
+                Button(role: .destructive) { statusDraft = StatusDraft(change: StatusChange(to: .blocked)) } label: { Label("Blocked…", systemImage: "octagon") }
             }
             if item.status == .backlog || item.status == .ready {
-                Button(role: .destructive) { update(UpdateItemRequest(status: .done, resolution: .wontDo)) } label: { Label("Close as won't do", systemImage: "xmark.circle") }
+                Button(role: .destructive) { statusDraft = StatusDraft(change: StatusChange(to: .done, resolution: .wontDo)) } label: { Label("Close as won't do", systemImage: "xmark.circle") }
             }
         } label: {
             FieldRow(title: "State", value: item.status.glyph.label, symbol: item.status.glyph.symbol, tint: item.status.glyph.tint)
@@ -234,6 +276,60 @@ struct ItemDetailView: View {
                 .accessibilityElement(children: .combine)
             }
         } header: { SectionHeader(text: "Activity") }
+    }
+
+    // MARK: chain and audit
+
+    /// Everyone on the story's path to done; a tap opens their Talk thread.
+    @ViewBuilder private func chainSection(_ chain: StoryChain) -> some View {
+        Section {
+            if let t = chain.charterTitle ?? chain.charterId {
+                LabeledContent("Charter", value: t)
+            }
+            ForEach(Array(chain.people.enumerated()), id: \.offset) { _, p in
+                if p.id == "owner" {
+                    LabeledContent(p.role, value: model.employeeName(p.id))
+                } else {
+                    Button { model.router.talk(to: p.id) } label: {
+                        HStack(spacing: 10) {
+                            InitialsAvatar(name: model.employeeName(p.id), size: 24, tint: .secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(model.employeeName(p.id)).font(.subheadline).foregroundStyle(.primary)
+                                Text(p.role).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "bubble.left").foregroundStyle(Color.accentColor)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(p.role): \(model.employeeName(p.id)). Talk")
+                    .accessibilityIdentifier("item.chain.\(p.role)")
+                }
+            }
+        } header: { SectionHeader(text: "Chain") } footer: { Text("Tap someone to talk to them.") }
+    }
+
+    /// Who did what and why, newest first. Rows from before reasons were required say so.
+    @ViewBuilder private func auditSection(_ entries: [AuditEntry]) -> some View {
+        let all = AuditEntry.newestFirst(entries)
+        let shown = showAllAudit ? all : Array(all.prefix(8))
+        Section {
+            if all.isEmpty { Text("Nothing recorded yet.").font(.subheadline).foregroundStyle(.secondary) }
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, e in
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: e.kind.symbol).foregroundStyle(.secondary).frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(Format.ago(e.at)) · \(model.employeeName(e.by)) · \(e.what { model.employeeName($0) })").font(.caption.weight(.medium))
+                        Text(e.reasonLine).font(.caption).foregroundStyle(e.reason == nil ? .tertiary : .secondary).italic(e.reason == nil).lineLimit(4)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            if all.count > shown.count {
+                Button("Show all \(all.count)") { withAnimation(.snappy) { showAllAudit = true } }.font(.caption.weight(.semibold))
+            }
+        } header: { SectionHeader(text: "Audit") }
     }
 
     private func composer(_ d: ItemDetail) -> some View {
@@ -274,9 +370,17 @@ struct ItemDetailView: View {
         catch { if let m = error.userMessage { actionError = m } }
     }
 
-    private func move(_ item: Item, to s: ItemStatus) {
-        if item.status == .done && s != .done { reopening = true; return }
-        update(UpdateItemRequest(status: s))
+    /// From a sheet: throws so the sheet stays open with the server's answer.
+    private func changeStatus(_ change: StatusChange) async throws {
+        guard let rest = model.rest else { throw WorkplaceError.notPaired }
+        try await model.items.changeStatus(rest, id: id, change)
+        await model.plan.load(rest)
+    }
+
+    private func send(_ req: UpdateItemRequest) async throws {
+        guard let rest = model.rest else { throw WorkplaceError.notPaired }
+        try await model.items.update(rest, id: id, req)
+        await model.plan.load(rest)
     }
 
     private func update(_ req: UpdateItemRequest) {
@@ -330,39 +434,203 @@ struct CommentRow: View {
     }
 }
 
-/// Blocked needs a reason and who it is waiting on (§19.3).
-struct BlockSheet: View {
+struct StatusDraft: Identifiable { let id = UUID(); var change: StatusChange }
+struct ReassignDraft: Identifiable { let id = UUID(); let to: String }
+
+/// Waiting, Parked or Blocked: a coloured box with the reason and since when.
+struct StatusBox: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    let text: String?
+    var extra: String? = nil
+    let since: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Label(title, systemImage: symbol).font(.subheadline.weight(.semibold)).foregroundStyle(tint)
+            if let text, !text.isEmpty { Text(text).font(.subheadline) }
+            if let extra { Text(extra).font(.subheadline) }
+            if let since { Text("since \(Format.ago(since))").font(.caption).foregroundStyle(.secondary) }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Every status change asks why (rework, Oct 2026). Waiting also asks who (the team, the owner
+/// or the COO), Parked when to resume, Blocked which outside cause. The send button stays off
+/// until the change is complete; a refusal from the server shows here and keeps the sheet open.
+struct StatusChangeSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let item: Item
-    let done: (String, String) -> Void
-    @State private var reason = ""
-    @State private var waitingOn = "owner"
+    @State var change: StatusChange
+    let submit: (StatusChange) async throws -> Void
+    @State private var sending = false
+    @State private var error: String?
+
+    init(item: Item, change: StatusChange, submit: @escaping (StatusChange) async throws -> Void) {
+        self.item = item
+        self._change = State(initialValue: change)
+        self.submit = submit
+    }
+
+    /// The statuses whose sheet asks for more than a reason.
+    static func asksMore(_ s: ItemStatus) -> Bool { s == .waiting || s == .parked || s == .blocked }
+
+    private var title: String {
+        if change.to == .done && change.resolution == .wontDo { return "Close as won't do" }
+        if item.status == .done && change.to != .done { return "Reopen" }
+        switch change.to {
+        case .waiting: return "Waiting on someone"
+        case .parked: return "Park it"
+        case .blocked: return "Mark blocked"
+        default: return "Move to \(change.to.glyph.label)"
+        }
+    }
+
+    private var prompt: String {
+        switch change.to {
+        case .waiting: return "What do they need to do?"
+        case .parked: return "Why park it?"
+        case .blocked: return "What outside thing is it waiting for?"
+        default: return item.status == .done ? "Why is it not done?" : "Why this change?"
+        }
+    }
+
+    /// The team, then you and the COO.
+    private var people: [(id: String, name: String)] {
+        model.assignees.filter { $0.id != "owner" } + [("owner", "You (the owner)"), ("coo", "Claude — COO")]
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section { Text(item.title).font(.subheadline.weight(.semibold)) }
                 Section {
-                    TextField("What is it waiting for?", text: $reason, axis: .vertical).lineLimit(2...5)
-                } header: { SectionHeader(text: "Reason") }
-                Section {
-                    Picker("Waiting on", selection: $waitingOn) {
-                        ForEach(model.assignees, id: \.id) { p in Text(p.name).tag(p.id) }
-                        Text("Claude — COO").tag("coo")
+                    Text(item.title).font(.subheadline.weight(.semibold))
+                    HStack(spacing: 6) {
+                        StateLabel(glyph: item.status.glyph, compact: true)
+                        Image(systemName: "arrow.right").font(.caption).foregroundStyle(.tertiary)
+                        StateLabel(glyph: change.to.glyph, compact: true)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                if change.to == .waiting {
+                    Section {
+                        Picker("Waiting on", selection: $change.waitingOn) {
+                            Text("Choose…").tag(String?.none)
+                            ForEach(people, id: \.id) { p in Text(p.name).tag(Optional(p.id)) }
+                        }
+                        .accessibilityIdentifier("status.waitingOn")
+                    } header: { SectionHeader(text: "Who") }
+                }
+                if change.to == .blocked {
+                    Section {
+                        Picker("Blocked on", selection: $change.blockedOn) {
+                            Text("Someone outside the team").tag("external")
+                            Text("The release").tag("release")
+                        }
+                        .pickerStyle(.inline)
+                        .labelsHidden()
+                    } header: { SectionHeader(text: "Blocked on") } footer: {
+                        Text("Waiting on a teammate, you or the COO is Waiting, not Blocked.")
                     }
                 }
+                Section {
+                    TextField(prompt, text: $change.reason, axis: .vertical).lineLimit(2...6)
+                        .accessibilityIdentifier("status.reason")
+                } header: { SectionHeader(text: "Reason (required)") } footer: {
+                    Text("It goes on the story's audit.")
+                }
+                if change.to == .parked {
+                    Section {
+                        TextField("Resume when… (after 1.4 ships, Monday)", text: $change.resumeWhen, axis: .vertical).lineLimit(1...3)
+                            .accessibilityIdentifier("status.resumeWhen")
+                    } header: { SectionHeader(text: "Resume when (required)") }
+                }
+                if change.to == .waiting && change.waitingOn == "owner" {
+                    Section {
+                        TextField("What do you recommend?", text: $change.recommendation, axis: .vertical).lineLimit(1...4)
+                    } header: { SectionHeader(text: "Recommendation (required)") }
+                }
+                if let error {
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.subheadline) }
+                }
             }
-            .navigationTitle("Mark blocked")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Block") { done(reason.trimmingCharacters(in: .whitespacesAndNewlines), waitingOn); dismiss() }
-                        .disabled(reason.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if sending { ProgressView() } else {
+                        Button("Save") { Task { await save() } }
+                            .disabled(change.problem != nil)
+                            .accessibilityIdentifier("status.save")
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .interactiveDismissDisabled(sending)
+    }
+
+    private func save() async {
+        sending = true
+        defer { sending = false }
+        do { try await submit(change); dismiss() } catch { if let m = error.userMessage { self.error = m } }
+    }
+}
+
+/// A change that only needs a reason (a reassign): one field, sent once it is long enough.
+struct ReasonSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    let subject: String
+    let summary: String
+    let prompt: String
+    let action: String
+    let submit: (String) async throws -> Void
+    @State private var reason = ""
+    @State private var sending = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(subject).font(.subheadline.weight(.semibold))
+                    Text(summary).font(.subheadline).foregroundStyle(.secondary)
+                }
+                Section {
+                    TextField(prompt, text: $reason, axis: .vertical).lineLimit(2...6)
+                        .accessibilityIdentifier("reason.text")
+                } header: { SectionHeader(text: "Reason (required)") } footer: { Text("It goes on the story's audit.") }
+                if let error {
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.subheadline) }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if sending { ProgressView() } else {
+                        Button(action) { Task { await save() } }.disabled(!StatusChange.validReason(reason))
+                    }
                 }
             }
         }
         .presentationDetents([.medium])
+        .interactiveDismissDisabled(sending)
+    }
+
+    private func save() async {
+        sending = true
+        defer { sending = false }
+        let why = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        do { try await submit(why); dismiss() } catch { if let m = error.userMessage { self.error = m } }
     }
 }

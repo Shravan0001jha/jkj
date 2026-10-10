@@ -107,7 +107,9 @@ for (const [name, members] of Object.entries(tsUnions)) {
   const a = new Set(members.map(String)), b = new Set(sw.map(String));
   for (const x of a) if (!b.has(x)) problems.push(`union ${name}: '${x}' missing from Swift`);
   // `unknown` is the client's own fallback for a value it does not know (LenientEnum), never sent.
-  for (const x of b) if (!a.has(x) && x !== 'unknown') problems.push(`union ${name}: Swift has extra '${x}'`);
+  // Ahead of packages/shared: docs/LLD-rework-2026-10.md (shared contract). Drop on merge.
+  const unionsAhead = { ItemStatus: ['waiting', 'parked'] };
+  for (const x of b) if (!a.has(x) && x !== 'unknown' && !(unionsAhead[name] ?? []).includes(x)) problems.push(`union ${name}: Swift has extra '${x}'`);
 }
 // WorkState = FeatureState | AssignmentState
 {
@@ -140,6 +142,12 @@ for (const [name, def] of Object.entries(tsInterfaces)) {
     RoomMessage: ['truncated'],
     CommentRequest: ['mentions'],
     CooMessage: ['attachments'],
+    // Ahead of packages/shared: docs/LLD-rework-2026-10.md (shared contract, W4, W5). Drop on merge.
+    Item: ['type', 'trueStatus', 'waiting', 'parked', 'docUrl', 'docId', 'rca'],
+    ItemDetail: ['audit', 'chain'],
+    EpicCard: ['finished'],
+    InboxItem: ['cooNote'],
+    UpdateItemRequest: ['reason', 'resumeWhen'],
   };
   for (const f of Object.keys(sw)) if (!(f in def.fields) && !(undeclared[name] ?? []).includes(f)) problems.push(`interface ${name}.${f}: Swift has a field the contract lacks`);
 }

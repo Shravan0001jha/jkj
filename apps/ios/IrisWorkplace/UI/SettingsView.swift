@@ -8,6 +8,8 @@ struct SettingsView: View {
     @State private var showDeveloper = false
     @State private var devices: [PushDevice] = []
     @State private var devicesError: String?
+    @State private var choosingFocus = false
+    @State private var actionError: String?
 
     var body: some View {
         NavigationStack {
@@ -30,6 +32,8 @@ struct SettingsView: View {
                         Text("Sessions end after 12 hours idle or 7 days; the app then asks you to sign in again.")
                     }
                 }
+                superFocusSection
+                macQueueSection
                 if let h = model.health {
                     Section {
                         if let r = h.resilience {
@@ -117,10 +121,117 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) {}
             }
             .sheet(isPresented: $showDeveloper) { DeveloperOptionsView() }
+            .confirmationDialog("Super focus for how long?", isPresented: $choosingFocus, titleVisibility: .visible) {
+                ForEach(SuperFocusStore.choices, id: \.self) { h in Button("\(h) hours") { setFocus(h) } }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Pushes reach you even in quiet hours until it ends.") }
+            .alert("Couldn't do that", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(actionError ?? "") }
+            .task {
+                guard let rest = model.rest else { return }
+                async let focus: Void = model.superFocus.load(rest)
+                async let queue: Void = model.macQueue.load(rest)
+                _ = await (focus, queue)
+            }
             .task {
                 guard model.mode == .relay, let rest = model.rest else { return }
                 do { devices = try await rest.pushDevices().devices } catch { if let m = error.userMessage { devicesError = m } }
             }
+        }
+    }
+
+    // MARK: super focus
+
+    /// On: pushes ignore quiet hours until the chosen time (2, 4 or 8 hours). Off clears it.
+    @ViewBuilder private var superFocusSection: some View {
+        let store = model.superFocus
+        if store.supported || store.error != nil {
+            Section {
+                let active = store.isActive()
+                Toggle(isOn: Binding(get: { active }, set: { on in if on { choosingFocus = true } else { setFocus(0) } })) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Super focus")
+                            if active, let d = store.untilDate() {
+                                Text("On until \(d.formatted(date: Calendar.current.isDateInToday(d) ? .omitted : .abbreviated, time: .shortened))")
+                                    .font(.caption).foregroundStyle(.orange)
+                                    .accessibilityIdentifier("settings.superFocus.until")
+                            }
+                        }
+                    } icon: { Image(systemName: "bolt.badge.clock") }
+                }
+                .disabled(store.busy || model.rest == nil)
+                .accessibilityIdentifier("settings.superFocus")
+                if active {
+                    Menu("Change the length") {
+                        ForEach(SuperFocusStore.choices, id: \.self) { h in Button("\(h) hours from now") { setFocus(h) } }
+                    }
+                    .font(.subheadline)
+                }
+                if let e = store.error { Text(e).font(.caption).foregroundStyle(.secondary) }
+            } header: { SectionHeader(text: "Super focus") } footer: {
+                Text("While it is on, pushes reach you even in quiet hours. Choose 2, 4 or 8 hours; it switches itself off.")
+            }
+        }
+    }
+
+    private func setFocus(_ hours: Int) {
+        guard let rest = model.rest else { return }
+        Task {
+            do { try await model.superFocus.set(rest, hours: hours) } catch { if let m = error.userMessage { actionError = m } }
+        }
+    }
+
+    // MARK: Mac queue
+
+    /// Who has the Mac and who is waiting for it; the next in line can be let in now.
+    @ViewBuilder private var macQueueSection: some View {
+        let store = model.macQueue
+        if store.supported || store.error != nil {
+            Section {
+                if store.shown.isEmpty {
+                    Text(store.error ?? "Nobody is waiting for the Mac.").font(.subheadline).foregroundStyle(.secondary)
+                }
+                ForEach(store.shown) { e in
+                    HStack(alignment: .top, spacing: 10) {
+                        HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: e.state == .granted ? "desktopcomputer" : "clock")
+                            .foregroundStyle(e.state == .granted ? .green : .secondary).frame(width: 22)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(model.employeeName(e.emp)).font(.subheadline.weight(.semibold))
+                                if e.state == .granted { Pill(text: "Has the Mac", tint: .green) }
+                            }
+                            let meta = [e.minutes.map { "\($0) min" }, e.itemId, e.at.map { Format.ago($0) }].compactMap { $0 }
+                            if !meta.isEmpty { Text(meta.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary) }
+                            if let why = e.why, !why.isEmpty { Text(why).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                        }
+                        }
+                        .accessibilityElement(children: .combine)
+                        Spacer(minLength: 0)
+                        if e.id == store.head?.id {
+                            if store.granting == e.id { ProgressView() } else {
+                                Button("Grant now") { grant(e.id) }
+                                    .buttonStyle(.borderedProminent).controlSize(.small)
+                                    .accessibilityIdentifier("settings.macQueue.grant")
+                            }
+                        }
+                    }
+                }
+            } header: {
+                HStack { SectionHeader(text: "Mac queue"); Spacer()
+                    Button { Task { if let rest = model.rest { await store.load(rest) } } } label: { Image(systemName: "arrow.clockwise") }
+                        .accessibilityLabel("Refresh the Mac queue")
+                }
+            } footer: { Text("Employees ask for the Mac to run real tests. Grant now lets the next one in without waiting.") }
+        }
+    }
+
+    private func grant(_ id: String) {
+        guard let rest = model.rest else { return }
+        Task {
+            do { try await model.macQueue.grant(rest, id: id) } catch { if let m = error.userMessage { actionError = m } }
         }
     }
 

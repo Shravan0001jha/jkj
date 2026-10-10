@@ -43,7 +43,7 @@ final class V2StoreTests: XCTestCase {
         XCTAssertEqual(s.focusIds, ["ft_mummakwyuew19"])
         XCTAssertNil(s.error)
         await s.loadBoard(rest)
-        XCTAssertEqual(s.columns.map(\.status), ItemStatus.order)
+        XCTAssertEqual(s.columns.map(\.status), ItemStatus.order.filter { !ItemStatus.rework.contains($0) }, "an older board: no Waiting or Parked columns")
         XCTAssertEqual(s.columns.first { $0.status == .inReview }?.items.count, 6)
     }
 
@@ -151,17 +151,17 @@ final class V2StoreTests: XCTestCase {
             d.item.assigneeId = "owner"
             return (200, try! JSONEncoder().encode(d))
         }
-        try await s.update(rest, id: "as_muqecr89jhjst", UpdateItemRequest(assigneeId: "owner"))
+        try await s.update(rest, id: "as_muqecr89jhjst", UpdateItemRequest(assigneeId: "owner", reason: "I'll take it"))
         XCTAssertEqual(s.details["as_muqecr89jhjst"]?.item.assigneeId, "owner")
         let body = try JSONSerialization.jsonObject(with: StubURLProtocol.recorded.last!.body!) as! [String: Any]
-        XCTAssertEqual(body as NSDictionary, ["assigneeId": "owner"] as NSDictionary)
+        XCTAssertEqual(body as NSDictionary, ["assigneeId": "owner", "reason": "I'll take it"] as NSDictionary)
     }
 
     func testAServerRefusalIsShownInItsOwnWords() async throws {
         let s = ItemsStore()
         StubURLProtocol.handler = { _ in (400, Data(#"{"error":"a reviewer is required to enter review"}"#.utf8)) }
         do {
-            try await s.update(rest, id: "as_1", UpdateItemRequest(status: .inReview))
+            try await s.update(rest, id: "as_1", UpdateItemRequest(status: .inReview, reason: "ready for review"))
             XCTFail("expected the refusal")
         } catch {
             XCTAssertEqual(error.userMessage, "a reviewer is required to enter review")

@@ -98,6 +98,11 @@ enum API {
     static let releasePosts = "/api/releases/posts"
     static func releasePost(_ id: String) -> String { "/api/releases/posts/\(enc(id))" }
 
+    // Rework (Oct 2026): super focus (W4) and the Mac queue (W6).
+    static let superFocus = "/api/settings/super-focus"
+    static let macQueue = "/api/mac-queue"
+    static func macQueueGrant(_ id: String) -> String { "/api/mac-queue/\(enc(id))/grant" }
+
     static let socket = "/ws"
 
     // Relay-only (LLD-workplace-push §2, relay LLD): answered by the relay, never proxied.

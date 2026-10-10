@@ -83,6 +83,9 @@ final class AppModel {
     let updates = UpdatesStore()
     let rooms = RoomsStore()
     let releasePosts = ReleasePostsStore()
+    // Rework (Oct 2026): Settings
+    let superFocus = SuperFocusStore()
+    let macQueue = MacQueueStore()
     /// Chat files fetched with the session's credential, cached on disk.
     let attachments = AttachmentCache()
     /// Talk list pins and read marks (this phone's own).

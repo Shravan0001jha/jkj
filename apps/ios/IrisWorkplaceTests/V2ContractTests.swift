@@ -36,7 +36,8 @@ final class V2ContractTests: XCTestCase {
     func testLiveBoardGroupsByEveryStatus() throws {
         try roundTrip("live-plan-board", PlanResponse.self)
         let board = try XCTUnwrap(try Fixtures.decode("live-plan-board", as: PlanResponse.self).board)
-        XCTAssertEqual(Set(board.keys), Set(ItemStatus.known.map(\.rawValue)))
+        // Every status the server had on 2 Oct; Waiting and Parked (rework) came later.
+        XCTAssertEqual(Set(board.keys), Set(ItemStatus.known.filter { !ItemStatus.rework.contains($0) }.map(\.rawValue)))
         XCTAssertEqual(board["in-review"]?.count, 6)
         XCTAssertTrue(board["in-review"]!.allSatisfy { $0.stall?.rule == .unreviewed || $0.stall == nil })
     }
@@ -113,7 +114,7 @@ final class V2ContractTests: XCTestCase {
         var epics = areas[0]["epics"] as! [[String: Any]]
         var card = epics[0]
         var epic = card["epic"] as! [String: Any]
-        epic["status"] = "parked"
+        epic["status"] = "frozen-solid"
         epic["level"] = "initiative"
         var legacy = epic["legacy"] as! [String: Any]
         legacy["kind"] = "incident"

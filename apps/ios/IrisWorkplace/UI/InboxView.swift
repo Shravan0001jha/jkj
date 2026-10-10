@@ -78,6 +78,10 @@ struct InboxRow: View {
                     Text(Format.ago(item.lastMessageAt ?? item.createdAt)).font(.caption2).foregroundStyle(.tertiary)
                 }
                 Text(item.title).font(.subheadline.weight(open ? .bold : .regular)).lineLimit(1)
+                if let note = item.cooNote, !note.text.isEmpty {
+                    Label("COO: \(note.text)", systemImage: "person.badge.shield.checkmark").font(.caption.weight(.medium))
+                        .foregroundStyle(Color.accentColor).lineLimit(2)
+                }
                 if !item.summary.isEmpty && item.summary != item.title {
                     Text(item.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
@@ -96,6 +100,28 @@ struct InboxRow: View {
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(open && item.urgency.isRaised ? u.label + " urgency. " : "")\(g.label): \(item.title)")
+    }
+}
+
+/// The COO passed this on to the owner: why it needs him, on top of the item.
+struct CooNoteBanner: View {
+    let note: CooNote
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "person.badge.shield.checkmark").font(.title3).foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("COO: needs you because…").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+                Text(note.text).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                if let at = note.at { Text(Format.ago(at)).font(.caption2).foregroundStyle(.secondary) }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("inbox.cooNote")
     }
 }
 
@@ -123,6 +149,7 @@ struct InboxItemView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
+                            if let note = item.cooNote, !note.text.isEmpty { CooNoteBanner(note: note) }
                             question(item)
                             VStack(alignment: .leading, spacing: 8) {
                                 AnswerOptions(item: item)

@@ -10,6 +10,8 @@ struct PlanView: View {
     @State private var creating: NewItemView.Draft?
     @State private var actionError: String?
     @State private var showDone = false
+    /// The Plan's collapsed "Done (N)" section of finished epics.
+    @State private var showFinished = false
     @State private var query = PlanQuery()
 
     private var store: PlanStore { model.plan }
@@ -78,7 +80,7 @@ struct PlanView: View {
                     Section { activeFilters }
                 }
                 ForEach(plan.areas) { a in
-                    let shown = query.epics(a.epics)
+                    let shown = query.openEpics(a.epics)
                     Section {
                         if a.epics.isEmpty {
                             Button { creating = .init(level: .epic, areaId: a.area.id) } label: {
@@ -86,7 +88,7 @@ struct PlanView: View {
                             }
                         }
                         else if shown.isEmpty {
-                            Text("No epics match the filter").font(.caption).foregroundStyle(.tertiary)
+                            Text(a.epics.allSatisfy(\.isFinished) ? "Every epic here is done" : "No epics match the filter").font(.caption).foregroundStyle(.tertiary)
                         }
                         ForEach(shown) { card in epicRow(card) }
                             .onMove(perform: query.allowsReorder ? { from, to in
@@ -100,14 +102,36 @@ struct PlanView: View {
                         }
                     }
                 }
-                if !query.epics(plan.unfiled).isEmpty {
+                if !query.openEpics(plan.unfiled).isEmpty {
                     Section {
-                        ForEach(query.epics(plan.unfiled)) { card in epicRow(card) }
+                        ForEach(query.openEpics(plan.unfiled)) { card in epicRow(card) }
                     } header: { SectionHeader(text: "No area yet") }
+                }
+                let finished = query.finishedEpics(plan)
+                if !finished.isEmpty {
+                    Section {
+                        Button { withAnimation(.snappy) { showFinished.toggle() } } label: {
+                            HStack {
+                                Image(systemName: ItemStatus.done.glyph.symbol).foregroundStyle(ItemStatus.done.glyph.tint)
+                                Text("Done (\(finished.count))").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                                    .rotationEffect(.degrees(showFinished ? 90 : 0))
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Done, \(finished.count) finished epics")
+                        .accessibilityHint(showFinished ? "Collapses" : "Expands")
+                        .accessibilityIdentifier("plan.done")
+                        if showFinished || query.status == .done {
+                            ForEach(finished) { card in epicRow(card) }
+                        }
+                    } footer: { if !showFinished { Text("Finished epics, out of the way.") } }
                 }
                 Section {
                     HStack(spacing: 14) {
-                        ForEach(ItemStatus.order, id: \.self) { s in
+                        ForEach(ItemStatus.order.filter { !ItemStatus.rework.contains($0) || plan.counts[$0.rawValue] != nil }, id: \.self) { s in
                             VStack(spacing: 2) {
                                 Image(systemName: s.glyph.symbol).foregroundStyle(s.glyph.tint)
                                 Text("\(plan.counts[s.rawValue] ?? 0)").font(.caption.monospacedDigit().weight(.semibold))

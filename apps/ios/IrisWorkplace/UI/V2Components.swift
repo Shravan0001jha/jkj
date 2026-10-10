@@ -70,7 +70,11 @@ struct ItemRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title).font(.subheadline.weight(.medium)).lineLimit(2)
                 Text(meta).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                if let b = item.blocked {
+                if item.status == .waiting, let w = item.waiting {
+                    Text("Waiting on \(model.employeeName(w.on))" + (w.reason.map { ": \($0)" } ?? "")).font(.caption).foregroundStyle(.orange).lineLimit(2)
+                } else if item.status == .parked, let p = item.parked {
+                    Text("Parked" + (p.resumeWhen.map { " · resume when \($0)" } ?? "") + (p.reason.map { ": \($0)" } ?? "")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                } else if let b = item.blocked {
                     Text("Waiting on \(model.employeeName(b.waitingOn)): \(b.reason)").font(.caption).foregroundStyle(.red).lineLimit(2)
                 } else if let s = item.stall {
                     Text(s.line).font(.caption).foregroundStyle(.orange).lineLimit(1)

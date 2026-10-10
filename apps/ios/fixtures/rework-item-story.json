@@ -1,0 +1,85 @@
+{
+  "item": {
+    "id": "as_rework1",
+    "level": "story",
+    "title": "Wake word in every accent",
+    "body": "Acoustic KWS, not transcript aliases.",
+    "status": "waiting",
+    "statusSince": "2026-10-10T06:00:00.000Z",
+    "parentId": "ft_epic1",
+    "epicId": "ft_epic1",
+    "areaId": "ar_voice",
+    "assigneeId": "dev",
+    "reviewerId": "lead1",
+    "points": 3,
+    "rank": 4,
+    "acceptance": [
+      "Hears Iris in en-IN"
+    ],
+    "legacy": {
+      "kind": "assignment",
+      "state": "in-progress",
+      "charterId": "voice"
+    },
+    "type": "bug",
+    "trueStatus": "waiting",
+    "waiting": {
+      "on": "tara",
+      "reason": "Needs the QA device profile",
+      "since": "2026-10-10T06:00:00.000Z"
+    },
+    "docUrl": "https://www.notion.so/wake-word-hld",
+    "docId": "nd_123",
+    "rca": {
+      "text": "The gate floor stayed high after loud music.",
+      "at": "2026-10-09T10:00:00.000Z",
+      "by": "dev"
+    },
+    "createdAt": "2026-10-08T06:00:00.000Z",
+    "updatedAt": "2026-10-10T06:00:00.000Z"
+  },
+  "children": [],
+  "comments": [],
+  "activity": [],
+  "audit": [
+    {
+      "at": "2026-10-08T06:00:00.000Z",
+      "by": "asha",
+      "kind": "created"
+    },
+    {
+      "at": "2026-10-08T06:01:00.000Z",
+      "by": "asha",
+      "kind": "assigned",
+      "to": "dev",
+      "reason": "voice charter"
+    },
+    {
+      "at": "2026-10-10T06:00:00.000Z",
+      "by": "dev",
+      "kind": "status",
+      "from": "in-progress",
+      "to": "waiting",
+      "reason": "Needs the QA device profile"
+    },
+    {
+      "at": "2026-10-10T07:00:00.000Z",
+      "by": "coo",
+      "kind": "doc",
+      "reason": "HLD linked"
+    }
+  ],
+  "chain": {
+    "developer": "dev",
+    "devReviewer": "lead1",
+    "extraReviewers": [
+      "sec1"
+    ],
+    "qa": "tara",
+    "charterId": "voice",
+    "charterTitle": "Voice & audio",
+    "lead": "lead1",
+    "chiefOfStaff": "asha",
+    "cto": "cto"
+  }
+}

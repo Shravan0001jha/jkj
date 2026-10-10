@@ -196,6 +196,19 @@ const server = createServer(async (req, res) => {
     thread.item.messageCount = thread.messages.length; thread.item.lastMessageAt = now;
     return json(res, 200, thread);
   }
+  // Rework (Oct 2026): super focus (W4) and the Mac queue (W6).
+  if (p === '/api/settings/super-focus') {
+    if (m === 'POST') { const h = Number((await readJson(req))?.hours ?? 0); v2.superFocus = { until: h > 0 ? new Date(Date.now() + h * 3600e3).toISOString() : null }; }
+    return json(res, 200, v2.superFocus ??= { until: null });
+  }
+  if (m === 'GET' && p === '/api/mac-queue') return json(res, 200, v2.macQueue);
+  if (m === 'POST' && seg[1] === 'mac-queue' && seg[3] === 'grant') {
+    const e = v2.macQueue.find(x => x.id === id);
+    if (!e) return json(res, 404, { error: 'no such request' });
+    for (const x of v2.macQueue) if (x.state === 'granted') x.state = 'done';
+    e.state = 'granted';
+    return json(res, 200, e);
+  }
   if (m === 'GET' && p === '/api/areas') return json(res, 200, v2.areas);
   if (m === 'GET' && p === '/api/rooms') return json(res, 200, v2.rooms);
   if (m === 'GET' && seg[1] === 'rooms' && id) {

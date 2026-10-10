@@ -108,6 +108,15 @@ struct PlanQuery: Equatable {
         return sorted(shown).compactMap { byId[$0.id] }
     }
 
+    /// An area's epics that are still going: finished ones leave for the Plan's "Done (N)".
+    func openEpics(_ cards: [EpicCard]) -> [EpicCard] { epics(cards.filter { !$0.isFinished }) }
+
+    /// Every finished epic of the plan (each area's and the unfiled), filtered and ordered: the
+    /// collapsed "Done (N)" section at the bottom of the Plan.
+    func finishedEpics(_ plan: PlanResponse) -> [EpicCard] {
+        epics((plan.areas.flatMap(\.epics) + plan.unfiled).filter(\.isFinished))
+    }
+
     /// One board column, filtered and ordered.
     func column(_ items: [Item]) -> [Item] { sorted(items.filter(matches)) }
 

@@ -34,12 +34,52 @@ enum ItemStatus: String, Codable, CaseIterable, LenientEnum {
     case backlog, ready
     case inProgress = "in-progress"
     case inReview = "in-review"
+    /// Rework (Oct 2026): waiting on a person (`Item.waiting`), parked on purpose (`Item.parked`).
+    case waiting, parked
     case done, blocked
     case unknown
 
     /// The board's columns, in the state machine's order.
-    static let order: [ItemStatus] = [.backlog, .ready, .inProgress, .inReview, .blocked, .done]
+    static let order: [ItemStatus] = [.backlog, .ready, .inProgress, .inReview, .waiting, .parked, .blocked, .done]
+    /// New in the October rework: an older server never sends them, so the board only shows
+    /// their columns when the server does.
+    static let rework: Set<ItemStatus> = [.waiting, .parked]
     var isOpen: Bool { self != .done }
+}
+
+/// What the board shows (computed by the server from the status, the hold, the PR and so on).
+enum TrueStatus: String, Codable, CaseIterable, LenientEnum {
+    case backlog
+    case onHold = "on-hold"
+    case ready
+    case inProgress = "in-progress"
+    case inReview = "in-review"
+    case waiting, parked, qa, approved, merged, done, blocked
+    case unknown
+
+    var label: String {
+        switch self {
+        case .backlog: return "Backlog"
+        case .onHold: return "On hold"
+        case .ready: return "Ready"
+        case .inProgress: return "In progress"
+        case .inReview: return "In review"
+        case .waiting: return "Waiting on"
+        case .parked: return "Parked"
+        case .qa: return "QA"
+        case .approved: return "Approved"
+        case .merged: return "Merged"
+        case .done: return "Done"
+        case .blocked: return "Blocked"
+        case .unknown: return "Other"
+        }
+    }
+}
+
+/// The Jira type: a bug is a story-level item; an `rca` story is done when its RCA is posted.
+enum ItemType: String, Codable, CaseIterable, LenientEnum {
+    case epic, story, task, bug, rca
+    case unknown
 }
 
 enum ItemResolution: String, Codable, CaseIterable, LenientEnum {
@@ -73,6 +113,28 @@ struct ItemBlocked: Codable, Equatable, Hashable {
     var since: String
 }
 
+/// `waiting`: on an employee id, 'owner' or 'coo'.
+struct ItemWaiting: Codable, Equatable, Hashable {
+    var on: String
+    var reason: String?
+    var since: String?
+}
+
+/// `parked`: why, and when it should resume.
+struct ItemParked: Codable, Equatable, Hashable {
+    var reason: String?
+    var resumeWhen: String?
+    var by: String?
+    var since: String?
+}
+
+/// The posted RCA (an `rca` story is done once it is here).
+struct ItemRca: Codable, Equatable, Hashable {
+    var text: String
+    var at: String?
+    var by: String?
+}
+
 struct ItemStall: Codable, Equatable, Hashable {
     var rule: StallRule
     var since: String
@@ -104,6 +166,14 @@ struct Item: Codable, Equatable, Hashable, Identifiable {
     var legacy: ItemLegacy
     var createdAt: String
     var updatedAt: String
+    // Rework (Oct 2026). All optional: an older server sends none of them.
+    var type: ItemType?
+    var trueStatus: TrueStatus?
+    var waiting: ItemWaiting?
+    var parked: ItemParked?
+    var docUrl: String?
+    var docId: String?
+    var rca: ItemRca?
 }
 
 // MARK: - Areas and the plan
@@ -159,8 +229,12 @@ struct EpicCard: Codable, Equatable, Hashable, Identifiable {
     var next: EpicNext?
     var flags: [PlanFlag]
     var inFocus: Bool
+    /// Rework: `planTier === 4`. Absent on an older server.
+    var finished: Bool?
 
     var id: String { epic.id }
+    /// The server's word when it gives one; otherwise a done epic is finished.
+    var isFinished: Bool { finished ?? (epic.status == .done) }
 }
 
 struct Focus: Codable, Equatable, Hashable {
@@ -226,6 +300,57 @@ struct ItemDetail: Codable, Equatable {
     var activity: [Activity]
     var progress: EpicProgress?
     var threadId: String?
+    /// Rework: who did what, with the reason (newest last). Absent on an older server.
+    var audit: [AuditEntry]?
+    /// Rework: everyone on the story's path to done.
+    var chain: StoryChain?
+}
+
+enum AuditKind: String, Codable, CaseIterable, LenientEnum {
+    case created, assigned, status, reviewer, parked, reopened, doc
+    case unknown
+}
+
+struct AuditEntry: Codable, Equatable, Hashable {
+    var at: String
+    var by: String
+    var kind: AuditKind
+    var from: String?
+    var to: String?
+    /// Absent = "not recorded" (rows from before reasons were required).
+    var reason: String?
+}
+
+/// The story's chain of people (LLD rework W1 §7). Only `extraReviewers` is always there.
+struct StoryChain: Codable, Equatable, Hashable {
+    var developer: String?
+    var devReviewer: String?
+    var extraReviewers: [String]
+    var qa: String?
+    var charterId: String?
+    var charterTitle: String?
+    var lead: String?
+    var chiefOfStaff: String?
+    var cto: String?
+
+    init(developer: String? = nil, devReviewer: String? = nil, extraReviewers: [String] = [], qa: String? = nil, charterId: String? = nil,
+         charterTitle: String? = nil, lead: String? = nil, chiefOfStaff: String? = nil, cto: String? = nil) {
+        self.developer = developer; self.devReviewer = devReviewer; self.extraReviewers = extraReviewers; self.qa = qa
+        self.charterId = charterId; self.charterTitle = charterTitle; self.lead = lead; self.chiefOfStaff = chiefOfStaff; self.cto = cto
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        developer = try c.decodeIfPresent(String.self, forKey: .developer)
+        devReviewer = try c.decodeIfPresent(String.self, forKey: .devReviewer)
+        extraReviewers = try c.decodeIfPresent([String].self, forKey: .extraReviewers) ?? []
+        qa = try c.decodeIfPresent(String.self, forKey: .qa)
+        charterId = try c.decodeIfPresent(String.self, forKey: .charterId)
+        charterTitle = try c.decodeIfPresent(String.self, forKey: .charterTitle)
+        lead = try c.decodeIfPresent(String.self, forKey: .lead)
+        chiefOfStaff = try c.decodeIfPresent(String.self, forKey: .chiefOfStaff)
+        cto = try c.decodeIfPresent(String.self, forKey: .cto)
+    }
 }
 
 enum UpdateKind: String, Codable, CaseIterable, LenientEnum {
@@ -367,6 +492,10 @@ struct UpdateItemRequest: Codable, Equatable {
     var note: String?
     var recommendation: String?
     var start: Bool?
+    /// Rework: required whenever `status` or `assigneeId` changes (`note` is its old alias).
+    var reason: String?
+    /// Rework: Parked needs it.
+    var resumeWhen: String?
 }
 
 struct CommentRequest: Codable, Equatable {
@@ -402,4 +531,71 @@ struct CreateReleasePostRequest: Codable, Equatable {
 }
 struct FocusRequest: Codable, Equatable {
     var epicIds: [String]
+}
+
+// MARK: - Rework (Oct 2026): settings and the Mac queue
+
+/// `GET/POST /api/settings/super-focus`: pushes ignore quiet hours until `until`.
+struct SuperFocus: Codable, Equatable {
+    var until: String?
+}
+
+struct SuperFocusRequest: Codable, Equatable {
+    /// 0 switches it off.
+    var hours: Int
+}
+
+enum MacQueueState: String, Codable, CaseIterable, LenientEnum {
+    case queued, granted, done, expired
+    case unknown
+}
+
+/// One request for the Mac (`mac_queue` row). Decoded leniently: the id may be a number, and
+/// the row's snake_case names are accepted next to the camelCase ones.
+struct MacQueueEntry: Decodable, Equatable, Identifiable {
+    var id: String
+    var emp: String
+    var itemId: String?
+    var minutes: Int?
+    var why: String?
+    var at: String?
+    var state: MacQueueState
+
+    private enum Keys: String, CodingKey { case id, emp, employeeId, itemId, item_id, minutes, why, at, state }
+
+    init(id: String, emp: String, itemId: String? = nil, minutes: Int? = nil, why: String? = nil, at: String? = nil, state: MacQueueState) {
+        self.id = id; self.emp = emp; self.itemId = itemId; self.minutes = minutes; self.why = why; self.at = at; self.state = state
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        if let s = try? c.decode(String.self, forKey: .id) { id = s } else { id = String(try c.decode(Int.self, forKey: .id)) }
+        emp = try c.decodeIfPresent(String.self, forKey: .emp) ?? c.decodeIfPresent(String.self, forKey: .employeeId) ?? "?"
+        itemId = try c.decodeIfPresent(String.self, forKey: .itemId) ?? c.decodeIfPresent(String.self, forKey: .item_id)
+        minutes = try? c.decodeIfPresent(Int.self, forKey: .minutes)
+        why = try? c.decodeIfPresent(String.self, forKey: .why)
+        at = try? c.decodeIfPresent(String.self, forKey: .at)
+        state = (try? c.decodeIfPresent(MacQueueState.self, forKey: .state)) ?? .unknown
+    }
+}
+
+/// `GET /api/mac-queue`: a list, or an object carrying one.
+struct MacQueueResponse: Decodable, Equatable {
+    var entries: [MacQueueEntry]
+
+    private enum Keys: String, CodingKey { case queue, entries, items, requests }
+
+    init(from decoder: Decoder) throws {
+        if let list = try? decoder.singleValueContainer().decode([MacQueueEntry].self) { entries = list; return }
+        let c = try decoder.container(keyedBy: Keys.self)
+        for k in [Keys.queue, .entries, .items, .requests] {
+            if let list = try c.decodeIfPresent([MacQueueEntry].self, forKey: k) { entries = list; return }
+        }
+        entries = []
+    }
+}
+
+/// Any JSON answer whose body the app does not need.
+struct IgnoredResponse: Decodable {
+    init(from decoder: Decoder) throws {}
 }

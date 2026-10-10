@@ -170,6 +170,8 @@ extension ItemStatus {
         case .ready: return Glyph(symbol: "circle", tint: .blue, label: "Ready")
         case .inProgress: return Glyph(symbol: "play.circle.fill", tint: .green, label: "In progress")
         case .inReview: return Glyph(symbol: "magnifyingglass.circle.fill", tint: .purple, label: "In review")
+        case .waiting: return Glyph(symbol: "hourglass.circle.fill", tint: .orange, label: "Waiting")
+        case .parked: return Glyph(symbol: "parkingsign.circle", tint: .gray, label: "Parked")
         case .done: return Glyph(symbol: "checkmark.circle.fill", tint: .green, label: "Done")
         case .blocked: return Glyph(symbol: "octagon.fill", tint: .red, label: "Blocked")
         case .unknown: return Glyph(symbol: "questionmark.circle", tint: .secondary, label: "Other")
@@ -435,5 +437,20 @@ struct SectionHeader: View {
     let text: String
     var body: some View {
         Text(text).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).textCase(nil)
+    }
+}
+
+extension AuditKind {
+    var symbol: String {
+        switch self {
+        case .created: return "plus.circle"
+        case .assigned: return "person.crop.circle"
+        case .status: return "arrow.right.circle"
+        case .reviewer: return "person.crop.circle.badge.checkmark"
+        case .parked: return "parkingsign.circle"
+        case .reopened: return "arrow.counterclockwise.circle"
+        case .doc: return "doc.richtext"
+        case .unknown: return "circle.dashed"
+        }
     }
 }
