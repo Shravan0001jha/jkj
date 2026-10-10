@@ -287,8 +287,21 @@ export interface WorkItem {
   queuedFor?: string;
   /** The story's pull request on GitHub (docs/LLD-github-flow.md §1); set only in shadow/on mode. */
   pr?: PrRecord;
-  /** 'bug': a story-level bug (docs/HLD-jira-lifecycle.md §1). */
-  type?: 'bug';
+  /** 'bug': a story-level bug (docs/HLD-jira-lifecycle.md §1); 'rca': a root-cause-only story, done when the RCA is posted. */
+  type?: 'bug' | 'rca';
+  /** Status waiting (rework, Oct 2026): on an employee id, 'owner' or 'coo'. */
+  waiting?: { on: string; reason: string; since: string; recommendation?: string };
+  /** Status parked: set aside on purpose until `resumeWhen`. */
+  parked?: { reason: string; resumeWhen: string; by: string; since: string };
+  /** The posted five-part RCA. */
+  rca?: { text: string; at: string; by: string };
+  /** The story's Notion doc. */
+  docUrl?: string;
+  docId?: string;
+  /** Reviewers added for real code in other teams' charters. */
+  extraReviewers?: { id: string; files: string[]; approvedAt?: string }[];
+  /** Routed to a lead by the Chief of Staff: the lead assigns it within the team (W2). */
+  routedAt?: string;
   /** An explicit dependency: this item starts after that one finishes. */
   startsAfter?: string;
   /** On hold: why it is parked. */
@@ -393,6 +406,14 @@ export interface PrRecord {
   /** context → "sha|state|description" last posted, so an unchanged status is not posted again. */
   posted?: Record<string, string>;
   merged?: { at: string; sha: string; by: string };
+  /** The developer approver chosen for this PR (a member of the author's team, or the CTO). */
+  devReviewer?: string;
+  /** The one QA for this story, once chosen. */
+  qaReviewer?: string;
+  /** Leads of other teams whose charters' files this PR changes. */
+  extraReviewers?: { id: string; files: string[]; approvedAt?: string }[];
+  /** Set by POST /api/coo/approve-spend for PRs touching workflows or infra. */
+  spendApprovedAt?: string;
 }
 
 /* ---------- inbox ---------- */
@@ -462,6 +483,10 @@ export interface InboxItem {
   lastMessageAt?: string;
   /** v2: shown by colour and label, not wording. Always set by the server since 2 Oct (from the kind and the level, LLD §19.5); absent (an old client cache) = normal. */
   urgency?: 'normal' | 'high' | 'urgent';
+  /** Agent-raised owner items are held for the COO to triage first (W4). */
+  cooHold?: { until: string };
+  /** The COO's note on an owner item ("needs you because …"), shown at the top. */
+  cooNote?: string;
 }
 
 /* ---------- org changes ---------- */
