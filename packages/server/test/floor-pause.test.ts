@@ -48,7 +48,7 @@ test('paused: the dispatcher starts nothing, new or resumed; unpaused it does', 
     assert.equal(r.action, 'skipped');
     assert.match(r.reason ?? '', /floor is paused/);
     // An In-progress story with no session (the orphan resume) does not start either.
-    items.update(wp, a.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, a.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     dispatch.sweep(wp);
     await tick();
     assert.equal(of(fake, 'dev').length, 0, 'no session started');
@@ -67,8 +67,8 @@ test('paused: the manager digest starts no session for Asha', async () => {
   const { wp, fake, story, done } = setup();
   try {
     const blocked = story('QA the bundle', 'nikhil');
-    items.update(wp, blocked.id, { status: 'in-progress' }, 'nikhil');
-    items.update(wp, blocked.id, { status: 'blocked', blockedReason: 'Needs the vendor build.', waitingOn: 'external' }, 'nikhil');
+    items.update(wp, blocked.id, { status: 'in-progress', reason: 'test: moved' }, 'nikhil');
+    items.update(wp, blocked.id, { status: 'blocked', blockedReason: 'Needs the vendor build.', waitingOn: 'external', reason: 'test: moved' }, 'nikhil');
     floor.setPaused(wp, true, 'pause', 'owner');
     manager.digest(wp, Date.now() + 60 * MIN);
     manager.deliver(wp, Date.now() + 61 * MIN);

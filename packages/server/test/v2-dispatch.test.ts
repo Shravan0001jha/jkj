@@ -70,7 +70,7 @@ test('busy-parked: the watcher keeps the story Ready, queued for Dev; it starts 
     assert.equal(watch.evaluate(wp, rawGet(wp, b.id)!, Date.now() + 120 * MIN), null, 'the dispatcher owns it now: no "not started" stall');
 
     // Dev finishes A (to review) while the turn is still running: nothing is pushed into the turn.
-    items.update(wp, a.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
+    items.update(wp, a.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'dev');
     await tick();
     assert.equal(items.require$(wp, b.id).status, 'ready');
     // The turn ends: Dev is free, and B goes to his open session, on B's branch.
@@ -98,7 +98,7 @@ test('a story the old watcher parked in Backlog (no hold) restarts when the assi
     const c = story('Dance tempo', 'dev');
     items.update(wp, c.id, { status: 'backlog', note: 'Moved to Backlog by Asha: Dev is busy on Mic gate' }, 'asha');
     assert.equal(items.require$(wp, c.id).hold, undefined, 'the watcher\'s busy-parking is not a hold');
-    items.update(wp, a.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
+    items.update(wp, a.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'dev');
     employees.close(wp, employees.openSession('dev')!.agentId, 'ended');
     await tick(40);
     assert.equal(of(fake, 'dev').length, 2, 'a fresh session for the parked story');
@@ -110,7 +110,7 @@ test('a story the old watcher parked in Backlog (no hold) restarts when the assi
   }
 });
 
-test('held Backlog is never started: a COO/owner move, a hold note, or hold: true; nor Backlog outside the focus', () => {
+test('held Backlog is never started: a COO/owner move, a hold note, or hold: true (parked); nor Backlog outside the focus', () => {
   const { wp, fake, story, other, done } = setup();
   try {
     const h1 = story('Greeting copy', 'dev');
@@ -122,11 +122,13 @@ test('held Backlog is never started: a COO/owner move, a hold note, or hold: tru
     const side = story('Side quest', 'dev', other.id);
     items.update(wp, side.id, { status: 'backlog', note: 'Moved to Backlog by Asha: not in focus' }, 'asha');
 
-    for (const id of [h1.id, h2.id, h3.id]) {
+    for (const id of [h1.id, h2.id]) {
       const it = items.require$(wp, id);
       assert.equal(it.status, 'backlog', id);
       assert.equal(it.hold, true, id);
     }
+    // Rework (Oct 2026): an explicit hold parks the item (status parked), which is never queued either.
+    assert.equal(items.require$(wp, h3.id).status, 'parked');
     assert.equal(items.require$(wp, side.id).hold, undefined);
     assert.deepEqual(dispatch.queue(wp, 'dev').map(w => w.id), [], 'held and unfocused Backlog are not queued work');
     dispatch.sweep(wp);
@@ -134,12 +136,12 @@ test('held Backlog is never started: a COO/owner move, a hold note, or hold: tru
     assert.equal(fake.sessions.length, 0);
 
     // Only the owner, the COO or the Chief of Staff holds an item.
-    assert.throws(() => items.update(wp, h1.id, { hold: false }, 'dev'), /owner, the COO or the Chief of Staff/);
-    assert.throws(() => items.update(wp, side.id, { hold: true, status: 'ready' }, 'owner'), /Backlog/);
-    // Leaving Backlog clears the hold; the owner lifting it makes the item work again.
-    items.update(wp, h3.id, { status: 'ready' }, 'owner');
-    assert.equal(items.require$(wp, h3.id).hold, undefined);
-    items.update(wp, h1.id, { hold: false }, 'coo');
+    assert.throws(() => items.update(wp, h1.id, { hold: false, reason: 'test: moved' }, 'dev'), /owner, the COO or the Chief of Staff/);
+    assert.throws(() => items.update(wp, side.id, { hold: true, status: 'ready', reason: 'test: moved' }, 'owner'), /A hold parks an item/);
+    // Leaving Parked or Backlog clears the hold; the owner lifting it makes the item work again.
+    items.update(wp, h3.id, { status: 'ready', reason: 'test: moved' }, 'owner');
+    assert.equal(items.require$(wp, h3.id).parked, undefined);
+    items.update(wp, h1.id, { hold: false, reason: 'test: moved' }, 'coo');
     assert.equal(items.require$(wp, h1.id).hold, undefined);
     assert.deepEqual(dispatch.queue(wp, 'dev').map(w => w.id), [h1.id, h3.id], 'focus order, then rank, then age');
   } finally {
@@ -154,8 +156,8 @@ test('reviews come before stories: a free reviewer gets the queued review first,
     const r = story('Mic gate', 'owner');
     employees.talk(wp, 'nikhil', 'Long job', [], { autonomous: true });
     await tick();
-    items.update(wp, r.id, { status: 'in-progress' }, 'owner');
-    items.update(wp, r.id, { status: 'in-review', reviewerId: 'nikhil' }, 'owner');
+    items.update(wp, r.id, { status: 'in-progress', reason: 'test: moved' }, 'owner');
+    items.update(wp, r.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'owner');
     reviewWake.onItem(wp, r.id);
     assert.deepEqual(reviewWake.queued(wp, 'nikhil'), [r.id], 'queued: Nikhil is mid-turn');
     assert.equal(dispatch.dispatch(wp, 'nikhil').action, 'skipped', 'mid-turn: nothing pushed');
@@ -184,8 +186,8 @@ test('stale In review items (from before the review wake) are woken once; a revi
   const { wp, fake, story, done } = setup();
   try {
     const r = story('Errand flow — Server', 'owner');
-    items.update(wp, r.id, { status: 'in-progress' }, 'owner');
-    items.update(wp, r.id, { status: 'in-review', reviewerId: 'nikhil' }, 'owner');
+    items.update(wp, r.id, { status: 'in-progress', reason: 'test: moved' }, 'owner');
+    items.update(wp, r.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'owner');
     assert.equal(of(fake, 'nikhil').length, 0, 'no review wake running: nobody was woken');
 
     assert.deepEqual(dispatch.wakeStaleReviews(wp), [r.id]);
@@ -247,7 +249,7 @@ test('the idle alert for any other reason goes to Asha first; the COO hears only
   const { wp, fake, story, done } = setup();
   try {
     const x = story('Mic gate', 'dev');
-    items.update(wp, x.id, { status: 'in-progress' }, 'dev'); // In progress, but no session on it
+    items.update(wp, x.id, { status: 'in-progress', reason: 'test: moved' }, 'dev'); // In progress, but no session on it
     const y = story('Dance tempo', 'dev');
     const t0 = Date.now();
     // Its one automatic resume was already spent (the orphan rule), so it stays idle and is reported.
@@ -376,7 +378,7 @@ test('busy includes In-progress work with no session: the watcher queues a Ready
   const { wp, fake, story, done } = setup();
   try {
     const a = story('DND toggle expert', 'mira');
-    items.update(wp, a.id, { status: 'in-progress' }, 'mira');   // In progress, no session behind it
+    items.update(wp, a.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');   // In progress, no session behind it
     assert.equal(employees.openSession('mira'), undefined);
     const b = story('Decline counter', 'mira');
     const r = watch.check(wp, b.id, Date.now() + 16 * MIN)!;
@@ -398,9 +400,9 @@ test('orphan: an idle session left on a finished story does not hide the person\
     const s = fake.last();
     s.result({ costUsd: 0 });                                      // the turn ends; the session stays open, idle
     await tick();
-    items.update(wp, a.id, { status: 'in-review', reviewerId: 'nikhil' }, 'mira');
+    items.update(wp, a.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'mira');
     const b = story('Bluetooth toggle', 'mira');
-    items.update(wp, b.id, { status: 'in-progress' }, 'mira');     // In progress, nothing behind it
+    items.update(wp, b.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');     // In progress, nothing behind it
     assert.equal(employees.openSession('mira')!.assignmentId, a.id);
 
     const r = dispatch.dispatch(wp, 'mira');
@@ -416,7 +418,7 @@ test('a throttled orphan resume never falls through to starting new work: the In
   const { wp, fake, story, done } = setup();
   try {
     const a = story('Activity line (B9)', 'mira');
-    items.update(wp, a.id, { status: 'in-progress' }, 'mira');
+    items.update(wp, a.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
     // Resumed once already within the throttle window, so resumeOrphan returns null.
     wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`orphan-resumed:${a.id}`, new Date().toISOString());
     const b = story('Lower-ranked story', 'mira');

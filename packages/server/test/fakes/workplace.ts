@@ -47,3 +47,33 @@ export function testWorkplace(overrides: Partial<Record<string, string>> = {}): 
   return { wp, tmp };
 }
 
+
+/**
+ * The October 2026 org tree on top of the seed (opt-in; the seed itself has no CTO or engineers):
+ * owner → coo → (asha, cto); asha → the leads and the QA lead (nikhil); engineers under their leads:
+ * arjun and sameer under dev (conversation), ira under mira (experts); zoya and aditi are QA members
+ * (role qa) under the QA lead nikhil, so their team is nikhil's.
+ * In memory only, so other tests' org is untouched.
+ */
+export function withTree(wp: Workplace): Workplace {
+  const org = wp.org;
+  if (!org.roles.some(r => r.id === 'cto')) {
+    org.roles.push({ id: 'cto', title: 'Chief Technology Officer', level: 0, instructions: '', tools: {}, permissionMode: 'dontAsk', model: 'opus', budgetClass: 'high' });
+  }
+  const template = org.employees.find(e => e.id === 'dev')!;
+  const add = (id: string, name: string, roleId: string, reportsTo: string, charterIds: string[], level: 0 | 1 | 2): void => {
+    if (org.employees.some(e => e.id === id)) return;
+    org.employees.push({
+      id, name, roleId, level, permanent: level < 2, charterIds, unitId: template.unitId, chapterIds: [], reportsTo,
+      workspace: { ...template.workspace }, budget: { inrPerDay: 80, concurrentSessions: 1 }, state: 'idle',
+    });
+  };
+  add('cto', 'Vikram', 'cto', 'coo', [], 0);
+  add('arjun', 'Arjun', 'engineer', 'dev', ['conversation', 'character'], 2);
+  add('sameer', 'Sameer', 'engineer', 'dev', ['conversation'], 2);
+  add('ira', 'Ira', 'engineer', 'mira', ['experts'], 2);
+  add('zoya', 'Zoya', 'qa', 'nikhil', ['qa-release'], 2);
+  add('aditi', 'Aditi', 'qa', 'nikhil', ['qa-release'], 2);
+  for (const c of org.charters.values()) c.holderIds = org.employees.filter(e => e.charterIds.includes(c.id)).map(e => e.id);
+  return wp;
+}

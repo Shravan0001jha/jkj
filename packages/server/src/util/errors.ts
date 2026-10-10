@@ -65,3 +65,13 @@ export class Upstream extends BadRequest {
     this.status = status;
   }
 }
+
+/** The tree says no (rework, Oct 2026): only the assignee or someone above them changes a story. */
+export class Forbidden extends BadRequest {
+  override readonly status = 403;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'Forbidden';
+  }
+}

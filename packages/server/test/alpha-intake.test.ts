@@ -42,9 +42,9 @@ test('a triaged bug becomes one ranked story under Bug bash, its id goes back, a
     assert.equal(items.plan(wp).unfiled.find(c => c.epic.id === epic.id)!.progress.storiesTotal, 1);
 
     // Done → fixed reported exactly once.
-    items.update(wp, storyId, { status: 'in-progress', assigneeId: 'dev' } as never, 'asha');
-    items.update(wp, storyId, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
-    items.update(wp, storyId, { status: 'done' }, 'nikhil');
+    items.update(wp, storyId, { status: 'in-progress', assigneeId: 'dev', reason: 'test: moved' } as never, 'asha');
+    items.update(wp, storyId, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'dev');
+    items.update(wp, storyId, { status: 'done', reason: 'test: moved' }, 'nikhil');
     const be2 = fakeBackend([]);
     const r2 = await alpha.tick(wp, cfg, be2.fn);
     assert.deepEqual(r2.fixed, ['B1']);

@@ -36,7 +36,7 @@ test('In progress with no session for 10 min: one alert to Asha with who, how lo
   const { wp, story, done } = setup();
   try {
     const s = story('About screen version', 'tara');
-    items.update(wp, s.id, { status: 'in-progress' }, 'tara');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
     const t0 = Date.now();
     assert.deepEqual(stuck.sweep(wp, t0), []);
     assert.deepEqual(stuck.sweep(wp, t0 + 8 * MIN), [], 'not before 10 min');
@@ -57,7 +57,7 @@ test('In progress: a session on the item clears it, and the cleared alert is nev
   const { wp, story, done } = setup();
   try {
     const s = story('Footer', 'tara');
-    items.update(wp, s.id, { status: 'in-progress' }, 'tara');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
     const t0 = Date.now();
     stuck.sweep(wp, t0);
     stuck.sweep(wp, t0 + 11 * MIN);
@@ -74,10 +74,10 @@ test('In review with no reviewer session that has seen the request: alert names 
   const { wp, story, done } = setup();
   try {
     const s = story('Version label', 'tara');
-    items.update(wp, s.id, { status: 'in-progress' }, 'tara');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
     // Tara has a session on it; Nikhil (reviewer) has none.
     employees.assign(wp, s.id);
-    items.update(wp, s.id, { status: 'in-review', reviewerId: 'nikhil' }, 'tara');
+    items.update(wp, s.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'tara');
     const t0 = Date.now();
     stuck.sweep(wp, t0);
     assert.equal(stuck.sweep(wp, t0 + 11 * MIN).length, 1);
@@ -99,7 +99,7 @@ test('assigned to the Chief of Staff and not routed in 10 min: alert to Asha sug
     const [a] = alertsFor(wp, s.id);
     assert.notEqual(a!.state, 'coo', 'to Asha, not straight to the COO');
     assert.match(a!.text!, /Ready.*Asha \(Chief of Staff, to route it\).*not routed.*Suggested: reassign it to the owning developer/s);
-    items.update(wp, s.id, { assigneeId: 'tara' }, 'asha');
+    items.update(wp, s.id, { assigneeId: 'tara', reason: 'test: moved' }, 'asha');
     stuck.sweep(wp, t0 + 12 * MIN);
     assert.equal(alertsFor(wp, s.id)[0]!.resolved, true);
   } finally { await done(); }
@@ -109,7 +109,7 @@ test('the paused floor: nothing is checked or raised, and the clock starts again
   const { wp, story, done } = setup();
   try {
     const s = story('Paused work', 'tara');
-    items.update(wp, s.id, { status: 'in-progress' }, 'tara');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
     const t0 = Date.now();
     stuck.sweep(wp, t0);
     floor.setPaused(wp, true, 'test', 'owner');
@@ -130,7 +130,7 @@ test('In progress while the assignee is working another story: queued, not stuck
     const b = story('Second story, queued behind it', 'tara');
     employees.assign(wp, a.id);
     assert.ok(employees.sessionOn('tara', a.id));
-    items.update(wp, b.id, { status: 'in-progress' }, 'tara');
+    items.update(wp, b.id, { status: 'in-progress', reason: 'test: moved' }, 'tara');
     const t0 = Date.now();
     stuck.sweep(wp, t0);
     assert.deepEqual(stuck.sweep(wp, t0 + 11 * MIN), [], 'busy elsewhere is not stuck');

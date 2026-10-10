@@ -123,11 +123,11 @@ test('repeated identical transitions inside the window post one feed line and on
   const { wp, tmp } = testWorkplace();
   try {
     const { story, thread } = setup(wp);
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     const block = { status: 'blocked' as const, blockedReason: 'needs the Speaker API', waitingOn: 'external' };
     for (let i = 0; i < 3; i++) {
       items.update(wp, story.id, block, 'dev');
-      items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+      items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     }
     assert.deepEqual(lines(wp, story.id), ['started', 'blocked', 'unblocked']);
     assert.deepEqual(roomLines(wp, thread.id), [
@@ -139,11 +139,11 @@ test('repeated identical transitions inside the window post one feed line and on
     assert.equal(trail.activityFor(wp, story.id).filter(a => a.kind === 'status' && a.to === 'blocked').length, 3);
 
     // A different reason is a different line.
-    items.update(wp, story.id, { status: 'blocked', blockedReason: 'waiting on the TTS voice', waitingOn: 'owner' }, 'dev');
+    items.update(wp, story.id, { status: 'blocked', blockedReason: 'waiting on the TTS voice', waitingOn: 'owner', reason: 'test: moved' }, 'dev');
     assert.equal(lines(wp, story.id).at(-1), 'blocked');
 
     // Outside the window the same line posts again.
-    items.update(wp, story.id, { status: 'in-progress' }, 'owner');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'owner');
     const old = new Date(Date.now() - (wp.config.updateDedupeMinutes + 1) * 60_000).toISOString();
     wp.db.prepare('update updates set at = ? where item_id = ?').run(old, story.id);
     items.update(wp, story.id, block, 'dev');
@@ -158,12 +158,12 @@ test('an Unblocked line is posted only for a block that was announced', () => {
   const { wp, tmp } = testWorkplace();
   try {
     const { story, thread } = setup(wp);
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     // A block written without an announcement (as a legacy shutdown block was): leaving it says nothing.
     const row = work.get(wp, story.id)!;
     work.saveQuiet(wp, { ...row, state: 'blocked', status: 'blocked', blockedReason: 'old', waitingOn: 'coo', blockedSince: new Date().toISOString() });
     const before = roomLines(wp, thread.id).length;
-    items.update(wp, story.id, { status: 'in-progress' }, 'owner');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'owner');
     assert.ok(!lines(wp, story.id).includes('unblocked'));
     assert.equal(roomLines(wp, thread.id).length, before);
   } finally {

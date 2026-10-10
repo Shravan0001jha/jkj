@@ -93,7 +93,7 @@ test('QA woken before the developer approval is told to wait, and cannot move th
     assert.match(prompt, /wait: developer approval first/i);
     assert.doesNotMatch(prompt, /item_update on .* status in-progress/);
 
-    assert.throws(() => items.update(s.wp, s.id, { status: 'in-progress', note: 'no developer approval yet' }, 'nikhil'), /developer approval first/i);
+    assert.throws(() => items.update(s.wp, s.id, { status: 'in-progress', note: 'no developer approval yet' }, 'nikhil'), /developer approval first|Forbidden/i);
     await assert.rejects(flow.sendBack(s.wp, s.id, 'nikhil', 'no developer approval'), /developer approval first/i);
     assert.equal(rawGet(s.wp, s.id)!.status, 'in-review');
 

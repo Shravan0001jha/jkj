@@ -75,9 +75,9 @@ test('a release post lists every story and fix that shipped, grouped by area, on
     const e2 = items.create(wp, { level: 'epic', title: 'Recall', areaId: mem.id }, 'owner');
     const ship = (parentId: string, title: string, assigneeId: string) => {
       const s = items.create(wp, { level: 'story', parentId, title, assigneeId }, 'asha');
-      items.update(wp, s.id, { status: 'in-progress' }, assigneeId);
-      items.update(wp, s.id, { status: 'in-review', reviewerId: 'nikhil' }, assigneeId);
-      return items.update(wp, s.id, { status: 'done' }, 'nikhil');
+      items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, assigneeId);
+      items.update(wp, s.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, assigneeId);
+      return items.update(wp, s.id, { status: 'done', reason: 'test: moved' }, 'nikhil');
     };
     const a = ship(e1.id, 'Mic stays live at volume 0', 'dev');
     const b = ship(e2.id, 'Fix: recall drops the last fact', 'kabir');
@@ -113,7 +113,7 @@ test('a release run that finishes posts in the Releases room on its own', async 
     const voice = areas.create(wp, { title: 'Voice & audio' }, 'owner');
     const e1 = items.create(wp, { level: 'epic', title: 'Music', areaId: voice.id }, 'owner');
     const s = items.create(wp, { level: 'story', parentId: e1.id, title: 'Mic stays live', assigneeId: 'dev' }, 'asha');
-    items.update(wp, s.id, { status: 'done', resolution: 'done' }, 'owner');
+    items.update(wp, s.id, { status: 'done', resolution: 'done', reason: 'test: moved' }, 'owner');
     const rel = releases.propose(wp, 'desktop-mac', '0.2.16', 'nikhil');
     inbox.answer(wp, rel.inboxId, 'approve', undefined, 'web');
     await releases.run(wp, rel.id);

@@ -53,10 +53,10 @@ test('(2) a Blocked feed line carries one sentence of the reason (about 100 char
   try {
     const epic = items.create(wp, { level: 'epic', title: 'Iris during music' }, 'owner');
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'QA the music bundle', assigneeId: 'nikhil' }, 'asha');
-    items.update(wp, s.id, { status: 'in-progress' }, 'nikhil');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'nikhil');
     const reason = 'Dev\'s ducking build is not on the branch yet, so there is nothing to run the AC5 checks against on the real Mac. ' +
       'I also need the low-confidence fixtures from Mira. Once both land I can finish in about an hour.';
-    items.update(wp, s.id, { status: 'blocked', blockedReason: reason, waitingOn: 'external' }, 'nikhil');
+    items.update(wp, s.id, { status: 'blocked', blockedReason: reason, waitingOn: 'external', reason: 'test: moved' }, 'nikhil');
     const line = trail.updates(wp).find(u => u.kind === 'blocked' && u.itemId === s.id)!;
     const said = line.line.replace(/^Blocked: QA the music bundle — waiting on someone outside the team: /, '');
     assert.ok(said.length <= 101, `short: ${said}`);
@@ -66,8 +66,8 @@ test('(2) a Blocked feed line carries one sentence of the reason (about 100 char
     assert.equal(items.require$(wp, s.id).blocked!.reason, reason, 'the item keeps every word');
 
     const brief = items.create(wp, { level: 'story', parentId: epic.id, title: 'Short one', assigneeId: 'mira' }, 'asha');
-    items.update(wp, brief.id, { status: 'in-progress' }, 'mira');
-    items.update(wp, brief.id, { status: 'blocked', blockedReason: 'needs the API key', waitingOn: 'external' }, 'mira');
+    items.update(wp, brief.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
+    items.update(wp, brief.id, { status: 'blocked', blockedReason: 'needs the API key', waitingOn: 'external', reason: 'test: moved' }, 'mira');
     assert.equal(trail.updates(wp).find(u => u.kind === 'blocked' && u.itemId === brief.id)!.line, 'Blocked: Short one — waiting on someone outside the team: needs the API key');
   } finally {
     tmp.cleanup();

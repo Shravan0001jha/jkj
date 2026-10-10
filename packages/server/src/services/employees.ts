@@ -28,7 +28,7 @@ import * as readTools from './read-tools.js';
 // The owner's Inbox replies reach the asker durably (HLD D23, LLD §19.14); the module wires itself.
 import './reply-delivery.js';
 import { chiefOfStaffId, isWaitable, nameOf, rawGet } from './v2-map.js';
-import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org.js';
+import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg, ctoId, isTeamLead, managerOf, subtree } from './org.js';
 import { humanizeIds } from './id-names.js';
 import { now } from './store.js';
 import * as talkStore from './talk-store.js';
@@ -570,7 +570,7 @@ function releasePhantom(wp: Workplace, itemId: string, employeeId: string): void
   const since = Date.parse(it.statusSince ?? '');
   if (!Number.isFinite(since) || Date.now() - since > PHANTOM_START_MS) return;
   try {
-    items.update(wp, itemId, { status: 'ready' }, 'workplace');
+    items.update(wp, itemId, { status: 'ready', note: 'system: the session was switched back to a sent-back story before this one was begun' }, 'workplace');
     trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Back to Ready: ${nameOf(wp, employeeId)}'s session was switched back to a sent-back story before this one was begun.` });
     log.info('employees', `${employeeId}: ${itemId} released to ready (phantom start)`);
   } catch (e) {
@@ -1231,9 +1231,11 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
             return ok(`Not recorded: ${err instanceof Error ? err.message : String(err)}`);
           }
         }),
-      tool('ask_owner', 'Raise a real decision to the owner\'s Inbox, with your recommendation (required: one of the options, or what you would do). Use it only for what the handbook says needs the owner.',
+      tool('ask_owner', 'Chief of Staff and CTO only: raise a real decision to the owner\'s Inbox, with your recommendation (required: one of the options, or what you would do). Use it only for what the handbook says needs the owner. Everyone else: escalate to your manager.',
         { title: z.string(), body: z.string(), options: z.array(z.string()).optional(), recommendation: z.string().optional(), itemId: z.string().optional().describe('The work item this decision is about (default: your current assignment). One open ask per item reaches the owner.') },
         async ({ title, body, options, recommendation, itemId }) => {
+          // Rework (Oct 2026): only the Chief of Staff, the CTO and the COO ask the owner; everyone else goes up the chain.
+          if (!isChiefOfStaff(wp, employeeId) && employeeId !== ctoId(wp.org) && employeeId !== 'coo') return ok('Ask your manager: owner decisions go up the chain (escalate).');
           if (!recommendation?.trim()) return ok('Not filed: give your recommendation (one of the options, or what you would do). The owner decides faster with one.');
           const about = itemId?.trim() || session().assignmentId;
           const { item, reused } = inbox.raiseOrReuse(wp, { kind: 'decision', title, body, raisedBy: employeeId, recommendation, ...(about && rawGet(wp, about) ? { context: { itemId: about } } : {}), ...(options?.length ? { options: options.map(o => ({ id: o.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label: o })) } : {}) });
@@ -1359,21 +1361,42 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           try { const r = room.resolve(wp, threadId, { summary, by: employeeId, ...(followUps ? { followUps } : {}) }); return ok(`Resolved ${threadId}${r.followUps.length ? `; follow-ups ${r.followUps.join(', ')}` : ''}.`); }
           catch (err) { return ok(`Not resolved: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('escalate', 'Chief of Staff only: escalate a Team Room thread for a decision above your authority, with your recommendation (required). It goes to the COO FIRST (Claude), who answers it or forwards it to the owner\'s Inbox; only when the COO is offline does it go straight to the owner. Never tell the owner it is in his Inbox unless this tool says so.',
-        { threadId: z.string(), title: z.string(), body: z.string(), options: z.array(z.string()).optional(), recommendation: z.string().optional() },
-        async ({ threadId, title, body, options, recommendation }) => {
-          const emp = employee(wp, employeeId);
-          if (!emp.charterIds.includes('chief-of-staff') && emp.level !== 0) return ok('Only the Chief of Staff escalates; mention @asha in the thread.');
+      tool('escalate', 'Escalate a decision above your authority to your manager. Everyone: give itemId (default: your current story), a title and the body; your manager is woken with it and it is recorded on the item. ' +
+        'Chief of Staff and CTO: escalate a Team Room thread (threadId) with your recommendation (required); it goes to the COO FIRST (Claude), who answers it or forwards it to the owner\'s Inbox; only when the COO is offline does it go straight to the owner. Never tell the owner it is in his Inbox unless this tool says so.',
+        { threadId: z.string().optional(), itemId: z.string().optional(), title: z.string(), body: z.string(), options: z.array(z.string()).optional(), recommendation: z.string().optional() },
+        async ({ threadId, itemId, title, body, options, recommendation }) => {
+          const top = isChiefOfStaff(wp, employeeId) || employeeId === ctoId(wp.org);
+          if (!top) {
+            // Up the chain (rework, Oct 2026): the caller's manager is woken with the item and the text.
+            const manager = managerOf(wp.org, employeeId);
+            if (!manager || manager === 'owner' || employee(wp, manager).virtual) return ok('Not escalated: you have no manager to escalate to in the Workplace; ask Asha in the Room.');
+            const about = itemId?.trim() || currentStory(session());
+            if (about && !rawGet(wp, about)) return ok(`Not escalated: no item ${about}.`);
+            const rec = recommendation?.trim() ? ` My recommendation: ${recommendation.trim()}` : '';
+            const text = `${nameOf(wp, employeeId)} escalates to you${about ? ` on ${about} "${rawGet(wp, about)!.title}"` : ''}${threadId ? ` (Room thread ${threadId})` : ''}: ${title.trim()}\n\n${body.trim()}${rec}${options?.length ? `\nOptions: ${options.join(' / ')}` : ''}\n\nDecide it, or escalate it further (escalate).`;
+            let delivered = true;
+            try { talk(wp, manager, text, [], { autonomous: true, from: employeeId }); }
+            catch (err) { delivered = false; log.warn('employees', `escalate ${employeeId} → ${manager}: ${err instanceof Error ? err.message : err}`); }
+            if (about) {
+              try { trail.comment(wp, about, { by: employeeId, text: `Escalated to ${nameOf(wp, manager)}: ${title.trim()}`, details: `${body.trim()}${rec}`, mentions: [manager] }); }
+              catch (err) { log.warn('employees', `escalate comment on ${about}: ${err instanceof Error ? err.message : err}`); }
+            }
+            return ok(`Escalated to ${nameOf(wp, manager)}${delivered ? ', who has been woken with it' : ' (recorded; they could not be woken now and will see it on the item)'}. Carry on with other work until they answer.`);
+          }
+          if (!threadId) return ok('Not escalated: give the Team Room thread (threadId) to escalate.');
           if (!recommendation?.trim()) return ok('Not escalated: give your recommendation (one of the options, or what you would do).');
           try { const item = room.escalate(wp, threadId, { title, body, by: employeeId, recommendation, ...(options ? { options } : {}) }); return ok(String(item.id).startsWith('in_') ? `Escalated to the OWNER's Inbox (the COO is offline) as ${item.id}.` : `Escalated to the COO as ${item.id} (not the owner's Inbox). The COO answers it or forwards it to the owner; wait for that answer in this thread.`); }
           catch (err) { return ok(`Not escalated: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       /* ---------- v2: the plan (LLD §19.12) ---------- */
-      tool('item_create', 'Create an epic (Chief of Staff only; no parentId, optional targetDate YYYY-MM-DD; the COO decides focus), a story under an epic (Chief of Staff or the epic owner) or a task under a story (the story\'s assignee). One item per outcome: an open item with the same title under the same parent is returned instead of a copy.',
-        { level: z.enum(['epic', 'story', 'task']), parentId: z.string().optional(), title: z.string(), body: z.string().optional(), assigneeId: z.string().optional(), points: z.number().int().optional(), acceptance: z.array(z.string()).optional(), targetDate: z.string().optional(), type: z.enum(['bug']).optional().describe('bug: a story-level bug (level story).'), startsAfter: z.string().optional().describe('The item id this one starts after.') },
-        async ({ level, parentId, title, body, assigneeId, points, acceptance, targetDate, type, startsAfter }) => {
-          const emp = employee(wp, employeeId);
-          const isCos = emp.charterIds.includes('chief-of-staff') || (emp.level === 0 && !emp.virtual);
+      tool('item_create', 'Create an epic (Chief of Staff only; no parentId, optional targetDate YYYY-MM-DD; the COO decides focus), a story under an epic, or a task under a story (the story\'s assignee). ' +
+        'Anyone files a story or a bug: a bug (type bug) goes to the QA lead first for its RCA; a story you file goes to your manager, Ready (or to someone below you if you name them). type rca files an RCA-only story (no code). ' +
+        'One item per outcome: an open item with the same title under the same parent is returned instead of a copy.',
+        { level: z.enum(['epic', 'story', 'task']), parentId: z.string().optional(), title: z.string(), body: z.string().optional(), assigneeId: z.string().optional(), points: z.number().int().optional(), acceptance: z.array(z.string()).optional(), targetDate: z.string().optional(), type: z.enum(['bug', 'rca']).optional().describe('bug: a story-level bug (level story), routed to QA first; rca: a root-cause-only story, done when the RCA is posted.'), startsAfter: z.string().optional().describe('The item id this one starts after.') },
+        async ({ level, parentId, title, body, assigneeId: asked, points, acceptance, targetDate, type, startsAfter }) => {
+          const isCos = isChiefOfStaff(wp, employeeId);
+          let assigneeId = asked;
+          let reason: string | undefined;
           // Epics (owner, 3 Oct: the team does creation, the COO decides): the Chief of Staff files
           // them directly; focus stays the COO's call.
           if (level === 'epic') {
@@ -1386,29 +1409,41 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           if (!parentId) return ok('A story needs its epic (parentId) and a task its story.');
           const parent = rawGet(wp, parentId);
           if (!parent) return ok(`No item ${parentId}.`);
-          if (level === 'story' && !isCos && parent.ownerId !== employeeId) return ok('Only the Chief of Staff or the epic owner creates stories; ask Asha in the Room.');
           if (level === 'task' && !isCos && parent.employeeId !== employeeId) return ok('Only the story\'s assignee (or the Chief of Staff) splits it into tasks.');
+          if (level === 'story' && type === 'bug') {
+            // A bug goes to the QA lead first, whoever files it (rework, Oct 2026).
+            assigneeId = undefined;
+          } else if (level === 'story' && isCos) {
+            if (assigneeId && assigneeId !== employeeId && !isTeamLead(wp.org, assigneeId)) return ok(`Not created: route a story to the charter lead (the lead assigns within the team); ${nameOf(wp, assigneeId)} is not a lead.`);
+          } else if (level === 'story') {
+            // Filed by anyone else: to the filer's manager, Ready — or to someone below the filer they named.
+            if (!assigneeId || !subtree(wp.org, employeeId).includes(assigneeId)) {
+              assigneeId = managerOf(wp.org, employeeId);
+              if (assigneeId === 'owner' || (assigneeId && employee(wp, assigneeId).virtual)) assigneeId = undefined;
+              reason = `filed by ${nameOf(wp, employeeId)}`;
+            }
+          }
           const twin = items.duplicateOf(wp, parentId, title);
           if (twin) return ok(`Already exists as ${twin.id} (${twin.status}); work on that one.`);
           try {
-            const it = items.create(wp, { level, parentId, title, ...(type ? { type } : {}), ...(startsAfter ? { startsAfter } : {}), ...(body ? { body } : {}), ...(assigneeId ? { assigneeId } : {}), ...(points ? { points: points as never } : {}), ...(acceptance ? { acceptance } : {}) }, employeeId);
-            return ok(`Created ${it.id} (${it.level}, ${it.status}).`);
+            const it = items.create(wp, { level, parentId, title, ...(type ? { type } : {}), ...(startsAfter ? { startsAfter } : {}), ...(body ? { body } : {}), ...(assigneeId ? { assigneeId } : {}), ...(points ? { points: points as never } : {}), ...(acceptance ? { acceptance } : {}) }, employeeId, reason ? { reason } : {});
+            return ok(`Created ${it.id} (${it.level}, ${it.status}${it.assigneeId ? `, with ${nameOf(wp, it.assigneeId)}` : ''}).`);
           } catch (err) { return ok(`Not created: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('item_update', 'Move one of your items (start, block with a reason and who you wait on, send to review with a reviewer), or set its points. You never mark your own work done; the reviewer does. ' +
-        'Blocked is only for a wait on the owner (waitingOn owner, with your recommendation), the COO (coo), the release (release), another item (its id), or someone outside the team (external); it always needs blockedReason. ' +
+      tool('item_update', 'Every change needs a reason; you can change your own stories and those of people below you; reassign only to someone below you or to your manager. ' +
+        'Move an item (start, wait, park, send to review with a reviewer), or set its points. You never mark your own work done; the reviewer does. ' +
+        'waiting: on a person (waitingOn an employee id, owner with your recommendation, or coo) with a reason; it stays yours. parked: set aside with a reason and resumeWhen (what restarts it). ' +
+        'Blocked is only for external causes: the release (release), another item (its id), or someone outside the team (external); it needs blockedReason. ' +
         'startsAfter <itemId> records a dependency: the item starts after that one finishes, and flips to Ready by itself then. While it stays Blocked you can update waitingOn, blockedReason and startsAfter to keep the blocker current. ' +
-        'Waiting on a teammate is never Blocked: status blocked with waitingOn a teammate becomes In review with them reviewing when it is a review or sign-off (kind review), ' +
-        'or hands the item to them when it is their work (kind work): they work on it and give it back with item_handback.',
-        { itemId: z.string(), status: z.enum(['backlog', 'ready', 'in-progress', 'in-review', 'done', 'blocked']).optional(), blockedReason: z.string().optional(), waitingOn: z.string().optional(), startsAfter: z.string().optional().describe('The item id this one starts after; "" clears it.'), hold: z.boolean().optional().describe('Park it (true, with status backlog and a note saying why) so the dispatcher never auto-starts it; false releases it. Chief of Staff only.'), kind: z.enum(['review', 'work']).optional(), recommendation: z.string().optional(), reviewerId: z.string().optional(), points: z.number().int().optional(), note: z.string().optional(), assigneeId: z.string().optional().describe('Chief of Staff only: route the item to this employee.') },
-        async ({ itemId, status, blockedReason, waitingOn, startsAfter, hold, kind, recommendation, reviewerId, points, note, assigneeId }) => {
+        'With a teammate in waitingOn, kind review puts it In review with them reviewing; kind work hands the item to them until they give it back with item_handback. Without kind it is Waiting on them.',
+        { itemId: z.string(), status: z.enum(['backlog', 'ready', 'in-progress', 'in-review', 'waiting', 'parked', 'done', 'blocked']).optional(), reason: z.string().optional().describe('Why: required for any status or assignee change.'), blockedReason: z.string().optional(), waitingOn: z.string().optional().describe('waiting: an employee id, owner or coo. blocked: external, release or an item id.'), resumeWhen: z.string().optional().describe('parked: what has to happen for it to resume.'), startsAfter: z.string().optional().describe('The item id this one starts after; "" clears it.'), hold: z.boolean().optional().describe('Park it (true, with a note saying why) so the dispatcher never auto-starts it; false releases it to Backlog. Chief of Staff only.'), kind: z.enum(['review', 'work']).optional(), recommendation: z.string().optional(), reviewerId: z.string().optional(), points: z.number().int().optional(), note: z.string().optional().describe('Alias of reason.'), assigneeId: z.string().optional().describe('Reassign: to someone below you or to your manager (the Chief of Staff routes to a lead).') },
+        async ({ itemId, status, reason, blockedReason, waitingOn, resumeWhen, startsAfter, hold, kind, recommendation, reviewerId, points, note, assigneeId }) => {
           // A parked item must be held, or the dispatcher restarts it at once (5 Oct: Mira's music story bounced back 4 times).
-          if (hold !== undefined && !isChiefOfStaff(wp, employeeId)) return ok('Not changed: only the Chief of Staff parks or releases an item (hold); ask Asha.');
-          if (hold && status && status !== 'backlog') return ok('Not changed: a held item sits in backlog; use status backlog with hold true.');
-          if (status === 'blocked' && waitingOn === 'owner' && !recommendation?.trim()) return ok('Not changed: blocked on the owner raises a decision in his Inbox; give your recommendation.');
-          if (assigneeId && !isChiefOfStaff(wp, employeeId)) return ok('Not changed: only the Chief of Staff routes an item to someone; hand it over with status blocked, waitingOn and kind work instead.');
+          if (hold !== undefined && !isChiefOfStaff(wp, employeeId)) return ok('Not changed: only the Chief of Staff parks or releases an item (hold); use status parked with a reason and resumeWhen, or ask Asha.');
+          if (hold && status && status !== 'backlog' && status !== 'parked') return ok('Not changed: a hold parks the item; leave the status out.');
+          if ((status === 'blocked' || status === 'waiting') && waitingOn === 'owner' && !recommendation?.trim()) return ok('Not changed: waiting on the owner raises a decision in his Inbox; give your recommendation.');
           try {
-            const it = items.update(wp, itemId, { ...(assigneeId ? { assigneeId } : {}), ...(status ? { status } : hold ? { status: 'backlog' as const } : {}), ...(hold !== undefined ? { hold } : {}), ...(startsAfter !== undefined ? { startsAfter } : {}), ...(blockedReason ? { blockedReason } : {}), ...(waitingOn ? { waitingOn } : {}), ...(kind ? { kind } : {}), ...(recommendation ? { recommendation } : {}), ...(reviewerId ? { reviewerId } : {}), ...(points ? { points: points as never } : {}), ...(note ? { note } : {}) }, employeeId);
+            const it = items.update(wp, itemId, { ...(assigneeId ? { assigneeId } : {}), ...(status ? { status } : {}), ...(hold !== undefined ? { hold } : {}), ...(startsAfter !== undefined ? { startsAfter } : {}), ...(blockedReason ? { blockedReason } : {}), ...(waitingOn ? { waitingOn } : {}), ...(resumeWhen ? { resumeWhen } : {}), ...(kind ? { kind } : {}), ...(recommendation ? { recommendation } : {}), ...(reviewerId ? { reviewerId } : {}), ...(points ? { points: points as never } : {}), ...(reason ? { reason } : {}), ...(note ? { note } : {}) }, employeeId);
             if (status === 'blocked' && it.status !== 'blocked') return ok(notBlocked(wp, it));
             return ok(`${it.id} is ${it.trueStatus ? it.trueStatus : it.status}${it.blocker ? `, waiting on ${it.blocker.label} (${it.blocker.status})` : ''}.`);
           } catch (err) { return ok(`Not changed: ${err instanceof Error ? err.message : String(err)}`); }
@@ -1488,6 +1523,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
 
 /** The reply when a block on a teammate became a review or a handoff (LLD §19.6c). */
 function notBlocked(wp: Workplace, it: Item): string {
+  if (it.status === 'waiting') return `Not blocked: a wait on a person is Waiting on. ${it.id} is Waiting on ${nameOf(wp, it.waiting?.on)}; it stays yours. Blocked is for the release, another item or someone outside the team.`;
   return it.status === 'in-review'
     ? `Not blocked: waiting on a teammate's review is a review. ${it.id} is In review with ${nameOf(wp, it.reviewerId)}, who has been asked to review it.`
     : it.handoff

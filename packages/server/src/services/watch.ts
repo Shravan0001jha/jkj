@@ -130,7 +130,7 @@ function notStarted(wp: Workplace, w: WorkItem, nowMs: number): StallAction {
       failed = true;
     }
   }
-  items.update(wp, w.id, { status: 'backlog', note: `Moved to Backlog by Asha: ${reason}` }, asha(wp));
+  items.update(wp, w.id, { status: 'backlog', note: `system: moved to Backlog by Asha: ${reason}` }, asha(wp));
   trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: `Moved to Backlog: ${reason} (Ready for ${ready} min)` });
   // Asha first (LLD §19.6e): "not in focus" is a notice; a spend cap is the COO's call; a failed start is Asha's to act on.
   manager.alert(wp, {

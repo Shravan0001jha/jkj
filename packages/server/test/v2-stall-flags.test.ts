@@ -39,13 +39,13 @@ test('a stalled flag waits on Asha by default and reads as human time', () => {
   const { wp, tmp } = testWorkplace();
   try {
     const { epic, story } = setup(wp);
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     const idle = flagOf(wp, epic.id, story.id, Date.now() + 3 * HOUR + MIN)!;
     assert.equal(idle.kind, 'stalled');
     assert.equal(idle.waitingOn, 'asha', 'Asha owns stall handling (LLD §19.6e)');
     assert.equal(idle.reason, 'In progress 3 hours, no activity');
 
-    items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
+    items.update(wp, story.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'dev');
     const review = flagOf(wp, epic.id, story.id, Date.now() + 4 * DAY + MIN)!;
     assert.equal(review.reason, 'In review 4 days, untouched');
     assert.equal(review.waitingOn, 'asha');
@@ -60,7 +60,7 @@ test('after the assignee flags its own stall (no one named), the flag waits on t
   const { wp, tmp } = testWorkplace();
   try {
     const { epic, story } = setup(wp);
-    items.update(wp, story.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, story.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     watch.flag(wp, story.id, { by: 'dev', reason: 'the Speaker has no one-sentence primitive' });
     const f = flagOf(wp, epic.id, story.id, Date.now() + 2 * HOUR)!;
     assert.equal(f.kind, 'stalled');

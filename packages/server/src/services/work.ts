@@ -47,8 +47,10 @@ export interface CreateWork {
   platformIds?: string[];
   spec?: string;
   by?: string;
+  /** Why it was created this way ("filed by Arjun"): the created row's text, which the audit reads. */
+  note?: string;
   /** v2 fields set at creation (items.ts): level, parentId, status, points, reviewer, owner, area, rank, … */
-  v2?: Partial<Pick<WorkItem, 'level' | 'parentId' | 'status' | 'points' | 'reviewerId' | 'ownerId' | 'areaId' | 'rank' | 'targetDate' | 'acceptance' | 'hold'>>;
+  v2?: Partial<Pick<WorkItem, 'level' | 'parentId' | 'status' | 'points' | 'reviewerId' | 'ownerId' | 'areaId' | 'rank' | 'targetDate' | 'acceptance' | 'hold' | 'type'>>;
 }
 
 export function create(wp: Workplace, spec: CreateWork): WorkItem {
@@ -96,7 +98,7 @@ export function create(wp: Workplace, spec: CreateWork): WorkItem {
     rank: spec.v2?.rank ?? nextRank(wp, level, parentId, spec.v2?.areaId),
   };
   save(wp, item, true);
-  trail.afterChange(wp, null, item, by);
+  trail.afterChange(wp, null, item, by, spec.note);
   return item;
 }
 

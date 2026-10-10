@@ -76,7 +76,7 @@ test('Ready for 15 minutes outside the focus goes to Backlog with the reason; Ba
 
     // The old Chief-of-Staff routine must not resume a parked item either.
     const old = work.create(wp, { kind: 'assignment', title: 'Old parked', body: 'x', employeeId: 'kabir' });
-    items.update(wp, old.id, { status: 'backlog' }, 'coo');
+    items.update(wp, old.id, { status: 'backlog', reason: 'test: moved' }, 'coo');
     const tickResult = cos.tick(wp, Date.now() + 600 * MIN);
     assert.ok(!tickResult.resumed.includes(old.id));
     assert.ok(!tickResult.queued.includes(old.id));
@@ -117,7 +117,7 @@ test('In progress with no activity for 10 minutes: Asha is told at once, once pe
   try {
     coo.touchHeartbeatForTest(wp); // the COO is online: no fallback resume
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Duck music', assigneeId: 'mira' }, 'asha');
-    items.update(wp, s.id, { status: 'in-progress' }, 'mira');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
     assert.equal(watch.check(wp, s.id, Date.now() + 9 * MIN), null);
     const r = watch.check(wp, s.id, Date.now() + 11 * MIN)!;
     assert.equal(r.rule, 'idle');
@@ -152,7 +152,7 @@ test('idle with the agent\'s session open: it is asked to flag its own stall; wi
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Duck music', assigneeId: 'mira' }, 'asha');
     employees.assign(wp, s.id);
     await tick();
-    items.update(wp, s.id, { status: 'in-progress' }, 'mira');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
     const mira = () => fake.sessions.find(x => x.options.cwd.includes('/mira/'))!;
     mira().result(); // the turn ended; the session sits idle
     await tick();
@@ -161,7 +161,7 @@ test('idle with the agent\'s session open: it is asked to flag its own stall; wi
     assert.ok(mira().sent.some(m => /flag_stall/.test(m.text)), 'the agent is asked to flag itself');
 
     const t = items.create(wp, { level: 'story', parentId: epic.id, title: 'Resume me', assigneeId: 'kabir' }, 'asha');
-    items.update(wp, t.id, { status: 'in-progress' }, 'kabir');
+    items.update(wp, t.id, { status: 'in-progress', reason: 'test: moved' }, 'kabir');
     const kabir = () => fake.sessions.filter(x => x.options.cwd.includes('/kabir/')).length;
     const r2 = watch.check(wp, t.id, Date.now() + 11 * MIN)!;
     assert.equal(r2.action, 'resumed');
@@ -180,8 +180,8 @@ test('In review for 30 minutes untouched: Asha is told, naming the reviewer; not
   try {
     coo.touchHeartbeatForTest(wp);
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Review me', assigneeId: 'dev' }, 'asha');
-    items.update(wp, s.id, { status: 'in-progress' }, 'dev');
-    items.update(wp, s.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
+    items.update(wp, s.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'dev');
     assert.equal(watch.check(wp, s.id, Date.now() + 29 * MIN), null);
     const r = watch.check(wp, s.id, Date.now() + 31 * MIN)!;
     assert.equal(r.rule, 'unreviewed');
@@ -216,7 +216,7 @@ test('an agent flags its own stall the moment it happens: Asha hears at once', a
   const { wp, tmp, epic } = setup();
   try {
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Needs Rohan', assigneeId: 'dev' }, 'asha');
-    items.update(wp, s.id, { status: 'in-progress' }, 'dev');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'dev');
     const server = workplaceTools(wp, 'dev', () => ({ agentId: 'a', employeeId: 'dev', assignmentId: s.id, startedAt: '', seen: {}, planCaptured: false }));
     const [ct, st] = InMemoryTransport.createLinkedPair();
     await server.instance.connect(st);

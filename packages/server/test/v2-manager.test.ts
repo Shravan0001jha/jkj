@@ -131,11 +131,11 @@ test('the manager digest: every 20 minutes while work is active; nothing when th
     assert.equal(manager.digest(wp, t0), null, 'no work: no digest');
 
     const blocked = story('QA the bundle', 'nikhil');
-    items.update(wp, blocked.id, { status: 'in-progress' }, 'nikhil');
-    items.update(wp, blocked.id, { status: 'blocked', blockedReason: 'Needs the vendor build. It ships Friday.', waitingOn: 'external' }, 'nikhil');
+    items.update(wp, blocked.id, { status: 'in-progress', reason: 'test: moved' }, 'nikhil');
+    items.update(wp, blocked.id, { status: 'blocked', blockedReason: 'Needs the vendor build. It ships Friday.', waitingOn: 'external', reason: 'test: moved' }, 'nikhil');
     const review = story('Mic gate', 'owner');
-    items.update(wp, review.id, { status: 'in-progress' }, 'owner');
-    items.update(wp, review.id, { status: 'in-review', reviewerId: 'nikhil' }, 'owner');
+    items.update(wp, review.id, { status: 'in-progress', reason: 'test: moved' }, 'owner');
+    items.update(wp, review.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'owner');
     story('Dance tempo', 'dev');
     wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`paused:${spend.dayOf()}:employee:dev`, new Date().toISOString());
 
@@ -160,11 +160,11 @@ test('the manager digest repeats nothing: only items whose state changed or that
   try {
     const t0 = Date.now();
     const blocked = story('QA the bundle', 'nikhil');
-    items.update(wp, blocked.id, { status: 'in-progress' }, 'nikhil');
-    items.update(wp, blocked.id, { status: 'blocked', blockedReason: 'Needs the vendor build.', waitingOn: 'external' }, 'nikhil');
+    items.update(wp, blocked.id, { status: 'in-progress', reason: 'test: moved' }, 'nikhil');
+    items.update(wp, blocked.id, { status: 'blocked', blockedReason: 'Needs the vendor build.', waitingOn: 'external', reason: 'test: moved' }, 'nikhil');
     const review = story('Mic gate', 'owner');
-    items.update(wp, review.id, { status: 'in-progress' }, 'owner');
-    items.update(wp, review.id, { status: 'in-review', reviewerId: 'nikhil' }, 'owner');
+    items.update(wp, review.id, { status: 'in-progress', reason: 'test: moved' }, 'owner');
+    items.update(wp, review.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'test: moved' }, 'owner');
     story('Dance tempo', 'dev');
     wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`paused:${spend.dayOf()}:employee:dev`, new Date().toISOString());
 
@@ -224,8 +224,8 @@ test('the manager digest: an undelivered digest does not count as told', async (
   try {
     const t0 = Date.now();
     const blocked = story('QA the bundle', 'nikhil');
-    items.update(wp, blocked.id, { status: 'in-progress' }, 'nikhil');
-    items.update(wp, blocked.id, { status: 'blocked', blockedReason: 'Needs the vendor build.', waitingOn: 'external' }, 'nikhil');
+    items.update(wp, blocked.id, { status: 'in-progress', reason: 'test: moved' }, 'nikhil');
+    items.update(wp, blocked.id, { status: 'blocked', blockedReason: 'Needs the vendor build.', waitingOn: 'external', reason: 'test: moved' }, 'nikhil');
     // Asha is mid-turn: the first digest waits in the queue.
     manager.alert(wp, stalled(blocked.id, blocked.title), t0);
     await tick();

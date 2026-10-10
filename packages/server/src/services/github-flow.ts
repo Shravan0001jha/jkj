@@ -273,7 +273,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   const named = fresh.reviewerId ?? '';
   if (!holds(fresh.pr?.devApproval, fresh) && (!canApproveAsDeveloper(employeeOf(wp, named)) || named === fresh.employeeId)) {
     const dev = devReviewer(wp, fresh);
-    if (dev) items.update(wp, itemId, { reviewerId: dev, note: 'A developer reviews first, then QA' }, 'workplace');
+    if (dev) items.update(wp, itemId, { reviewerId: dev, note: 'system: a developer reviews first, then QA' }, 'workplace');
   }
 
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
@@ -474,7 +474,7 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
     const load: Record<string, number> = {};
     for (const i of items.list(wp, { status: 'in-review' })) if (i.reviewerId && i.id !== itemId) load[i.reviewerId] = (load[i.reviewerId] ?? 0) + 1;
     const qa = qaReviewer(wp.org.employees, w, [by], load);
-    if (qa && qa !== w.reviewerId) items.update(wp, itemId, { reviewerId: qa, note: 'Developer approval given; QA reviews next' }, by);
+    if (qa && qa !== w.reviewerId) items.update(wp, itemId, { reviewerId: qa, note: 'Developer approval given; QA reviews next' }, by, { checked: true });
     try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
     return { stage: 'dev', message: `Developer approval recorded (approval 1 of 2) on ${pr.headSha.slice(0, 8)}. QA reviews next${qa ? ` (${nameOf(wp, qa)})` : ''} for approval 2 of 2. Any new commit resets both approvals.` };
   }
@@ -487,7 +487,7 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, qaApproval: approval } }));
   trail.record(wp, { itemId, by, kind: 'note', text: `QA approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)} with a QA doc of ${doc.cases.length} edge cases (${qaPath})${approval.note ? `: ${approval.note}` : ''}` });
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
-  items.update(wp, itemId, { status: 'done', reviewerId: by, note: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer) and ${nameOf(wp, by)} (QA)` }, by);
+  items.update(wp, itemId, { status: 'done', reviewerId: by, note: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer) and ${nameOf(wp, by)} (QA)` }, by, { checked: true });
   const auto = await autoMerge(wp, itemId);
   const tail = auto === 'merged' ? 'The Workplace merged it into the trunk.'
     : auto === 'waiting' ? 'The Workplace merges it itself once the tests check is green: approved is not merged.'
@@ -508,7 +508,7 @@ export async function sendBack(wp: Workplace, itemId: string, by: string, note: 
   if (w.status !== 'in-review') throw new BadRequest(`This story is not in review (it is ${w.status}), so there is nothing to send back.`);
   if (!canApproveAsDeveloper(who) && !holds(w.pr.devApproval, w)) throw new BadRequest(QA_WAIT);
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, sendBack: { by, at: now(), note: note.trim() } } }));
-  items.update(wp, itemId, { status: 'in-progress', note: `Sent back by ${nameOf(wp, by)}: ${note.trim()}` }, by);
+  items.update(wp, itemId, { status: 'in-progress', note: `Sent back by ${nameOf(wp, by)}: ${note.trim()}` }, by, { checked: true });
   tellAuthor(wp, itemId, by, note.trim());
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
   return rawGet(wp, itemId)!;
@@ -788,7 +788,7 @@ function reopenForConflict(wp: Workplace, w: WorkItem): boolean {
   const note = `PR #${pr.number} conflicts with ${pr.base}, so it was not merged. Merge origin/${pr.base} into ${pr.branch}, resolve the conflict keeping both sides' intent, ` +
     'run scripts/pre-pr.sh, then report_done: the new commit needs both approvals again.';
   try {
-    items.update(wp, w.id, { status: 'in-progress', assigneeId: w.employeeId, note: `Reopened by the Workplace: ${note}` }, 'workplace');
+    items.update(wp, w.id, { status: 'in-progress', assigneeId: w.employeeId, note: `system: reopened by the Workplace: ${note}` }, 'workplace');
   } catch (err) {
     log.warn('github', `${w.id}: reopen after a merge conflict failed: ${errText(err)}`);
     return false;
