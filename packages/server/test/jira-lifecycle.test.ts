@@ -343,36 +343,20 @@ test('paused floor: the monitor is silent and its clocks restart after the resum
   } finally { await done(); }
 });
 
-test('Asha every 10 min, only new or changed violations, and no session when nothing is new', async () => {
+test('hygiene no longer tells Asha (LLD-rework W2 §6): violations are still computed, no alert and no session', async () => {
   const { wp, story, patch, done } = setup();
   try {
     const a = story('Bare A', 'tara');
     patch(a.id, { status: 'blocked', state: 'blocked', statusSince: new Date().toISOString() });
     const t0 = Date.now();
-    const r1 = hygiene.sweep(wp, t0);
-    assert.match(r1.asha!, /Board hygiene: 1 new or changed/);
-    assert.match(r1.asha!, /\(c\) "Bare A".*Fix:/);
-    assert.equal(hygieneAlerts(wp).length, 1);
     const sessions = runtime.sessions.length;
-
-    const b = story('Bare B', 'kabir');
-    patch(b.id, { status: 'blocked', state: 'blocked', statusSince: new Date().toISOString() });
-    assert.equal(hygiene.sweep(wp, t0 + 5 * MIN).asha, null, 'not before 10 min');
-    const r2 = hygiene.sweep(wp, t0 + 11 * MIN);
-    assert.match(r2.asha!, /1 new or changed \(2 open in all\)/);
-    assert.ok(r2.asha!.includes('Bare B') && !r2.asha!.includes('Bare A'), 'only the new one');
-
-    const r3 = hygiene.sweep(wp, t0 + 22 * MIN);
-    assert.equal(r3.asha, null, 'nothing new: nothing sent');
-    assert.equal(hygieneAlerts(wp).length, 2);
-
-    patch(a.id, { waitingOn: 'coo' }); // changed: now only the reason is missing
-    const r4 = hygiene.sweep(wp, t0 + 33 * MIN);
-    assert.ok(r4.asha && r4.asha.includes('Bare A') && /no blockedReason/.test(r4.asha), 'a changed violation is sent again');
-    assert.ok(runtime.sessions.length >= sessions);
-    const before = runtime.sessions.length;
-    hygiene.sweep(wp, t0 + 44 * MIN);
-    assert.equal(runtime.sessions.length, before, 'no session when nothing is new');
+    for (const m of [0, 11, 22, 33]) {
+      const r = hygiene.sweep(wp, t0 + m * MIN);
+      assert.equal(r.asha, null);
+      assert.ok(r.violations.some(v => v.rule === 'bad-block' && v.itemId === a.id), 'still computed');
+    }
+    assert.equal(hygieneAlerts(wp).length, 0);
+    assert.equal(runtime.sessions.length, sessions, 'no session for Asha');
   } finally { await done(); }
 });
 

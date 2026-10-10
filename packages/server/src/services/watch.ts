@@ -6,17 +6,22 @@ import * as trail from './trail.js';
 import * as items from './items.js';
 import * as waits from './waits.js';
 import * as coo from './coo.js';
-import * as cos from './cos.js';
-import * as spend from './spend.js';
 import * as manager from './manager.js';
-import { chiefOfStaffId, isAgent, levelOf, nameOf, rawGet, statusFromState } from './v2-map.js';
+import * as floor from './floor.js';
+import { isAgent, levelOf, nameOf, rawGet, statusFromState } from './v2-map.js';
 import { log } from '../util/logger.js';
 
 /**
- * The event-driven stall detector (HLD D21, LLD §19.6). No sweep: every item change, activity row,
+ * The event-driven stall watcher (HLD D21, LLD §19.6). No sweep: every item change, activity row,
  * comment and session event re-arms that item's deadline, and the deadline firing is the stall.
  * `evaluate` decides from the data alone (the timer is only a hint to look); `check` acts once per
  * episode; `startWatch` wires the timers.
+ *
+ * Since the October rework (LLD-rework-2026-10 W2 §6) it alerts nobody and moves nothing: no manager
+ * alert, no auto-start, no parking, no restart in a fresh session. It keeps the trail lines, the
+ * "queued for a busy assignee" mark the dispatcher reads, and the nudge into the idle session itself.
+ * Telling people about a stall is the stall chain's job (stall-chain.ts). `flag` (an agent flagging
+ * its own stall) is unchanged.
  */
 
 export interface Evaluation {
@@ -71,7 +76,7 @@ export function evaluate(wp: Workplace, w: WorkItem, nowMs = Date.now()): Evalua
   return null;
 }
 
-export type StallAction = 'started' | 'backlog' | 'queued' | 'notified' | 'resumed';
+export type StallAction = 'queued' | 'notified' | 'noted';
 
 const episodeKey = (id: string): string => `stall:${id}`;
 const handled = (wp: Workplace, id: string, episode: string): boolean =>
@@ -81,107 +86,62 @@ const handled = (wp: Workplace, id: string, episode: string): boolean =>
 export function check(wp: Workplace, id: string, nowMs = Date.now()): { rule: StallRule; action: StallAction } | null {
   const w = rawGet(wp, id);
   if (!w) return null;
+  // "Pause all": nothing is parked, queued or moved while the floor is paused (LLD-rework W2 §7).
+  if (floor.paused(wp)) return null;
   const ev = evaluate(wp, w, nowMs);
   if (!ev?.stalled) return null;
   const episode = `${ev.rule}:${ev.since}`;
   if (handled(wp, id, episode)) return null;
   wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(episodeKey(id), episode);
-  const action = ev.rule === 'not-started' ? notStarted(wp, w, nowMs) : ev.rule === 'idle' ? idle(wp, w, ev, nowMs) : unreviewed(wp, w, ev, nowMs);
+  const action = ev.rule === 'not-started' ? notStarted(wp, w) : ev.rule === 'idle' ? idle(wp, w, ev) : unreviewed(wp, w, ev, nowMs);
   log.info('watch', `${id} ${ev.rule}: ${action}`);
   return { rule: ev.rule, action };
 }
 
-const asha = (wp: Workplace): string => chiefOfStaffId(wp) ?? 'workplace';
 const mins = (wp: Workplace, rule: StallRule): number => Math.round(thresholds(wp)[rule] / MIN);
 
 /**
- * Ready for 15 minutes: Asha starts it (in focus, assignee free, within budget); with the assignee busy
- * it stays Ready, queued for them, and the dispatcher starts it when they are free (outage 2 Oct, LLD
- * §19.6d: Backlog for "busy" was never restarted); otherwise it is parked with the reason.
+ * Ready past the threshold (LLD-rework W2 §2, §6). The watcher no longer starts it, parks it, or
+ * alerts anyone: the dispatcher starts the next story for a free person, and the stall chain tells the
+ * lead, Asha, the COO and the owner in turn. What stays is the bookkeeping the dispatcher reads: with
+ * its assignee busy elsewhere it is marked queued for them, so it is not a "not started" stall.
  */
-function notStarted(wp: Workplace, w: WorkItem, nowMs: number): StallAction {
-  const name = nameOf(wp, w.employeeId);
+function notStarted(wp: Workplace, w: WorkItem): StallAction {
   const open = employees.openSession(w.employeeId!);
-  let reason: string | null = null;
-  let capped = false;
-  let failed = false;
-  const ready = mins(wp, 'not-started');
-  // Busy is an open session OR other work already In progress (3 Oct: an In-progress story with no
-  // session behind it read as "free", so a second story started on top of it, three times in 20 min).
   const wip = wp.db.prepare("select id from work where employee_id = ? and status = 'in-progress' and id != ? limit 1").get(w.employeeId!, w.id) as { id: string } | undefined;
-  if (items.inFocus(wp, w) && (open || wip)) {
+  if (open || wip) {
+    const name = nameOf(wp, w.employeeId);
     const onId = open?.assignmentId ?? wip?.id;
     const on = onId ? rawGet(wp, onId)?.title ?? onId : 'another session';
-    items.markQueued(wp, w.id, asha(wp));
-    trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: `Queued for ${name}: busy on ${on}; starts when ${name} is free (Ready for ${ready} min)` });
-    manager.alert(wp, { key: `queued:${w.id}:${w.statusSince ?? w.updatedAt}`, itemId: w.id, title: `Queued: ${w.title}`, body: `Ready for ${ready} min; ${name} is busy on ${on}, so it is queued for ${name} and starts when ${name} is free.`, by: asha(wp), subjectId: w.employeeId, notice: true }, nowMs);
+    items.markQueued(wp, w.id, 'workplace');
+    trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'stall', text: `Queued for ${name}: busy on ${on}; starts when ${name} is free (Ready for ${mins(wp, 'not-started')} min)` });
     return 'queued';
   }
-  if (!items.inFocus(wp, w)) reason = 'not in focus';
-  else if (!spend.canSpend(wp, w.employeeId!, spend.dayOf(new Date(nowMs))).ok) { reason = `${name} is paused by the spend cap`; capped = true; }
-  if (!reason) {
-    try {
-      employees.assign(wp, w.id);
-      trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: `Started by Asha: Ready for ${ready} min and in focus` });
-      manager.alert(wp, { key: `started:${w.id}:${w.statusSince ?? w.updatedAt}`, itemId: w.id, title: `Started: ${w.title}`, body: `Ready for ${ready} min; Asha started ${name} on it.`, by: asha(wp), subjectId: w.employeeId, notice: true }, nowMs);
-      return 'started';
-    } catch (err) {
-      reason = `could not start: ${err instanceof Error ? err.message : String(err)}`;
-      failed = true;
-    }
-  }
-  items.update(wp, w.id, { status: 'backlog', note: `Moved to Backlog by Asha: ${reason}` }, asha(wp));
-  trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: `Moved to Backlog: ${reason} (Ready for ${ready} min)` });
-  // Asha first (LLD §19.6e): "not in focus" is a notice; a spend cap is the COO's call; a failed start is Asha's to act on.
-  manager.alert(wp, {
-    key: `parked:${w.id}:${w.statusSince ?? w.updatedAt}`, itemId: w.id, title: `Parked: ${w.title}`,
-    body: `Ready for ${ready} min and not started; moved to Backlog: ${reason}.`, by: asha(wp), subjectId: w.employeeId,
-    ...(capped ? { decision: 'spend' as const } : failed ? {} : { notice: true }),
-  }, nowMs);
-  return 'backlog';
+  return 'noted';
 }
 
-/** In progress with no activity: Asha now (the COO if she does not act); the agent asked to flag itself; Asha's resume if the COO is away. */
-function idle(wp: Workplace, w: WorkItem, ev: Evaluation, nowMs: number): StallAction {
-  const name = nameOf(wp, w.employeeId);
-  const m = Math.floor((nowMs - Date.parse(ev.since)) / MIN);
+/**
+ * In progress with no activity: the agent on it is asked to flag itself or carry on (a message to its
+ * own session; nothing else is moved). No alert, and no restart in another session: the stall chain
+ * owns that (LLD-rework W2 §6).
+ */
+function idle(wp: Workplace, w: WorkItem, ev: Evaluation): StallAction {
   trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'stall', text: `No activity for ${mins(wp, 'idle')} min (last at ${ev.since.slice(11, 16)} UTC)` });
-  manager.alert(wp, { key: `idle:${w.id}:${ev.since}`, itemId: w.id, title: `Stalled: ${w.title}`, body: `${name}'s ${levelOf(w)} has had no activity for ${m} min (since ${ev.since.slice(11, 16)} UTC).`, by: 'workplace', subjectId: w.employeeId }, nowMs);
   const s = sessionOn(w);
-  if (s) {
-    try {
-      runs.sendMessage(s.agentId, `No activity on "${w.title}" for ${mins(wp, 'idle')} minutes. If you are stuck, call flag_stall with why (and who you are waiting on); otherwise carry on and post a one-line status.`, [], { from: 'workplace' });
-    } catch (err) {
-      log.warn('watch', `nudge ${w.id}: ${err instanceof Error ? err.message : err}`);
-    }
-    return 'notified';
-  }
-  if (!coo.presence(wp).online) {
-    const key = `stall-resume:${w.id}`;
-    const last = (wp.db.prepare('select value from settings where key = ?').get(key) as { value: string } | undefined)?.value;
-    const why = cos.whyWaiting(wp, w, spend.dayOf(new Date(nowMs)));
-    if (!why && (!last || nowMs - Date.parse(last) > 60 * MIN)) {
-      try {
-        employees.assign(wp, w.id);
-        wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(key, new Date(nowMs).toISOString());
-        trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: 'Asha resumed it in a fresh session (the COO is offline)' });
-        return 'resumed';
-      } catch (err) {
-        trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: `Asha could not resume it: ${err instanceof Error ? err.message : String(err)}` });
-      }
-    } else if (why) {
-      trail.record(wp, { itemId: w.id, by: asha(wp), kind: 'stall', text: `Not resumed: ${why}` });
-    }
+  if (!s) return 'noted';
+  try {
+    runs.sendMessage(s.agentId, `No activity on "${w.title}" for ${mins(wp, 'idle')} minutes. If you are stuck, call flag_stall with why (and who you are waiting on); otherwise carry on and post a one-line status.`, [], { from: 'workplace' });
+  } catch (err) {
+    log.warn('watch', `nudge ${w.id}: ${err instanceof Error ? err.message : err}`);
   }
   return 'notified';
 }
 
+/** In review untouched: a line on the item's trail only (the review queue and the stall chain act). */
 function unreviewed(wp: Workplace, w: WorkItem, ev: Evaluation, nowMs: number): StallAction {
   const m = Math.floor((nowMs - Date.parse(ev.since)) / MIN);
-  const reviewer = nameOf(wp, w.reviewerId);
-  trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'stall', text: `In review for ${m} min with nothing from ${reviewer}` });
-  manager.alert(wp, { key: `unreviewed:${w.id}:${ev.since}`, itemId: w.id, title: `Unreviewed: ${w.title}`, body: `In review for ${m} min; the reviewer is ${reviewer}.`, by: 'workplace', ...(w.reviewerId ? { subjectId: w.reviewerId } : {}) }, nowMs);
-  return 'notified';
+  trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'stall', text: `In review for ${m} min with nothing from ${nameOf(wp, w.reviewerId)}` });
+  return 'noted';
 }
 
 /**
