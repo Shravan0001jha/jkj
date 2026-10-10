@@ -300,6 +300,9 @@ export interface WorkItem {
   prRefused?: { at: string; sha: string; reasons: string[] };
   /** The story's latest finished robot-suite run (run_evidence, docs/LLD-evidence.md §1). */
   evidenceRun?: EvidenceRunRecord;
+  /** The story's Notion doc (W7, doc_write): its page URL and page id. One doc per story. */
+  docUrl?: string;
+  docId?: string;
 }
 
 /* ---------- evidence runs (docs/LLD-evidence.md) ---------- */

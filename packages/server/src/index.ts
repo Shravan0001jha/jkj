@@ -43,6 +43,7 @@ import * as pace from './services/pace.js';
 import * as alphaIntake from './services/alpha-intake.js';
 import * as health from './services/health.js';
 import * as inbox from './services/inbox.js';
+import * as docs from './services/docs.js';
 import { OPEN_DECISIONS } from './seed-data/checklist.js';
 import { log } from './util/logger.js';
 
@@ -210,6 +211,10 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   // AWS actuals once a day, after the digest hour.
   const awsTimer = setInterval(() => { if (config.awsCost) void awsCost.reconcileYesterday(wp).catch(err => log.warn('aws-cost', String(err))); }, 60 * 60_000);
   const digestTimer = setInterval(() => void digestService.maybeSend(wp, telegram, config.digestHour), 60_000);
+  // Notion docs (LLD W7 §6): the owner's doc comments reach the doc's owner. A no-op without the key.
+  const docsTimer = setInterval(() => {
+    void docs.relaySweep(wp, { deliver: (id, text, about) => deliverDocComment(wp, id, text, about) }).catch(err => log.warn('docs', `comment relay: ${err instanceof Error ? err.message : err}`));
+  }, 120_000);
   // Weekly pacing (owner, 3 Oct): day N of the week may use at most N × 14% of the weekly limit.
   const stopPace = process.env['WORKPLACE_TEST_GUARD'] === '1' ? () => {} : pace.start(wp);
   // Alpha intake (owner, 3 Oct): tester-confirmed bugs are pulled into the Bug bash epic.
@@ -244,6 +249,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       stopEvidence();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
+      clearInterval(docsTimer);
       stopPace();
       stopAlpha();
       telegram.stop();
@@ -255,6 +261,14 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       held.release();
     },
   };
+}
+
+/** An owner's Notion comment, to the doc's owner: their session (as a mention is), or the COO bridge for the COO. */
+function deliverDocComment(wp: Workplace, employeeId: string, text: string, about: { itemId: string; title: string }): void {
+  const emp = wp.org.employees.find(e => e.id === employeeId);
+  if (!emp) return;
+  if (emp.virtual) { coo.notifyMention(wp, { threadId: `item:${about.itemId}`, threadTitle: about.title, by: 'owner', text }); return; }
+  employees.talk(wp, employeeId, text, [], { autonomous: true, probe: true });
 }
 
 function seedDecisions(wp: Workplace): void {

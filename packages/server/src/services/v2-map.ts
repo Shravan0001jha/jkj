@@ -139,6 +139,7 @@ export function projectItem(wp: Workplace, w: WorkItem): Item {
     ...(w.queuedFor && status === 'ready' ? { queuedFor: w.queuedFor } : {}),
     ...(w.mergedInto ? { mergedInto: w.mergedInto } : {}),
     ...(w.releasedIn ? { releasedIn: w.releasedIn } : {}),
+    ...(w.docUrl ? { docUrl: w.docUrl } : {}),
     legacy: { kind: w.kind, state: w.state, ...(w.charterId ? { charterId: w.charterId } : {}), ...(w.featureId ? { featureId: w.featureId } : {}) },
     createdAt: w.createdAt,
     updatedAt: w.updatedAt,
