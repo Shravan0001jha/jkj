@@ -1,7 +1,10 @@
-import type { InboxKind, RoomMessage, RoomThread } from '@jkj/shared';
+import type { InboxKind } from '@jkj/shared';
 import type { Workplace, WorkplaceEvent } from './workplace.js';
 import * as inbox from './inbox.js';
+import { superFocusActive } from './focus.js';
 import { log } from '../util/logger.js';
+
+export { superFocusActive } from './focus.js';
 
 /**
  * Push intents for the owner's phone (LLD-workplace-push §3, §4).
@@ -11,13 +14,16 @@ import { log } from '../util/logger.js';
  * device tokens and the APNs key; the Mac holds neither. Nothing here ever
  * blocks a Workplace event.
  *
- * What pushes: every Inbox item (an `alert` with `inboxId`), alerts at
- * `needs-you` / `blocked` / `cap` without one, and Team Room messages that
- * @mention the owner. What never pushes: `info`, answered items, the owner's
- * own messages, anything while the tunnel is down or push is off.
+ * What pushes (rework W4; owner, 10 Oct: "only what needs the owner"): an
+ * owner Inbox item (an `alert` with `inboxId`, after the COO's 15-minute hold),
+ * alerts at `needs-you` (a tool approval, the COO pickup alarm) / `blocked` (a
+ * failed release) / `cap`, and a stall's `ring` (critical sound, never held by
+ * quiet hours: the stall chain already decided it may ring). What never pushes:
+ * `info`, answered items, Updates, Team Room mentions, anything while the tunnel
+ * is down or push is off.
  */
 
-export type PushLevel = 'needs-you' | 'blocked' | 'cap' | 'mention' | 'update';
+export type PushLevel = 'needs-you' | 'blocked' | 'cap' | 'mention' | 'update' | 'ring';
 export type PushCategory = 'WP_INBOX' | 'WP_ROOM' | 'WP_ALERT' | 'WP_UPDATE';
 
 export interface PushIntent {
@@ -30,6 +36,8 @@ export interface PushIntent {
   category: PushCategory;
   /** Ids and the deep link only; never content. */
   data: { link: string; inboxId?: string; threadId?: string; employeeId?: string; itemId?: string };
+  /** A ring: the relay asks APNs for a critical alert sound where the app is entitled to it, else the default. */
+  sound?: 'critical';
 }
 
 export interface PushResult { id: string; sent: number; dropped: number; failed: number }
@@ -87,18 +95,27 @@ export function ownerMentionPattern(handles: string[]): RegExp {
 const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'alert';
 
 /** Pure: the intent an event calls for, or null. */
-export function intentFor(wp: Workplace, event: WorkplaceEvent, handles: string[]): PushIntent | null {
+export function intentFor(wp: Workplace, event: WorkplaceEvent, _handles: string[]): PushIntent | null {
   if (event.type === 'alert') {
     if (event.level === 'info') return null;
     if (event.inboxId) {
       const item = inbox.get(wp, event.inboxId);
       if (item && item.state !== 'open') return null;
+      // Still held for the COO (rework W4): its push comes when the hold ends.
+      if (item?.cooHold && Date.parse(item.cooHold.until) > Date.now()) return null;
       const raiser = item ? nameOf(wp, item.raisedBy) : '';
       const body = item ? `${KIND_LABEL[item.kind] ?? 'Needs you'}${raiser ? ` · from ${raiser}` : ''}` : GENERIC_BODY;
       return {
         id: newId(), title: oneLine(item?.title ?? event.title, TITLE_MAX), body,
         collapseId: `inbox:${event.inboxId}`, threadId: 'inbox', level: 'needs-you', category: 'WP_INBOX',
         data: { link: `inbox/${event.inboxId}`, inboxId: event.inboxId },
+      };
+    }
+    if (event.level === 'ring') {
+      return {
+        id: newId(), title: oneLine(event.title, TITLE_MAX), body: scrub(event.body),
+        collapseId: `ring:${slug(event.title)}`, threadId: 'alerts', level: 'ring', category: 'WP_ALERT', sound: 'critical',
+        data: { link: 'office' },
       };
     }
     const employee = wp.org.employees.find(e => event.title.startsWith(`${e.name} `) || event.title.startsWith(`${e.id} `));
@@ -109,32 +126,16 @@ export function intentFor(wp: Workplace, event: WorkplaceEvent, handles: string[
       data: { link: employee ? `employee/${employee.id}` : 'office', ...(employee ? { employeeId: employee.id } : {}) },
     };
   }
-  // v2 (HLD D22): the Updates the owner chose to be pushed — start, block, the brief, the review.
-  if (event.type === 'update.posted') {
-    const u = event.update;
-    if (!u.push) return null;
-    return {
-      id: newId(), title: oneLine(u.line, TITLE_MAX), body: u.kind === 'brief' ? 'Your morning brief' : u.kind === 'review' ? 'The weekly review' : 'Updates',
-      collapseId: `update:${u.itemId ?? u.kind}`, threadId: 'updates', level: u.kind === 'blocked' ? 'blocked' : 'update', category: 'WP_UPDATE',
-      data: { link: u.href, ...(u.itemId ? { itemId: u.itemId } : {}), ...(u.inboxId ? { inboxId: u.inboxId } : {}) },
-    };
-  }
-  if (event.type === 'room.message') {
-    const { message, thread } = event as { message: RoomMessage; thread: RoomThread };
-    if (message.owner || message.by === 'owner') return null;
-    if (!ownerMentionPattern(handles).test(message.text)) return null;
-    return {
-      id: newId(), title: oneLine(`${nameOf(wp, message.by)} mentioned you in "${thread.title}"`, TITLE_MAX),
-      body: scrub(message.text.split('\n').find(l => l.trim()) ?? ''),
-      collapseId: `room:${thread.id}`, threadId: 'room', level: 'mention', category: 'WP_ROOM',
-      data: { link: `room/${thread.id}`, threadId: thread.id },
-    };
-  }
+  // Rework W4: Updates and Team Room mentions no longer push; the owner reads them in the app.
   return null;
 }
 
-/** "23-07": IST hours during which needs-you and mentions are not sent (cap and blocked still are). */
-export function inQuietHours(spec: string | undefined, at: number): boolean {
+/**
+ * "23-07": IST hours during which needs-you pushes are not sent (cap, blocked and ring still are).
+ * With a Workplace, super focus switches quiet hours off while it lasts (rework W4).
+ */
+export function inQuietHours(spec: string | undefined, at: number, wp?: Workplace): boolean {
+  if (wp && superFocusActive(wp, at)) return false;
   const m = /^(\d{1,2})-(\d{1,2})$/.exec(spec ?? '');
   if (!m) return false;
   const from = Number(m[1]) % 24, to = Number(m[2]) % 24;
@@ -171,11 +172,12 @@ export class Push {
     if (!intent) return null;
     const now = this.now();
     this.rollDay(now);
-    if ((intent.level === 'needs-you' || intent.level === 'mention' || intent.level === 'update') && inQuietHours(this.wp.config.pushQuiet, now)) return null;
+    if ((intent.level === 'needs-you' || intent.level === 'mention' || intent.level === 'update') && inQuietHours(this.wp.config.pushQuiet, now, this.wp)) return null;
     const prior = this.seen.get(intent.collapseId);
     if (prior && now - prior.at < DEDUPE_MS && prior.title === intent.title) return null;
     while (this.window.length && now - this.window[0]! >= 60_000) this.window.shift();
-    if (this.window.length >= BURST_PER_MINUTE) {
+    // A ring is never folded into a burst summary: it is the one push that must sound.
+    if (intent.level !== 'ring' && this.window.length >= BURST_PER_MINUTE) {
       this.suppressed += 1;
       this.suppressedToday += 1;
       if (now - this.lastSummaryAt < 60_000) return null;

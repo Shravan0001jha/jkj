@@ -41,6 +41,8 @@ export interface ReplyDelivery {
   target: string;
   /** When the owner replied. */
   at: string;
+  /** Rework W4: 'coo' when this is the COO's answer on the owner's behalf (absent = the owner's reply). */
+  from?: 'coo';
   text: string;
   deliveredAt?: string;
   /** The run it was last handed to (an employee target). */
@@ -86,6 +88,11 @@ function linkedItems(wp: Workplace, item: InboxItem): string[] {
 
 function prompt(item: InboxItem, d: ReplyDelivery): string {
   const again = d.attempts > 0 ? '\n\n(Sent again: the first delivery was lost when the session it went to ended.)' : '';
+  if (d.from === 'coo') {
+    const option = item.answer ? item.options.find(o => o.id === item.answer!.optionId)?.label : undefined;
+    return `The COO answered "${item.title}" (${item.id}) on the owner's behalf${option ? ` (${option})` : ''}: "${d.text}"\n\n` +
+      `Act on it; the owner was not asked. Acknowledge in the same thread with inbox_reply, in a few short lines.${again}`;
+  }
   return `The owner replied on "${item.title}" (${item.id}): "${d.text}"\n\nAnswer in the same thread with inbox_reply, in a few short lines. ` +
     `The item is ${item.state === 'open' ? 'still open' : item.state}${item.options.length ? `; its options are ${item.options.map(o => o.label).join(', ')}` : ''}.${again}`;
 }
@@ -120,6 +127,18 @@ export function onOwnerReply(wp: Workplace, item: InboxItem, message: InboxMessa
     try { coo.relayInboxReply(wp, { inboxId: item.id, title: item.title, text: message.text, messageId: message.id, copy: true, raisedBy: item.raisedBy }); }
     catch (err) { log.warn('inbox', `COO copy of ${message.id}: ${err instanceof Error ? err.message : err}`); }
   }
+  return deliver(wp, d, nowMs);
+}
+
+/**
+ * Rework W4: the COO resolved an owner item (POST /api/coo/owner-inbox/:id/resolve). His answer
+ * reaches the raiser the same durable way as an owner reply: recorded, delivered, re-delivered until
+ * acknowledged, escalated if not. Nothing to deliver when the item has no agent to tell.
+ */
+export function deliverCooAnswer(wp: Workplace, item: InboxItem, message: InboxMessage, nowMs = Date.now()): ReplyDelivery | undefined {
+  const target = targetOf(wp, item);
+  if (target === coo.COO_ID) return undefined;
+  const d = save(wp, { messageId: message.id, inboxId: item.id, target, at: message.at, text: message.text, attempts: 0, from: 'coo' });
   return deliver(wp, d, nowMs);
 }
 
@@ -175,11 +194,12 @@ export function sweep(wp: Workplace, nowMs = Date.now()): { acked: string[]; red
     const title = item?.title ?? d.inboxId;
     const who = nameOf(wp, d.target);
     const mins = Math.round(age / MIN);
+    const whose = d.from === 'coo' ? 'COO\'s answer' : 'Owner\'s reply';
     if (age >= ASHA_AFTER_MS && !d.ashaAt) {
       manager.alert(wp, {
         // The Inbox id, not a work item: manager.escalate leaves it alone; the COO step is ours, at 20 min.
         key: ashaKey(d), itemId: d.inboxId, by: 'workplace', subjectId: d.target,
-        title: `Owner's reply not answered: ${title}`,
+        title: `${whose} not answered: ${title}`,
         body: `${who} has not answered the owner's reply in ${mins} min.`,
         text: `The owner replied on "${title}" (${d.inboxId}) ${mins} min ago and ${who} has not answered: "${d.text}". ` +
           `Make sure ${who} has it and answers in the thread with inbox_reply (or answer it yourself with inbox_reply if ${who} cannot).`,
@@ -191,7 +211,7 @@ export function sweep(wp: Workplace, nowMs = Date.now()): { acked: string[]; red
       const linked = item ? linkedItems(wp, item)[0] : undefined;
       coo.notifyStall(wp, {
         itemId: linked ?? d.inboxId, by: 'workplace',
-        title: `Owner's reply not answered: ${title}`,
+        title: `${whose} not answered: ${title}`,
         body: `The owner replied on ${d.inboxId} ${mins} min ago and ${who} has not answered (delivered ${d.attempts} time${d.attempts === 1 ? '' : 's'}${d.lastError ? `; last error: ${d.lastError}` : ''}). Asha was told at 10 min. The reply: "${d.text}"`,
       });
       d = save(wp, { ...d, cooAt: new Date(nowMs).toISOString() });

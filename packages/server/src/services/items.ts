@@ -628,7 +628,7 @@ function stallActor(wp: Workplace, w: WorkItem, since: string): string {
 function card(wp: Workplace, epic: WorkItem, focus: Focus, nowMs: number): EpicCard {
   const next = childrenRows(wp, epic.id).find(s => levelOf(s) === 'story' && s.status !== 'done');
   const handoffs = handoffsFor(wp, epic.id);
-  return {
+  const c: Omit<EpicCard, 'finished'> = {
     epic: toItem(wp, epic, nowMs),
     progress: progress(wp, epic.id),
     ...(next ? { next: { id: next.id, title: next.title } } : {}),
@@ -636,6 +636,8 @@ function card(wp: Workplace, epic: WorkItem, focus: Focus, nowMs: number): EpicC
     ...(handoffs.length ? { handoffs } : {}),
     inFocus: focus.epicIds.includes(epic.id),
   };
+  // Rework W4: iOS folds finished epics (plan tier 4) into "Done (N)".
+  return { ...c, finished: planTier(wp, c) === 4 };
 }
 
 /**
@@ -643,7 +645,7 @@ function card(wp: Workplace, epic: WorkItem, focus: Focus, nowMs: number): EpicC
  * needs the owner, then live work (in progress / in review / blocked / stalled), then focus epics
  * not yet started, then the rest, and finished epics last. Rank order holds within a tier.
  */
-export function planTier(wp: Workplace, c: EpicCard): number {
+export function planTier(wp: Workplace, c: Omit<EpicCard, 'finished'>): number {
   // Finished first: a done epic never rises above unfinished work, whatever stale flag it carries (owner, 4 Oct).
   const finished = c.epic.status === 'done' || (c.progress.storiesTotal > 0 && c.progress.storiesDone === c.progress.storiesTotal);
   if (finished) return 4;

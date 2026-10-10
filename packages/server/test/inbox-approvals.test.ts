@@ -11,7 +11,10 @@ test('raising an item emits inbox.updated and a needs-you alert; answering twice
     const events: WorkplaceEvent[] = [];
     wp.on(e => events.push(e));
     const item = inbox.raise(wp, { kind: 'question', title: 'Which port?', body: 'A or B?', raisedBy: 'kabir' });
-    assert.deepEqual(events.map(e => e.type), ['inbox.updated', 'alert']);
+    // Rework W4: an agent's item is held 15 min for the COO; the needs-you alert comes when the hold ends.
+    assert.deepEqual(events.map(e => e.type), ['inbox.updated']);
+    inbox.releaseHolds(wp, Date.now() + inbox.COO_HOLD_MS + 1_000);
+    assert.deepEqual(events.map(e => e.type), ['inbox.updated', 'inbox.updated', 'alert']);
     assert.equal(inbox.openCount(wp), 1);
 
     assert.throws(() => inbox.answer(wp, item.id, 'answered', undefined, 'web'), /needs a note/);

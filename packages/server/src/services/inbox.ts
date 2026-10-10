@@ -5,6 +5,8 @@ import { newId, now, rowJson, rowsJson } from './store.js';
 import { humanizeIds } from './id-names.js';
 import { levelOf, rawGet } from './v2-map.js';
 import { BadRequest, Conflict, NotFound } from '../util/errors.js';
+import { appendBridgeLine } from './coo-bridge.js';
+import { log } from '../util/logger.js';
 
 /**
  * The Inbox: every decision or approval that needs the owner, with context
@@ -203,12 +205,67 @@ function insert(wp: Workplace, spec: RaiseOptions): InboxItem {
     urgency: spec.urgency ?? urgencyOf(wp, spec.kind, context),
     messageCount: 0,
   };
+  // Rework W4: the COO is copied on everything an agent sends the owner, and the push waits 15 min
+  // for him to triage it (resolve it, or say why it needs the owner). If the copy cannot be written
+  // the item is not held: the owner is never left waiting on a COO who was not told.
+  if (isOwnerFacing(item) && heldForCoo(item)) {
+    try {
+      appendBridgeLine(wp, { kind: 'owner-inbox', inboxId: item.id, title: item.title, raisedBy: item.raisedBy, summary: item.summary });
+      item.cooHold = { until: new Date(Date.now() + COO_HOLD_MS).toISOString() };
+    } catch (err) { log.warn('inbox', `COO copy of ${item.id}: ${err instanceof Error ? err.message : err}`); }
+  }
   wp.db.prepare('insert into inbox (id, kind, state, raised_by, created_at, json) values (?, ?, ?, ?, ?, ?)')
     .run(item.id, item.kind, item.state, item.raisedBy, item.createdAt, JSON.stringify(item));
   wp.emit({ type: 'inbox.updated', item });
-  // Routine housekeeping never pings or counts against the owner (it is not in his Inbox at all).
-  if (isOwnerFacing(item)) wp.emit({ type: 'alert', level: 'needs-you', title: item.title, body: item.summary, inboxId: item.id });
+  // Routine housekeeping never pings or counts against the owner (it is not in his Inbox at all);
+  // a held item pings when the hold ends (releaseHolds) or the COO says it needs the owner.
+  if (isOwnerFacing(item) && !item.cooHold) wp.emit({ type: 'alert', level: 'needs-you', title: item.title, body: item.summary, inboxId: item.id });
   return item;
+}
+
+/* ---------- rework W4: the COO's copy and hold ---------- */
+
+export const COO_HOLD_MS = 15 * 60_000;
+/** The answer the COO records when he resolves an item none of whose options fits. */
+export const COO_RESOLVED = 'resolved';
+
+/**
+ * Held for the COO: an owner item an agent (or the Workplace) raised. Not the owner's or the COO's
+ * own, and not one that already came through the COO (`cooItemId`: forwarded by him, or his
+ * offline fallback).
+ */
+export function heldForCoo(i: Pick<InboxItem, 'raisedBy' | 'context'>): boolean {
+  return i.raisedBy !== 'owner' && i.raisedBy !== 'coo' && typeof i.context['cooItemId'] !== 'string';
+}
+
+function save(wp: Workplace, item: InboxItem): InboxItem {
+  wp.db.prepare('update inbox set json = ? where id = ?').run(JSON.stringify(item), item.id);
+  wp.emit({ type: 'inbox.updated', item });
+  return item;
+}
+
+const withoutHold = ({ cooHold: _h, ...rest }: InboxItem): InboxItem => rest;
+
+/**
+ * End an open item's hold now and push it (the COO's "needs you", or the 15 minutes ran out). With
+ * a note, it is kept on the item as `cooNote` and shown first. The alert goes out even when the hold
+ * had already ended: the note is new information for the owner.
+ */
+export function releaseHold(wp: Workplace, id: string, note?: string): InboxItem {
+  const item = get(wp, id);
+  if (!item) throw new NotFound(`No inbox item ${id}`);
+  if (item.state !== 'open') throw new Conflict(`${id} was already ${item.state}`);
+  const next = save(wp, { ...withoutHold(item), ...(note?.trim() ? { cooNote: { text: note.trim(), at: now() } } : {}) });
+  if (isOwnerFacing(next)) wp.emit({ type: 'alert', level: 'needs-you', title: next.title, body: next.summary, inboxId: next.id });
+  return next;
+}
+
+/** The 60-second sweep: open items whose hold ran out are pushed, once. Returns their ids. */
+export function releaseHolds(wp: Workplace, nowMs = Date.now()): string[] {
+  // Oldest first, so the owner's phone shows them in the order they were raised.
+  const due = list(wp, 'open').filter(i => i.cooHold && Date.parse(i.cooHold.until) <= nowMs).reverse();
+  for (const i of due) releaseHold(wp, i.id);
+  return due.map(i => i.id);
 }
 
 export function list(wp: Workplace, state?: InboxItem['state']): InboxItem[] {
@@ -312,18 +369,20 @@ export function get(wp: Workplace, id: string): InboxItem | undefined {
   return item ? backfill(wp, item) : undefined;
 }
 
-export function answer(wp: Workplace, id: string, optionId: string, note: string | undefined, via: InboxAnswer['via']): InboxItem {
+export function answer(wp: Workplace, id: string, optionId: string, note: string | undefined, via: InboxAnswer['via'], opts: { by?: 'coo' } = {}): InboxItem {
   const item = get(wp, id);
   if (!item) throw new BadRequest(`No inbox item ${id}`);
   if (item.state !== 'open') throw new Conflict(`${id} was already answered`);
   const option = item.options.find(o => o.id === optionId);
-  if (!option) throw new BadRequest(`"${optionId}" is not one of the options: ${item.options.map(o => o.id).join(', ')}`);
-  if (option.needsNote && !note?.trim()) throw new BadRequest(`"${option.label}" needs a note`);
+  // The COO may resolve an item none of whose options fits (rework W4): recorded as `resolved`.
+  if (!option && !(opts.by === 'coo' && optionId === COO_RESOLVED)) throw new BadRequest(`"${optionId}" is not one of the options: ${item.options.map(o => o.id).join(', ')}`);
+  if (option?.needsNote && !note?.trim()) throw new BadRequest(`"${option.label}" needs a note`);
 
+  // An answered item is never held (rework W4): the hold sweep and the push both skip it.
   const answered: InboxItem = {
-    ...item,
+    ...withoutHold(item),
     state: 'answered',
-    answer: { optionId, ...(note ? { note } : {}), at: now(), via },
+    answer: { optionId, ...(note ? { note } : {}), at: now(), via, ...(opts.by ? { by: opts.by } : {}) },
   };
   wp.db.prepare('update inbox set state = ?, json = ? where id = ?').run('answered', JSON.stringify(answered), id);
   wp.emit({ type: 'inbox.updated', item: answered });
