@@ -4,6 +4,7 @@ import * as items from './items.js';
 import * as work from './work.js';
 import * as trail from './trail.js';
 import * as manager from './manager.js';
+import * as employees from './employees.js';
 import { tell } from './blocks.js';
 import { dependentsOf, finished, label, trueStatus } from './lifecycle.js';
 import { levelOf, nameOf, rawGet, stateFromStatus } from './v2-map.js';
@@ -14,8 +15,9 @@ import { log } from '../util/logger.js';
  * The lifecycle's automatic moves (docs/HLD-jira-lifecycle.md §2–3):
  *
  * - A story's PR merged: the story is Done (resolution done) if it was not, so the board shows Merged,
- *   and Asha is told to close it (Merged → Done). Called by the merge itself, and by the hygiene sweep
- *   for a merge that happened elsewhere.
+ *   and Asha is told to close it (Merged → Done); the author's session still bound to it is ended
+ *   (LLD-rework-2026-10 W2 §4). Called by the merge itself, and by the hygiene sweep for a merge that
+ *   happened elsewhere.
  * - An item finished (Merged, or Done when it has no PR): each item that starts after it, or is
  *   Blocked waiting on it, flips to Ready (a held Backlog stays held) and its assignee is told. Once
  *   per dependent and blocker (`dep-ready:<dependent>:<blocker>`).
@@ -38,6 +40,11 @@ export function onMerged(wp: Workplace, id: string, by = 'workplace'): 'moved' |
     moved = true;
   }
   const w = rawGet(wp, id)!;
+  // A merge ends the session (LLD W2 §4): the author's session still bound to the merged story is done.
+  if (w.employeeId) {
+    void employees.endSessionOn(wp, w.employeeId, id, 'merged')
+      .catch(err => log.warn('lifecycle', `${id}: could not end ${w.employeeId}'s session: ${err instanceof Error ? err.message : err}`));
+  }
   manager.alert(wp, {
     key: `merged:${id}:${w.pr!.merged!.at}`, itemId: id, by: 'workplace',
     title: `Merged: ${w.title}`,

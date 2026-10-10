@@ -234,11 +234,19 @@ export function acted(wp: Workplace, rec: AlertRecord): boolean {
   return !!said;
 }
 
-/** Alerts Asha has not acted on within the window go to the COO, once each. Returns their keys. */
+/**
+ * The old stall detectors' alert keys (watch, stuck, the dispatcher's idle alert). Since the October
+ * rework (LLD-rework-2026-10 W2 §6) a stall reaches the COO only through the stall chain, so these are
+ * never escalated; records raised before the rework age out with `prune`.
+ */
+const STALL_KEYS = ['idle:', 'unreviewed:', 'stuck:', 'idle-emp:', 'queued:', 'started:', 'parked:'];
+export const isStallKey = (key: string): boolean => STALL_KEYS.some(p => key.startsWith(p));
+
+/** Alerts Asha has not acted on within the window go to the COO, once each (stall alerts never: the stall chain owns them). Returns their keys. */
 export function escalate(wp: Workplace, nowMs = Date.now()): string[] {
   const out: string[] = [];
   for (const rec of all(wp)) {
-    if (rec.state === 'coo' || rec.notice || rec.escalated || rec.resolved) continue;
+    if (rec.state === 'coo' || rec.notice || rec.escalated || rec.resolved || isStallKey(rec.key)) continue;
     if (nowMs - Date.parse(rec.at) <= escalateMs(wp)) continue;
     if (acted(wp, rec)) { write(wp, { ...rec, resolved: true }); continue; }
     const mins = wp.config.managerEscalateMinutes;

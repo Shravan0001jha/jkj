@@ -472,6 +472,8 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
   // (owner, 7 Oct): she also authors work (the product doc, the batch sign-off); a story with a
   // reviewer is work she delivers for someone to check, so it gets the author's prompt, not routing.
   const routing = isChiefOfStaff(wp, item.employeeId) && !item.reviewerId;
+  // Routed to a lead by Asha (LLD W2 §5): the lead assigns it within the team, or keeps it with a reason.
+  const routed = routedToLead(wp, item) ? `${ROUTED_PREFIX}\n\n` : '';
   if (open && carryOver.has(item.employeeId)) {
     const carried = carryOver.get(item.employeeId)!;
     runs.sendMessage(open.agentId, redeliveryText(carried), [], { from: carried[0]!.from });
@@ -482,7 +484,7 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
     // new story in his talk session's emp/dev/general, cut before that day's merge). Between turns the
     // worktree is switched now (auto-saving any uncommitted work, as at spawn); mid-turn, the switch
     // and the message wait for the end of that turn, so nothing is built on the old branch meanwhile.
-    const prompt = routing ? routePrompt(item) : `New assignment ${item.id}: ${item.title}\n\n${item.body}\n\nReply with "## Plan" first.`;
+    const prompt = routing ? routePrompt(item) : `${routed}New assignment ${item.id}: ${item.title}\n\n${item.body}\n\nReply with "## Plan" first.`;
     if (midTurn(open.agentId)) {
       queueSwitch(wp, open.agentId, item.id, prompt);
       return runs.getRunAgent(open.agentId)!;
@@ -496,16 +498,36 @@ function startSession(wp: Workplace, assignmentId: string): Agent {
     const started = item.state === 'planned' ? work.transition(wp, item.id, { to: 'building', by: item.employeeId }) : item;
     return spawn(wp, item.employeeId, {
       assignment: started,
-      prompt: `Build assignment ${item.id}: ${item.title}. Your plan is attached in your context; follow it. ` +
+      prompt: `${routed}Build assignment ${item.id}: ${item.title}. Your plan is attached in your context; follow it. ` +
         'Work only in your worktree on your own branch, change only the paths your charters own, run the tests the charter names, ' +
         'commit on your branch (never push, merge or rebase), then call the Workplace tool report_done with the real test counts, ' +
         'the commit hashes, what you verified live and what you did not. If something outside your charter is needed, say so and ask_owner or stop.',
     });
   }
-  return spawn(wp, item.employeeId, { assignment: item, prompt: `Take assignment ${item.id}: ${item.title}. Read your context and reply with "## Plan" first.` });
+  return spawn(wp, item.employeeId, { assignment: item, prompt: `${routed}Take assignment ${item.id}: ${item.title}. Read your context and reply with "## Plan" first.` });
 }
 
 /** The Chief of Staff (role `chief-of-staff`, or the charter holder): she routes work, she does not build it. */
+/** The opening line of a lead's start prompt for stories the Chief of Staff routed to their team (LLD W2 §5). */
+export const ROUTED_PREFIX = 'Routed to your team: assign each to a team member (item_update assigneeId + reason) or keep it with a reason.';
+
+/**
+ * Routed to a lead by the Chief of Staff and not started yet (LLD W2 §5): Ready or Backlog, assigned to
+ * a lead or the QA lead, and the newest assignment (or the creation, when it was never reassigned) was
+ * the Chief of Staff's. Read from the activity rows, so no field has to be kept in step.
+ */
+export function routedToLead(wp: Workplace, w: WorkItem): boolean {
+  if (!w.employeeId || (w.status !== 'ready' && w.status !== 'backlog')) return false;
+  const role = wp.org.employees.find(e => e.id === w.employeeId)?.roleId;
+  if (role !== 'lead' && role !== 'qa') return false;
+  const cos = chiefOfStaffId(wp);
+  if (!cos || cos === w.employeeId) return false;
+  const row = wp.db.prepare("select json from activity where item_id = ? and kind in ('created', 'assigned') order by seq desc limit 1").get(w.id) as { json: string } | undefined;
+  if (!row) return false;
+  const a = JSON.parse(row.json) as { by: string; kind: string; to?: string };
+  return a.by === cos && (a.kind === 'created' || a.to === w.employeeId);
+}
+
 export function isChiefOfStaff(wp: Workplace, employeeId: string): boolean {
   return wp.org.employees.find(e => e.id === employeeId)?.roleId === 'chief-of-staff' || employeeId === chiefOfStaffId(wp);
 }
@@ -545,36 +567,27 @@ export function redirectTo(wp: Workplace, itemId: string, prompt: string): boole
   if (!item.employeeId) return false;
   const open = openSession(item.employeeId);
   if (!open || open.assignmentId === itemId) return false;
-  const left = open.assignmentId;
+  // The story the session leaves goes back to Ready when the switch happens (handOver: one story per person).
   if (midTurn(open.agentId)) queueSwitch(wp, open.agentId, itemId, prompt);
   else handOver(wp, open, item, prompt);
-  if (left) releasePhantom(wp, left, item.employeeId);
   return true;
 }
 
-/** A story auto-started this recently, with no plan yet, was never really begun (8 Oct, Asha). */
-export const PHANTOM_START_MS = 5 * 60_000;
-
 /**
- * The dispatcher starts the next Ready story the moment an engineer goes free after a submit. When a
- * send-back lands seconds later, the session is switched back to the sent-back story and the one just
- * started is left In progress with no work behind it: a phantom that trips the stall alarm and needs a
- * manual revert (3 times on 8 Oct). If the story the session leaves was started under PHANTOM_START_MS
- * ago and has no plan, put it back to Ready. A story with a plan, or started earlier, is real work and
- * stays as it is.
+ * One story per person (LLD W2 §2; owner 10 Oct). A session that takes a new assignment leaves its old
+ * story; if that story is still In progress it goes back to Ready (with a `system:` reason), so the
+ * board never shows two stories In progress for one person, and the dispatcher starts it again when
+ * the person is free. Replaces the 8 Oct "phantom start" release, which only covered a story started
+ * under five minutes ago with no plan: a story with a plan was left In progress with nobody on it.
  */
-function releasePhantom(wp: Workplace, itemId: string, employeeId: string): void {
-  const it = items.get(wp, itemId);
-  const raw = rawGet(wp, itemId);
-  if (!it || !raw || it.status !== 'in-progress' || raw.plan) return;
-  const since = Date.parse(it.statusSince ?? '');
-  if (!Number.isFinite(since) || Date.now() - since > PHANTOM_START_MS) return;
+function releaseLeft(wp: Workplace, leftId: string, employeeId: string, next: WorkItem): void {
+  const it = items.get(wp, leftId);
+  if (!it || it.status !== 'in-progress' || it.assigneeId !== employeeId) return;
   try {
-    items.update(wp, itemId, { status: 'ready' }, 'workplace');
-    trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Back to Ready: ${nameOf(wp, employeeId)}'s session was switched back to a sent-back story before this one was begun.` });
-    log.info('employees', `${employeeId}: ${itemId} released to ready (phantom start)`);
+    items.update(wp, leftId, { status: 'ready', note: `system: ${nameOf(wp, employeeId)} moved to "${next.title}"` }, 'workplace');
+    log.info('employees', `${employeeId}: ${leftId} back to Ready (moved to ${next.id})`);
   } catch (e) {
-    log.warn('employees', `${employeeId}: could not release ${itemId}: ${(e as Error).message}`);
+    log.warn('employees', `${employeeId}: could not put ${leftId} back to Ready: ${(e as Error).message}`);
   }
 }
 
@@ -600,9 +613,11 @@ function moveSession(wp: Workplace, session: Session, item: WorkItem): void {
 
 /** Switch, then send the assignment into the session. Throws WorktreeSwitchError (nothing sent). */
 function handOver(wp: Workplace, session: Session, item: WorkItem, prompt: string): void {
+  const left = session.assignmentId;
   moveSession(wp, session, item);
   runs.sendMessage(session.agentId, prompt, [], { from: 'workplace' });
   work.setSession(wp, item.id, runs.sessionIdOf(session.agentId) ?? session.agentId);
+  if (left && left !== item.id) releaseLeft(wp, left, session.employeeId, item);
 }
 
 /** Assignments waiting for an open session's turn to end, per agent id, oldest first. */
@@ -661,9 +676,17 @@ const HANDOFF_PROMPT =
   '"nothing done". Then stop.';
 
 /** Ask for the handoff, wait a bounded time, close. */
-export async function endSession(wp: Workplace, agentId: string, waitMs = 150_000, evenIfIdle = false, opts: CloseOptions = {}): Promise<void> {
+/** Sessions waiting for their handoff before they close: a second end request for one is a no-op. */
+const ending = new Set<string>();
+
+export async function endSession(wp: Workplace, agentId: string, waitMs = 150_000, evenIfIdle = false, opts: CloseOptions & { reason?: string } = {}): Promise<void> {
   const session = sessions.get(agentId);
-  if (!session) return;
+  if (!session || ending.has(agentId)) return;
+  ending.add(agentId);
+  try { await endSessionNow(wp, session, agentId, waitMs, evenIfIdle, opts); } finally { ending.delete(agentId); }
+}
+
+async function endSessionNow(wp: Workplace, session: Session, agentId: string, waitMs: number, evenIfIdle: boolean, opts: CloseOptions & { reason?: string }): Promise<void> {
   const agent = runs.getRunAgent(agentId);
   if (session.probe) { close(wp, agentId, 'probe ended'); return; }
   if (agent && (agent.status === 'running' || agent.status === 'waiting' || (evenIfIdle && agent.status === 'idle')) && waitMs > 0) {
@@ -672,7 +695,24 @@ export async function endSession(wp: Workplace, agentId: string, waitMs = 150_00
     runs.sendMessage(agentId, HANDOFF_PROMPT, [], { from: 'workplace' });
     await waiting;
   }
-  close(wp, agentId, 'ended', opts);
+  const { reason = 'ended', ...closeOpts } = opts;
+  close(wp, agentId, reason, closeOpts);
+}
+
+/** How long a session ended by a reassignment or a merge gets to write its handoff. */
+export const END_ON_ITEM_WAIT_MS = 60_000;
+
+/**
+ * End this employee's live sessions bound to `itemId` (LLD W2 §3–4): the story was reassigned away
+ * from them, or merged. They are asked for the handoff (bounded), then closed with `reason`, so the
+ * dispatcher gives them their next story. Probe sessions and sessions on other stories are left alone.
+ * Returns how many were ended.
+ */
+export async function endSessionOn(wp: Workplace, employeeId: string, itemId: string, reason: string, waitMs = END_ON_ITEM_WAIT_MS): Promise<number> {
+  const bound = sessionsOf(employeeId).filter(s => s.assignmentId === itemId && !s.probe && isLive(s.agentId));
+  for (const s of bound) log.info('employees', `${employeeId}: ending session ${s.agentId} on ${itemId} (${reason})`);
+  await Promise.all(bound.map(s => endSession(wp, s.agentId, waitMs, false, { reason })));
+  return bound.length;
 }
 
 /**

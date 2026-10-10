@@ -419,7 +419,7 @@ test('a CTO named as reviewer keeps the developer review; it is not swapped for 
   } finally { await s.done(); }
 });
 
-test('a send-back releases a story the dispatcher had only just started, back to Ready (8 Oct phantom)', async () => {
+test('a send-back puts a story the dispatcher had only just started back to Ready (8 Oct phantom; one story per person)', async () => {
   const s = setup('shadow');
   try {
     s.commit('services/agent-svc/recall.py', 'x = 1\n');
@@ -434,11 +434,11 @@ test('a send-back releases a story the dispatcher had only just started, back to
     await flow.sendBack(s.wp, s.storyId, 'dev', 'the recall test is missing');
     assert.equal(employees.openSession('kabir')?.assignmentId, s.storyId);
     assert.equal(items.get(s.wp, other.id)!.status, 'ready', 'the phantom start is released');
-    assert.ok(trail.activityFor(s.wp, other.id).some(a => /Back to Ready/.test(a.text)));
+    assert.ok(trail.activityFor(s.wp, other.id).some(a => a.kind === 'status' && a.to === 'ready' && /^system: Kabir moved to /.test(a.text)));
   } finally { await s.done(); }
 });
 
-test('a send-back leaves a story that was really begun (it has a plan) In progress', async () => {
+test('a send-back puts even a story that was really begun (it has a plan) back to Ready, plan kept (one story per person, LLD-rework W2 §2)', async () => {
   const s = setup('shadow');
   try {
     s.commit('services/agent-svc/recall.py', 'x = 1\n');
@@ -451,7 +451,9 @@ test('a send-back leaves a story that was really begun (it has a plan) In progre
     await new Promise(r => setTimeout(r, 20));
     work.attachPlan(s.wp, other.id, 'Plan: do it', 'kabir');
     await flow.sendBack(s.wp, s.storyId, 'dev', 'the recall test is missing');
-    assert.equal(items.get(s.wp, other.id)!.status, 'in-progress', 'real work stays');
+    assert.equal(employees.openSession('kabir')?.assignmentId, s.storyId);
+    assert.equal(items.get(s.wp, other.id)!.status, 'ready', 'nobody is on it now: Ready, and the dispatcher restarts it');
+    assert.ok(rawGet(s.wp, other.id)!.plan, 'the plan stays on the story');
   } finally { await s.done(); }
 });
 

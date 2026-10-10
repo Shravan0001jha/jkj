@@ -5,7 +5,6 @@ import * as employees from './employees.js';
 import * as runs from './runs.js';
 import * as items from './items.js';
 import * as stuck from './stuck.js';
-import * as manager from './manager.js';
 import * as coo from './coo.js';
 import * as floor from './floor.js';
 import * as lifecycleWatch from './lifecycle-watch.js';
@@ -32,13 +31,11 @@ function hasCommits(wp: Workplace, w: WorkItem): boolean {
 
 /**
  * The hygiene monitor (docs/HLD-jira-lifecycle.md §4): is the board true? A sweep every 2 minutes
- * finds the violations below, and reports them: to Asha every 10 minutes (only what is new or changed
- * since her last report; nothing, and no session, when nothing is), and to the COO every 60 minutes
- * (one summary bridge item; nothing when clean). Silent while the floor is paused, and the clocks
- * start again after the resume.
+ * finds the violations below for GET /api/hygiene, and reports them to the COO every 60 minutes (one
+ * summary bridge item; nothing when clean). Asha is no longer sent hygiene notices (LLD-rework-2026-10
+ * W2 §6). Silent while the floor is paused, and the clocks start again after the resume.
  *
- * Settings: `hygiene:seen` (first-seen per violation key), `hygiene:asha` ({ at, sent: key → fingerprint }),
- * `hygiene:coo` ({ at }).
+ * Settings: `hygiene:seen` (first-seen per violation key), `hygiene:coo` ({ at }).
  */
 
 const MIN = 60_000;
@@ -225,27 +222,19 @@ export function report(wp: Workplace, nowMs = Date.now()): HygieneReport {
   };
 }
 
-const fingerprint = (v: HygieneViolation): string => `${v.rule}|${v.itemId}|${v.what}`;
 
 export function line(wp: Workplace, v: HygieneViolation): string {
   return `- (${LETTER[v.rule]}) ${quote(v.title)} [${v.itemId}]${v.assigneeId ? ` (${nameOf(wp, v.assigneeId)})` : ''}: ${v.what}, for ${humanDuration(v.minutes * MIN)}. Fix: ${v.fix}.`;
 }
 
-/** Asha, every 10 min: only what is new or changed since her last report. Returns the text sent, or null. */
-function toAsha(wp: Workplace, vs: HygieneViolation[], nowMs: number): string | null {
-  const st = read<{ at: string; sent: Record<string, string> }>(wp, ASHA);
-  if (st && nowMs - Date.parse(st.at) < ASHA_MS) return null;
-  const sent = st?.sent ?? {};
-  const fresh = vs.filter(v => sent[v.key] !== fingerprint(v));
-  const at = new Date(nowMs).toISOString();
-  write(wp, ASHA, { at, sent: Object.fromEntries(vs.map(v => [v.key, fingerprint(v)])) });
-  if (!fresh.length) return null;
-  const text = [
-    `Board hygiene: ${fresh.length} new or changed (${vs.length} open in all). The board must show the true state: fix each one and say what you did with item_comment on the item.`,
-    ...fresh.map(v => line(wp, v)),
-  ].join('\n');
-  manager.alert(wp, { key: `hygiene:${at}`, itemId: '', title: 'Board hygiene', body: text, text, notice: true, by: 'workplace' }, nowMs);
-  return text;
+/**
+ * Asha no longer gets board-hygiene notices (LLD-rework-2026-10 W2 §6: 19% of her comments said "not
+ * a real stall"; the stall chain tells her what is really stalled). The report is still computed for
+ * GET /api/hygiene and the COO's summary. Drops the old per-Asha record; returns null.
+ */
+function toAsha(wp: Workplace): null {
+  drop(wp, ASHA);
+  return null;
 }
 
 /** The COO, every 60 min: one summary bridge item; nothing when clean. Returns its body, or null. */
@@ -257,7 +246,7 @@ function toCoo(wp: Workplace, vs: HygieneViolation[], nowMs: number): string | n
   const r = report(wp, nowMs);
   const counts = HYGIENE_RULES.filter(rule => r.counts[rule] > 0).map(rule => `(${LETTER[rule]}) ${rule} ${r.counts[rule]}`).join(', ');
   const title = `Board hygiene: ${vs.length} violation${vs.length === 1 ? '' : 's'}, ${r.cleanPct}% clean`;
-  const body = [`${title}. Asha has them every 10 min.`, `By rule: ${counts}.`, 'Oldest:', ...vs.slice(0, 3).map(v => line(wp, v))].join('\n');
+  const body = [`${title}.`, `By rule: ${counts}.`, 'Oldest:', ...vs.slice(0, 3).map(v => line(wp, v))].join('\n');
   coo.notifyHygiene(wp, { title, body });
   return body;
 }
@@ -276,7 +265,7 @@ export function sweep(wp: Workplace, nowMs = Date.now()): SweepResult {
   const seen = Object.fromEntries(conds.map(c => [c.key, prev[c.key] ?? iso]));
   write(wp, SEEN, seen);
   const violations = judge(conds, seen, nowMs);
-  return { violations, asha: toAsha(wp, violations, nowMs), coo: toCoo(wp, violations, nowMs) };
+  return { violations, asha: toAsha(wp), coo: toCoo(wp, violations, nowMs) };
 }
 
 /** Every two minutes. Returns stop(). */

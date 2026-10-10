@@ -78,18 +78,22 @@ test('an alert reaches Asha: a short session when she has none, queued while she
   }
 });
 
-test('not acted on within 15 minutes: the COO gets one bridge item; an alert Asha acted on is not escalated', async () => {
+test('not acted on within 15 minutes: the COO gets one bridge item; an alert Asha acted on, or an old stall-detector alert, is not escalated', async () => {
   const { wp, story, done } = setup();
   try {
     const a = story('Mic gate', 'dev');
     const b = story('Dance tempo', 'dev');
     const t0 = Date.now();
-    manager.alert(wp, stalled(a.id, a.title), t0);
-    manager.alert(wp, stalled(b.id, b.title), t0);
+    // A flag (an agent's own flag_stall) still escalates; the old detectors' stall keys never do (LLD-rework W2 §6).
+    manager.alert(wp, stalled(a.id, a.title, `flag:${a.id}:t0`), t0);
+    manager.alert(wp, stalled(b.id, b.title, `flag:${b.id}:t0`), t0);
+    const c = story('Old detector', 'dev');
+    manager.alert(wp, stalled(c.id, c.title), t0);
     await tick();
     trail.comment(wp, b.id, { by: 'asha', text: 'Restarted Dev on it.' });
     assert.deepEqual(manager.escalate(wp, t0 + 10 * MIN), [], 'not before 15 minutes');
-    assert.deepEqual(manager.escalate(wp, t0 + 16 * MIN), [`idle:${a.id}:t0`]);
+    assert.deepEqual(manager.escalate(wp, t0 + 16 * MIN), [`flag:${a.id}:t0`]);
+    assert.equal(cooItems(wp, c.id).length, 0, 'a stall-detector key is the stall chain\'s, never escalated here');
     assert.equal(cooItems(wp, a.id).length, 1);
     assert.equal(cooItems(wp, a.id)[0]!.title, 'Stalled: Mic gate');
     assert.match(cooItems(wp, a.id)[0]!.body, /Asha has not acted on it in 15 min/);

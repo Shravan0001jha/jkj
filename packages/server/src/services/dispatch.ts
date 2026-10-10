@@ -22,15 +22,15 @@ import { log } from '../util/logger.js';
  * Now, when an employee becomes free (a turn ends, a session closes, an item of theirs leaves In
  * progress) and on a sweep every two minutes:
  * - their queued reviews go first (through review-wake), then their next Ready/Backlog story or task
- *   in a focus epic (focus order, rank, age), started with `employees.assign` on its own branch;
+ *   (routed-to-lead first, then focus order, then the rest; rank, age), started with `employees.assign`
+ *   on its own branch;
  * - spend and concurrency caps are respected; held Backlog and Backlog outside the focus never start;
  * - In review items nobody is reviewing (from before review-wake, or a review session that died)
  *   are woken once per episode;
- * - an employee idle 10+ minutes with queued focus work is reported once per episode: to Asha first,
- *   to the COO when the reason is a cap (LLD §19.6e).
+ * - an employee left idle is no longer reported from here: the stall chain (stall-chain.ts) tells the
+ *   lead, Asha, the COO and the owner in turn (LLD-rework-2026-10 W2 §6).
  *
- * Settings: `stale-review:<itemId>` = the episode requeued, `dispatch-idle:<employeeId>` = the idle
- * episode, `hold-migration` = the boot migration ran.
+ * Settings: `stale-review:<itemId>` = the episode requeued, `hold-migration` = the boot migration ran.
  */
 
 const MIN = 60_000;
@@ -85,12 +85,14 @@ export function busyReason(wp: Workplace, employeeId: string, nowMs = Date.now()
 }
 
 /**
- * Their queued story work, in the order it is taken: Ready or Backlog stories and tasks assigned to
- * them, not held, in a focus epic; by the epic's place in the focus, then rank, then age.
+ * Their queued story work, in the order it is taken (LLD W2 §1: focus is priority, not a filter):
+ * stories the Chief of Staff routed to them as a lead first, then Ready or Backlog stories and tasks
+ * in a focus epic (by the epic's place in the focus), then Ready work outside the focus; within each,
+ * by rank, then age. Held Backlog, Backlog outside the focus, and work that starts after an unfinished
+ * item are never queued. An empty focus means: Ready work by rank.
  */
 export function queue(wp: Workplace, employeeId: string): WorkItem[] {
   const focus = items.getFocus(wp).epicIds;
-  if (!focus.length) return [];
   const rows = rowsJson<WorkItem>(wp.db.prepare("select json from work where employee_id = ? and status in ('ready', 'backlog')").all(employeeId));
   const out: { w: WorkItem; at: number }[] = [];
   for (const w of rows) {
@@ -98,8 +100,9 @@ export function queue(wp: Workplace, employeeId: string): WorkItem[] {
     if (w.status === 'backlog' && w.hold) continue;
     if (openStartsAfter(wp, w)) continue; // starts after an item that has not finished
     const epic = epicOf(wp, w);
-    const at = epic ? focus.indexOf(epic.id) : -1;
-    if (at < 0) continue; // never auto-start anything outside the focus
+    const inFocus = epic ? focus.indexOf(epic.id) : -1;
+    if (inFocus < 0 && w.status === 'backlog') continue; // Backlog outside the focus is parked: never auto-started
+    const at = employees.routedToLead(wp, w) ? -1 : inFocus < 0 ? focus.length : inFocus;
     out.push({ w, at });
   }
   return out
@@ -122,12 +125,20 @@ function skipped(wp: Workplace, employeeId: string, reason: string): DispatchRes
  * so a story that genuinely waits (and should have been put on hold) cannot loop a session.
  */
 const ORPHAN_RESUME_H = 3;
+/**
+ * A story the person is still working: In progress, theirs, not merged into another. A session left on
+ * a story that went to review, Done or someone else does not tie them to it (2 Oct orphan RCA).
+ */
+const working = (w: WorkItem | undefined, employeeId: string): boolean => !!w && w.status === 'in-progress' && w.employeeId === employeeId && !w.mergedInto;
 function resumeOrphan(wp: Workplace, employeeId: string, nowMs: number): DispatchResult | null {
   const wip = inProgress(wp, employeeId).find(w => !w.hold && levelOf(w) !== 'epic');
   if (!wip) return null;
   // An open session counts only if it is actually doing something, or is already on this story.
   // 3 Oct: sessions sat idle ("waiting") on a finished or held story while the person's In-progress
   // story had nothing behind it; 10 people showed "working" with 3 stories In progress.
+  // One story per person (LLD W2 §2): a live session bound to another story they are working is that
+  // person's work; resuming the orphan would move the session off it.
+  if (employees.sessionsOf(employeeId).some(s => s.assignmentId && s.assignmentId !== wip.id && employees.isLive(s.agentId) && working(rawGet(wp, s.assignmentId), employeeId))) return null;
   const open = employees.openSession(employeeId);
   if (open) {
     const a = runs.getRunAgent(open.agentId);
@@ -189,8 +200,9 @@ export function dispatch(wp: Workplace, employeeId: string, nowMs = Date.now()):
     return skipped(wp, employeeId, `could not start "${next.title}": ${msg}`);
   }
   reasonsOf(wp).delete(employeeId);
-  trail.record(wp, { itemId: next.id, by: 'workplace', kind: 'note', text: `Started: ${name} was free; next in focus` });
-  log.info('dispatch', `${next.id}: started for ${name} (next in focus)`);
+  const why = employees.routedToLead(wp, next) ? 'routed to their team' : items.inFocus(wp, next) ? 'next in focus' : 'next in their queue';
+  trail.record(wp, { itemId: next.id, by: 'workplace', kind: 'note', text: `Started: ${name} was free; ${why}` });
+  log.info('dispatch', `${next.id}: started for ${name} (${why})`);
   return { action: 'story', itemId: next.id };
 }
 
@@ -226,44 +238,18 @@ export function wakeStaleReviews(wp: Workplace): string[] {
   return out;
 }
 
-interface IdleEpisode { since: string; alerted: boolean }
-
-/** Idle with queued focus work past the threshold: Asha hears once per episode (the COO for a cap). Returns who was reported. */
-export function idleAlerts(wp: Workplace, nowMs = Date.now()): string[] {
-  const out: string[] = [];
-  for (const id of agents(wp)) {
-    const key = `dispatch-idle:${id}`;
-    const reviews = reviewWake.queued(wp, id);
-    const stories = queue(wp, id);
-    const n = reviews.length + stories.length;
-    const open = employees.openSession(id);
-    const a = open ? runs.getRunAgent(open.agentId) : undefined;
-    const idle = !a || (a.status !== 'running' && !a.approval);
-    let ep: IdleEpisode | undefined;
-    try { const raw = get(wp, key); ep = raw ? JSON.parse(raw) as IdleEpisode : undefined; } catch { ep = undefined; }
-    if (!n || !idle) {
-      // The episode is over: an alert still with Asha is resolved, so it never goes on to the COO.
-      if (ep) { manager.resolve(wp, `idle-emp:${id}:${ep.since}`); del(wp, key); }
-      continue;
-    }
-    if (!ep) { put(wp, key, JSON.stringify({ since: new Date(nowMs).toISOString(), alerted: false })); continue; }
-    if (ep.alerted || nowMs - Date.parse(ep.since) <= wp.config.dispatchIdleMinutes * MIN) continue;
-    const name = nameOf(wp, id);
-    const reason = reasonsOf(wp).get(id) ?? busyReason(wp, id, nowMs) ?? 'no reason recorded';
-    const title = `${name} idle with ${n} queued item${n === 1 ? '' : 's'}`;
-    // The alert sits on the next queued item; the reason may quote another story, so each names its own id.
-    const anchor = reviews[0] ?? stories[0]!.id;
-    // Asha first (LLD §19.6e); a cap is a spend decision above her, so the COO hears of that at once.
-    const capped = /spend cap|concurrency cap/.test(reason);
-    manager.alert(wp, {
-      key: `idle-emp:${id}:${ep.since}`, itemId: anchor, title, body: `${title} (next: ${anchor}): ${reason}.`, by: 'workplace', subjectId: id,
-      ...(capped ? { decision: 'spend' as const } : {}),
-    }, nowMs);
-    put(wp, key, JSON.stringify({ ...ep, alerted: true }));
-    log.warn('dispatch', `${title}: ${reason}`);
-    out.push(id);
+/**
+ * Retired (LLD W2 §6): "idle with queued work" no longer alerts Asha or the COO; the stall chain
+ * (stall-chain.ts) is the one place a stall is told. What is left is the cleanup of episodes recorded
+ * before the rework, so none of them is escalated later. Returns who was reported: always nobody.
+ */
+export function idleAlerts(wp: Workplace, _nowMs = Date.now()): string[] {
+  const rows = wp.db.prepare("select key, value from settings where key like 'dispatch-idle:%'").all() as { key: string; value: string }[];
+  for (const r of rows) {
+    try { manager.resolve(wp, `idle-emp:${r.key.slice('dispatch-idle:'.length)}:${(JSON.parse(r.value) as { since: string }).since}`); } catch { /* a bad row: just drop it */ }
+    del(wp, r.key);
   }
-  return out;
+  return [];
 }
 
 /**
@@ -311,6 +297,28 @@ export function migrateHolds(wp: Workplace): string[] {
   return out;
 }
 
+/**
+ * Reassigning ends the old session (LLD W2 §3; owner 10 Oct). A live session bound to this item whose
+ * employee is no longer its assignee is asked for its handoff and closed (reason `reassigned`), so two
+ * people never work one story and the old assignee's next story starts. A person who reassigned the
+ * story themselves (routing it on, handing it to their manager) is left alone: their session moves on
+ * to their next story by itself. Returns the agent ids being ended.
+ */
+export function endReassigned(wp: Workplace, item: WorkItem): string[] {
+  const stale = employees.allSessions().filter(s => s.assignmentId === item.id && s.employeeId !== item.employeeId && !s.probe && employees.isLive(s.agentId));
+  if (!stale.length) return [];
+  const row = wp.db.prepare("select by from activity where item_id = ? and kind = 'assigned' order by seq desc limit 1").get(item.id) as { by: string } | undefined;
+  const out: string[] = [];
+  for (const s of stale) {
+    if (row?.by === s.employeeId) continue;
+    out.push(s.agentId);
+    log.info('dispatch', `${item.id}: reassigned from ${nameOf(wp, s.employeeId)} to ${nameOf(wp, item.employeeId)}: ending ${s.agentId}`);
+    void employees.endSession(wp, s.agentId, employees.END_ON_ITEM_WAIT_MS, false, { reason: 'reassigned' })
+      .catch(err => log.warn('dispatch', `${item.id}: could not end ${s.agentId}: ${err instanceof Error ? err.message : err}`));
+  }
+  return out;
+}
+
 /** Wire it: the moments someone becomes free, and the sweep. Returns stop(). */
 export function startDispatch(wp: Workplace): () => void {
   let stopped = false;
@@ -339,6 +347,7 @@ export function startDispatch(wp: Workplace): () => void {
 
   const off = wp.on(event => {
     if (event.type !== 'work.updated') return;
+    try { endReassigned(wp, event.item); } catch (err) { log.warn('dispatch', `${event.item.id}: ${err instanceof Error ? err.message : err}`); }
     const { id, status, employeeId } = event.item;
     const had = seen.has(id);
     const prevOwner = seen.get(id);

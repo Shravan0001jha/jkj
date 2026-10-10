@@ -212,61 +212,29 @@ test('stale In review items (from before the review wake) are woken once; a revi
   }
 });
 
-test('the idle alert: queued focus work and idle 10+ minutes; a spend cap is the COO\'s call, once per episode', async () => {
+test('idle with queued work is no longer alerted from the dispatcher (LLD-rework W2 §6: the stall chain tells people); the reason is still kept and the cap respected', async () => {
   const { wp, fake, story, done } = setup();
   try {
     const s = story('Dance tempo', 'dev');
     pause(wp, 'dev');
     const t0 = Date.now();
-    dispatch.sweep(wp, t0);
-    dispatch.sweep(wp, t0 + 5 * MIN);
-    const alerts = () => coo.listItems(wp).filter(i => /idle with/.test(i.title));
-    assert.equal(alerts().length, 0, 'not before 10 minutes');
-    dispatch.sweep(wp, t0 + 11 * MIN);
-    assert.equal(alerts().length, 1);
-    assert.equal(alerts()[0]!.title, 'Dev idle with 1 queued item');
-    assert.match(alerts()[0]!.body, /^Dev idle with 1 queued item \(next: \S+\): paused by the employee:dev spend cap/);
-    assert.equal(alerts()[0]!.itemId, s.id);
-    dispatch.sweep(wp, t0 + 20 * MIN);
-    dispatch.sweep(wp, t0 + 40 * MIN);
-    assert.equal(alerts().length, 1, 'once per episode');
+    for (const m of [0, 5, 11, 20, 40]) assert.deepEqual(dispatch.sweep(wp, t0 + m * MIN).alerts, []);
+    assert.equal(coo.listItems(wp).filter(i => /idle with/.test(i.title)).length, 0, 'not the COO');
+    assert.equal(manager.list(wp).filter(r => /idle with/.test(r.title)).length, 0, 'not Asha');
+    assert.match(dispatch.lastReason(wp, 'dev')!, /paused by the employee:dev spend cap/);
     assert.equal(fake.sessions.length, 0, 'the cap is respected');
 
-    // The cap lifts: the story starts, the episode ends.
+    // An episode recorded before the rework is cleared, so it is never escalated.
+    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run('dispatch-idle:mira', JSON.stringify({ since: new Date(t0).toISOString(), alerted: true }));
+    dispatch.sweep(wp, t0 + 41 * MIN);
+    assert.equal(wp.db.prepare('select 1 from settings where key = ?').get('dispatch-idle:mira'), undefined);
+
+    // The cap lifts: the story starts.
     spend.liftPause(wp, 'employee:dev', spend.dayOf(), 'owner');
     dispatch.sweep(wp, t0 + 42 * MIN);
     await tick();
     assert.equal(fake.sessions.length, 1);
-    assert.equal(wp.db.prepare('select 1 from settings where key = ?').get('dispatch-idle:dev'), undefined);
-  } finally {
-    done();
-  }
-});
-
-test('the idle alert for any other reason goes to Asha first; the COO hears only if she does not act in 15 minutes', async () => {
-  const { wp, fake, story, done } = setup();
-  try {
-    const x = story('Mic gate', 'dev');
-    items.update(wp, x.id, { status: 'in-progress' }, 'dev'); // In progress, but no session on it
-    const y = story('Dance tempo', 'dev');
-    const t0 = Date.now();
-    // Its one automatic resume was already spent (the orphan rule), so it stays idle and is reported.
-    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`orphan-resumed:${x.id}`, new Date(t0).toISOString());
-    dispatch.sweep(wp, t0);
-    assert.deepEqual(dispatch.sweep(wp, t0 + 11 * MIN).alerts, ['dev']);
-    await tick();
-    const alert = manager.list(wp).find(r => r.title === 'Dev idle with 1 queued item')!;
-    assert.match(alert.body, /Dev has "Mic gate" \(\S+\) In progress/);
-    assert.match(alert.body, new RegExp(`\\(next: ${alert.itemId}\\)`));
-    assert.ok(told(fake, 'asha').some(t => /Dev idle with 1 queued item/.test(t)), 'Asha is told');
-    assert.equal(coo.listItems(wp).filter(i => /idle with/.test(i.title)).length, 0, 'not the COO');
-    manager.escalate(wp, t0 + 20 * MIN);
-    assert.equal(coo.listItems(wp).filter(i => /idle with/.test(i.title)).length, 0, 'not before 15 minutes');
-    manager.escalate(wp, t0 + 27 * MIN);
-    const filed = coo.listItems(wp).filter(i => /idle with/.test(i.title));
-    assert.equal(filed.length, 1);
-    assert.equal(filed[0]!.itemId, y.id);
-    assert.match(filed[0]!.body, /Asha has not acted on it in 15 min/);
+    assert.equal(employees.openSession('dev')!.assignmentId, s.id);
   } finally {
     done();
   }

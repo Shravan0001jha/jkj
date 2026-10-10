@@ -16,8 +16,9 @@ import { installFakeRuntime } from './fakes/fake-runtime.js';
 import { testWorkplace } from './fakes/workplace.js';
 
 /**
- * The event-driven stall detector (HLD D21, LLD §19.6): no sweep. Each rule is evaluated for one
- * item at a given instant; the timers only decide when to look.
+ * The event-driven stall watcher (HLD D21, LLD §19.6): no sweep. Each rule is evaluated for one
+ * item at a given instant; the timers only decide when to look. Since the October rework it alerts
+ * nobody and moves nothing (LLD-rework-2026-10 W2 §6); flag_stall is unchanged.
  */
 
 const MIN = 60_000;
@@ -33,7 +34,10 @@ function setup() {
   return { ...t, epic };
 }
 
-test('Ready for 15 minutes, in focus, assignee free: Asha starts it; a notice for Asha, nothing for the COO', async () => {
+// Since the October rework (LLD-rework-2026-10 W2 §2, §6) the watcher alerts nobody and moves nothing:
+// no auto-start, no parking, no resume in a fresh session. The stall chain (stall-chain.ts) tells people.
+
+test('Ready for 15 minutes, in focus, assignee free: the watcher neither starts it nor alerts anyone (the dispatcher and the stall chain own it)', async () => {
   const fake = installFakeRuntime();
   const { wp, tmp, epic } = setup();
   try {
@@ -42,16 +46,12 @@ test('Ready for 15 minutes, in focus, assignee free: Asha starts it; a notice fo
     assert.equal(watch.check(wp, s.id, Date.now() + 14 * MIN), null, 'not yet');
     const r = watch.check(wp, s.id, Date.now() + 16 * MIN)!;
     assert.equal(r.rule, 'not-started');
-    assert.equal(r.action, 'started');
+    assert.equal(r.action, 'noted');
     await tick();
-    assert.equal(fake.sessions.length, 1);
-    assert.equal(employees.openSession('dev')?.assignmentId, s.id);
-    assert.ok(trail.activityFor(wp, s.id).some(a => a.kind === 'stall' && /Started by Asha/.test(a.text)));
-    assert.equal(coo.listItems(wp).filter(i => i.itemId === s.id).length, 0, 'Asha first: the COO is not told');
-    const notice = alertsFor(wp, s.id).find(r => r.title === 'Started: Mic stays live')!;
-    assert.equal(notice.notice, true);
-    assert.equal(notice.state, 'queued', 'a notice rides along with the next alert; it starts no session of its own');
-    assert.equal(fake.sessions.length, 1, 'no session for Asha just for a notice');
+    assert.equal(fake.sessions.length, 0, 'never started by the watcher');
+    assert.equal(items.require$(wp, s.id).status, 'ready');
+    assert.equal(alertsFor(wp, s.id).length, 0, 'no alert for Asha');
+    assert.equal(coo.listItems(wp).filter(i => i.itemId === s.id).length, 0);
     assert.equal(inbox.ownerList(wp, 'open').filter(i => i.context['itemId'] === s.id).length, 0, 'never the owner\'s Inbox');
   } finally {
     fake.restore();
@@ -59,7 +59,7 @@ test('Ready for 15 minutes, in focus, assignee free: Asha starts it; a notice fo
   }
 });
 
-test('Ready for 15 minutes outside the focus goes to Backlog with the reason; Backlog is never started by anything', () => {
+test('Ready for 15 minutes outside the focus stays Ready (focus is priority, not a filter); Backlog is never started by anything', async () => {
   const fake = installFakeRuntime();
   const { wp, tmp, epic } = setup();
   try {
@@ -67,26 +67,25 @@ test('Ready for 15 minutes outside the focus goes to Backlog with the reason; Ba
     items.setFocus(wp, [epic.id], 'owner');
     const s = items.create(wp, { level: 'story', parentId: other.id, title: 'Side quest', assigneeId: 'mira' }, 'asha');
     const r = watch.check(wp, s.id, Date.now() + 16 * MIN)!;
-    assert.equal(r.action, 'backlog');
-    const parked = items.require$(wp, s.id);
-    assert.equal(parked.status, 'backlog');
-    assert.ok(trail.activityFor(wp, s.id).some(a => a.kind === 'stall' && /not in focus/i.test(a.text)));
+    assert.equal(r.action, 'noted');
+    assert.equal(items.require$(wp, s.id).status, 'ready', 'not parked in Backlog');
     assert.equal(fake.sessions.length, 0);
-    assert.equal(watch.check(wp, s.id, Date.now() + 600 * MIN), null, 'a parked item is not stalled');
+    assert.equal(alertsFor(wp, s.id).length, 0);
 
     // The old Chief-of-Staff routine must not resume a parked item either.
     const old = work.create(wp, { kind: 'assignment', title: 'Old parked', body: 'x', employeeId: 'kabir' });
-    items.update(wp, old.id, { status: 'backlog' }, 'coo');
+    items.update(wp, old.id, { status: 'backlog', note: 'parked by the COO' }, 'coo');
     const tickResult = cos.tick(wp, Date.now() + 600 * MIN);
     assert.ok(!tickResult.resumed.includes(old.id));
     assert.ok(!tickResult.queued.includes(old.id));
+    await tick(30); // what the Chief-of-Staff routine started settles before the database closes
   } finally {
     fake.restore();
     tmp.cleanup();
   }
 });
 
-test('Ready for 15 minutes with the assignee busy stays Ready, queued for them (never Backlog), naming the work it is busy on', async () => {
+test('Ready for 15 minutes with the assignee busy stays Ready, queued for them (never Backlog), naming the work it is busy on; no notice', async () => {
   const fake = installFakeRuntime();
   const { wp, tmp, epic } = setup();
   try {
@@ -102,7 +101,7 @@ test('Ready for 15 minutes with the assignee busy stays Ready, queued for them (
     assert.equal(it.queuedFor, 'dev');
     assert.equal(it.hold, undefined);
     assert.ok(trail.activityFor(wp, s.id).some(a => /Queued for Dev: busy on Already building/.test(a.text)));
-    assert.ok(alertsFor(wp, s.id).some(r => /^Queued:/.test(r.title) && r.notice), 'a notice for Asha');
+    assert.equal(alertsFor(wp, s.id).length, 0, 'no notice for Asha');
     assert.equal(coo.listItems(wp).filter(i => i.itemId === s.id).length, 0);
     assert.equal(fake.sessions.length, 1);
   } finally {
@@ -111,83 +110,75 @@ test('Ready for 15 minutes with the assignee busy stays Ready, queued for them (
   }
 });
 
-test('In progress with no activity for 10 minutes: Asha is told at once, once per episode; the COO only if she does not act in 15 min', async () => {
+test('In progress with no activity for 10 minutes: a trail line, once per episode; no alert to Asha or the COO', async () => {
   const fake = installFakeRuntime();
   const { wp, tmp, epic } = setup();
   try {
-    coo.touchHeartbeatForTest(wp); // the COO is online: no fallback resume
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Duck music', assigneeId: 'mira' }, 'asha');
-    items.update(wp, s.id, { status: 'in-progress' }, 'mira');
+    items.update(wp, s.id, { status: 'in-progress', note: 'started by hand' }, 'mira');
     assert.equal(watch.check(wp, s.id, Date.now() + 9 * MIN), null);
     const r = watch.check(wp, s.id, Date.now() + 11 * MIN)!;
     assert.equal(r.rule, 'idle');
-    assert.equal(r.action, 'notified');
+    assert.equal(r.action, 'noted');
     await tick();
-    assert.ok(toldAsha(fake).some(t => /Stalled: Duck music/.test(t) && t.includes(s.id)), 'Asha is told first');
-    assert.equal(coo.listItems(wp).filter(i => i.itemId === s.id).length, 0, 'not the COO, yet');
+    assert.deepEqual(toldAsha(fake), [], 'Asha is not told');
+    assert.equal(alertsFor(wp, s.id).length, 0);
+    assert.equal(coo.listItems(wp).filter(i => i.itemId === s.id).length, 0);
     assert.ok(trail.activityFor(wp, s.id).some(a => a.kind === 'stall' && /No activity for 10 min/.test(a.text)));
     assert.equal(inbox.ownerList(wp, 'open').length, 0, 'the owner hears nothing about a stall');
-    assert.equal(fake.sessions.filter(x => !x.options.cwd.includes('/asha/')).length, 0, 'the COO is online: nobody is resumed');
-
+    assert.equal(fake.sessions.length, 0, 'nobody is resumed, whatever the COO\'s presence');
     assert.equal(watch.check(wp, s.id, Date.now() + 25 * MIN), null, 'same episode: once');
-    // Asha does not act: 15 minutes later the COO gets the bridge item.
-    assert.deepEqual(manager.escalate(wp, Date.now() + 27 * MIN).length, 1);
-    const notes = coo.listItems(wp).filter(i => i.kind === 'stall' && i.itemId === s.id);
-    assert.equal(notes.length, 1);
-    assert.match(notes[0]!.body, /Asha has not acted on it in 15 min/);
-    assert.match(coo.readInboxFileForTest(wp), /"kind":"stall"/);
     trail.comment(wp, s.id, { by: 'mira', text: 'still on it' });
     assert.equal(watch.check(wp, s.id, Date.now() + 5 * MIN), null);
-    assert.equal(watch.check(wp, s.id, Date.now() + 12 * MIN)!.action, 'notified', 'a new episode after new activity');
+    assert.equal(watch.check(wp, s.id, Date.now() + 12 * MIN)!.rule, 'idle', 'a new episode after new activity');
   } finally {
     fake.restore();
     tmp.cleanup();
   }
 });
 
-test('idle with the agent\'s session open: it is asked to flag its own stall; with the COO offline and no session, Asha resumes it', async () => {
+test('idle with the agent\'s session open: it is asked to flag its own stall; with the COO offline and no session, nothing is resumed', async () => {
   const fake = installFakeRuntime();
   const { wp, tmp, epic } = setup();
   try {
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Duck music', assigneeId: 'mira' }, 'asha');
     employees.assign(wp, s.id);
     await tick();
-    items.update(wp, s.id, { status: 'in-progress' }, 'mira');
     const mira = () => fake.sessions.find(x => x.options.cwd.includes('/mira/'))!;
     mira().result(); // the turn ended; the session sits idle
     await tick();
     const r = watch.check(wp, s.id, Date.now() + 11 * MIN)!;
     assert.equal(r.rule, 'idle');
+    assert.equal(r.action, 'notified');
     assert.ok(mira().sent.some(m => /flag_stall/.test(m.text)), 'the agent is asked to flag itself');
 
     const t = items.create(wp, { level: 'story', parentId: epic.id, title: 'Resume me', assigneeId: 'kabir' }, 'asha');
-    items.update(wp, t.id, { status: 'in-progress' }, 'kabir');
+    items.update(wp, t.id, { status: 'in-progress', note: 'started by hand' }, 'kabir');
     const kabir = () => fake.sessions.filter(x => x.options.cwd.includes('/kabir/')).length;
     const r2 = watch.check(wp, t.id, Date.now() + 11 * MIN)!;
-    assert.equal(r2.action, 'resumed');
+    assert.equal(r2.action, 'noted');
     await tick();
-    assert.equal(kabir(), 1, 'the COO-offline fallback is unchanged: Asha resumes it');
-    assert.ok(trail.activityFor(wp, t.id).some(a => /COO is offline/.test(a.text)));
+    assert.equal(kabir(), 0, 'the watcher never moves or starts a session');
   } finally {
     fake.restore();
     tmp.cleanup();
   }
 });
 
-test('In review for 30 minutes untouched: Asha is told, naming the reviewer; not the COO', async () => {
+test('In review for 30 minutes untouched: a trail line naming the reviewer; no alert', async () => {
   const fake = installFakeRuntime();
   const { wp, tmp, epic } = setup();
   try {
-    coo.touchHeartbeatForTest(wp);
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Review me', assigneeId: 'dev' }, 'asha');
-    items.update(wp, s.id, { status: 'in-progress' }, 'dev');
-    items.update(wp, s.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
+    items.update(wp, s.id, { status: 'in-progress', note: 'started by hand' }, 'dev');
+    items.update(wp, s.id, { status: 'in-review', reviewerId: 'nikhil', note: 'ready for review' }, 'dev');
     assert.equal(watch.check(wp, s.id, Date.now() + 29 * MIN), null);
     const r = watch.check(wp, s.id, Date.now() + 31 * MIN)!;
     assert.equal(r.rule, 'unreviewed');
     await tick();
-    assert.ok(toldAsha(fake).some(t => /Unreviewed: Review me/.test(t) && /Nikhil/.test(t)));
-    assert.equal(coo.listItems(wp).filter(i => i.itemId === s.id).length, 0);
+    assert.deepEqual(toldAsha(fake), []);
+    assert.equal(alertsFor(wp, s.id).length, 0);
+    assert.ok(trail.activityFor(wp, s.id).some(a => a.kind === 'stall' && /nothing from Nikhil/.test(a.text)));
     assert.equal(items.toItem(wp, work.get(wp, s.id)!, Date.now() + 31 * MIN).stall?.rule, 'unreviewed');
   } finally {
     fake.restore();
@@ -202,8 +193,9 @@ test('the timers fire on their own (event-driven, no sweep)', async () => {
   try {
     const epic = items.create(wp, { level: 'epic', title: 'Elsewhere' }, 'owner');
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Unfocused', assigneeId: 'tara' }, 'asha');
-    for (let i = 0; i < 50 && items.require$(wp, s.id).status !== 'backlog'; i++) await tick(20);
-    assert.equal(items.require$(wp, s.id).status, 'backlog');
+    for (let i = 0; i < 50 && !wp.db.prepare('select 1 from settings where key = ?').get(`stall:${s.id}`); i++) await tick(20);
+    assert.match((wp.db.prepare('select value from settings where key = ?').get(`stall:${s.id}`) as { value: string }).value, /^not-started:/);
+    assert.equal(items.require$(wp, s.id).status, 'ready', 'checked, and nothing moved');
   } finally {
     stop();
     fake.restore();

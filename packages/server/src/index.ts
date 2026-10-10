@@ -36,6 +36,7 @@ import * as manager from './services/manager.js';
 import * as stuck from './services/stuck.js';
 import * as hygiene from './services/hygiene.js';
 import * as lifecycleWatch from './services/lifecycle-watch.js';
+import * as stallChain from './services/stall-chain.js';
 import * as githubFlow from './services/github-flow.js';
 import * as evidence from './services/evidence.js';
 import * as spend from './services/spend.js';
@@ -115,7 +116,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   const stopTalk = wireTalk(wp);
   loadSttKey(join(config.opsDir, 'workplace', 'stt.env'));
   try { room.ensureReleases(wp); } catch (err) { log.warn('boot', `Releases room: ${err instanceof Error ? err.message : err}`); }
-  // v2 stalls are events, not a sweep (HLD D21): each open item has a deadline that every change re-arms.
+  // v2 stall deadlines (HLD D21), re-armed by every change: trail lines, the busy-assignee queue mark and
+  // a nudge to the idle session only; no alerts and no moves since the rework (the stall chain tells people).
   const stopWatch = watch.startWatch(wp);
   // The reviewer is woken the moment an item enters In review (QA, 2 Oct), not 30 min later via the COO.
   const stopReviewWake = reviewWake.startReviewWake(wp);
@@ -127,17 +129,20 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   try { handoff.migrateBlockedWaits(wp); } catch (err) { log.warn('boot', `blocked waits: ${err instanceof Error ? err.message : err}`); }
   // Backlog the COO/owner parked before `hold` existed is held; the watcher's "busy" parking is not (LLD §19.6d).
   try { dispatch.migrateHolds(wp); } catch (err) { log.warn('boot', `hold migration: ${err instanceof Error ? err.message : err}`); }
-  // The dispatcher (outage 2 Oct): a free employee gets their next work (reviews first, then focus
-  // stories); stale reviews are woken; idle-with-queued-work is reported to the COO. Sweeps every 2 min.
+  // The dispatcher (outage 2 Oct): a free employee gets their next work (reviews first, then routed and
+  // focus stories, then the rest); stale reviews are woken; a reassigned story's old session is ended.
+  // Sweeps every 2 min.
   const stopDispatch = dispatch.startDispatch(wp);
   // Asha first (owner, 2 Oct): operational alerts go to her; the COO only when she does not act in
   // 15 min, the call is above her, or she is stuck. Her digest every 20 min while work is active.
   const stopManager = manager.startManager(wp);
-  // The stuck-story watchdog (dry run, 4 Oct): In progress with no session, In review with no reviewer
-  // on it, or with Asha unrouted, for 10 min: one alert to Asha (the manager escalates after 15). Every 2 min.
-  const stopStuck = stuck.startStuckWatch(wp);
+  // The stall chain (LLD-rework-2026-10 W2 §6), in place of the stuck watchdog and the other stall
+  // alerts: a stalled story's lead at 10 min, Asha at 20, the COO at 30, a ring to the owner at 40.
+  // Every minute. The stuck rules stay only as the hygiene report's input (its old records are cleared once).
+  stuck.sweep(wp);
+  const stopStallChain = stallChain.startStallChain(wp);
   // The Jira lifecycle (docs/HLD-jira-lifecycle.md): a finished blocker flips its dependents to Ready;
-  // the hygiene monitor tells Asha (10 min) and the COO (60 min) where the board is not true.
+  // the hygiene monitor tells the COO (60 min) where the board is not true.
   const stopLifecycle = lifecycleWatch.startLifecycleWatch(wp);
   const stopHygiene = hygiene.startHygieneWatch(wp);
   // The GitHub flow's sweep (docs/HLD-github-flow.md D3): a new commit on a story in review is re-pushed
@@ -237,7 +242,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       stopHandoffWatch();
       stopDispatch();
       stopManager();
-      stopStuck();
+      stopStallChain();
       stopLifecycle();
       stopHygiene();
       stopGitHubFlow();
