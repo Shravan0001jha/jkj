@@ -32,6 +32,8 @@ import { writeEmployeeFile, readEmployeeFile, summarise, commitOrg } from './org
 import { humanizeIds } from './id-names.js';
 import { now } from './store.js';
 import * as talkStore from './talk-store.js';
+import * as macQueue from './mac-queue.js';
+import * as testAccounts from './test-accounts.js';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
 import { QA_DOC_FORMAT as qaDocFormat } from './qa-doc.js';
@@ -76,7 +78,7 @@ export function hitSessionBudget(subtype: string): boolean {
 
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence', 'request_mac', 'release_mac', 'lease_test_account', 'return_test_account'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -1481,6 +1483,45 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           } catch (err) {
             return ok(`Not proposed: ${err instanceof Error ? err.message : String(err)}`);
           }
+        }),
+      /* ---------- services: the Mac queue and the test-account pool (LLD-rework §W6) ---------- */
+      tool('request_mac', `Ask for the owner's Mac for a live check (a desktop app run, real audio, a host command): you join the queue and get your place. The Workplace opens it for you, for the minutes you ask (at most ${macQueue.MAX_MINUTES}), when it is your turn AND your session is on that story; you are told on the story and in your session. A request that comes up ${macQueue.MAX_SKIPS} times while you are not on the story expires. Call release_mac the moment you are done.`,
+        { itemId: z.string().optional(), minutes: z.number(), why: z.string() },
+        async ({ itemId, minutes, why }) => {
+          const id = itemId ?? currentStory(session());
+          if (!id) return ok('Name the story: no story is attached to this session, so call request_mac again with its itemId.');
+          try {
+            const r = macQueue.request(wp, { emp: employeeId, itemId: id, minutes, why });
+            if (r.request.state === 'granted') return ok(`The Mac is already yours for ${id} (request ${r.request.id}), until ${r.request.until}. Call release_mac when you are done.`);
+            return ok(`${r.existing ? 'Already queued' : 'Queued'} for ${id} (request ${r.request.id}, ${r.request.minutes} min): position ${r.position}. You will be told when the Mac is yours; keep working on this story meanwhile.`);
+          } catch (err) { return ok(`Not queued: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('release_mac', 'Give the Mac back now (your live check is done), so the next person gets it. With no grant, withdraws your queued requests.',
+        {},
+        async () => {
+          const ended = macQueue.release(wp, employeeId);
+          if (!ended.length) return ok('Nothing to release: you hold no Mac time and have nothing queued.');
+          return ok(ended[0]!.was === 'granted' ? `Released the Mac (${ended.map(e => e.ended.itemId).join(', ')}). Thank you.` : `Withdrew ${ended.length} queued request${ended.length === 1 ? '' : 's'}.`);
+        }),
+      tool('lease_test_account', 'Lease a staging test account for a test (never the owner\'s account or profile), for 4 hours. You get its id and email, never a password or token. For platform "desktop" the Workplace signs it in for you into a fresh profile and gives you its path: launch the test build with --user-data-dir <that path>. Return it with return_test_account when done.',
+        { itemId: z.string().optional(), platform: z.enum(['desktop', 'ios', 'android']) },
+        async ({ itemId, platform }) => {
+          const id = itemId ?? currentStory(session());
+          if (!id) return ok('Name the story: no story is attached to this session, so call lease_test_account again with its itemId.');
+          try {
+            const l = await testAccounts.lease(wp, { emp: employeeId, itemId: id, platform });
+            return ok([
+              `Leased test account ${l.accountId}: ${l.email} (${l.platform}), until ${l.expiresAt}.`,
+              ...(l.profilePath ? [`Signed in already: launch the test build with --user-data-dir ${l.profilePath} (never the owner's profile or /Applications/Iris.app).`] : ['No signed-in profile on a phone: the sign-in code goes to an inbox only the Workplace reads, so phone checks go through run_evidence, which signs its own accounts in.']),
+              `Return it with return_test_account {accountId: "${l.accountId}"} when done.`,
+            ].join('\n'));
+          } catch (err) { return ok(`No test account: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('return_test_account', 'Return a test account you leased; its profile is removed and the account goes back to the pool.',
+        { accountId: z.string() },
+        async ({ accountId }) => {
+          try { const a = testAccounts.giveBack(wp, accountId, employeeId); return ok(`Returned ${a.id} (${a.email}) to the pool.`); }
+          catch (err) { return ok(`Not returned: ${err instanceof Error ? err.message : String(err)}`); }
         }),
     ],
   });

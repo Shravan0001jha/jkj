@@ -316,6 +316,19 @@ export function openLiveWindow(wp: Workplace, employeeId: string, minutes: numbe
   return { employeeId, until };
 }
 
+/** The window ends now (mac-queue: a release, an expiry, a grant taken over): the setting is removed. */
+export function closeLiveWindow(wp: Workplace, employeeId: string): void {
+  wp.db.prepare('delete from settings where key = ?').run(LIVE_WINDOW_KEY(employeeId));
+}
+
+/** Every window still open now, by employee (mac-queue: a COO-opened window holds the Mac too). */
+export function openLiveWindows(wp: Workplace, nowMs = Date.now()): { employeeId: string; until: number }[] {
+  const rows = wp.db.prepare("select key, value from settings where key like 'live-window:%'").all() as { key: string; value: string }[];
+  return rows
+    .map(r => ({ employeeId: r.key.slice('live-window:'.length), until: Date.parse(r.value) }))
+    .filter(w => Number.isFinite(w.until) && w.until > nowMs);
+}
+
 /** The window's expiry as an absolute ms timestamp, or null when none is set. */
 export function liveWindowUntil(wp: Workplace, employeeId: string): number | null {
   const row = wp.db.prepare('select value from settings where key = ?').get(LIVE_WINDOW_KEY(employeeId)) as { value: string } | undefined;

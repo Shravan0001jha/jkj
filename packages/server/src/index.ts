@@ -28,6 +28,8 @@ import * as reviewWake from './services/review-wake.js';
 import * as blocks from './services/blocks.js';
 import * as rhythm from './services/rhythm.js';
 import * as awsCost from './services/aws-cost.js';
+import * as macQueue from './services/mac-queue.js';
+import * as testAccounts from './services/test-accounts.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
 import * as employees from './services/employees.js';
 import * as handoff from './services/handoff.js';
@@ -202,6 +204,11 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
     // The owner's message or @coo mention with no COO response in 15 min: one push (dry run #22).
     try { cooPickup.check(wp); } catch (err) { log.warn('coo', `pickup check: ${err instanceof Error ? err.message : err}`); }
   }, 30_000);
+  // The Mac queue and the test-account pool (LLD-rework §W6): grants, expiries and lease ends every 30 s.
+  const servicesTimer = setInterval(() => {
+    try { macQueue.sweep(wp); } catch (err) { log.warn('mac-queue', String(err)); }
+    try { testAccounts.expireLeases(wp); } catch (err) { log.warn('test-accounts', String(err)); }
+  }, 30_000);
   // The Chief of Staff's routine: stalled work is resumed within budget or explained in the Inbox.
   // Its stall loop is off in v2 (the watcher owns stalls); the Room moderation stays.
   const cosTimer = setInterval(() => { try { cos.tick(wp, Date.now(), { stalls: false }); } catch (err) { log.warn('cos', String(err)); } }, 5 * 60_000);
@@ -230,6 +237,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       clearInterval(stallTimer);
       clearInterval(cosTimer);
       clearInterval(rhythmTimer);
+      clearInterval(servicesTimer);
       stopWatch();
       stopTalk();
       stopReviewWake();
