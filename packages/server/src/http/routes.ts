@@ -38,6 +38,7 @@ import * as talk from '../services/talk.js';
 import * as talkStore from '../services/talk-store.js';
 import * as evidence from '../services/evidence.js';
 import * as hygiene from '../services/hygiene.js';
+import * as macQueue from '../services/mac-queue.js';
 import type { Telegram } from '../services/telegram.js';
 import type { Tunnel } from '../services/tunnel.js';
 import type { Push } from '../services/push.js';
@@ -475,6 +476,11 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       employees.refreshLiveWindow(wp, employeeId, Date.parse(window.until));
       json(res, 200, window);
     }),
+
+    // The Mac queue (LLD-rework §W6.1): who holds the owner's Mac and who waits. The owner (phone or
+    // web) or the COO hands it over now, session or not.
+    r('GET', '/api/mac-queue', (_req, res) => json(res, 200, macQueue.list(wp))),
+    r('POST', '/api/mac-queue/:id/grant', (req, res, _url, [id]) => json(res, 200, macQueue.grantNow(wp, dec(id), actorOf(req)))),
 
     // "Pause all" (owner, 4 Oct): nothing unattended starts while it is on; talk still works.
     // Reload the org (map.yaml, charters, roles) without a restart (5 Oct: map fixes waited on live windows).

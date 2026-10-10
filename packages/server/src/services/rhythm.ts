@@ -5,6 +5,7 @@ import * as trail from './trail.js';
 import * as room from './room.js';
 import * as inbox from './inbox.js';
 import * as proposals from './proposals.js';
+import * as costWatch from './cost-watch.js';
 import { rowsJson } from './store.js';
 import { chiefOfStaffId, levelOf, nameOf, rawGet } from './v2-map.js';
 import { log } from '../util/logger.js';
@@ -121,6 +122,8 @@ export function maybeRun(wp: Workplace, nowMs = Date.now()): string[] {
     trail.postUpdate(wp, { kind: 'review', line: r.line, details: r.details, by: asha, href: 'plan' });
     ran.push('review');
   }
+  // The GitHub cost watcher (LLD-rework §W6.3): from 09:00 IST, once a day; it keeps its own once-a-day mark.
+  void costWatch.maybeRun(wp, nowMs).catch(err => log.warn('cost-watch', String(err)));
   if (ran.length) log.info('rhythm', `${day}: ${ran.join(', ')}`);
   return ran;
 }
