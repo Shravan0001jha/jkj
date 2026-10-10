@@ -16,9 +16,12 @@ import { nameOf, STATUS_LABEL } from './v2-map.js';
 
 export const MAX_CHARS = 8000;
 const BODY_MAX = 1500;
-const COMMENT_MAX = 600;
-/** A comment's details are its whole text (one-line.ts short()); never cut mid-argument. */
-const DETAILS_MAX = 2000;
+/** An agent comment is at most 1200 characters (one-line.ts COMMENT_CAP), so a stored one is read whole. */
+const COMMENT_MAX = 1200;
+/** A comment's details (older comments were cut to 400 characters with the rest here); never cut mid-argument. */
+const DETAILS_MAX = 4000;
+/** A comment that is a plan or an RCA is never dropped from a read: it is pinned after the head. */
+export const PINNED = /^\s*##\s*(Plan|RCA)\b/im;
 const ACTIVITY_MAX = 200;
 const ACTIVITY_LAST = 30;
 const CHILDREN_MAX = 15;
@@ -117,17 +120,22 @@ export function readItem(wp: Workplace, q: string): string {
   head.push('', 'Linked Inbox items (read with inbox_read):', ...(linked.length ? linked.slice(0, 10).map(i => inboxLine(wp, i)) : ['  none']));
   if (linked.length > 10) head.push(`  +${linked.length - 10} more`);
 
-  const comments = d.comments.map(c => {
+  const commentLine = (c: (typeof d.comments)[number], max: number): string => {
     const details = c.details ? `\n      details: ${named(wp, c.details, DETAILS_MAX)}` : '';
-    return `  - ${who(wp, c.by)} at ${c.at}: ${named(wp, c.text, COMMENT_MAX)}${details}`;
-  });
+    return `  - ${who(wp, c.by)} at ${c.at}: ${named(wp, c.text, max)}${details}`;
+  };
+  // Plans and RCAs are what a reviewer judges the work against (owner, 10 Oct: they were dropped from
+  // context on long stories): pinned after the head and never dropped, oldest first.
+  const pinned = d.comments.filter(c => PINNED.test(c.text));
+  if (pinned.length) head.push('', `Plan and RCA (pinned, ${pinned.length}):`, ...pinned.map(c => commentLine(c, DETAILS_MAX)));
+  const comments = d.comments.filter(c => !PINNED.test(c.text)).map(c => commentLine(c, COMMENT_MAX));
   const activity = d.activity.slice(-ACTIVITY_LAST).map(a => {
     const move = a.from !== undefined || a.to !== undefined ? ` ${a.from ?? '∅'}→${a.to ?? '∅'}` : '';
     return `  - ${a.at} ${who(wp, a.by)} ${a.kind}${move}: ${named(wp, a.text, ACTIVITY_MAX)}`;
   });
   const olderActivity = Math.max(0, d.activity.length - ACTIVITY_LAST);
   return fit(head, [
-    { title: `Comments (${d.comments.length})`, noun: 'comment', lines: comments },
+    { title: `Comments (${d.comments.length}${pinned.length ? `, ${pinned.length} pinned above` : ''})`, noun: 'comment', lines: comments },
     { title: `Activity (last ${Math.min(ACTIVITY_LAST, d.activity.length)} of ${d.activity.length})`, noun: 'activity entry', lines: activity, ...(olderActivity ? { omitted: olderActivity } : {}) },
   ]);
 }

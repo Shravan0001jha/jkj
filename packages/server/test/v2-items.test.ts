@@ -294,7 +294,7 @@ test('merging a duplicate keeps its history as a comment on the survivor and mov
   }
 });
 
-test('comments carry mentions; an agent comment is kept short with the rest in details', () => {
+test('comments carry mentions; an agent comment is stored whole (rework W3: capped at 1200, never cut)', () => {
   const { wp, tmp } = testWorkplace();
   try {
     const { story } = tree(wp);
@@ -302,8 +302,9 @@ test('comments carry mentions; an agent comment is kept short with the rest in d
     assert.deepEqual(c.mentions, ['dev']);
     const long = Array.from({ length: 8 }, (_, i) => `line ${i + 1} of the analysis`).join('\n');
     const d = trail.comment(wp, story.id, { by: 'dev', text: long });
-    assert.equal(d.text.split('\n').length, 4);
-    assert.equal(d.details, long);
+    assert.equal(d.text, long, 'stored whole, no "…"');
+    assert.equal(d.details, undefined);
+    assert.throws(() => trail.comment(wp, story.id, { by: 'dev', text: 'x'.repeat(1201) }), /capped at 1200 characters/);
     const o = trail.comment(wp, story.id, { by: 'owner', text: long });
     assert.equal(o.text, long, 'the owner\'s words are never shortened');
     assert.ok(trail.activityFor(wp, story.id).some(a => a.kind === 'comment'));

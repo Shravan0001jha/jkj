@@ -32,7 +32,28 @@ export interface GuardContext {
    * no window is open: live checks go through the COO, not the session.
    */
   liveWindowUntil?: number;
+  /**
+   * RCA before code (owner, 10 Oct), from the session's story: `until-rca` for a bug with no RCA yet,
+   * `rca-only` for an RCA ticket (never code), `none` otherwise. While not `none`, edits and git
+   * commit/add are denied. Read live (a getter at spawn), so an assignment change or a captured RCA
+   * applies at once.
+   */
+  rcaGate?: RcaGate;
 }
+
+export type RcaGate = 'none' | 'until-rca' | 'rca-only';
+
+/** The gate for a story: an RCA ticket never writes code; a bug writes code once its RCA is on record. */
+export function rcaGateFor(item: { type?: string; rca?: unknown } | undefined): RcaGate {
+  if (!item) return 'none';
+  if (item.type === 'rca') return 'rca-only';
+  if (item.type === 'bug' && !item.rca) return 'until-rca';
+  return 'none';
+}
+
+export const RCA_FIRST = 'RCA first: post a 5-part "## RCA" comment on the story before changing code';
+export const RCA_ONLY = 'This is an RCA ticket: no code changes; post the RCA and report_done';
+const GIT_WRITE = /\bgit\s+(-C\s+\S+\s+)?(commit|add)\b/i;
 
 export interface GuardDecision {
   decision: 'allow' | 'deny';
@@ -107,6 +128,11 @@ export const FORBIDDEN_COMMANDS: { pattern: RegExp; why: string }[] = [
 
 export function guardTool(tool: string, input: Record<string, unknown>, ctx: GuardContext): GuardDecision {
   if (ctx.readOnly && (EDIT_TOOLS.has(tool) || tool === 'Bash')) return { decision: 'deny', reason: ctx.readOnly };
+  // The gate is read only for a write (it may be a live getter on the session's story).
+  if (EDIT_TOOLS.has(tool) || (tool === 'Bash' && GIT_WRITE.test(String(input['command'] ?? '')))) {
+    const gate = ctx.rcaGate ?? 'none';
+    if (gate !== 'none') return { decision: 'deny', reason: gate === 'rca-only' ? RCA_ONLY : RCA_FIRST };
+  }
   // Protected folders are off limits even to read, for every tool that names a file (no exception path).
   if (tool === 'Read' || EDIT_TOOLS.has(tool)) {
     const filePath = String(input['file_path'] ?? input['notebook_path'] ?? '');

@@ -1,5 +1,5 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import type { Workplace } from './workplace.js';
 import { BadRequest } from '../util/errors.js';
 
@@ -13,10 +13,16 @@ import { BadRequest } from '../util/errors.js';
  *
  * Shape:
  *   ## Edge cases
- *   - PASS: <case> — <how it was checked>
+ *   - PASS: <case> — <how it was checked> evidence: <screenshot/log path or URL>
  *   - N/A: <case> — <why it does not apply>
  *   ## Report
  *   <what was checked, what was not, residual risk>
+ *   Evidence: n/a — <why no robot evidence>     (optional; only with the next line)
+ *   Tests: <command> <counts>
+ *
+ * QA proof (owner, 10 Oct): every PASS or FAIL case cites its proof, a file that exists (absolute, or
+ * relative to the evidence folder or the author's worktree) or an http(s) URL. "Checked by hand" with
+ * nothing to look at is not a check.
  */
 
 export const MIN_CASES = 3;
@@ -27,7 +33,41 @@ const CASE = /^\s*[-*]\s*(PASS|FAIL|N\/A)\s*:\s*(.+)$/i;
 export interface QaCase { verdict: 'PASS' | 'FAIL' | 'N/A'; text: string }
 export interface QaDoc { cases: QaCase[]; report: string }
 
-export const QA_DOC_FORMAT = '"## Edge cases" with one line per case ("- PASS: <case> — <how checked>", "- N/A: <case> — <why>"), then "## Report" (what was checked, what was not, residual risk)';
+export const QA_DOC_FORMAT = '"## Edge cases" with one line per case ("- PASS: <case> — <how checked> evidence: <screenshot/log path or URL>", "- N/A: <case> — <why>"), then "## Report" (what was checked, what was not, residual risk; "Evidence: n/a — <why>" only together with "Tests: <command> <counts>")';
+
+export const PROOF_NEEDED = 'Each case needs proof: add "evidence: <screenshot/log path or URL>"';
+const PROOF = /\bevidence:\s*(\S+)/i;
+const URL_PROOF = /^https?:\/\/[^\s/]+\S*$/i;
+/** "Evidence: n/a — <why>" on its own line: the change has no robot-suite evidence, on purpose. */
+export const EVIDENCE_NA = /^\s*Evidence:\s*n\/a\b\s*[—–:-]*\s*(\S.*)?$/im;
+/** "Tests: <command> <counts>": the suite that stands in for the evidence. */
+const TESTS_LINE = /^\s*Tests:\s*\S.*\d/im;
+
+/** True when the doc says the story has no robot-suite evidence on purpose (and names the tests instead). */
+export const evidenceNa = (text: string | undefined): boolean => !!text && EVIDENCE_NA.test(text) && TESTS_LINE.test(text);
+
+/** The proof a case line cites, or null when it cites none that exists. `roots` are where relative paths may live. */
+export function proofOf(line: string, roots: string[]): string | null {
+  const m = PROOF.exec(line);
+  if (!m) return null;
+  const ref = m[1]!.replace(/[)\].,;:'"`]+$/, '').replace(/^[(<'"`]+/, '');
+  if (!ref) return null;
+  if (URL_PROOF.test(ref)) return ref;
+  if (/^[a-z]+:\/\//i.test(ref)) return null;
+  if (isAbsolute(ref)) return existsSync(ref) ? ref : null;
+  for (const root of roots) { const p = join(root, ref); if (existsSync(p)) return p; }
+  return null;
+}
+
+/** Why the doc's proof is not enough (each PASS/FAIL case, the n/a line), or none. */
+export function proofProblems(text: string, cases: QaCase[], roots: string[]): string[] {
+  const problems: string[] = [];
+  const missing = cases.filter(c => c.verdict !== 'N/A' && !proofOf(c.text, roots));
+  if (missing.length) problems.push(`${PROOF_NEEDED} (${missing.length} case${missing.length === 1 ? '' : 's'} without one that exists: ${missing.map(c => `"${c.text.slice(0, 60)}"`).join('; ')})`);
+  if (EVIDENCE_NA.test(text) && !TESTS_LINE.test(text)) problems.push('"Evidence: n/a" needs the tests that stand in for it on its own line: "Tests: <command> <counts>"');
+  if (EVIDENCE_NA.test(text) && !EVIDENCE_NA.exec(text)?.[1]?.trim()) problems.push('"Evidence: n/a" needs its reason: "Evidence: n/a — <why>"');
+  return problems;
+}
 
 /** The sections of a QA doc, or the reasons it is not one. */
 export function parse(text: string): QaDoc | { errors: string[] } {
@@ -51,17 +91,31 @@ export function parse(text: string): QaDoc | { errors: string[] } {
   return errors.length ? { errors } : { cases, report: report! };
 }
 
-/** Throws unless `text` is a QA doc that allows approval; a FAIL means send it back instead. */
-export function require$(text: string | undefined): QaDoc {
+/**
+ * Throws unless `text` is a QA doc that allows approval; a FAIL means send it back instead. `roots`: the
+ * folders a relative evidence path may be in (the evidence folder, the author's worktree).
+ */
+export function require$(text: string | undefined, roots: string[] = []): QaDoc {
   if (!text?.trim()) throw new BadRequest(`QA's approval needs the QA doc (qaDoc): ${QA_DOC_FORMAT}. List every edge case where the change might break and check each one before approving.`);
   const doc = parse(text);
   if ('errors' in doc) throw new BadRequest(`The QA doc is not complete: ${doc.errors.join('; ')}. Expected ${QA_DOC_FORMAT}.`);
+  const proof = proofProblems(text, doc.cases, roots);
+  if (proof.length) throw new BadRequest(`${proof.join('. ')}.`);
   const failed = doc.cases.filter(c => c.verdict === 'FAIL');
   if (failed.length) throw new BadRequest(`The QA doc has ${failed.length} failing case(s) (${failed.map(c => c.text).join('; ')}), so this is not an approval: call review_send_back with the root cause.`);
   return doc;
 }
 
 export function dir(wp: Workplace): string { return join(wp.config.workplaceDir, 'qa'); }
+
+/** Where QA's screenshots and logs live (~/iris-workplace/evidence): a relative evidence path may name a file here. */
+export function evidenceDir(wp: Workplace): string { return join(wp.config.workplaceDir, 'evidence'); }
+
+/** The filed QA doc of a story, if any. */
+export function filed(wp: Workplace, itemId: string): string | undefined {
+  const path = join(dir(wp), `${itemId}.md`);
+  return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
+}
 
 /** File the doc for the staging test cycle; returns its path. */
 export function file(wp: Workplace, itemId: string, meta: { title: string; by: string; sha: string; at: string }, text: string): string {

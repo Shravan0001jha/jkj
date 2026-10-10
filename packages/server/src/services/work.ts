@@ -265,8 +265,10 @@ export function reportDone(wp: Workplace, id: string, evidence: Evidence, given:
  * the build; otherwise what went wrong, for the warning and the nudge.
  */
 export function planWarning(item: WorkItem): string | null {
-  if (item.kind === 'feature' || item.history.some(h => h.to === 'planned')) return null;
-  return item.plan?.trim() ? 'the plan was posted late, after the work began' : 'no plan was posted before the work';
+  // Rework, 10 Oct: a plan on record is enough (a plan posted as an item_comment lands after the start
+  // move, and that is not "late"); only no plan at all warns.
+  if (item.kind === 'feature' || item.plan?.trim() || item.history.some(h => h.to === 'planned')) return null;
+  return 'no plan was posted before the work';
 }
 
 export function attachPlan(wp: Workplace, id: string, plan: string, by: string): WorkItem {
@@ -400,9 +402,90 @@ export function setSession(wp: Workplace, id: string, sessionId: string): WorkIt
   return updated;
 }
 
-/** The first "## Plan" section of a reply, if the employee wrote one. */
+/** The first "## Plan" (or "## Plan:") section of a reply or comment, if the employee wrote one. */
 export function parsePlan(text: string): string | null {
-  const m = /^##\s+Plan\s*$([\s\S]*?)(?=^##\s|\Z)/mi.exec(text) ?? /##\s+Plan\s*\n([\s\S]*)/i.exec(text);
-  const body = m?.[1]?.trim();
-  return body ? body : null;
+  const m = /^##[ \t]*Plan\b[ \t]*:?[ \t]*(.*)$([\s\S]*?)(?=^##\s|(?![\s\S]))/mi.exec(text);
+  if (m) {
+    const body = [m[1] ?? '', m[2] ?? ''].join('\n').trim();
+    return body || null;
+  }
+  const loose = /##[ \t]*Plan\b[ \t]*:?[ \t]*\n([\s\S]*)/i.exec(text);
+  return loose?.[1]?.trim() || null;
+}
+
+/* ---------- the RCA (rework W3, owner 10 Oct: RCA before code) ---------- */
+
+/** The five parts of an RCA, each matched case-insensitively at the start of a line of the "## RCA" section. */
+export const RCA_PARTS: readonly { name: string; re: RegExp }[] = [
+  { name: 'Symptom', re: /^symptoms?\b/i },
+  { name: 'Root cause', re: /^root[ -]cause\b/i },
+  { name: 'Why it escaped (or Why QA missed)', re: /^why\s+(it\s+escaped|qa\s+missed)\b/i },
+  { name: 'Fix', re: /^fix(es)?\b/i },
+  { name: 'Regression', re: /^regression\b/i },
+];
+
+/** A line's text with markdown furniture off its start: bullets, numbering, sub-headings, emphasis. */
+const lineStart = (line: string): string => line.replace(/^[\s>]*(?:#{3,6}\s*|[-*+]\s+|\d+[.)]\s*)?(?:\*\*|__)?\s*/, '');
+
+/** The "## RCA" section of a text and which of the five parts it lacks; null when there is no such section. */
+export function parseRca(text: string): { text: string; missing: string[] } | null {
+  const m = /^##[ \t]*RCA\b[ \t]*:?[^\n]*$([\s\S]*?)(?=^##\s|(?![\s\S]))/mi.exec(text);
+  if (!m) return null;
+  const section = `${m[0]}`.trim();
+  const lines = (m[1] ?? '').split('\n').map(lineStart);
+  const missing = RCA_PARTS.filter(p => !lines.some(l => p.re.test(l))).map(p => p.name);
+  return { text: section, missing };
+}
+
+/** Record a complete RCA on the item (`item.rca`); throws when a part is missing. */
+export function attachRca(wp: Workplace, id: string, text: string, by: string): WorkItem {
+  const item = require$(wp, id);
+  const rca = parseRca(text);
+  if (!rca) throw new BadRequest('No "## RCA" section: start the comment with a "## RCA" heading.');
+  if (rca.missing.length) throw new BadRequest(`The RCA is missing ${rca.missing.join(', ')}: an RCA has five parts (Symptom, Root cause, Why it escaped, Fix, Regression), each starting a line.`);
+  const at = now();
+  const updated: WorkItem = { ...item, rca: { text: rca.text, at, by: authorId(wp, by) }, updatedAt: at };
+  save(wp, updated);
+  trail.record(wp, { itemId: id, by, kind: 'note', text: `RCA recorded (five parts)${item.type === 'bug' ? ': code changes are unlocked' : ''}` });
+  return updated;
+}
+
+export interface Captured { plan?: boolean; rca?: 'recorded' | { missing: string[] } }
+
+/**
+ * A comment from the item's assignee (item_comment) carries its plan or its RCA: a "## Plan" line
+ * attaches the plan, a complete five-part "## RCA" records the RCA. Anyone else's comment is only a comment.
+ */
+export function captureFromComment(wp: Workplace, id: string, by: string, text: string): Captured {
+  const item = get(wp, id);
+  if (!item || !by || item.employeeId !== authorId(wp, by)) return {};
+  const out: Captured = {};
+  const plan = parsePlan(text);
+  if (plan) { attachPlan(wp, id, plan, by); out.plan = true; }
+  const rca = parseRca(text);
+  if (rca) {
+    if (rca.missing.length) out.rca = { missing: rca.missing };
+    else { attachRca(wp, id, text, by); out.rca = 'recorded'; }
+  }
+  return out;
+}
+
+/**
+ * An RCA ticket (type 'rca') is done when its RCA is posted (owner, 10 Oct): no code, no pull request,
+ * no review. Throws unless the RCA is recorded.
+ */
+export function closeRca(wp: Workplace, id: string, given: string): WorkItem {
+  const by = authorId(wp, given);
+  const item = require$(wp, id);
+  if (item.type !== 'rca') throw new BadRequest(`${id} is not an RCA ticket.`);
+  if (!item.rca) throw new BadRequest('An RCA ticket is done when its RCA is posted: post the five-part "## RCA" with item_comment first.');
+  if (item.status === 'done') return item;
+  const at = now();
+  const note = 'system: RCA posted; an RCA ticket is done without a pull request';
+  const next: WorkItem = {
+    ...item, status: 'done', statusSince: at, resolution: 'done', updatedAt: at,
+    ...(item.state !== 'done' ? { state: 'done' as WorkState, history: [...item.history, { at, from: item.state, to: 'done' as WorkState, by, note }] } : {}),
+  };
+  delete next.queuedFor;
+  return put(wp, item, next, by, note);
 }

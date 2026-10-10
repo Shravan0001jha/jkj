@@ -92,7 +92,7 @@ test('item_read stays within ~8 KB: long texts are clipped, oldest comments and 
     for (let i = 0; i < 80; i++) trail.record(wp, { itemId: story.id, by: 'mira', kind: 'note', text: `Note ${i} ${long}` });
     const out = readTools.readItem(wp, story.id);
     assert.ok(out.length <= readTools.MAX_CHARS, `${out.length} chars`);
-    assert.ok(!out.includes('x'.repeat(2100)), 'no long text survives whole (details up to 2000)');
+    assert.ok(!out.includes('x'.repeat(4100)), 'no long text survives whole (details up to 4000, rework W3)');
     assert.match(out, /Comment 59: evidence/, 'the newest comment is kept');
     assert.ok(!out.includes('Comment 0: evidence'), 'the oldest comment is dropped');
     assert.match(out, /older comments? omitted/);

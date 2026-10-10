@@ -27,7 +27,13 @@ export interface AssembledContext {
 export const PLAN_FIRST =
   'Reply with a plan first, under a heading "## Plan": what you will change, how you will test it, ' +
   'and what needs someone else. Do not build until the plan is written. When done, report with ' +
-  'evidence: tests passed/failed with the command, commits, what was live-verified and what was not.';
+  'evidence: tests passed/failed with the command, commits, what was live-verified and what was not. ' +
+  'For a bug: post the 5-part ## RCA first; code edits unlock after it.';
+
+/** Layers that are never dropped (rework W3): without them the session does not know its work or where to do it. */
+const KEPT = new Set(['assignment', 'workspace']);
+/** A handoff is trimmed to its last part (the newest notes) before any layer is dropped. */
+export const HANDOFF_KEEP_CHARS = 6000;
 
 export function assembleContext(
   org: Org,
@@ -73,7 +79,7 @@ export function assembleContext(
   if (options.worktree) {
     push('workspace', 'local', 'Your workspace', 'Where you work, and what you may change.', '',
       `Worktree: ${options.worktree} (your own branch; the base branch is ${employee.workspace.branch ?? 'main'}). Never work in the main checkout.\n` +
-      `Commit on your branch; never push, merge or rebase. The lead reviews and merges.\n` +
+      `Commit on your branch; never push or rebase; merging the trunk into your branch is allowed. The Workplace merges after both approvals.\n` +
       `Paths your charters own (the only ones you may change): ${(options.ownedPaths ?? []).join(', ') || 'none listed; ask the Chief of Staff'}.`);
   }
   return render(employee, layers, options.maxTokens ?? 24_000);
@@ -116,24 +122,35 @@ function render(employee: Employee, layers: ContextLayer[], maxTokens: number): 
 
   let truncated = false;
   const budget = maxTokens - estimateTokens(head);
-  let used = 0;
+  // The assignment and the workspace are rendered first among the variable layers and never dropped
+  // (rework W3: a huge handoff once pushed the assignment out, and the session worked blind). Their
+  // budget is taken first; everything else fits in what is left, in order.
+  const kept = layers.filter(l => KEPT.has(l.id) && l.body.trim());
+  const keptText = kept.map(l => `## ${l.label}\n${l.body.trim()}`);
+  let used = keptText.reduce((n, t) => n + estimateTokens(t), 0);
   const parts: string[] = [];
 
   for (const layer of layers) {
-    if (!layer.body.trim()) continue;
+    if (KEPT.has(layer.id) || !layer.body.trim()) continue;
     let body = layer.body;
-    if (used + layer.tokens > budget && layer.id.startsWith('charter:')) {
+    if (layer.id === 'handoff' && body.length > HANDOFF_KEEP_CHARS) {
+      // The newest part of a handoff is what the next session needs; trimmed before anything is dropped.
+      body = `(older handoff notes omitted; the full file is ${layer.path})\n${body.slice(-HANDOFF_KEEP_CHARS)}`;
+      truncated = true;
+    }
+    if (used + estimateTokens(body) > budget && layer.id.startsWith('charter:')) {
       // Charter detail after "Rules and traps" lives in linked docs; drop it first.
       body = trimCharter(body);
       truncated = true;
     }
-    const tokens = estimateTokens(body);
+    const text = `## ${layer.label}\n${body.trim()}`;
+    const tokens = estimateTokens(text);
     if (used + tokens > budget) { truncated = true; continue; }
     used += tokens;
-    parts.push(`## ${layer.label}\n${body.trim()}`);
+    parts.push(text);
   }
 
-  const append = [head, ...parts].join('\n\n');
+  const append = [head, ...parts, ...keptText].join('\n\n');
   return { layers, append, tokens: estimateTokens(append), truncated };
 }
 

@@ -287,8 +287,10 @@ export interface WorkItem {
   queuedFor?: string;
   /** The story's pull request on GitHub (docs/LLD-github-flow.md §1); set only in shadow/on mode. */
   pr?: PrRecord;
-  /** 'bug': a story-level bug (docs/HLD-jira-lifecycle.md §1). */
-  type?: 'bug';
+  /** 'bug': a story-level bug (docs/HLD-jira-lifecycle.md §1); 'rca': a root-cause-only ticket (no code). */
+  type?: 'bug' | 'rca';
+  /** The five-part "## RCA" captured from the assignee's comment (rework W3). */
+  rca?: { text: string; at: string; by: string };
   /** An explicit dependency: this item starts after that one finishes. */
   startsAfter?: string;
   /** On hold: why it is parked. */
@@ -393,6 +395,27 @@ export interface PrRecord {
   /** context → "sha|state|description" last posted, so an unchanged status is not posted again. */
   posted?: Record<string, string>;
   merged?: { at: string; sha: string; by: string };
+  /** The developer approver the Workplace named (a member of the author's team, else the CTO). */
+  devReviewer?: string;
+  /** The one QA for this story (set at the developer approval); only they give approval 2 of 2. */
+  qaReviewer?: string;
+  /** Leads of other teams whose charters' code the diff changes: each approves their files before QA. */
+  extraReviewers?: ExtraReviewer[];
+  /** A PR touching CI or infra (spend) merges only after POST /api/coo/approve-spend. */
+  spendApprovedAt?: string;
+}
+
+/** An extra reviewer's approval holds, like the two approvals, only for its commit and its stay in review. */
+export interface ExtraReviewer {
+  id: string;
+  /** The files that put them here (empty when the author asked for them with request_review). */
+  files: string[];
+  approvedAt?: string;
+  /** The head and the review episode the approval was given on. */
+  sha?: string;
+  episode?: string;
+  /** Added by the author (request_review extraReviewers), not by the diff. */
+  requested?: boolean;
 }
 
 /* ---------- inbox ---------- */
