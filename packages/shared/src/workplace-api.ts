@@ -340,7 +340,7 @@ export type WorkplaceServerEvent =
   | { type: 'signals.updated'; signals: HealthSignals }
   | { type: 'room.thread'; thread: RoomThread }
   | { type: 'room.message'; message: RoomMessage; thread: RoomThread }
-  | { type: 'alert'; level: 'info' | 'needs-you' | 'blocked' | 'cap'; title: string; body: string; inboxId?: string }
+  | { type: 'alert'; level: 'info' | 'needs-you' | 'blocked' | 'cap' | 'ring'; title: string; body: string; inboxId?: string }
   /**
    * The COO bridge. `coo.message` (the owner's own conversation) and `coo.presence` (online ↔
    * offline, from the lead's heartbeat) reach every authenticated owner socket, relay included —
