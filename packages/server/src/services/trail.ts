@@ -3,11 +3,11 @@ import type { Workplace } from './workplace.js';
 import * as inbox from './inbox.js';
 import * as room from './room.js';
 import { newId, now, rowsJson } from './store.js';
-import { oneLine, short } from './one-line.js';
+import { oneLine, overCap } from './one-line.js';
 
 /** How much of a block's reason the feed line carries. */
 const BLOCKED_REASON_MAX = 100;
-import { authorId, chiefOfStaffId, epicOf, levelOf, nameOf, rawGet } from './v2-map.js';
+import { authorId, chiefOfStaffId, epicOf, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { BadRequest } from '../util/errors.js';
 
 /**
@@ -53,10 +53,13 @@ export function comment(wp: Workplace, itemId: string, given: { by: string; text
   const spec = { ...given, by: authorId(wp, given.by) };
   if (!rawGet(wp, itemId)) throw new BadRequest(`No item ${itemId}`);
   if (!spec.text.trim()) throw new BadRequest('An empty comment says nothing.');
-  const authored = spec.by === 'owner' || spec.by === 'workplace' ? { text: spec.text.trim() } : short(spec.text);
-  const details = spec.details ?? authored.details;
+  // Owner, 10 Oct: an agent's comment is capped at 1200 characters and refused above it (never cut);
+  // what is accepted is stored whole. The owner, the COO and the Workplace's own notes are uncapped.
+  const over = isAgent(wp, spec.by) ? overCap(spec.text) : null;
+  if (over) throw new BadRequest(over);
+  const details = spec.details;
   const c: Comment = {
-    id: newId('cm'), itemId, at: now(), by: spec.by, text: authored.text,
+    id: newId('cm'), itemId, at: now(), by: spec.by, text: spec.text.trim(),
     // Several people at once (owner, 4 Oct): the ids the app sends plus every @id/@Name in the text.
     ...(details ? { details } : {}), mentions: [...new Set([...(spec.mentions ?? []), ...room.mentionsIn(wp, spec.text)])],
   };

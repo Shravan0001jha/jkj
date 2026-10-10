@@ -498,6 +498,13 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const body = await readJson(req);
       json(res, 200, await githubFlow.merge(wp, str(body['itemId']), 'coo'));
     }),
+    // Merges without the COO (rework W3): only a PR touching CI workflows or infrastructure waits for his
+    // spend approval, which this records; the automatic merge then goes on. Loopback only, like the rest.
+    r('POST', '/api/coo/approve-spend', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      json(res, 200, await githubFlow.approveSpend(wp, str(body['itemId']), 'coo'));
+    }),
 
     // run_evidence (docs/LLD-evidence.md §5): the queue for the COO (loopback only), and the reports
     // for the owner and reviewers (same auth as every /api route, so the tunnel and the token work).

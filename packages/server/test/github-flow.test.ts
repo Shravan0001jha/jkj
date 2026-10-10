@@ -26,7 +26,7 @@ import { installFakeRuntime } from './fakes/fake-runtime.js';
 /** A QA doc that allows approval 2 of 2 (owner's review flow, step 2). */
 import * as qaDoc from '../src/services/qa-doc.js';
 import { qaReviewer } from '../src/services/review-policy.js';
-const QA_DOC = '## Edge cases\n- PASS: empty input — unit test\n- PASS: provider down — killed the provider and checked the reply\n- N/A: Windows path — no Windows code touched\n## Report\nChecked both failure paths by hand and in tests; Windows untouched; residual risk low.';
+const QA_DOC = '## Edge cases\n- PASS: empty input — unit test evidence: https://ci.example.com/runs/1\n- PASS: provider down — killed the provider and checked the reply evidence: https://ci.example.com/runs/2\n- N/A: Windows path — no Windows code touched\n## Report\nChecked both failure paths by hand and in tests; Windows untouched; residual risk low.\nEvidence: n/a — server-only change, no app surface\nTests: pytest 374 passed, 0 failed';
 
 /**
  * Checkpoints 8 and 9 (docs/HLD-github-flow.md): the server pushes a story's branch and opens its PR
@@ -109,13 +109,13 @@ test('local is the default: a review move pushes nothing, opens no PR, and the n
   const s = setup('local');
   try {
     assert.equal(flow.mode(s.wp), 'local');
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     toReview(s);
     const r = await flow.onReview(s.wp, s.storyId, 'kabir');
     assert.equal(r.skipped, 'local');
     assert.equal(s.gh.calls.length, 0, 'GitHub is never touched in local');
     assert.equal(rawGet(s.wp, s.storyId)!.pr, undefined);
-    await assert.rejects(flow.approve(s.wp, s.storyId, 'dev'), /local/);
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'arjun'), /local/);
     await assert.rejects(flow.merge(s.wp, s.storyId, 'coo'), /local/);
     // The old rule holds: the reviewer marks it done.
     const reviewer = rawGet(s.wp, s.storyId)!.reviewerId!;
@@ -130,7 +130,7 @@ test('local is the default: a review move pushes nothing, opens no PR, and the n
 test('shadow: moving to review pushes emp/<name>/<story>, opens a PR to the trunk, stores its number and posts statuses', async () => {
   const s = setup('shadow');
   try {
-    const head = s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    const head = s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     const r = await reviewed(s);
     assert.equal(r.refused, undefined);
     const branch = `emp/kabir/${s.storyId}`;
@@ -163,7 +163,7 @@ test('shadow: moving to review pushes emp/<name>/<story>, opens a PR to the trun
 test('report_done and request_review drive the push through the Workplace tools', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     const server = workplaceTools(s.wp, 'kabir', () => ({ agentId: 'a', employeeId: 'kabir', assignmentId: s.storyId, startedAt: '', seen: {}, planCaptured: false }));
     const [ct, st] = InMemoryTransport.createLinkedPair();
     await server.instance.connect(st);
@@ -196,7 +196,7 @@ test('the push guard refuses a branch that is not emp/<assignee>/<story>', () =>
 test('gate: a commit adding dist-x build output is refused and nothing reaches GitHub', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     s.commit('services/agent-svc/dist-x/iris-agent.bin', 'binary\n');
     const r = await reviewed(s);
     assert.ok(r.refused?.some(x => /dist-x\/iris-agent\.bin/.test(x)), JSON.stringify(r.refused));
@@ -226,17 +226,17 @@ test('gate: a planted fake key is refused (even when a later commit deletes it) 
 
 /* ---------- checkpoint 9: two approvals, in order ---------- */
 
-test('two approvals in order: a lead who is not the author, then QA; identities are recorded and QA marks it done', async () => {
+test('two approvals in order: a member of the author\'s team (not the author), then QA; identities are recorded and QA marks it done', async () => {
   const s = setup('shadow');
   try {
-    const head = s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    const head = s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
     await assert.rejects(flow.approve(s.wp, s.storyId, 'kabir'), /author/i);
-    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC), /^BadRequest: QA reviews after a developer approval; ask a lead to review first\.$/);
-    await assert.rejects(flow.approve(s.wp, s.storyId, 'arjun'), /lead/i);   // an engineer is not a developer approver
-    const dev = await flow.approve(s.wp, s.storyId, 'dev', 'reads well');
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC), /^BadRequest: QA reviews after a developer approval; ask the author's team to review first\.$/);
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'dev'), /not in Kabir's team/);   // rework W3: a lead of another team is not the developer approver
+    const dev = await flow.approve(s.wp, s.storyId, 'arjun', 'reads well');
     assert.equal(dev.stage, 'dev');
-    assert.equal(pr(s).devApproval?.by, 'dev');
+    assert.equal(pr(s).devApproval?.by, 'arjun');
     assert.equal(pr(s).devApproval?.sha, head);
     assert.equal(rawGet(s.wp, s.storyId)!.reviewerId, 'nikhil', 'the review moves to QA');
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'in-review');
@@ -250,15 +250,17 @@ test('two approvals in order: a lead who is not the author, then QA; identities 
   } finally { await s.done(); }
 });
 
-test("a lead's own story needs a peer lead; Zoya (quality charter) can give the QA approval", async () => {
+test("a lead's own story needs a member of the lead's team (rework W3; was any peer lead); Zoya (quality charter) can give the QA approval when she is the story's QA", async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'tara');
+    await assert.rejects(flow.approve(s.wp, s.storyId, 'tara'), /not in Kabir's team/);
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    items.update(s.wp, s.storyId, { reviewerId: 'zoya', note: 'Zoya takes QA on this one' }, 'asha');
     const qa = await flow.approve(s.wp, s.storyId, 'zoya', undefined, QA_DOC);
     assert.equal(qa.stage, 'qa');
-    assert.equal(pr(s).devApproval?.by, 'tara');
+    assert.equal(pr(s).devApproval?.by, 'arjun');
     assert.equal(pr(s).qaApproval?.by, 'zoya');
   } finally { await s.done(); }
 });
@@ -266,10 +268,10 @@ test("a lead's own story needs a peer lead; Zoya (quality charter) can give the 
 test('a new commit resets both approvals, marks evidence stale, and is pushed', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
-    const newer = s.commit('services/agent-svc/recall.py', 'x = 2\n');
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    const newer = s.commit('services/agent-svc/memory_client.py', 'x = 2\n');
     await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC), /new commit/i);
     assert.equal(pr(s).headSha, newer);
     assert.equal(s.gh.remoteSha(`emp/kabir/${s.storyId}`), newer);
@@ -277,7 +279,7 @@ test('a new commit resets both approvals, marks evidence stale, and is pushed', 
     assert.equal(flow.approvalHolds(rawGet(s.wp, s.storyId)!, 'dev'), false);
     // The developer approval is needed again, on the new head.
     await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC), /developer approval/i);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     assert.equal(pr(s).devApproval?.sha, newer);
   } finally { await s.done(); }
 });
@@ -285,15 +287,15 @@ test('a new commit resets both approvals, marks evidence stale, and is pushed', 
 test('#23: a new head that already has evidence says so; without it the evidence is stale', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
     const pushed = () => trail.activityFor(s.wp, s.storyId).filter(a => /^Pushed .*new commits/.test(a.text)).map(a => a.text);
-    s.commit('services/agent-svc/recall.py', 'x = 2\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 2\n');
     await flow.syncHeads(s.wp);
     assert.match(pushed().at(-1)!, /both approvals reset; the evidence is stale$/);
     assert.equal(pr(s).evidence, 'stale');
 
-    const newer = s.commit('services/agent-svc/recall.py', 'x = 3\n');
+    const newer = s.commit('services/agent-svc/memory_client.py', 'x = 3\n');
     const cur = rawGet(s.wp, s.storyId)!;
     work.saveQuiet(s.wp, { ...cur, evidenceRun: { run: 'r', sha: newer, state: 'success', platforms: ['android'], features: ['queries'], passed: 14, failed: 0, failures: [], durationS: 60, report: '/r', by: 'kabir', at: new Date().toISOString() } });
     await flow.syncHeads(s.wp);
@@ -306,10 +308,10 @@ test('#23: a new head that already has evidence says so; without it the evidence
 test('the sweep notices a new commit while in review: re-pushed and reset', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
-    const newer = s.commit('services/agent-svc/recall.py', 'x = 3\n');
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    const newer = s.commit('services/agent-svc/memory_client.py', 'x = 3\n');
     const moved = await flow.syncHeads(s.wp);
     assert.deepEqual(moved, [s.storyId]);
     assert.equal(s.gh.remoteSha(`emp/kabir/${s.storyId}`), newer);
@@ -321,17 +323,17 @@ test('the sweep notices a new commit while in review: re-pushed and reset', asyn
 test('on: done needs both approvals (the owner excepted); shadow enforces nothing', async () => {
   const on = setup('on');
   try {
-    on.commit('services/agent-svc/recall.py', 'x = 1\n');
+    on.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(on);
     assert.throws(() => items.update(on.wp, on.storyId, { status: 'done' }, 'nikhil'), /approval/i);
-    await flow.approve(on.wp, on.storyId, 'dev');
+    await flow.approve(on.wp, on.storyId, 'arjun');
     assert.throws(() => items.update(on.wp, on.storyId, { status: 'done' }, 'nikhil'), /approval/i);
     await flow.approve(on.wp, on.storyId, 'nikhil', undefined, QA_DOC);
     assert.equal(rawGet(on.wp, on.storyId)!.status, 'done');
   } finally { await on.done(); }
   const shadow = setup('shadow');
   try {
-    shadow.commit('services/agent-svc/recall.py', 'x = 1\n');
+    shadow.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(shadow);
     // Shadow routes review to a developer approver first (finding #3) but enforces no approvals: the reviewer marks it done.
     const reviewer = rawGet(shadow.wp, shadow.storyId)!.reviewerId!;
@@ -343,10 +345,10 @@ test('on: done needs both approvals (the owner excepted); shadow enforces nothin
 test('a dispute of a QA send-back goes to Asha first (then the COO, then the owner)', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
     await assert.rejects(flow.dispute(s.wp, s.storyId, 'kabir', 'it works'), /send-back/i);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     await assert.rejects(flow.sendBack(s.wp, s.storyId, 'kabir', 'nope'), /author/i);
     await flow.sendBack(s.wp, s.storyId, 'nikhil', 'the recall test is missing');
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'in-progress');
@@ -366,30 +368,30 @@ test('a dispute of a QA send-back goes to Asha first (then the COO, then the own
 test('#20: a send-back reaches the author at once: a message into an idle open session, else a session on the story', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
     const kabirs = () => runtime.sessions.filter(x => x.options.cwd.includes('/kabir/'));
     const before = kabirs().length;
     // No open session: one starts on the story, with the note.
-    await flow.sendBack(s.wp, s.storyId, 'dev', 'the recall test is missing');
+    await flow.sendBack(s.wp, s.storyId, 'arjun', 'the recall test is missing');
     assert.equal(kabirs().length, before + 1);
-    assert.match(kabirs().at(-1)!.options.prompt, /Sent back by Dev: .*the recall test is missing/s);
+    assert.match(kabirs().at(-1)!.options.prompt, /Sent back by Arjun: .*the recall test is missing/s);
     assert.ok(trail.activityFor(s.wp, s.storyId).some(a => /Send-back delivered to Kabir: a session started/.test(a.text)));
 
     // An open session sitting idle (waiting) gets it as a message, not a second session.
     kabirs().at(-1)!.result();
     items.update(s.wp, s.storyId, { status: 'in-review' }, 'kabir');
     await flow.onReview(s.wp, s.storyId, 'kabir');
-    await flow.sendBack(s.wp, s.storyId, 'dev', 'rename the helper');
+    await flow.sendBack(s.wp, s.storyId, 'arjun', 'rename the helper');
     assert.equal(kabirs().length, before + 1, 'no second session');
-    assert.match(kabirs().at(-1)!.sent.at(-1)!.text, /Sent back by Dev: .*rename the helper/s);
+    assert.match(kabirs().at(-1)!.sent.at(-1)!.text, /Sent back by Arjun: .*rename the helper/s);
   } finally { await s.done(); }
 });
 
 test('a send-back switches the author\'s open session back to the story when it is on another one (8 Oct)', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
     // Kabir moved on: his one open session is on another story, idle between turns.
     const epicId = rawGet(s.wp, s.storyId)!.parentId!;
@@ -400,10 +402,10 @@ test('a send-back switches the author\'s open session back to the story when it 
     await new Promise(r => setTimeout(r, 20));
     assert.equal(employees.openSession('kabir')?.assignmentId, other.id);
     const before = kabirs().length;
-    await flow.sendBack(s.wp, s.storyId, 'dev', 'the recall test is missing');
+    await flow.sendBack(s.wp, s.storyId, 'arjun', 'the recall test is missing');
     assert.equal(kabirs().length, before, 'no second session');
     assert.equal(employees.openSession('kabir')?.assignmentId, s.storyId, 'the session is back on the sent-back story');
-    assert.match(kabirs().at(-1)!.sent.at(-1)!.text, /Sent back by Dev: .*the recall test is missing/s);
+    assert.match(kabirs().at(-1)!.sent.at(-1)!.text, /Sent back by Arjun: .*the recall test is missing/s);
     assert.ok(trail.activityFor(s.wp, s.storyId).some(a => /switched back to this story/.test(a.text)));
   } finally { await s.done(); }
 });
@@ -413,7 +415,7 @@ test('a CTO named as reviewer keeps the developer review; it is not swapped for 
   try {
     s.wp.org.employees.push({ ...employee(s.wp, 'kabir'), id: 'cto', name: 'Vikram', roleId: 'cto', level: 0, charterIds: [], reportsTo: undefined } as never);
     items.update(s.wp, s.storyId, { reviewerId: 'cto' }, 'coo');
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
     assert.equal(rawGet(s.wp, s.storyId)!.reviewerId, 'cto', 'the named CTO stays the reviewer');
   } finally { await s.done(); }
@@ -422,7 +424,7 @@ test('a CTO named as reviewer keeps the developer review; it is not swapped for 
 test('a send-back releases a story the dispatcher had only just started, back to Ready (8 Oct phantom)', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
     const epicId = rawGet(s.wp, s.storyId)!.parentId!;
     const other = items.create(s.wp, { level: 'story', title: 'Next story', parentId: epicId, assigneeId: 'kabir' }, 'owner');
@@ -431,7 +433,7 @@ test('a send-back releases a story the dispatcher had only just started, back to
     kabirs().at(-1)!.result();
     await new Promise(r => setTimeout(r, 20));
     assert.equal(items.get(s.wp, other.id)!.status, 'in-progress');
-    await flow.sendBack(s.wp, s.storyId, 'dev', 'the recall test is missing');
+    await flow.sendBack(s.wp, s.storyId, 'arjun', 'the recall test is missing');
     assert.equal(employees.openSession('kabir')?.assignmentId, s.storyId);
     assert.equal(items.get(s.wp, other.id)!.status, 'ready', 'the phantom start is released');
     assert.ok(trail.activityFor(s.wp, other.id).some(a => /Back to Ready/.test(a.text)));
@@ -441,7 +443,7 @@ test('a send-back releases a story the dispatcher had only just started, back to
 test('a send-back leaves a story that was really begun (it has a plan) In progress', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
     const epicId = rawGet(s.wp, s.storyId)!.parentId!;
     const other = items.create(s.wp, { level: 'story', title: 'Next story', parentId: epicId, assigneeId: 'kabir' }, 'owner');
@@ -450,7 +452,7 @@ test('a send-back leaves a story that was really begun (it has a plan) In progre
     kabirs().at(-1)!.result();
     await new Promise(r => setTimeout(r, 20));
     work.attachPlan(s.wp, other.id, 'Plan: do it', 'kabir');
-    await flow.sendBack(s.wp, s.storyId, 'dev', 'the recall test is missing');
+    await flow.sendBack(s.wp, s.storyId, 'arjun', 'the recall test is missing');
     assert.equal(items.get(s.wp, other.id)!.status, 'in-progress', 'real work stays');
   } finally { await s.done(); }
 });
@@ -458,7 +460,7 @@ test('a send-back leaves a story that was really begun (it has a plan) In progre
 test('the evidence hook sets workplace/evidence on the head', async () => {
   const s = setup('shadow');
   try {
-    const head = s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    const head = s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
     await flow.setEvidence(s.wp, s.storyId, 'success', 'screenshots attached');
     assert.equal(pr(s).evidence, 'success');
@@ -469,7 +471,7 @@ test('the evidence hook sets workplace/evidence on the head', async () => {
 test('a failed pre-pr.sh result makes workplace/tests fail, with the failing tail on the item', async () => {
   const s = setup('shadow');
   try {
-    const head = s.commit('services/agent-svc/recall.py', 'x = 1\n', undefined, 'fail');
+    const head = s.commit('services/agent-svc/memory_client.py', 'x = 1\n', undefined, 'fail');
     await reviewed(s);
     assert.equal(s.gh.status(head, 'workplace/tests')?.state, 'failure');
     assert.match(s.gh.status(head, 'workplace/tests')!.description, /agent-svc unit 372 passed, 2 failed/);
@@ -481,7 +483,7 @@ test('a failed pre-pr.sh result makes workplace/tests fail, with the failing tai
 test('workplace/tests reports pre-pr.sh: "mobile-android unit 16 passed · agent-svc syntax ok · agent-svc unit 374 passed — run by kabir on <sha7>"; the server runs no suites', async () => {
   const s = setup('shadow', { quality: 'areas:\n  agent-svc:\n    paths: [services/agent-svc/]\n    checks:\n      - name: never\n        run: touch /tmp/never-ran-by-workplace\n' });
   try {
-    const head = s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    const head = s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
     const st = s.gh.status(head, 'workplace/tests')!;
     assert.equal(st.state, 'success');
@@ -504,7 +506,7 @@ test('pre-PR gate: report_done and request_review refuse without a passing pre-p
     const args = { assignmentId: s.storyId, testsPassed: 3, testsFailed: 0, commits: ['abc'], liveVerified: [], notVerified: [] };
     const refusal = /Run scripts\/pre-pr\.sh on your latest commit first \(results belong to a commit\)\./;
     // Not run at all.
-    const first = s.commit('services/agent-svc/recall.py', 'x = 1\n', undefined, false);
+    const first = s.commit('services/agent-svc/memory_client.py', 'x = 1\n', undefined, false);
     assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
     assert.notEqual(rawGet(s.wp, s.storyId)!.status, 'in-review', 'nothing recorded');
     assert.equal(s.gh.count('push'), 0);
@@ -512,11 +514,11 @@ test('pre-PR gate: report_done and request_review refuse without a passing pre-p
     writePrePr(s.wt, first, { ok: false });
     assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
     // Passed, but on an older commit.
-    s.commit('services/agent-svc/recall.py', 'x = 2\n', undefined, false);
+    s.commit('services/agent-svc/memory_client.py', 'x = 2\n', undefined, false);
     writePrePr(s.wt, first, { ok: true });
     assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
     // A file named for the head that describes another commit.
-    const head = s.commit('services/agent-svc/recall.py', 'x = 3\n', undefined, false);
+    const head = s.commit('services/agent-svc/memory_client.py', 'x = 3\n', undefined, false);
     writePrePr(s.wt, head, { forSha: first });
     assert.match(JSON.stringify((await client.callTool({ name: 'report_done', arguments: args })).content), refusal);
     // A fast run, or one limited to some areas, never counts.
@@ -537,7 +539,7 @@ test('pre-PR gate: report_done and request_review refuse without a passing pre-p
 
   const l = setup('local');
   try {
-    l.commit('services/agent-svc/recall.py', 'x = 1\n', undefined, false);
+    l.commit('services/agent-svc/memory_client.py', 'x = 1\n', undefined, false);
     assert.equal(flow.prePrGate(l.wp, l.storyId), null, 'local: no gate');
   } finally { await l.done(); }
 });
@@ -557,7 +559,7 @@ test('employee sessions get ANDROID_HOME, JAVA_HOME (JDK 17) and DEVELOPER_DIR (
 test('three GitHub failures within five minutes fall back to local and alert the COO', async () => {
   const s = setup('on');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     toReview(s);
     s.gh.failNext('push', 3);
     for (let i = 0; i < 2; i++) {
@@ -600,7 +602,7 @@ test('a refusal (planted dist-x) is not a GitHub failure', async () => {
 test('merge: dry run in shadow; in on refused until review and tests are green, then a merge commit, the branch deleted, the trunk fast-forwarded', async () => {
   const sh = setup('shadow');
   try {
-    sh.commit('services/agent-svc/recall.py', 'x = 1\n');
+    sh.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(sh);
     const dry = await flow.merge(sh.wp, sh.storyId, 'coo');
     assert.equal(dry.merged, false);
@@ -611,10 +613,10 @@ test('merge: dry run in shadow; in on refused until review and tests are green, 
 
   const s = setup('on');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
     await assert.rejects(flow.merge(s.wp, s.storyId, 'coo'), /approval/i);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     const before = git(s.trunkRepo, ['rev-parse', TRUNK]).trim();
     // The QA approval (2 of 2) with workplace/tests green: the Workplace merges it itself.
     const qa = await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
@@ -634,9 +636,9 @@ test('merge: dry run in shadow; in on refused until review and tests are green, 
 test('merge: refused when tests are red, or the head moved since the approvals', async () => {
   const s = setup('on');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n', undefined, 'fail');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n', undefined, 'fail');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     assert.equal(pr(s).merged, undefined, 'red tests: no auto-merge');
     await flow.autoMergeSweep(s.wp);
@@ -650,9 +652,9 @@ test('merge: refused when tests are red, or the head moved since the approvals',
 test('auto-merge holds when the CTO commented after the developer approval (8 Oct)', async () => {
   const s = setup('on');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     await new Promise(r => setTimeout(r, 5));
     trail.record(s.wp, { itemId: s.storyId, by: 'cto', kind: 'comment', text: 'Restructure: verdicts first.' });
     await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
@@ -664,11 +666,11 @@ test('auto-merge holds when the CTO commented after the developer approval (8 Oc
 test('auto-merge is not held by a CTO comment from before the developer approval', async () => {
   const s = setup('on');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     trail.record(s.wp, { itemId: s.storyId, by: 'cto', kind: 'comment', text: 'Looks fine to start.' });
     await new Promise(r => setTimeout(r, 5));
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     assert.ok(pr(s).merged, 'merged');
   } finally { await s.done(); }
@@ -677,9 +679,9 @@ test('auto-merge is not held by a CTO comment from before the developer approval
 test('auto-merge tells Asha on success', async () => {
   const s = setup('on');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     const told = manager.list(s.wp).find(a => a.key.startsWith(`merged:${s.storyId}`));
     assert.ok(told, 'Asha is told');
@@ -691,9 +693,9 @@ test('auto-merge tells Asha on success', async () => {
 test('auto-merge: a GitHub merge failure alerts the COO once, forces nothing, is not retried; the manual merge still works', async () => {
   const s = setup('on');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     s.gh.failNext('merge', 1);
     const qa = await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);   // never throws on a merge problem
     assert.equal(qa.stage, 'qa');
@@ -715,9 +717,9 @@ test('auto-merge: a GitHub merge failure alerts the COO once, forces nothing, is
 test('auto-merge: a conflict with trunk reopens the story to its author instead of leaving it Done', async () => {
   const s = setup('on');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     s.gh.failNext('merge', 1, 'GitHub PUT /repos/o/r/pulls/1/merge failed (405): Pull Request has merge conflicts');
     await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     const w = rawGet(s.wp, s.storyId)!;
@@ -734,9 +736,9 @@ test('auto-merge: a conflict with trunk reopens the story to its author instead 
 test('auto-merge: a PR GitHub already shows merged is recorded as merged, not alerted', async () => {
   const s = setup('on');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     const fakePr = s.gh.prs[0]!; fakePr.state = 'closed'; fakePr.merged = true;   // its commits reached trunk via another PR
     await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     assert.equal(pr(s).merged?.by, 'github');
@@ -747,9 +749,9 @@ test('auto-merge: a PR GitHub already shows merged is recorded as merged, not al
 test('auto-merge: the sweep merges a story approved in shadow once the mode is on; shadow never merges', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     await flow.autoMergeSweep(s.wp);
     assert.equal(s.gh.count('merge'), 0, 'shadow never merges');
@@ -764,9 +766,9 @@ test('auto-merge: the sweep merges a story approved in shadow once the mode is o
 test('merge: a trunk checkout that cannot fast-forward alerts the COO and is never forced', async () => {
   const s = setup('on');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     // A local commit on the trunk checkout that GitHub does not have: a pull can only merge, not fast-forward.
     writeFileSync(join(s.trunkRepo, 'LOCAL.md'), 'local only\n');
     git(s.trunkRepo, ['add', '-A']);
@@ -791,7 +793,7 @@ test('an approval holds only for its commit and its stay in review', () => {
 test('a first push GitHub failed is retried by the sweep; a refused head is not', async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     toReview(s);
     s.gh.failNext('push', 1);
     assert.ok((await flow.onReview(s.wp, s.storyId, 'kabir')).error);
@@ -862,9 +864,9 @@ test('done check: a stale origin/<trunk> does not count newer trunk commits the 
 test("QA's approval needs the QA doc: missing, thin or failing docs are refused; a complete one is filed for the staging cycle", async () => {
   const s = setup('shadow');
   try {
-    s.commit('services/agent-svc/recall.py', 'x = 1\n');
+    s.commit('services/agent-svc/memory_client.py', 'x = 1\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil'), /needs the QA doc/);
     await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, '## Edge cases\n- PASS: one\n## Report\nshort'), /not complete/);
     await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC.replace('- PASS: empty input', '- FAIL: empty input')), /review_send_back/);
@@ -881,32 +883,26 @@ test("QA's approval needs the QA doc: missing, thin or failing docs are refused;
   } finally { await s.done(); }
 });
 
-test('auto-merge holds a design doc for the COO: both approvals and green tests are not enough; the COO merges it by hand', async () => {
+test('rework W3 (owner, 10 Oct): a design doc is no longer held for the COO; it auto-merges after both approvals like any change', async () => {
   const s = setup('on');
   try {
     s.commit('docs/tech/grounded-awareness.md', '# Technical doc\n');
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
-    assert.equal(pr(s).merged, undefined, 'a design doc never auto-merges');
-    const held = coo.listItems(s.wp).filter(i => /auto-merge/i.test(i.title) && i.itemId === s.storyId);
-    assert.equal(held.length, 1, 'the COO is asked once');
-    assert.match(held[0]!.body, /design docs \(docs\/tech\/grounded-awareness\.md\)/);
-    await flow.autoMergeSweep(s.wp);
-    assert.equal(pr(s).merged, undefined, 'the sweep does not merge it either');
-    const m = await flow.merge(s.wp, s.storyId, 'coo');
-    assert.equal(m.merged, true, 'the COO merges it after review');
-    assert.ok(flow.DESIGN_DOC.test('docs/experts/HLD-grounded-awareness.md') && flow.DESIGN_DOC.test('docs/product/x.md') && !flow.DESIGN_DOC.test('docs/experts/info.md'));
+    assert.ok(pr(s).merged, 'merged after both approvals');
+    assert.equal(coo.listItems(s.wp).filter(i => /auto-merge/i.test(i.title) && i.itemId === s.storyId).length, 0, 'the COO is not asked');
+    assert.equal((flow as Record<string, unknown>)['DESIGN_DOC'], undefined, 'the hold is gone');
   } finally { await s.done(); }
 });
 
 test('a full pre-pr.sh result that arrives after approval is re-read: the sweep merges the story instead of waiting forever', async () => {
   const s = setup('on');
   try {
-    const head = s.commit('services/agent-svc/recall.py', 'x = 1\n', undefined, false);
+    const head = s.commit('services/agent-svc/memory_client.py', 'x = 1\n', undefined, false);
     writePrePr(s.wt, head, { mode: 'fast' });          // passes the submit gate, but only a full run turns tests green
     await reviewed(s);
-    await flow.approve(s.wp, s.storyId, 'dev');
+    await flow.approve(s.wp, s.storyId, 'arjun');
     await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
     assert.equal(pr(s).tests?.state, 'pending');
     assert.equal(pr(s).merged, undefined, 'approved but waiting for a full run');

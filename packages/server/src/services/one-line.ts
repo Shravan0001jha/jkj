@@ -75,3 +75,16 @@ export function short(text: string): { text: string; details?: string } {
   }
   return { text: `${kept.trimEnd()} …`, details: whole };
 }
+
+/**
+ * Agent comments and Inbox replies (owner, 10 Oct): stored whole, never cut silently, and capped. A
+ * comment over the cap is refused with the way out (a doc), so nothing an agent wrote is ever lost to
+ * a "…". The owner's and the COO's words are never capped.
+ */
+export const COMMENT_CAP = 1200;
+
+/** Null when `text` fits the cap; else the refusal the agent reads. */
+export function overCap(text: string, cap = COMMENT_CAP): string | null {
+  const n = text.trim().length;
+  return n > cap ? `Not posted: comments are capped at ${cap} characters (yours: ${n}). Put the detail in a doc (doc_write) and link it.` : null;
+}

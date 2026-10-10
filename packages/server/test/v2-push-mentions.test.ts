@@ -71,7 +71,7 @@ test('a long comment reaches the mentioned employee whole, not its shortened lin
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Ack latency', assigneeId: 'dev' }, 'asha');
     const long = `@dev ${'numbers from the four scripted runs. '.repeat(20)}CAVEAT-AT-THE-END`;
     const c = trail.comment(wp, s.id, { by: 'nikhil', text: long });
-    assert.ok(c.text.endsWith('…') && c.details, 'stored as a short line plus details');
+    assert.equal(c.text, long.trim(), 'stored whole (rework W3: no short line plus details)');
     await tick();
     assert.match(fake.last().options.prompt, /CAVEAT-AT-THE-END/);
   } finally {

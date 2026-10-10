@@ -6,8 +6,9 @@ import type { Workplace } from './workplace.js';
  * functions over the org and the item, plus the mode setting, so `items.ts` can ask without pulling
  * in the GitHub flow itself.
  *
- * Two approvals, in order: a developer (a lead who is not the author — for a lead's own story, a
- * peer lead), then QA (role `qa`, or the quality charter's holder). An approval holds only for the
+ * Two approvals, in order: a developer (a member of the author's team who is not the author, or the
+ * CTO), then QA (role `qa`, or the quality charter's holder), with any extra reviewer (another team's
+ * lead whose charter's code the diff changes) approving before QA. An approval holds only for the
  * commit it was given on and the stay in review it was given in.
  */
 
@@ -26,11 +27,56 @@ export function writeGithubMode(wp: Workplace, mode: GitHubMode): void {
 }
 
 export const isDeveloper = (e: Employee | undefined): boolean => !!e && e.roleId === 'lead';
-/** Who may give the developer approval (1 of 2): a lead, or the CTO when named as the reviewer (8 Oct:
- * Vikram was set as reviewer on a QA process doc and silently replaced by Dev because `cto` is not a
- * lead role). Automatic assignment still picks leads only (devReviewer), so the CTO is never loaded
- * with routine reviews; he reviews what he is explicitly given. */
-export const canApproveAsDeveloper = (e: Employee | undefined): boolean => !!e && (e.roleId === 'lead' || e.roleId === 'cto');
+export const isCto = (e: Employee | undefined): boolean => !!e && e.roleId === 'cto';
+/** A reviewing role (a lead or the CTO): who may look at any story's evidence, whatever the team. */
+export const isReviewerRole = (e: Employee | undefined): boolean => isDeveloper(e) || isCto(e);
+
+/* ---------- the team (rework W3; private copies of the org-tree helpers, by reportsTo and roleId) ---------- */
+
+const isTeamLead = (e: Employee | undefined): boolean => !!e && (e.roleId === 'lead' || e.roleId === 'qa');
+
+/**
+ * The lead of `id`'s team: themselves when their role is lead or qa, else the first manager up the
+ * chain whose role is. Undefined for people above the teams (the CoS, the CTO, the COO) and strangers.
+ */
+export function teamOf(employees: Employee[], id: string | undefined): string | undefined {
+  const byId = (x: string | undefined) => (x ? employees.find(e => e.id === x) : undefined);
+  let cur = byId(id);
+  const seen = new Set<string>();
+  while (cur && !seen.has(cur.id)) {
+    if (isTeamLead(cur)) return cur.id;
+    seen.add(cur.id);
+    cur = byId(cur.reportsTo ?? undefined);
+  }
+  return undefined;
+}
+
+/** A team: its lead and the lead's direct reports (virtual employees never review). */
+export function teamMembers(employees: Employee[], leadId: string | undefined): string[] {
+  if (!leadId) return [];
+  return employees.filter(e => !e.virtual && (e.id === leadId || e.reportsTo === leadId)).map(e => e.id);
+}
+
+/** The lead answering for a charter: a holder whose role is lead or qa, else the team lead of its first holder. */
+export function leadOfCharter(employees: Employee[], charterId: string): string | undefined {
+  const holders = employees.filter(e => !e.virtual && e.charterIds.includes(charterId));
+  const lead = holders.find(isTeamLead);
+  return lead ? lead.id : holders.length ? teamOf(employees, holders[0]!.id) : undefined;
+}
+
+/**
+ * Who may give the developer approval (1 of 2) on `authorId`'s story (owner, 10 Oct): a member of the
+ * author's own team who is not the author, or the CTO. A lead of another team reviews only the files of
+ * their charters (an extra reviewer), never the story as a whole.
+ */
+export function canApproveAsDeveloper(employees: Employee[], actorId: string | undefined, authorId: string | undefined): boolean {
+  if (!actorId || actorId === authorId) return false;
+  const actor = employees.find(e => e.id === actorId);
+  if (!actor || actor.virtual) return false;
+  if (isCto(actor)) return true;
+  const team = teamOf(employees, authorId);
+  return !!team && teamMembers(employees, team).includes(actorId);
+}
 export const isQa = (e: Employee | undefined): boolean => !!e && (e.roleId === 'qa' || e.charterIds.includes(QUALITY_CHARTER));
 
 /**
@@ -66,7 +112,7 @@ export function doneProblem(wp: Workplace, w: WorkItem, by: string): string | nu
   const s = stage(w);
   if (s === 'approved') return null;
   return s === 'dev'
-    ? 'This story has a pull request, so it is done only through review_approve: approval 1 of 2 from the developer approver (a lead who is not the author), then approval 2 of 2 from QA. Ask a lead to review first.'
+    ? 'This story has a pull request, so it is done only through review_approve: approval 1 of 2 from the developer approver (a member of the author\'s team who is not the author), then approval 2 of 2 from QA. Ask your team to review first.'
     : 'This story has a pull request, so it is done only through review_approve: it has the developer approval (1 of 2) and needs QA\'s (2 of 2). QA calls review_approve.';
 }
 
@@ -76,7 +122,7 @@ export const QA_WAIT = 'Wait: developer approval first. QA reviews after the dev
 export function qaTooEarly(wp: Workplace, w: WorkItem, by: string): boolean {
   if (!w.pr || w.pr.merged || githubMode(wp) === 'local') return false;
   const who = wp.org.employees.find(e => e.id === by);
-  return isQa(who) && !canApproveAsDeveloper(who) && !approvalHolds(w, 'dev');
+  return isQa(who) && !canApproveAsDeveloper(wp.org.employees, by, w.employeeId) && !approvalHolds(w, 'dev');
 }
 
 /** An In review story with a PR moved back by QA before the developer approval: refused (finding #3). */

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import type { Employee, GitHubMode, PrApproval, PrRecord, WorkItem } from '@jkj/shared';
+import type { Employee, ExtraReviewer, GitHubMode, PrApproval, PrRecord, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { GitHubPort, StatusState } from './github-port.js';
 import { RealGitHub } from './github-port.js';
@@ -15,9 +15,11 @@ import * as employees from './employees.js';
 import * as runs from './runs.js';
 import { now } from './store.js';
 import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
-import { branchFor, worktreePath, git as gitIn } from './worktrees.js';
+import { branchFor, worktreePath } from './worktrees.js';
 import * as prePr from './pre-pr.js';
-import { GITHUB_MODES, githubMode, holds, isDeveloper, canApproveAsDeveloper, isQa, qaReviewer, writeGithubMode } from './review-policy.js';
+import { GITHUB_MODES, githubMode, holds, canApproveAsDeveloper, isCto, isQa, qaReviewer, writeGithubMode, teamOf, teamMembers, leadOfCharter } from './review-policy.js';
+import { resolve as resolveOwner } from './ownership.js';
+import { chiefOfStaffId } from './v2-map.js';
 import { freshLink } from './evidence-share.js';
 import * as qaDoc from './qa-doc.js';
 import { BadRequest, Conflict, NotFound } from '../util/errors.js';
@@ -171,6 +173,8 @@ export interface ReviewResult {
   pr?: { number: number; url: string };
   /** Settles when workplace/tests is recorded for this head (never rejects). */
   tests?: Promise<void>;
+  /** The head moved only by merging the trunk: the approvals, tests and evidence carried over. */
+  carried?: boolean;
   /** One line for the employee's tool reply ('' when nothing happened). */
   message: string;
 }
@@ -236,24 +240,45 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   }
 
   const moved = !!reuse && reuse.headSha !== ctx.head;
+  // Rework W3 (owner, 10 Oct): a head that moved only by merging the trunk in keeps the approvals,
+  // the tests and the evidence; any commit of the author's own resets them.
+  const carried = moved && trunkOnly(ctx.repo, ctx.base, reuse!.headSha, ctx.head);
   const episode = w.statusSince ?? '';
   const at = now();
   let tookOver = false;
+  const extra = codeReviewersFor(wp, ctx);
+  let added: ExtraReviewer[] = [];
   savePr(wp, itemId, cur => {
     const base: PrRecord = reuse
       ? { ...reuse }
       : { number: number!, url: url!, branch: ctx.branch, base: ctx.base, headSha: ctx.head, pushedAt: at, evidence: 'pending' };
     const record: PrRecord = { ...base, number: number!, url: url!, headSha: ctx.head, pushedAt: at };
-    if (moved) {
-      delete record.devApproval; delete record.qaApproval; delete record.tests;
+    const before = reuse?.headSha;
+    if (moved && carried) {
+      for (const k of ['devApproval', 'qaApproval'] as const) if (record[k] && record[k]!.sha === before) record[k] = { ...record[k]!, sha: ctx.head };
+      if (record.tests && record.tests.sha === before) {
+        const note = 'carried: trunk-only merge';
+        record.tests = { ...record.tests, sha: ctx.head, at, summary: record.tests.summary.includes(note) ? record.tests.summary : `${record.tests.summary} (${note})` };
+      }
+      record.extraReviewers = (record.extraReviewers ?? []).map(e => (e.approvedAt && e.sha === before ? { ...e, sha: ctx.head } : e));
+    } else if (moved) {
+      delete record.devApproval; delete record.qaApproval; delete record.tests; delete record.spendApprovedAt;
       record.evidence = 'stale';
+      record.extraReviewers = (record.extraReviewers ?? []).map(clearExtra);
     }
     // A new stay in review (after a send-back): the approvals of the last one are over.
     for (const k of ['devApproval', 'qaApproval'] as const) if (record[k] && record[k]!.episode !== episode) delete record[k];
+    // The extra reviewers: the leads whose charters' code this diff changes (recomputed on every push),
+    // plus anyone the author asked for; an approval given on this head and this stay keeps holding.
+    const prevExtra = (record.extraReviewers ?? []).map(e => (e.approvedAt && e.episode !== episode ? clearExtra(e) : e));
+    const nextExtra: ExtraReviewer[] = extra.map(c => { const p = prevExtra.find(e => e.id === c.id); return p ? { ...p, files: c.files } : c; });
+    for (const e of prevExtra) if (e.requested && !nextExtra.some(x => x.id === e.id)) nextExtra.push(e);
+    added = nextExtra.filter(e => !prevExtra.some(x => x.id === e.id));
+    if (nextExtra.length) record.extraReviewers = nextExtra; else delete record.extraReviewers;
     // Evidence is run before submitting (handbook step 4, then 5): a finished run on this very head
     // carries over to a new PR record, or to a head the PR has just moved to.
     const ev = cur.evidenceRun;
-    if (ev && ev.sha === ctx.head && (ev.state === 'success' || ev.state === 'failure') && (!reuse || moved)) {
+    if (ev && ev.sha === ctx.head && (ev.state === 'success' || ev.state === 'failure') && (!reuse || (moved && !carried))) {
       record.evidence = ev.state;
       tookOver = true;
       record.evidenceNote = `${ev.passed} passed, ${ev.failed} failed on ${ev.platforms.join('+')} (run_evidence)`;
@@ -263,17 +288,28 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   trail.record(wp, {
     itemId, by: 'workplace', kind: 'note',
     // Dry run #23: evidence run on the new head before the push is not stale; say which it is.
-    text: `Pushed ${ctx.branch} (${ctx.head.slice(0, 8)}) to GitHub; PR #${number}${moved ? `: new commits, both approvals reset; ${tookOver ? 'evidence already matches this commit' : 'the evidence is stale'}` : ''}`,
+    text: `Pushed ${ctx.branch} (${ctx.head.slice(0, 8)}) to GitHub; PR #${number}${carried ? ': only the trunk merged in, so the approvals, tests and evidence carry over' : moved ? `: new commits, both approvals reset; ${tookOver ? 'evidence already matches this commit' : 'the evidence is stale'}` : ''}`,
   });
-  log.info('github', `${itemId}: pushed ${ctx.branch} ${ctx.head.slice(0, 8)}, PR #${number} (by ${by})`);
+  log.info('github', `${itemId}: pushed ${ctx.branch} ${ctx.head.slice(0, 8)}, PR #${number}${carried ? ' (trunk-only merge, approvals kept)' : ''} (by ${by})`);
   // With a PR the first review is a developer's (shadow and on): whoever the author named, the reviewer
-  // becomes a developer approver until the developer approval holds (dry-run finding #3, 4 Oct: QA
-  // named first refused and sent it back, a wasted round). The reviewer change wakes them.
+  // becomes a developer approver (a member of the author's team, or the CTO) until the developer approval
+  // holds (dry-run finding #3, 4 Oct: QA named first refused and sent it back, a wasted round).
   const fresh = rawGet(wp, itemId)!;
   const named = fresh.reviewerId ?? '';
-  if (!holds(fresh.pr?.devApproval, fresh) && (!canApproveAsDeveloper(employeeOf(wp, named)) || named === fresh.employeeId)) {
+  if (!holds(fresh.pr?.devApproval, fresh) && !canApproveAsDeveloper(wp.org.employees, named, fresh.employeeId)) {
     const dev = devReviewer(wp, fresh);
-    if (dev) items.update(wp, itemId, { reviewerId: dev, note: 'A developer reviews first, then QA' }, 'workplace');
+    if (dev) {
+      items.update(wp, itemId, { reviewerId: dev, note: 'system: a developer from the author\'s team reviews first, then QA' }, 'workplace');
+      savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, devReviewer: dev } } : {}));
+    } else {
+      trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `No developer approver for ${nameOf(wp, fresh.employeeId)}: nobody else in their team and no CTO. Asha names one (item_update reviewerId).` });
+    }
+  } else if (named && !fresh.pr?.devReviewer && canApproveAsDeveloper(wp.org.employees, named, fresh.employeeId)) {
+    savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, devReviewer: named } } : {}));
+  }
+  if (added.length) {
+    const list = added.map(e => `@${e.id} (${e.files.length ? e.files.slice(0, 5).join(', ') + (e.files.length > 5 ? ` +${e.files.length - 5} more` : '') : 'asked by the author'})`).join('; ');
+    trail.comment(wp, itemId, { by: 'workplace', text: `Extra review before QA: this pull request changes code your charters own. ${list}. Review those files and call review_approve on ${itemId}; QA waits for you.`, mentions: added.map(e => e.id) });
   }
 
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
@@ -282,13 +318,130 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
     const link = ev.share ? (await freshLink(wp, ev.share))?.url : undefined;
     await prComment(wp, itemId, `Evidence ${ev.state === 'success' ? 'PASS' : 'FAIL'} on ${ev.sha.slice(0, 8)} (${ev.platforms.join(',')} / ${ev.features.join(',')}): ${ev.passed} passed, ${ev.failed} failed. Report: ${link ?? 'link unavailable'}`);
   }
-  const tests = recordTests(wp, itemId, ctx);
+  const tests = carried ? Promise.resolve() : recordTests(wp, itemId, ctx);
   return {
-    pr: { number: number!, url: url! }, tests,
+    pr: { number: number!, url: url! }, tests, ...(carried ? { carried: true } : {}),
     message: `The Workplace pushed your branch: pull request #${number} (${url}). ` +
-      (moved ? `Any new commit resets both approvals, so it goes back through the developer approver (approval 1 of 2) and QA (approval 2 of 2); ${tookOver ? 'evidence already matches this commit.' : 'run run_evidence again on this commit.'}`
-        : 'Next: the developer approver (approval 1 of 2, a lead who is not the author), then QA (approval 2 of 2).'),
+      (carried ? 'Only the trunk was merged in, so the approvals, tests and evidence carry over.'
+        : moved ? `Your new commit resets both approvals, so it goes back through the developer approver (approval 1 of 2) and QA (approval 2 of 2); ${tookOver ? 'evidence already matches this commit.' : 'run run_evidence again on this commit.'}`
+        : 'Next: the developer approver (approval 1 of 2, a member of your team who is not you), then QA (approval 2 of 2).'),
   };
+}
+
+const clearExtra = (e: ExtraReviewer): ExtraReviewer => { const { approvedAt: _a, sha: _s, episode: _e, ...rest } = e; return rest; };
+
+/* ---------- trunk catch-up (rework W3) ---------- */
+
+const isAncestor = (repo: string, a: string, b: string): boolean => {
+  try { execFileSync('git', ['-C', repo, 'merge-base', '--is-ancestor', a, b], { stdio: 'ignore' }); return true; } catch { return false; }
+};
+
+/**
+ * True when `to` differs from `from` only by merges of the trunk: `from` is an ancestor of `to`, there is
+ * no non-merge commit in from..to that is not on the trunk, every merge's parents are on the branch before it (from, or another
+ * merge in the range) or on the trunk, and each merge is a clean one (its tree is what git's own merge of
+ * its parents gives: no change slipped in while "resolving"). Anything else is the author's work.
+ */
+export function trunkOnly(repo: string, base: string, from: string, to: string): boolean {
+  try {
+    if (from === to || !isAncestor(repo, from, to)) return false;
+    const trunks = [`refs/heads/${base}`, `refs/remotes/origin/${base}`].map(r => revParse(repo, r)).filter((x): x is string => !!x);
+    if (!trunks.length) return false;
+    // The branch's own new commits: in from..to and not on the trunk (the trunk's commits came in by the merge).
+    const own = (flag: string): string[] => git(repo, ['rev-list', flag, to, `^${from}`, ...trunks.map(t => `^${t}`)]).split('\n').map(x => x.trim()).filter(Boolean);
+    if (own('--no-merges').length) return false;
+    const merges = own('--merges');
+    if (!merges.length) return false;
+    const range = new Set(merges);
+    for (const m of merges) {
+      const parents = git(repo, ['rev-list', '--parents', '-n', '1', m]).trim().split(/\s+/).slice(1);
+      if (parents.length !== 2) return false;
+      let fromTrunk = false;
+      for (const p of parents) {
+        const ownSide = p === from || range.has(p) || isAncestor(repo, p, from);
+        const trunk = trunks.some(t => isAncestor(repo, p, t));
+        if (!ownSide && !trunk) return false;
+        if (trunk && !ownSide) fromTrunk = true;
+      }
+      if (!fromTrunk) return false;
+      let clean: string;
+      try { clean = git(repo, ['merge-tree', '--write-tree', parents[0]!, parents[1]!]).split('\n')[0]!.trim(); } catch { return false; }
+      if (clean !== git(repo, ['rev-parse', `${m}^{tree}`]).trim()) return false;
+    }
+    return true;
+  } catch { return false; }
+}
+
+/* ---------- extra reviewers (rework W3) ---------- */
+
+/** A comment line in any of the languages we write: //, #, *, /* or <!--. */
+const COMMENT_LINE = /^(\/\/|#|\*|\/\*|<!--)/;
+
+/** Docs never call for a code review from another team. */
+const notCode = (file: string): boolean => /\.md$/i.test(file) || file.startsWith('docs/');
+
+/** The files a branch changes against the trunk (since they diverged). */
+export function changedFiles(repo: string, base: string, head: string): string[] {
+  return git(repo, ['diff', '--name-only', `${base}...${head}`]).split('\n').map(f => f.trim()).filter(Boolean);
+}
+
+/** A file's change counts as code when at least one added or removed line (whitespace and blank lines aside) is not a comment. */
+export function realCodeChange(repo: string, base: string, head: string, file: string): boolean {
+  if (notCode(file)) return false;
+  const diff = git(repo, ['diff', '-w', '--ignore-blank-lines', `${base}...${head}`, '--', file]);
+  return diff.split('\n').some(l => (l.startsWith('+') || l.startsWith('-')) && !l.startsWith('+++') && !l.startsWith('---') && !!l.slice(1).trim() && !COMMENT_LINE.test(l.slice(1).trim()));
+}
+
+/** The other teams' leads whose charters own code this branch really changes, each with those files. */
+function codeReviewersFor(wp: Workplace, ctx: Ctx): ExtraReviewer[] {
+  const employees = wp.org.employees;
+  const author = ctx.emp.id;
+  const authorLead = teamOf(employees, author) ?? author;
+  const repoId = wp.org.repos.find(r => r.root === ctx.repo)?.id ?? 'iris';
+  const byLead = new Map<string, string[]>();
+  let files: string[];
+  try { files = changedFiles(ctx.repo, ctx.base, ctx.head); } catch { return []; }
+  for (const f of files) {
+    if (notCode(f)) continue;
+    const owner = resolveOwner(wp.org.map, { kind: 'path', key: `${repoId}:${f}` });
+    if (!owner) continue;
+    const lead = leadOfCharter(employees, owner.primary);
+    if (!lead || lead === authorLead || lead === author) continue;
+    let real = false;
+    try { real = realCodeChange(ctx.repo, ctx.base, ctx.head, f); } catch { real = false; }
+    if (!real) continue;
+    byLead.set(lead, [...(byLead.get(lead) ?? []), f]);
+  }
+  return [...byLead].map(([id, fs]) => ({ id, files: fs }));
+}
+
+/** The extra reviewers whose approval does not hold on this head and stay in review. */
+export function pendingExtra(w: WorkItem): ExtraReviewer[] {
+  const pr = w.pr;
+  if (!pr) return [];
+  return (pr.extraReviewers ?? []).filter(e => !(e.approvedAt && e.sha === pr.headSha && e.episode === (w.statusSince ?? '')));
+}
+
+/** The author asks other leads to approve before QA (request_review extraReviewers). */
+export function requestExtraReviewers(wp: Workplace, itemId: string, by: string, ids: string[]): ExtraReviewer[] {
+  const w = rawGet(wp, itemId);
+  if (!w) throw new NotFound(`No item ${itemId}`);
+  if (by !== w.employeeId) throw new BadRequest('Only the author adds extra reviewers to their pull request.');
+  if (!w.pr) throw new BadRequest('This story has no pull request yet: report_done opens it, then add extra reviewers.');
+  const unknown = ids.filter(id => !wp.org.employees.some(e => e.id === id && !e.virtual));
+  if (unknown.length) throw new BadRequest(`No such employee: ${unknown.join(', ')}.`);
+  if (ids.includes(w.employeeId!)) throw new BadRequest('You never review your own story.');
+  const team = teamMembers(wp.org.employees, teamOf(wp.org.employees, w.employeeId));
+  const mates = ids.filter(id => team.includes(id));
+  if (mates.length) throw new BadRequest(`${mates.map(id => nameOf(wp, id)).join(', ')} ${mates.length === 1 ? 'is' : 'are'} in your team: your team gives the developer approval; extra reviewers are other teams' leads.`);
+  const fresh: string[] = [];
+  const saved = savePr(wp, itemId, c => {
+    const list = [...(c.pr!.extraReviewers ?? [])];
+    for (const id of new Set(ids)) if (!list.some(e => e.id === id)) { list.push({ id, files: [], requested: true }); fresh.push(id); }
+    return { pr: { ...c.pr!, extraReviewers: list } };
+  });
+  if (fresh.length) trail.comment(wp, itemId, { by: 'workplace', text: `Extra review before QA, asked by ${nameOf(wp, by)}: ${fresh.map(id => `@${id}`).join(', ')}. Review the change and call review_approve on ${itemId}; QA waits for you.`, mentions: fresh });
+  return saved.pr!.extraReviewers ?? [];
 }
 
 function refuse(wp: Workplace, itemId: string, sha: string, reasons: string[]): ReviewResult {
@@ -425,17 +578,25 @@ function qaNames(wp: Workplace): string {
   return names.length ? names.join(' or ') : 'QA';
 }
 
-/** The developer reviewer: the author's lead, else the lead (not the author) with the fewest reviews open. */
+/** Reviews each person has open (in review with them as the reviewer). */
+const openReviews = (wp: Workplace, id: string): number => (wp.db.prepare("select count(*) as n from work where status = 'in-review' and reviewer_id = ?").get(id) as { n: number }).n;
+
+/**
+ * The developer approver (rework W3, owner 10 Oct): for an engineer, their team lead; for a lead (or the
+ * QA lead), the member of their own team with the fewest reviews open; the CTO when the team has nobody else.
+ */
 export function devReviewer(wp: Workplace, w: WorkItem): string | undefined {
-  const author = w.employeeId ? employeeOf(wp, w.employeeId) : undefined;
-  const lead = author?.reportsTo ? employeeOf(wp, author.reportsTo) : undefined;
-  if (lead && isDeveloper(lead) && lead.id !== w.employeeId) return lead.id;
-  const load = (id: string): number => (wp.db.prepare("select count(*) as n from work where status = 'in-review' and reviewer_id = ?").get(id) as { n: number }).n;
-  const leads = wp.org.employees.filter(e => isDeveloper(e) && !e.virtual && e.id !== w.employeeId);
-  return leads.map((e, i) => ({ id: e.id, n: load(e.id), i })).sort((a, b) => a.n - b.n || a.i - b.i)[0]?.id;
+  const employees = wp.org.employees;
+  const author = w.employeeId;
+  if (!author) return undefined;
+  const lead = teamOf(employees, author);
+  if (lead && lead !== author) return lead;
+  const members = teamMembers(employees, lead ?? author).filter(id => id !== author);
+  const pick = members.map((id, i) => ({ id, n: openReviews(wp, id), i })).sort((a, b) => a.n - b.n || a.i - b.i)[0]?.id;
+  return pick ?? employees.find(e => isCto(e) && !e.virtual)?.id;
 }
 
-/** The item in review with its PR, its head re-read; a moved head is re-pushed and refused. */
+/** The item in review with its PR, its head re-read; a moved head is re-pushed and refused, unless it only merged the trunk in. */
 async function reviewable(wp: Workplace, itemId: string): Promise<WorkItem> {
   const w = rawGet(wp, itemId);
   if (!w) throw new NotFound(`No item ${itemId}`);
@@ -447,50 +608,92 @@ async function reviewable(wp: Workplace, itemId: string): Promise<WorkItem> {
   if (w.status !== 'in-review') throw new BadRequest(`This story is not in review (it is ${w.status}); review it once its author calls report_done.`);
   const ctx = contextOf(wp, w);
   if (typeof ctx !== 'string' && ctx.head !== w.pr.headSha) {
-    await onReview(wp, itemId, 'workplace');
-    throw new Conflict(`Any new commit resets both approvals: ${ctx.branch} has a new commit (${ctx.head.slice(0, 8)}), so review the new head and call review_approve again (developer approver first, then QA).`);
+    const r = await onReview(wp, itemId, 'workplace');
+    if (r.carried) return rawGet(wp, itemId)!;
+    throw new Conflict(`A new commit resets both approvals: ${ctx.branch} has a new commit (${ctx.head.slice(0, 8)}), so review the new head and call review_approve again (developer approver first, then QA).`);
   }
   return w;
 }
 
-export interface ApproveResult { stage: 'dev' | 'qa'; message: string }
+export interface ApproveResult { stage: 'dev' | 'extra' | 'qa'; message: string }
+
+/** The one QA of a story: who it is now, honouring a change the Chief of Staff (or the owner, the COO) made with item_update reviewerId. */
+function assignedQa(wp: Workplace, w: WorkItem, by: string): { qa: string | undefined; changed: boolean } {
+  const set = w.pr?.qaReviewer;
+  if (!set || by === set) return { qa: set, changed: false };
+  const deciders = new Set(['owner', 'coo', chiefOfStaffId(wp) ?? '']);
+  const moves = trail.activityFor(wp, w.id).filter(a => a.kind === 'reviewer');
+  const lastToSet = moves.map(a => a.to).lastIndexOf(set);
+  const lastToBy = moves.map(a => a.to).lastIndexOf(by);
+  if (lastToBy > lastToSet && deciders.has(moves[lastToBy]!.by) && isQa(employeeOf(wp, by))) return { qa: by, changed: true };
+  return { qa: set, changed: false };
+}
+
+/** Where a QA doc's relative evidence paths may live: the evidence folder and the author's worktree. */
+function proofRoots(wp: Workplace, w: WorkItem): string[] {
+  const author = w.employeeId ? employeeOf(wp, w.employeeId) : undefined;
+  return [qaDoc.evidenceDir(wp), ...(author ? [authorWorktree(wp, author)] : [])];
+}
 
 export async function approve(wp: Workplace, itemId: string, by: string, note?: string, qaText?: string): Promise<ApproveResult> {
   if (mode(wp) === 'local') throw new BadRequest(LOCAL_REVIEW);
   const w = await reviewable(wp, itemId);
   const pr = w.pr!;
   const author = w.employeeId;
-  if (by === author) throw new BadRequest('You are the author, so you never approve your own story; another lead gives approval 1 of 2, then QA gives approval 2 of 2.');
+  const employees = wp.org.employees;
+  if (by === author) throw new BadRequest('You are the author, so you never approve your own story; a member of your team gives approval 1 of 2, then QA gives approval 2 of 2.');
   const who = employeeOf(wp, by);
   const approval: PrApproval = { by, at: now(), sha: pr.headSha, episode: w.statusSince ?? '', ...(note?.trim() ? { note: note.trim() } : {}) };
 
-  if (!holds(pr.devApproval, w)) {
-    if (!canApproveAsDeveloper(who)) {
-      if (isQa(who)) throw new BadRequest('QA reviews after a developer approval; ask a lead to review first.');
-      throw new BadRequest(`${nameOf(wp, by)} is not a lead, and approval 1 of 2 comes from the developer approver (a lead who is not the author); ask a lead to review.`);
-    }
-    savePr(wp, itemId, c => ({ pr: { ...c.pr!, devApproval: approval } }));
-    trail.record(wp, { itemId, by, kind: 'note', text: `Developer approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}${approval.note ? `: ${approval.note}` : ''}` });
-    const load: Record<string, number> = {};
-    for (const i of items.list(wp, { status: 'in-review' })) if (i.reviewerId && i.id !== itemId) load[i.reviewerId] = (load[i.reviewerId] ?? 0) + 1;
-    const qa = qaReviewer(wp.org.employees, w, [by], load);
-    if (qa && qa !== w.reviewerId) items.update(wp, itemId, { reviewerId: qa, note: 'Developer approval given; QA reviews next' }, by);
-    try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
-    return { stage: 'dev', message: `Developer approval recorded (approval 1 of 2) on ${pr.headSha.slice(0, 8)}. QA reviews next${qa ? ` (${nameOf(wp, qa)})` : ''} for approval 2 of 2. Any new commit resets both approvals.` };
+  // An extra reviewer (another team's lead whose charter's code the diff changes) approves their files.
+  const mine = (pr.extraReviewers ?? []).find(e => e.id === by);
+  if (mine && pendingExtra(w).some(e => e.id === by)) {
+    savePr(wp, itemId, c => ({ pr: { ...c.pr!, extraReviewers: (c.pr!.extraReviewers ?? []).map(e => (e.id === by ? { ...e, approvedAt: approval.at, sha: pr.headSha, episode: approval.episode } : e)) } }));
+    trail.record(wp, { itemId, by, kind: 'note', text: `Extra review: ${nameOf(wp, by)} approved their files on ${pr.headSha.slice(0, 8)}${mine.files.length ? ` (${mine.files.join(', ')})` : ''}${approval.note ? `: ${approval.note}` : ''}` });
+    const left = pendingExtra(rawGet(wp, itemId)!);
+    return { stage: 'extra', message: `Your approval of your files is recorded on ${pr.headSha.slice(0, 8)}.${left.length ? ` QA still waits for ${left.map(e => nameOf(wp, e.id)).join(', ')}.` : ' QA reviews once the developer approval is in.'} Any new commit of the author's resets it.` };
   }
 
-  if (!isQa(who)) throw new BadRequest(`It already has the developer approval (1 of 2), and approval 2 of 2 is QA's (${qaNames(wp)}); leave it to QA.`);
+  if (!holds(pr.devApproval, w)) {
+    if (!canApproveAsDeveloper(employees, by, author)) {
+      if (isQa(who)) throw new BadRequest('QA reviews after a developer approval; ask the author\'s team to review first.');
+      const team = teamMembers(employees, teamOf(employees, author)).filter(id => id !== author).map(id => nameOf(wp, id));
+      throw new BadRequest(`${nameOf(wp, by)} is not in ${nameOf(wp, author)}'s team, and approval 1 of 2 comes from the developer approver (a member of the author's team who is not the author${team.length ? `: ${team.join(' or ')}` : ''}, or the CTO).${mine ? ' Your own approval as an extra reviewer is already recorded.' : ''}`);
+    }
+    savePr(wp, itemId, c => ({ pr: { ...c.pr!, devApproval: approval, devReviewer: c.pr!.devReviewer ?? by } }));
+    trail.record(wp, { itemId, by, kind: 'note', text: `Developer approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}${approval.note ? `: ${approval.note}` : ''}` });
+    // One QA per story (owner, 10 Oct): named once, at the first developer approval, and kept.
+    let qa = pr.qaReviewer;
+    if (!qa) {
+      const load: Record<string, number> = {};
+      for (const i of items.list(wp, { status: 'in-review' })) if (i.reviewerId && i.id !== itemId) load[i.reviewerId] = (load[i.reviewerId] ?? 0) + 1;
+      qa = qaReviewer(employees, w, [by], load);
+      if (qa) savePr(wp, itemId, c => ({ pr: { ...c.pr!, qaReviewer: qa } }));
+    }
+    if (qa && qa !== w.reviewerId) items.update(wp, itemId, { reviewerId: qa, note: 'system: developer approval given; QA reviews next' }, 'workplace');
+    try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
+    const left = pendingExtra(rawGet(wp, itemId)!);
+    return { stage: 'dev', message: `Developer approval recorded (approval 1 of 2) on ${pr.headSha.slice(0, 8)}. ${left.length ? `${left.map(e => nameOf(wp, e.id)).join(', ')} approve their files, then ` : ''}QA reviews next${qa ? ` (${nameOf(wp, qa)})` : ''} for approval 2 of 2. A commit that only merges the trunk keeps it; any other new commit resets both approvals.` };
+  }
+
+  if (!isQa(who)) throw new BadRequest(`It already has the developer approval (1 of 2), and approval 2 of 2 is QA's (${pr.qaReviewer ? nameOf(wp, pr.qaReviewer) : qaNames(wp)}); leave it to QA.`);
   if (by === pr.devApproval!.by) throw new BadRequest('You gave approval 1 of 2, so approval 2 of 2 must come from another person in QA; leave it to them.');
-  // Owner's review flow step 2 (6 Oct): no QA approval without the edge-case doc and its report.
-  const doc = qaDoc.require$(qaText);
+  const { qa, changed } = assignedQa(wp, w, by);
+  if (qa && qa !== by) throw new BadRequest(`${nameOf(wp, qa)} is this story's QA, and one QA sees a story through: leave approval 2 of 2 to them. Asha can change the QA with item_update reviewerId and a reason.`);
+  const waiting = pendingExtra(w);
+  if (waiting.length) throw new BadRequest(`Waiting for ${waiting.map(e => nameOf(wp, e.id)).join(', ')} to approve their files: QA approves after every extra reviewer.`);
+  // Owner's review flow step 2 (6 Oct): no QA approval without the edge-case doc and its report; each case cites its proof (10 Oct).
+  const doc = qaDoc.require$(qaText, proofRoots(wp, w));
   const qaPath = qaDoc.file(wp, itemId, { title: w.title, by, sha: pr.headSha, at: approval.at }, qaText!);
-  savePr(wp, itemId, c => ({ pr: { ...c.pr!, qaApproval: approval } }));
+  savePr(wp, itemId, c => ({ pr: { ...c.pr!, qaApproval: approval, qaReviewer: by } }));
+  if (changed) trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `QA for this story is now ${nameOf(wp, by)} (changed by the Chief of Staff)` });
   trail.record(wp, { itemId, by, kind: 'note', text: `QA approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)} with a QA doc of ${doc.cases.length} edge cases (${qaPath})${approval.note ? `: ${approval.note}` : ''}` });
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
   items.update(wp, itemId, { status: 'done', reviewerId: by, note: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer) and ${nameOf(wp, by)} (QA)` }, by);
   const auto = await autoMerge(wp, itemId);
   const tail = auto === 'merged' ? 'The Workplace merged it into the trunk.'
-    : auto === 'waiting' ? 'The Workplace merges it itself once the tests check is green: approved is not merged.'
+    : auto === 'waiting' ? 'The Workplace merges it itself once the tests and evidence checks are green (or the QA doc says "Evidence: n/a"): approved is not merged.'
+    : auto === 'held' ? 'It changes CI or infrastructure, so it merges once the COO approves the spend: approved is not merged.'
     : auto === 'blocked' ? 'The automatic merge was stopped and the COO is alerted: approved is not merged.'
     : 'The COO merges it once the tests check is green: approved is not merged.';
   return { stage: 'qa', message: `QA approval recorded (approval 2 of 2); the story is done. ${tail}` };
@@ -504,9 +707,11 @@ export async function sendBack(wp: Workplace, itemId: string, by: string, note: 
   if (!w.pr) throw new BadRequest('This story has no pull request, so send it back with item_update (status in-progress, with what to change).');
   if (by === w.employeeId) throw new BadRequest('You are the author: only a reviewer (the developer approver or QA) sends a story back.');
   const who = employeeOf(wp, by);
-  if (!canApproveAsDeveloper(who) && !isQa(who)) throw new BadRequest(`${nameOf(wp, by)} is not a reviewer: only the developer approver (a lead who is not the author) or QA sends a story back; add your view with item_comment instead.`);
+  const developer = canApproveAsDeveloper(wp.org.employees, by, w.employeeId);
+  const extraReviewer = (w.pr.extraReviewers ?? []).some(e => e.id === by);
+  if (!developer && !extraReviewer && !isQa(who)) throw new BadRequest(`${nameOf(wp, by)} is not a reviewer: only the developer approver (a member of the author's team, or the CTO), an extra reviewer or QA sends a story back; add your view with item_comment instead.`);
   if (w.status !== 'in-review') throw new BadRequest(`This story is not in review (it is ${w.status}), so there is nothing to send back.`);
-  if (!canApproveAsDeveloper(who) && !holds(w.pr.devApproval, w)) throw new BadRequest(QA_WAIT);
+  if (!developer && !extraReviewer && !holds(w.pr.devApproval, w)) throw new BadRequest(QA_WAIT);
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, sendBack: { by, at: now(), note: note.trim() } } }));
   items.update(wp, itemId, { status: 'in-progress', note: `Sent back by ${nameOf(wp, by)}: ${note.trim()}` }, by);
   tellAuthor(wp, itemId, by, note.trim());
@@ -573,7 +778,11 @@ export async function dispute(wp: Workplace, itemId: string, by: string, reason:
 
 /* ---------- the sweep ---------- */
 
-/** In review with a PR and a moved head: re-pushed (which resets the approvals). Returns the moved ids. */
+/**
+ * In review with a PR and a moved head: re-pushed (a real commit resets the approvals; a trunk-only
+ * merge keeps them). A PR whose branch is behind the trunk is brought up to date through GitHub's
+ * update-branch (rework W3), so a story never has to be resubmitted only to catch up. Returns the moved ids.
+ */
 export async function syncHeads(wp: Workplace): Promise<string[]> {
   if (mode(wp) === 'local') return [];
   const moved: string[] = [];
@@ -587,11 +796,56 @@ export async function syncHeads(wp: Workplace): Promise<string[]> {
     }
     if (w.pr.merged) continue;
     const ctx = contextOf(wp, w);
-    if (typeof ctx === 'string' || ctx.head === w.pr.headSha) continue;
-    await onReview(wp, w.id, 'workplace');
-    moved.push(w.id);
+    if (typeof ctx === 'string') continue;
+    if (ctx.head !== w.pr.headSha) {
+      await onReview(wp, w.id, 'workplace');
+      moved.push(w.id);
+      continue;
+    }
+    await catchUp(wp, w, ctx);
   }
   return moved;
+}
+
+const UPDATE_BRANCH_PREFIX = 'github:update-branch:';
+
+/**
+ * The trunk moved past the PR's base: ask GitHub to merge the trunk into the branch (once per trunk
+ * commit), then fast-forward the author's worktree to it. The next sweep sees a trunk-only merge, which
+ * keeps the approvals. A conflict (GitHub's 422) goes back to the author, as an auto-merge conflict does.
+ */
+async function catchUp(wp: Workplace, w: WorkItem, ctx: Ctx): Promise<void> {
+  const pr = w.pr!;
+  const trunk = revParse(ctx.repo, `refs/heads/${ctx.base}`);
+  if (!trunk || isAncestor(ctx.repo, trunk, ctx.head)) return;
+  const key = UPDATE_BRANCH_PREFIX + w.id;
+  if (getSetting(wp, key) === `${ctx.head}|${trunk}`) return;
+  putSetting(wp, key, `${ctx.head}|${trunk}`);
+  const port = gitHubPort(wp);
+  let res: { updated: boolean; conflict?: boolean };
+  try { res = await port.updateBranch(pr.number, pr.headSha); } catch (err) {
+    recordFailure(wp, 'update branch', w.id, Date.now(), errText(err));
+    return;
+  }
+  if (res.conflict) {
+    trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'note', text: `GitHub could not bring ${pr.branch} up to date with ${pr.base}: it conflicts` });
+    reopenForConflict(wp, rawGet(wp, w.id) ?? w, 'GitHub could not bring it up to date with the trunk');
+    return;
+  }
+  if (!res.updated) return;
+  trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'note', text: `GitHub merged ${pr.base} into ${pr.branch} (update-branch); the trunk-only merge keeps the approvals` });
+  // The local branch follows GitHub: in the author's worktree when it has the branch checked out (a
+  // fast-forward pull), else the ref alone (a fetch; the author has moved on to another story). Never forced.
+  const wt = authorWorktree(wp, ctx.emp);
+  let on = '';
+  try { on = git(wt, ['rev-parse', '--abbrev-ref', 'HEAD']).trim(); } catch { /* no worktree */ }
+  try {
+    if (on === ctx.branch) await port.pullFfOnly(wt, ctx.branch);
+    else await port.fetchBranch(ctx.repo, ctx.branch);
+  } catch (err) {
+    trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'note', text: `${ctx.branch} could not follow GitHub's update locally (${errText(err)}); the next push may be refused until it does` });
+    log.warn('github', `${w.id}: local branch not fast-forwarded after update-branch: ${errText(err)}`);
+  }
 }
 
 /** Every minute while not local: the sweep. Returns stop(). */
@@ -631,8 +885,8 @@ export async function merge(wp: Workplace, itemId: string, by: string): Promise<
   const blockers: string[] = [];
   const ctx0 = contextOf(wp, w0);
   if (typeof ctx0 !== 'string' && ctx0.head !== w0.pr.headSha) {
-    await onReview(wp, itemId, 'workplace');
-    blockers.push(`new commits on ${ctx0.branch} since the review (${ctx0.head.slice(0, 8)}): approvals reset`);
+    const r = await onReview(wp, itemId, 'workplace');
+    if (!r.carried) blockers.push(`new commits on ${ctx0.branch} since the review (${ctx0.head.slice(0, 8)}): approvals reset`);
   }
   if (typeof ctx0 !== 'string' && ctx0.head === w0.pr.headSha && w0.pr.tests?.state === 'pending') await recordTests(wp, itemId, ctx0);
   const w = rawGet(wp, itemId)!;
@@ -642,6 +896,8 @@ export async function merge(wp: Workplace, itemId: string, by: string): Promise<
   if (!pr.tests || pr.tests.sha !== pr.headSha || pr.tests.state !== 'success') {
     blockers.push(`workplace/tests is ${pr.tests && pr.tests.sha === pr.headSha ? pr.tests.state : 'not run'} on ${pr.headSha.slice(0, 8)}`);
   }
+  // Evidence before merge (owner, 10 Oct): the robot suite passed, or QA's doc says why there is none.
+  if (!evidenceOk(wp, w)) blockers.push(`workplace/evidence is ${pr.evidence}, and the QA doc does not say "Evidence: n/a — <why>" with a "Tests:" line`);
   if (m === 'shadow') return { mode: m, merged: false, wouldMerge: blockers.length === 0, blockers };
   if (blockers.length) throw new Conflict(`Not merged: ${blockers.join('; ')}.`);
 
@@ -681,30 +937,52 @@ export async function merge(wp: Workplace, itemId: string, by: string): Promise<
 
 /* ---------- the automatic merge (owner-approved, 5 Oct) ---------- */
 
-export type AutoMergeOutcome = 'merged' | 'waiting' | 'blocked' | 'off';
+export type AutoMergeOutcome = 'merged' | 'waiting' | 'held' | 'blocked' | 'off';
 
 const AUTO_BLOCKED_PREFIX = 'github:automerge-blocked:';
 const autoInFlight = new Set<string>();
 
-/** In `on`: both approvals holding on the head and workplace/tests green on it. */
-function autoReady(w: WorkItem): 'ready' | 'waiting' | 'red' {
+/** Evidence before merge: workplace/evidence passed, or the filed QA doc says "Evidence: n/a — <why>" with its "Tests:" line. */
+export function evidenceOk(wp: Workplace, w: WorkItem): boolean {
+  return w.pr?.evidence === 'success' || qaDoc.evidenceNa(qaDoc.filed(wp, w.id));
+}
+
+/**
+ * In `on`: both approvals holding on the head, workplace/tests green on it, and the evidence passed (or
+ * marked n/a in the QA doc). A red test or failed evidence is `red`; anything not yet there is `waiting`.
+ */
+export function autoReady(wp: Workplace, w: WorkItem): 'ready' | 'waiting' | 'red' {
   const pr = w.pr;
   if (!pr || pr.merged || !holds(pr.devApproval, w) || !holds(pr.qaApproval, w)) return 'waiting';
   if (!pr.tests || pr.tests.sha !== pr.headSha) return 'waiting';
-  if (pr.tests.state === 'success') return 'ready';
-  return pr.tests.state === 'pending' ? 'waiting' : 'red';
+  if (pr.tests.state !== 'success') return pr.tests.state === 'pending' ? 'waiting' : 'red';
+  if (evidenceOk(wp, w)) return 'ready';
+  return pr.evidence === 'failure' ? 'red' : 'waiting';
 }
 
-/** Product, technical and HLD/LLD/TDD docs: reviewed and merged by the COO (org design, 7 Oct). */
-export const DESIGN_DOC = /^docs\/(product|tech)\/|(^|\/)(HLD|LLD|TDD)-[^/]*\.md$/;
+/** CI and infrastructure: a change here can cost money, so it merges only after the COO approves the spend. */
+export const SPEND_PATH = /^\.github\/workflows\/|^infra\/|\.tf$/;
 
-/** The design docs a story's branch changes against the trunk; none when its branch cannot be read. */
-export function designDocsIn(wp: Workplace, w: WorkItem): string[] {
+/** The spend-relevant files a story's branch changes against the trunk; none when its branch cannot be read. */
+export function spendFilesIn(wp: Workplace, w: WorkItem): string[] {
   const ctx = contextOf(wp, w);
   if (typeof ctx === 'string') return [];
-  try {
-    return gitIn(ctx.repo, ['diff', '--name-only', `${ctx.base}...${w.pr?.headSha ?? ctx.head}`]).split('\n').map(f => f.trim()).filter(f => DESIGN_DOC.test(f));
-  } catch { return []; }
+  try { return changedFiles(ctx.repo, ctx.base, w.pr?.headSha ?? ctx.head).filter(f => SPEND_PATH.test(f)); } catch { return []; }
+}
+
+const SPEND_HELD_PREFIX = 'github:spend-held:';
+
+/** The COO approves a spend-relevant PR (POST /api/coo/approve-spend); the automatic merge then goes on. */
+export async function approveSpend(wp: Workplace, itemId: string, by: string): Promise<{ itemId: string; spendApprovedAt: string; merge: AutoMergeOutcome }> {
+  const w = rawGet(wp, itemId);
+  if (!w) throw new NotFound(`No item ${itemId}`);
+  if (!w.pr) throw new BadRequest(`${itemId} has no pull request.`);
+  if (w.pr.merged) throw new Conflict(`${itemId} is already merged (PR #${w.pr.number}).`);
+  const at = now();
+  savePr(wp, itemId, c => ({ pr: { ...c.pr!, spendApprovedAt: at } }));
+  trail.record(wp, { itemId, by, kind: 'note', text: `Spend approved by ${nameOf(wp, by)} for PR #${w.pr.number} (CI or infrastructure change)` });
+  dropSetting(wp, SPEND_HELD_PREFIX + itemId);
+  return { itemId, spendApprovedAt: at, merge: await autoMerge(wp, itemId) };
 }
 
 function blockAuto(wp: Workplace, w: WorkItem, why: string): void {
@@ -732,13 +1010,25 @@ export async function autoMerge(wp: Workplace, itemId: string): Promise<AutoMerg
   // A pre-pr.sh result that arrives after review (B7, 7 Oct: approved, tests stuck pending all night)
   // is only read at submit time, so re-read it here before deciding to wait.
   if (w.pr.tests?.state === 'pending') { const ctx = contextOf(wp, w); if (typeof ctx !== 'string' && ctx.head === w.pr.headSha) await recordTests(wp, itemId, ctx); }
-  const ready = autoReady(rawGet(wp, itemId) ?? w);
+  const cur = rawGet(wp, itemId) ?? w;
+  const ready = autoReady(wp, cur);
   if (ready === 'waiting') return 'waiting';
-  if (ready === 'red') { blockAuto(wp, w, `workplace/tests is ${w.pr.tests!.state} on ${w.pr.headSha.slice(0, 8)}`); return 'blocked'; }
-  // Org design (owner, 7 Oct): design docs are approved by the COO, not by a developer and QA.
-  // Two merged without his review that night (the HLD and the product doc), so they never auto-merge.
-  const docs = designDocsIn(wp, w);
-  if (docs.length) { blockAuto(wp, w, `it changes design docs (${docs.join(', ')}), which merge only after the COO reviews them`); return 'blocked'; }
+  if (ready === 'red') {
+    const t = cur.pr!.tests!;
+    blockAuto(wp, cur, t.state !== 'success' ? `workplace/tests is ${t.state} on ${cur.pr!.headSha.slice(0, 8)}` : `workplace/evidence failed on ${cur.pr!.headSha.slice(0, 8)}`);
+    return 'blocked';
+  }
+  // Rework W3 (owner, 10 Oct): design docs merge after both approvals like any change (the COO's
+  // DESIGN_DOC hold is gone). What waits for the COO is spend: CI workflows and infrastructure.
+  const spend = cur.pr!.spendApprovedAt ? [] : spendFilesIn(wp, cur);
+  if (spend.length) {
+    if (getSetting(wp, SPEND_HELD_PREFIX + itemId) !== cur.pr!.headSha) {
+      putSetting(wp, SPEND_HELD_PREFIX + itemId, cur.pr!.headSha);
+      trail.comment(wp, itemId, { by: 'workplace', text: `Held for the COO: PR #${cur.pr!.number} changes CI or infrastructure (${spend.slice(0, 5).join(', ')}${spend.length > 5 ? ` +${spend.length - 5} more` : ''}), which can cost money. It merges once the COO approves the spend (POST /api/coo/approve-spend {"itemId":"${itemId}"}).` });
+      coo.notifyStall(wp, { itemId, by: 'workplace', title: `Spend approval: ${cur.title}`, body: `PR #${cur.pr!.number} has both approvals and green checks, and changes ${spend.join(', ')}. Approve the spend with POST /api/coo/approve-spend {"itemId":"${itemId}"}; it then merges itself.` });
+    }
+    return 'held';
+  }
   const late = unansweredCtoComment(wp, w);
   if (late) { blockAuto(wp, w, `the CTO commented after the developer approval (${late.at.slice(11, 19)} UTC: "${late.text.slice(0, 120)}"), so his feedback rides on no review`); return 'blocked'; }
   if (autoInFlight.has(itemId)) return 'waiting';
@@ -781,14 +1071,14 @@ export function unansweredCtoComment(wp: Workplace, w: WorkItem): { at: string; 
   return last ? { at: last.at, text: last.text } : null;
 }
 
-/** Done by approval, not merged because it conflicts with trunk: back to its author, who merges trunk and resubmits. */
-function reopenForConflict(wp: Workplace, w: WorkItem): boolean {
+/** Not merged (or not brought up to date) because it conflicts with trunk: back to its author, who merges trunk and resubmits. */
+function reopenForConflict(wp: Workplace, w: WorkItem, what = 'it was not merged'): boolean {
   const pr = w.pr!;
   if (!w.employeeId || !isAgent(wp, w.employeeId)) return false;
-  const note = `PR #${pr.number} conflicts with ${pr.base}, so it was not merged. Merge origin/${pr.base} into ${pr.branch}, resolve the conflict keeping both sides' intent, ` +
-    'run scripts/pre-pr.sh, then report_done: the new commit needs both approvals again.';
+  const note = `PR #${pr.number} conflicts with ${pr.base}, so ${what}. Merge origin/${pr.base} into ${pr.branch}, resolve the conflict keeping both sides' intent, ` +
+    'run scripts/pre-pr.sh, then report_done: the conflict resolution is your own change, so it needs both approvals again.';
   try {
-    items.update(wp, w.id, { status: 'in-progress', assigneeId: w.employeeId, note: `Reopened by the Workplace: ${note}` }, 'workplace');
+    items.update(wp, w.id, { status: 'in-progress', note: `system: reopened by the Workplace: ${note}` }, 'workplace');
   } catch (err) {
     log.warn('github', `${w.id}: reopen after a merge conflict failed: ${errText(err)}`);
     return false;

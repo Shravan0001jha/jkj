@@ -37,6 +37,13 @@ export interface GitHubPort {
   deleteBranch(branch: string): Promise<void>;
   /** `git pull --ff-only` of `branch` into the checkout at `repoDir`; throws when it cannot fast-forward. */
   pullFfOnly(repoDir: string, branch: string): Promise<void>;
+  /**
+   * Merge the base into the PR's branch on GitHub (PUT /pulls/{n}/update-branch), only if its head is
+   * still `expectedHeadSha`. `conflict` when GitHub refuses with 422 (a conflict, or the head moved).
+   */
+  updateBranch(n: number, expectedHeadSha: string): Promise<{ updated: boolean; conflict?: boolean }>;
+  /** Fast-forward the local `refs/heads/<branch>` of `repoDir` to GitHub's (no checkout touched); throws when it cannot. */
+  fetchBranch(repoDir: string, branch: string): Promise<void>;
 }
 
 export type Fetch = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ status: number; json(): Promise<unknown> }>;
@@ -186,6 +193,18 @@ export class RealGitHub implements GitHubPort {
   async merge(n: number, sha: string, title: string): Promise<{ merged: boolean; sha?: string }> {
     const data = await this.ok(this.o.pushApp, 'PUT', `${this.repoPath}/pulls/${n}/merge`, { merge_method: 'merge', sha, commit_title: title }) as { merged?: boolean; sha?: string };
     return { merged: !!data?.merged, ...(data?.sha ? { sha: data.sha } : {}) };
+  }
+
+  async fetchBranch(repoDir: string, branch: string): Promise<void> {
+    await this.git(repoDir, url => ['fetch', '--quiet', url, `refs/heads/${branch}:refs/heads/${branch}`]);
+  }
+
+  async updateBranch(n: number, expectedHeadSha: string): Promise<{ updated: boolean; conflict?: boolean }> {
+    const { status, data } = await this.api(this.o.pushApp, 'PUT', `${this.repoPath}/pulls/${n}/update-branch`, { expected_head_sha: expectedHeadSha });
+    if (status === 202 || status === 200) return { updated: true };
+    if (status === 422) return { updated: false, conflict: true };
+    const msg = typeof (data as { message?: unknown })?.message === 'string' ? `: ${(data as { message: string }).message}` : '';
+    throw new Error(redact(`GitHub PUT ${this.repoPath}/pulls/${n}/update-branch failed (${status})${msg}`));
   }
 
   async deleteBranch(branch: string): Promise<void> {

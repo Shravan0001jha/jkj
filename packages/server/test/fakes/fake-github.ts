@@ -11,7 +11,7 @@ import type { GitHubPort, PullRequest, StatusState } from '../../src/services/gi
  * way an outage or a revoked token would.
  */
 
-export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly';
+export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly' | 'updateBranch' | 'fetchBranch';
 
 export interface FakePr extends PullRequest { title: string; body: string; head: string; base: string }
 
@@ -111,6 +111,32 @@ export class FakeGitHub implements GitHubPort {
     } finally {
       rmSync(work, { recursive: true, force: true });
     }
+  }
+
+  /** GitHub's update-branch: a real merge of the base into the head branch in the bare repo; a conflict is GitHub's 422. */
+  async updateBranch(n: number, expectedHeadSha: string): Promise<{ updated: boolean; conflict?: boolean }> {
+    this.enter('updateBranch', n, expectedHeadSha);
+    const pr = this.prs.find(p => p.number === n);
+    if (!pr || pr.state !== 'open') throw new Error('fake GitHub: PR not open (404)');
+    if (this.remoteSha(pr.head) !== expectedHeadSha) return { updated: false, conflict: true };
+    const work = mkdtempSync(join(tmpdir(), 'iris-fake-update-'));
+    try {
+      const g = (args: string[]) => execFileSync('git', ['-C', work, ...args], { encoding: 'utf8', stdio: 'pipe' });
+      execFileSync('git', ['clone', '-q', this.bare, work], { stdio: 'pipe' });
+      g(['config', 'user.email', 'github@iris.local']); g(['config', 'user.name', 'github']);
+      g(['checkout', '-q', pr.head]);
+      try { g(['merge', '-q', '--no-ff', '-m', `Merge branch '${pr.base}' into ${pr.head}`, `origin/${pr.base}`]); } catch { return { updated: false, conflict: true }; }
+      g(['push', '-q', 'origin', pr.head]);
+      pr.headSha = this.remoteSha(pr.head)!;
+      return { updated: true };
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+
+  async fetchBranch(repoDir: string, branch: string): Promise<void> {
+    this.enter('fetchBranch', repoDir, branch);
+    execFileSync('git', ['-C', repoDir, 'fetch', '-q', this.bare, `refs/heads/${branch}:refs/heads/${branch}`], { stdio: 'pipe' });
   }
 
   async deleteBranch(branch: string): Promise<void> {

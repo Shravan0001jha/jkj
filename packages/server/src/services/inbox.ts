@@ -1,9 +1,9 @@
 import type { InboxAnswer, InboxItem, InboxKind, InboxMessage, InboxOption, InboxThread } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
-import { oneLine, short } from './one-line.js';
+import { oneLine, overCap } from './one-line.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { humanizeIds } from './id-names.js';
-import { levelOf, rawGet } from './v2-map.js';
+import { isAgent, levelOf, rawGet } from './v2-map.js';
 import { BadRequest, Conflict, NotFound } from '../util/errors.js';
 
 /**
@@ -382,7 +382,7 @@ export function thread(wp: Workplace, id: string): InboxThread {
 /**
  * A reply in an item's thread. With `optionId` it also answers the item (the text is the note);
  * text alone leaves it open — the owner can ask back or suggest something else, and the asker
- * answers in the same thread. An employee's reply is kept short; the owner's never is.
+ * answers in the same thread. An employee's reply is capped (COMMENT_CAP) and stored whole; the owner's never is.
  */
 export function reply(wp: Workplace, id: string, spec: { by: string; text?: string; optionId?: string; via?: InboxAnswer['via'] }): InboxThread {
   const item = get(wp, id);
@@ -392,8 +392,10 @@ export function reply(wp: Workplace, id: string, spec: { by: string; text?: stri
   if (spec.optionId && item.state !== 'open') throw new Conflict(`${id} was already answered`);
   let message: InboxMessage | undefined;
   if (text) {
-    const body = spec.by === 'owner' ? { text } : short(text);
-    message = { id: newId('im'), inboxId: id, at: now(), by: spec.by, text: body.text, ...(body.details ? { details: body.details } : {}) };
+    // Owner, 10 Oct: an agent's reply is capped like a comment and refused above it, never cut.
+    const over = isAgent(wp, spec.by) ? overCap(text) : null;
+    if (over) throw new BadRequest(over);
+    message = { id: newId('im'), inboxId: id, at: now(), by: spec.by, text };
     wp.db.prepare('insert into inbox_messages (id, inbox_id, at, by, json) values (?, ?, ?, ?, ?)').run(message.id, id, message.at, message.by, JSON.stringify(message));
     const latest = get(wp, id)!;
     const counted: InboxItem = { ...latest, messageCount: (latest.messageCount ?? 0) + 1, lastMessageAt: message.at };

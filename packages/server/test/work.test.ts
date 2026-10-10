@@ -151,11 +151,12 @@ test('report_done: a missing or late plan is a warning and a nudge, never a refu
     assert.ok(r.reviewerId && r.reviewerId !== 'dev', 'a reviewer who is not the author');
     assert.ok(trail.activityFor(wp, a.id).some(x => /Warning: no plan was posted before the work/.test(x.text)));
 
-    // A late plan (attached once the build was under way, never planned first) is the same warning.
+    // A late plan (attached once the build was under way, never planned first) no longer warns (rework W3,
+    // 10 Oct: a plan posted as an item_comment lands after the start move; only no plan at all warns).
     const late = work.create(wp, { kind: 'assignment', title: 'Beat confidence', body: 'x', employeeId: 'dev' });
     work.transition(wp, late.id, { to: 'blocked', by: 'dev', note: 'waiting' });
     work.attachPlan(wp, late.id, '## Plan\n1. clamp', 'dev');
-    assert.equal(work.planWarning(work.get(wp, late.id)!), 'the plan was posted late, after the work began');
+    assert.equal(work.planWarning(work.get(wp, late.id)!), null);
 
     // A plan on record first: no warning.
     const planned = work.create(wp, { kind: 'assignment', title: 'Wake duck', body: 'x', employeeId: 'dev' });

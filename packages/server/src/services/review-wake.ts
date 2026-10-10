@@ -86,7 +86,7 @@ export function reviewPrompt(wp: Workplace, w: WorkItem): string {
     (w.reviewerId && qaTooEarly(wp, w, w.reviewerId)
       ? `It has pull request #${w.pr!.number}, but no developer approval yet. Wait: developer approval first. QA reviews after the developer approver (approval 1 of 2): don't review it, move it or send it back now; you are woken again when it is your turn.`
       : w.pr && !w.pr.merged && githubMode(wp) !== 'local'
-      ? `It has pull request #${w.pr.number} (head ${w.pr.headSha.slice(0, 8)}). Approval 1 of 2 is the developer approver's (a lead who is not the author); approval 2 of 2 is QA's, only after the developer approval. ` +
+      ? `It has pull request #${w.pr.number} (head ${w.pr.headSha.slice(0, 8)}). Approval 1 of 2 is the developer approver's (a member of the author's team who is not the author, or the CTO); any extra reviewer (another team's lead named on the PR) approves their files; approval 2 of 2 is QA's, only after those. ` +
         `Then call review_approve on ${w.id} if it meets them, or review_send_back with exactly what to change (QA: the root cause). Keep it short.`
       : `Then call item_update on ${w.id}: status done if it meets them, or status in-progress with a note saying what to fix. Keep it short.`);
 }

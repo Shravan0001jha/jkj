@@ -9,13 +9,14 @@ import type { RunResult } from '../runtime/claude-agent.js';
 import * as runs from './runs.js';
 import * as floor from './floor.js';
 import * as work from './work.js';
+import { COMMENT_CAP } from './one-line.js';
 import * as githubFlow from './github-flow.js';
 import * as evidenceRuns from './evidence.js';
 import * as spend from './spend.js';
 import * as inbox from './inbox.js';
 import { assembleContext } from './context-layers.js';
 import { changedFiles, commitsSince, uncommittedFiles, ensureWorktree, isMainCheckout, WorktreeSwitchError, type Worktree } from './worktrees.js';
-import { guardTool, type GuardContext } from './guards.js';
+import { guardTool, rcaGateFor, type GuardContext } from './guards.js';
 import { resolve as resolveOwner } from './ownership.js';
 import * as stall from './stall.js';
 import * as room from './room.js';
@@ -199,6 +200,9 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
     mainCheckouts: wp.org.repos.map(r => r.root),
     ...(coo.liveWindowUntil(wp, employeeId) ? { liveWindowUntil: coo.liveWindowUntil(wp, employeeId)! } : {}),
     ...(!budget.ok ? { readOnly: `${emp.name} is paused by the ${budget.scope} spend cap: read and answer, but do not edit or run commands until the owner says "continue" in this talk` } : {}),
+    // RCA before code (rework W3): from the story the session is on now, read live, so a moved session
+    // (a new assignment) and a just-captured RCA both apply at the next tool call.
+    get rcaGate() { const id = currentStory(session); return rcaGateFor(id ? rawGet(wp, id) : undefined); },
   };
   const context = assembleContext(wp.org, emp, { ...(options.assignment ? { assignment: options.assignment } : {}), maxTokens: wp.config.contextTokens, worktree: worktree.path, ownedPaths: ownedPaths(wp, emp, repoId), room: room.contextFor(wp, employeeId) });
   const remaining = spend.remainingUsd(wp, employeeId);
@@ -1200,6 +1204,16 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           // the ASSIGNEE's branch (Mira's docstring) as the PR. Only the assignee submits their story.
           const owner = work.get(wp, id)?.employeeId;
           if (owner && owner !== employeeId) return ok(`Not recorded: ${id} is assigned to ${employee(wp, owner).name}, not you, so a submit would push their branch. Ask Asha to hand it back to you first, then report_done.`);
+          // RCA before code (rework W3): a bug needs its RCA on record; an RCA ticket is done by its RCA alone.
+          const story = rawGet(wp, id);
+          if ((story?.type === 'bug' || story?.type === 'rca') && !story.rca) return ok(`Not recorded: ${story.type === 'rca' ? 'this is an RCA ticket' : 'this is a bug'}, so post the five-part "## RCA" (Symptom, Root cause, Why it escaped, Fix, Regression) with item_comment first.`);
+          if (story?.type === 'rca') {
+            const twt = session().worktree;
+            const made = twt ? commitsSince(twt.path, twt.base) : [];
+            if (made.length) return ok(`Not recorded: this is an RCA ticket, and its branch has ${made.length} commit(s) since the base. An RCA ticket changes no code: file the fix as a bug or story (item_create), and leave this branch without commits.`);
+            try { const closed = work.closeRca(wp, id, employeeId); return ok(`Recorded. ${closed.id} is done: an RCA ticket closes when its RCA is posted (no pull request, no review).`); }
+            catch (err) { return ok(`Not recorded: ${err instanceof Error ? err.message : String(err)}`); }
+          }
           const evidence: Evidence = { tests: { passed: args.testsPassed, failed: args.testsFailed, ...(args.testCommand ? { command: args.testCommand } : {}) }, commits: args.commits, liveVerified: args.liveVerified, notVerified: args.notVerified, ...(args.notes ? { notes: args.notes } : {}) };
           // Before a commit counts as evidence: every changed file must be owned by one of the employee's charters.
           const wt = session().worktree;
@@ -1241,15 +1255,20 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           setState(wp, employeeId, 'needs-owner');
           return ok(`Filed as ${item.id}. Continue with other work; the answer arrives in your next session's context.`);
         }),
-      tool('request_review', 'Nudge the reviewer of a story that is already in review; it never submits one (report_done does). With pull requests on, run scripts/pre-pr.sh on your latest commit first, or the request is refused.',
-        { assignmentId: z.string(), note: z.string().optional() },
-        async ({ assignmentId, note }) => {
+      tool('request_review', 'Nudge the reviewer of a story that is already in review; it never submits one (report_done does). With pull requests on, run scripts/pre-pr.sh on your latest commit first, or the request is refused. ' +
+        'extraReviewers adds other leads who must approve before QA (the Workplace already adds the lead of every other team whose charter\'s code your diff changes).',
+        { assignmentId: z.string(), note: z.string().optional(), extraReviewers: z.array(z.string()).optional().describe('Employee ids of other teams\' leads to approve before QA.') },
+        async ({ assignmentId, note, extraReviewers }) => {
           const item = work.get(wp, assignmentId);
           if (!item) return ok(`No assignment ${assignmentId}.`);
           // It pings the reviewer of a story already in review; it never submits one (Rohan, 5 Oct).
           if (item.status !== 'in-review') return ok(`Not requested: ${assignmentId} is ${item.status}, not in review. request_review only nudges the reviewer of a story already in review; to submit it, call report_done.`);
           const gate = githubFlow.prePrGate(wp, assignmentId);
           if (gate) return ok(`Not requested: ${gate}`);
+          if (extraReviewers?.length) {
+            try { githubFlow.requestExtraReviewers(wp, assignmentId, employeeId, extraReviewers); }
+            catch (err) { return ok(`Not requested: ${err instanceof Error ? err.message : String(err)}`); }
+          }
           // The reviewer is a different identity (lead, or QA for a lead), never the owner (HOWTO
           // "State a feature once"; the §0 table has no owner row for a review): this is routine,
           // not an owner decision, so it never reaches his Inbox — only the reviewer's/Asha's page.
@@ -1258,12 +1277,12 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           return ok(`Review requested.${gh.message ? ` ${gh.message}` : ''}`);
         }),
       // The GitHub flow's two approvals (docs/HLD-github-flow.md D4): in local mode they answer "review as before".
-      tool('review_approve', 'Reviewers only: approve a story in review. Approval 1 of 2 is the developer approver\'s (a lead who is not the author); approval 2 of 2 is QA\'s, only after the developer approval, and needs qaDoc: the edge cases where the change might break, each checked, and a report. QA\'s approval marks the story done, and the Workplace merges it once the tests check is green (blockers go to the COO). Any new commit resets both approvals.',
+      tool('review_approve', 'Reviewers only: approve a story in review. Approval 1 of 2 is the developer approver\'s (a member of the author\'s team who is not the author, or the CTO); an extra reviewer (another team\'s lead named on the PR) approves their files; approval 2 of 2 is QA\'s (the one QA named on the story), only after the developer and every extra reviewer, and needs qaDoc: the edge cases where the change might break, each checked with "evidence: <screenshot/log path or URL>", and a report. QA\'s approval marks the story done, and the Workplace merges it once tests and evidence are green (or the doc says "Evidence: n/a — why" with a "Tests:" line). A commit that only merges the trunk keeps the approvals; any other new commit resets them.',
         { itemId: z.string(), note: z.string().optional(), qaDoc: z.string().optional().describe(`QA only, required for approval 2 of 2: ${qaDocFormat}`) },
         async ({ itemId, note, qaDoc }) => {
           try { return ok((await githubFlow.approve(wp, itemId, employeeId, note, qaDoc)).message); } catch (err) { return ok(`Not approved: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('review_send_back', 'Reviewers only (the developer approver or QA): send a story in review back to its author with exactly what to change; QA adds the root cause (what failed, where, and why). It resets both approvals.',
+      tool('review_send_back', 'Reviewers only (the developer approver, an extra reviewer or QA): send a story in review back to its author with exactly what to change; QA adds the root cause (what failed, where, and why). It resets both approvals.',
         { itemId: z.string(), note: z.string() },
         async ({ itemId, note }) => {
           try { await githubFlow.sendBack(wp, itemId, employeeId, note); return ok('Sent back to its author with your reason. Both approvals are reset: the story comes back through the developer approver, then QA.'); } catch (err) { return ok(`Not sent back: ${err instanceof Error ? err.message : String(err)}`); }
@@ -1413,11 +1432,23 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
             return ok(`${it.id} is ${it.trueStatus ? it.trueStatus : it.status}${it.blocker ? `, waiting on ${it.blocker.label} (${it.blocker.status})` : ''}.`);
           } catch (err) { return ok(`Not changed: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('item_comment', 'Comment on an item (a few short lines; mention people with @id). Status and notes about the work go here, not in chat.',
+      tool('item_comment', `Comment on an item (mention people with @id; at most ${COMMENT_CAP} characters, stored whole: put longer detail in a doc and link it). Status and notes about the work go here, not in chat. ` +
+        'On your own story, a comment with a "## Plan" heading records your plan, and a "## RCA" heading with its five parts (Symptom, Root cause, Why it escaped, Fix, Regression), each starting a line, records the RCA (a bug\'s code edits unlock after it).',
         { itemId: z.string(), text: z.string() },
         async ({ itemId, text }) => {
-          try { const c = trail.comment(wp, itemId, { by: employeeId, text }); return ok(`Commented ${c.id}.`); }
-          catch (err) { return ok(`Not commented: ${err instanceof Error ? err.message : String(err)}`); }
+          let c;
+          try { c = trail.comment(wp, itemId, { by: employeeId, text }); }
+          catch (err) { return ok(`${err instanceof Error && /^Not posted/.test(err.message) ? '' : 'Not commented: '}${err instanceof Error ? err.message : String(err)}`); }
+          // Plan and RCA capture (rework W3): from the assignee's comment, after it is safely posted.
+          let got: work.Captured = {};
+          try { got = work.captureFromComment(wp, itemId, employeeId, text); } catch (err) { return ok(`Commented ${c.id}, but it was not recorded as a plan or RCA: ${err instanceof Error ? err.message : String(err)}`); }
+          if (got.plan && session().assignmentId === itemId) session().planCaptured = true;
+          const said = [
+            got.plan ? 'your plan is recorded on the story' : '',
+            got.rca === 'recorded' ? `the RCA is recorded${rawGet(wp, itemId)?.type === 'rca' ? '; call report_done to close this RCA ticket' : rawGet(wp, itemId)?.type === 'bug' ? '; code edits are unlocked' : ''}` : '',
+            got.rca && got.rca !== 'recorded' ? `the RCA is NOT recorded: it is missing ${got.rca.missing.join(', ')} (each part starts a line)` : '',
+          ].filter(Boolean);
+          return ok(`Commented ${c.id}.${said.length ? ` ${said.join('; ')}.` : ''}`);
         }),
       tool('flag_stall', 'Flag your own stall the moment it happens: why you are stuck, and who you are waiting on if anyone. Waiting on the owner, the COO (coo) or someone outside the team (external) marks the item Blocked and the COO hears at once. ' +
         'Waiting on a teammate is not a stall: a review or sign-off puts it In review with them (kind review); their work hands the item to them (kind work) until they give it back with item_handback.',
