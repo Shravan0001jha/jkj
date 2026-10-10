@@ -438,6 +438,8 @@ export interface InboxAnswer {
   at: string;
   /** 'workplace': resolved by the Workplace itself (a migration, a superseded item), with a note. */
   via: 'web' | 'phone' | 'telegram' | 'workplace';
+  /** Who answered: absent = the owner; 'coo' = the COO resolved it on the owner's behalf (rework W4). */
+  by?: 'owner' | 'coo';
 }
 
 /**
@@ -485,6 +487,13 @@ export interface InboxItem {
   lastMessageAt?: string;
   /** v2: shown by colour and label, not wording. Always set by the server since 2 Oct (from the kind and the level, LLD §19.5); absent (an old client cache) = normal. */
   urgency?: 'normal' | 'high' | 'urgent';
+  /**
+   * Rework W4: an agent-raised item is copied to the COO and its push is held until `until` (15 min)
+   * so he can triage it first. The owner still sees it in his Inbox; only the push waits.
+   */
+  cooHold?: { until: string };
+  /** Rework W4: the COO's "needs you because …", shown at the top of the item. */
+  cooNote?: { text: string; at: string };
 }
 
 /* ---------- org changes ---------- */

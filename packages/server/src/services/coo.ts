@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, utimesSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, statSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Comment, CooItem, CooMessage, CooPresence, InboxItem, InboxOption, RoomMessage, TalkAttachment } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
@@ -7,6 +7,7 @@ import * as room from './room.js';
 import * as trail from './trail.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { BadRequest, NotFound } from '../util/errors.js';
+import { appendBridgeLine, bridgeDir, bridgeFile } from './coo-bridge.js';
 
 /**
  * The COO bridge (owner, 29 Sep).
@@ -32,17 +33,11 @@ export const OFFLINE_FALLBACK_MS = 30 * 60_000;
 
 export const isCoo = (id: string): boolean => id === COO_ID;
 
-function dir(wp: Workplace): string {
-  const d = join(wp.config.workplaceDir, 'coo');
-  mkdirSync(d, { recursive: true });
-  return d;
-}
-
-const inboxFile = (wp: Workplace): string => join(dir(wp), 'inbox.jsonl');
-const heartbeatFile = (wp: Workplace): string => join(dir(wp), 'heartbeat');
+const inboxFile = bridgeFile;
+const heartbeatFile = (wp: Workplace): string => join(bridgeDir(wp), 'heartbeat');
 
 function appendInboxFile(wp: Workplace, entry: Record<string, unknown>): void {
-  appendFileSync(inboxFile(wp), `${JSON.stringify({ id: newId('cbi'), at: now(), ...entry })}\n`, 'utf8');
+  appendBridgeLine(wp, entry);
 }
 
 /* ---------- presence ---------- */

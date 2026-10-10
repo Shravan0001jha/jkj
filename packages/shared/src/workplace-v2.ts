@@ -219,6 +219,13 @@ export interface EpicCard {
   /** Present when items of this epic are handed to a teammate (LLD §19.6c). Not flags: nothing is wrong. */
   handoffs?: PlanHandoff[];
   inFocus: boolean;
+  /** Rework W4: the epic is finished (`planTier === 4`); iOS folds these into "Done (N)". */
+  finished: boolean;
+}
+
+/** Rework W4: super focus (settings key `super-focus`). While `until` is in the future, quiet hours are off and a stall may ring at night. */
+export interface SuperFocus {
+  until: string | null;
 }
 
 export interface Focus {

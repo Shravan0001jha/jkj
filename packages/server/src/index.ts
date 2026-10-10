@@ -27,6 +27,8 @@ import * as watch from './services/watch.js';
 import * as reviewWake from './services/review-wake.js';
 import * as blocks from './services/blocks.js';
 import * as rhythm from './services/rhythm.js';
+import * as ownerInbox from './services/owner-inbox.js';
+import * as retention from './services/retention.js';
 import * as awsCost from './services/aws-cost.js';
 import { Tunnel, readRelayUrl, readTunnelSecret } from './services/tunnel.js';
 import * as employees from './services/employees.js';
@@ -205,8 +207,17 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   // The Chief of Staff's routine: stalled work is resumed within budget or explained in the Inbox.
   // Its stall loop is off in v2 (the watcher owns stalls); the Room moderation stays.
   const cosTimer = setInterval(() => { try { cos.tick(wp, Date.now(), { stalls: false }); } catch (err) { log.warn('cos', String(err)); } }, 5 * 60_000);
-  // Asha's rhythm (HLD D24): the 09:30 brief, the 10:00 stand-up, the Sunday review.
-  const rhythmTimer = setInterval(() => { try { rhythm.maybeRun(wp); } catch (err) { log.warn('rhythm', String(err)); } }, 60_000);
+  // Asha's rhythm (HLD D24): the 09:30 brief, the 10:00 stand-up, the Sunday review. Talk retention
+  // (rework W4) rides the same tick, once per IST day: agent messages older than 3 days are deleted.
+  const rhythmTimer = setInterval(() => {
+    try { rhythm.maybeRun(wp); } catch (err) { log.warn('rhythm', String(err)); }
+    try { retention.maybeRun(wp); } catch (err) { log.warn('retention', String(err)); }
+  }, 60_000);
+  // Retention also runs once 5 minutes after boot (a restart never waits a day for it).
+  const retentionBoot = setTimeout(() => { try { retention.sweep(wp); } catch (err) { log.warn('retention', String(err)); } }, 5 * 60_000);
+  retentionBoot.unref();
+  // The COO's hold on agent-raised owner items (rework W4): after 15 min untouched, they push.
+  const holdTimer = setInterval(() => { try { ownerInbox.releaseHolds(wp); } catch (err) { log.warn('inbox', `hold sweep: ${err instanceof Error ? err.message : err}`); } }, 60_000);
   // AWS actuals once a day, after the digest hour.
   const awsTimer = setInterval(() => { if (config.awsCost) void awsCost.reconcileYesterday(wp).catch(err => log.warn('aws-cost', String(err))); }, 60 * 60_000);
   const digestTimer = setInterval(() => void digestService.maybeSend(wp, telegram, config.digestHour), 60_000);
@@ -230,6 +241,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       clearInterval(stallTimer);
       clearInterval(cosTimer);
       clearInterval(rhythmTimer);
+      clearTimeout(retentionBoot);
+      clearInterval(holdTimer);
       stopWatch();
       stopTalk();
       stopReviewWake();

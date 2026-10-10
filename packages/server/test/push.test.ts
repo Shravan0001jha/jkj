@@ -21,6 +21,9 @@ function harness(overrides: Partial<Record<string, string>> = {}) {
   return { wp, tmp, sent, push, tick: (ms: number) => { t += ms; }, offline: () => { online = false; }, online: () => { online = true; } };
 }
 
+/** Rework W4: an agent's Inbox item is held 15 min for the COO; this is the sweep after the hold. */
+const afterHold = (wp: ReturnType<typeof testWorkplace>['wp']) => inbox.releaseHolds(wp, Date.now() + inbox.COO_HOLD_MS + 1_000);
+
 const employee = (wp: ReturnType<typeof testWorkplace>['wp']) => wp.org.employees.find(e => e.level === 1) ?? wp.org.employees[0]!;
 
 test('an Inbox item is one push with a derived body, an inbox deep link and a collapse id', () => {
@@ -28,6 +31,8 @@ test('an Inbox item is one push with a derived body, an inbox deep link and a co
   try {
     const raiser = employee(h.wp);
     const item = inbox.raise(h.wp, { kind: 'approval', title: 'Release desktop-mac 0.2.16', body: 'secret token=sk-abcdefghijklmnop please approve\nmore lines', raisedBy: raiser.id });
+    assert.equal(h.sent.length, 0, 'held for the COO');
+    afterHold(h.wp);
     assert.equal(h.sent.length, 1);
     const p = h.sent[0]!;
     assert.equal(p.title, 'Release desktop-mac 0.2.16');
@@ -50,6 +55,7 @@ test('a re-raised item with the same dedupe key does not push twice; a different
     inbox.raise(h.wp, { kind: 'cap', title: 'Cap reached', body: 'x', raisedBy: 'asha', dedupeKey: 'cap:today' });
     inbox.raise(h.wp, { kind: 'cap', title: 'Cap reached', body: 'x', raisedBy: 'asha', dedupeKey: 'cap:today' });
     inbox.raise(h.wp, { kind: 'question', title: 'Which colour?', body: 'x', raisedBy: 'asha' });
+    afterHold(h.wp);
     assert.deepEqual(h.sent.map(p => p.title), ['Cap reached', 'Which colour?']);
   } finally { h.tmp.cleanup(); }
 });
@@ -91,32 +97,14 @@ test('scrub: one line, capped, and never a credential shape', () => {
   assert.equal(scrub('Tests: 12 passed, 0 failed'), 'Tests: 12 passed, 0 failed');
 });
 
-test('Team Room: an @owner mention pushes with the thread link; employee-only mentions and the owner\'s own messages do not', () => {
+test('Team Room: an @owner mention no longer pushes (rework W4: only what needs the owner)', () => {
   const h = harness();
   try {
     const emp = employee(h.wp);
-    const other = h.wp.org.employees.find(e => e.id !== emp.id)!;
-    const { thread } = room.createThread(h.wp, { title: 'Repo split boundaries', text: `@${other.id} what do you own?`, by: emp.id });
-    assert.equal(h.sent.length, 0, 'an employee mention is not the owner');
+    const { thread } = room.createThread(h.wp, { title: 'Repo split boundaries', text: 'What do you own?', by: emp.id });
     room.post(h.wp, thread.id, { text: `@owner we need your call on the contracts repo.\nDetails below.`, by: emp.id });
-    assert.equal(h.sent.length, 1);
-    const p = h.sent[0]!;
-    assert.equal(p.title, `${emp.name} mentioned you in "Repo split boundaries"`);
-    assert.equal(p.body, '@owner we need your call on the contracts repo.');
-    assert.deepEqual(p.data, { link: `room/${thread.id}`, threadId: thread.id });
-    assert.equal(p.category, 'WP_ROOM');
-    assert.equal(p.level, 'mention');
-    room.post(h.wp, thread.id, { text: '@owner here is my answer to myself', by: 'owner' });
-    room.post(h.wp, thread.id, { text: 'someone@owner.example is an email, not a mention', by: emp.id });
-    room.post(h.wp, thread.id, { text: '@ownership is a word', by: emp.id });
-    assert.equal(h.sent.length, 1);
-    // A second mention in the same thread inside ten minutes with the same title collapses.
-    h.tick(60_000);
     room.post(h.wp, thread.id, { text: '@shravan ping', by: emp.id });
-    assert.equal(h.sent.length, 1);
-    h.tick(10 * 60_000);
-    room.post(h.wp, thread.id, { text: '@Owner still waiting', by: emp.id });
-    assert.equal(h.sent.length, 2);
+    assert.equal(h.sent.length, 0);
   } finally { h.tmp.cleanup(); }
 });
 
@@ -137,6 +125,7 @@ test('a burst becomes one summary push per minute after the sixth', () => {
   const h = harness();
   try {
     for (let i = 0; i < 9; i++) inbox.raise(h.wp, { kind: 'question', title: `Q${i}`, body: 'x', raisedBy: 'asha' });
+    afterHold(h.wp);
     assert.equal(h.sent.length, 7);
     const summary = h.sent[6]!;
     assert.equal(summary.collapseId, 'summary');
@@ -145,6 +134,7 @@ test('a burst becomes one summary push per minute after the sixth', () => {
     // A minute later: the window has cleared; the suppressed ones are not replayed (the Inbox is the truth).
     h.tick(61_000);
     inbox.raise(h.wp, { kind: 'question', title: 'Q-later', body: 'x', raisedBy: 'asha' });
+    afterHold(h.wp);
     assert.equal(h.sent.length, 8);
     assert.equal(h.sent[7]!.title, 'Q-later');
     assert.equal(h.push.status().suppressedToday, 3, 'the 7th (summarised), 8th and 9th');
@@ -157,6 +147,7 @@ test('nothing is queued while the Mac is not published; the next event for the s
   try {
     h.offline();
     inbox.raise(h.wp, { kind: 'question', title: 'Q1', body: 'x', raisedBy: 'asha' });
+    afterHold(h.wp);
     h.wp.emit({ type: 'alert', level: 'blocked', title: 'Deploy failed', body: 'a' });
     assert.equal(h.sent.length, 0);
     h.online();
@@ -173,12 +164,13 @@ test('--no-push sends nothing; the status says so', () => {
     const push = new Push(wp, { send: i => { sent.push(i); return true; } });
     push.attach();
     inbox.raise(wp, { kind: 'question', title: 'Q1', body: 'x', raisedBy: 'asha' });
+    afterHold(wp);
     assert.equal(sent.length, 0);
     assert.equal(push.status().enabled, false);
   } finally { tmp.cleanup(); }
 });
 
-test('quiet hours hold needs-you and mentions but not cap or blocked', () => {
+test('quiet hours hold needs-you but not cap or blocked', () => {
   assert.equal(inQuietHours('23-07', Date.parse('2026-09-28T18:00:00Z')), true, '23:30 IST');
   assert.equal(inQuietHours('23-07', Date.parse('2026-09-28T05:00:00Z')), false, '10:30 IST');
   assert.equal(inQuietHours('23-07', Date.parse('2026-09-28T01:00:00Z')), true, '06:30 IST');
@@ -190,6 +182,7 @@ test('quiet hours hold needs-you and mentions but not cap or blocked', () => {
     const push = new Push(wp, { send: i => { sent.push(i); return true; }, now: () => Date.parse('2026-09-28T18:00:00Z') });
     push.attach();
     inbox.raise(wp, { kind: 'question', title: 'Q1', body: 'x', raisedBy: 'asha' });
+    afterHold(wp);
     wp.emit({ type: 'alert', level: 'cap', title: 'Cap reached', body: 'x' });
     wp.emit({ type: 'alert', level: 'blocked', title: 'Stalled', body: 'x' });
     assert.deepEqual(sent.map(p => p.level), ['cap', 'blocked']);

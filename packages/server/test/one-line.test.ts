@@ -66,9 +66,14 @@ test('Inbox items carry summary and details; the ping is one line; old items get
     assert.equal(item.summary, 'Should the greeting use open-meteo or the system weather?');
     assert.equal(item.details, body);
     assert.equal(inbox.get(wp, item.id)!.summary, item.summary);
+    // Rework W4: Telegram pings only a cap and a ring; an Inbox item reaches the owner by push.
+    assert.equal(sent.length, 0);
+    assert.equal(ping(item.title, item.summary, item.id).split('\n').length, 1);
+    assert.ok(ping(item.title, item.summary, item.id).startsWith(`Iris Workplace · Should the greeting use open-meteo or the system weather? — reply: approve ${item.id}`));
+    wp.emit({ type: 'alert', level: 'cap', title: 'Cap reached: company', body });
     assert.equal(sent.length, 1);
     assert.equal(sent[0]!.split('\n').length, 1, `one line: ${sent[0]}`);
-    assert.ok(sent[0]!.startsWith('Iris Workplace · Should the greeting use open-meteo or the system weather? — reply: approve in_'));
+    assert.ok(sent[0]!.startsWith('Iris Workplace · Should the greeting use open-meteo or the system weather?'));
 
     // A raiser's own one line wins over the derived one.
     const given = inbox.raise(wp, { kind: 'question', title: 'Q', body: 'Long body\nwith lines', summary: 'Kabir needs the errand contract signed off today.', raisedBy: 'kabir' });

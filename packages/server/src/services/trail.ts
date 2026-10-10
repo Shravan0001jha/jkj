@@ -220,5 +220,5 @@ function ownerBlock(wp: Workplace, prev: WorkItem, next: WorkItem): void {
 inbox.onAnswer((wp, item) => {
   if (!inbox.isOwnerFacing(item) || !item.answer || item.answer.via === 'workplace') return;
   const option = item.options.find(o => o.id === item.answer!.optionId);
-  postUpdate(wp, { kind: 'decided', line: `Decided: ${item.title} — ${option?.label ?? item.answer.optionId}`, by: 'owner', inboxId: item.id });
+  postUpdate(wp, { kind: 'decided', line: `Decided: ${item.title} — ${option?.label ?? item.answer.optionId}`, by: item.answer.by ?? 'owner', inboxId: item.id });
 });

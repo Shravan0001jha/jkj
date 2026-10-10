@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Workplace } from './workplace.js';
 import * as coo from './coo.js';
+import * as inbox from './inbox.js';
 import { rawGet } from './v2-map.js';
 import { log } from '../util/logger.js';
 
@@ -56,6 +57,22 @@ function cooPosted(wp: Workplace, threadId: string | undefined, at: string): boo
   return !!wp.db.prepare("select 1 from messages where thread_id = ? and by = 'coo' and at >= ? limit 1").get(threadId, at);
 }
 
+/**
+ * The COO resolved, or flagged for the owner, an owner Inbox item the message names (in_…) after it
+ * was sent (rework W4: POST /api/coo/owner-inbox/:id/resolve or /needs-you). That is his answer; the
+ * owner does not get a "hasn't picked up" push for it.
+ */
+function cooActedOnNamedItem(wp: Workplace, text: string | undefined, at: string): boolean {
+  const ids = new Set(text?.match(/\bin_[a-z0-9]{6,}\b/g) ?? []);
+  for (const id of ids) {
+    const item = inbox.get(wp, id);
+    if (!item) continue;
+    if (item.answer?.by === 'coo' && item.answer.at >= at) return true;
+    if (item.cooNote && item.cooNote.at >= at) return true;
+  }
+  return false;
+}
+
 /** Where the message was: "the COO chat", a story's title, or a thread's. */
 function where(wp: Workplace, threadId: string | undefined, fallback: string): string {
   if (threadId?.startsWith('item:')) return `"${rawGet(wp, threadId.slice('item:'.length))?.title ?? fallback}"`;
@@ -75,13 +92,13 @@ export function check(wp: Workplace, nowMs = Date.now()): string[] {
     const age = nowMs - Date.parse(l.at);
     if (!(age > PICKUP_MS) || age > LOOKBACK_MS || seen(wp, l.id)) continue;
     if (l.kind === 'message') {
-      if (cooReplied(wp, l.at)) { mark(wp, l.id, 'answered'); continue; }
+      if (cooReplied(wp, l.at) || cooActedOnNamedItem(wp, l.text, l.at)) { mark(wp, l.id, 'answered'); continue; }
       late.push({ id: l.id, where: 'the COO chat' });
       continue;
     }
     const item = l.itemId ? coo.getItem(wp, l.itemId) : undefined;
     if (!item || item.raisedBy !== 'owner') { mark(wp, l.id, 'not the owner\'s'); continue; }
-    if (item.state !== 'open' || cooReplied(wp, l.at, item.id) || cooReplied(wp, l.at, l.id) || cooPosted(wp, item.threadId, l.at)) { mark(wp, l.id, 'answered'); continue; }
+    if (item.state !== 'open' || cooReplied(wp, l.at, item.id) || cooReplied(wp, l.at, l.id) || cooPosted(wp, item.threadId, l.at) || cooActedOnNamedItem(wp, item.body, l.at)) { mark(wp, l.id, 'answered'); continue; }
     late.push({ id: l.id, where: where(wp, item.threadId, item.title) });
   }
   if (!late.length) return [];

@@ -80,10 +80,13 @@ export class Telegram {
     });
   }
 
-  /** Pings for what needs the owner: one line per item (D16), the reply command after it. */
+  /**
+   * Pings only for a cap and a stall's ring (rework W4; owner, 10 Oct: notifications only for what
+   * needs him). Inbox items reach him through the app's push, after the COO's hold.
+   */
   attach(): void {
     this.wp.on(event => {
-      if (event.type === 'alert' && (event.level === 'needs-you' || event.level === 'cap' || event.level === 'blocked')) {
+      if (event.type === 'alert' && (event.level === 'cap' || event.level === 'ring')) {
         void this.notify(ping(event.title, event.body, event.inboxId));
       }
     });

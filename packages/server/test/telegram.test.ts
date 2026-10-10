@@ -17,16 +17,21 @@ test('commands parse: approve, reject, answer, talk, status, anything else is no
   assert.equal(parseCommand('Why can\'t we release all?').kind, 'unknown');
 });
 
-test('a new Inbox item pings the owner in at most five lines with the reply syntax', async () => {
+test('Telegram pings only a cap and a ring (rework W4), in at most five lines; an Inbox item is not pinged', async () => {
   const { wp, tmp } = testWorkplace({ WORKPLACE_TELEGRAM: '1' });
   try {
     const sent: string[] = [];
     const tg = new Telegram(wp, { send: async t => { sent.push(t); return true; } });
     tg.attach();
     const item = inbox.raise(wp, { kind: 'approval', title: 'Release 0.2.16', body: 'desktop-mac\nline2\nline3\nline4\nline5\nline6', raisedBy: 'nikhil' });
-    assert.equal(sent.length, 1);
-    assert.ok(sent[0]!.split('\n').length <= 5);
-    assert.ok(sent[0]!.includes(`approve ${item.id}`));
+    inbox.releaseHolds(wp, Date.now() + inbox.COO_HOLD_MS + 1_000);
+    wp.emit({ type: 'alert', level: 'blocked', title: 'Release failed', body: 'x' });
+    assert.equal(sent.length, 0, `${item.id} is the push's, not Telegram's`);
+    wp.emit({ type: 'alert', level: 'cap', title: 'Cap reached: company', body: 'line1\nline2\nline3\nline4\nline5\nline6' });
+    wp.emit({ type: 'alert', level: 'ring', title: 'Stalled 40 min', body: 'Mic stays live' });
+    assert.equal(sent.length, 2);
+    assert.ok(sent.every(t => t.split('\n').length <= 5));
+    assert.match(sent[1]!, /Mic stays live/);
   } finally {
     tmp.cleanup();
   }

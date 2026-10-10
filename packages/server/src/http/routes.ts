@@ -21,6 +21,8 @@ import * as views from '../services/views.js';
 import * as stall from '../services/stall.js';
 import * as room from '../services/room.js';
 import * as coo from '../services/coo.js';
+import * as ownerInbox from '../services/owner-inbox.js';
+import * as superFocus from '../services/focus.js';
 import * as features from '../services/features.js';
 import * as digest from '../services/digest.js';
 import * as items from '../services/items.js';
@@ -433,6 +435,23 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
         ...(typeof body['recommendation'] === 'string' && body['recommendation'].trim() ? { recommendation: body['recommendation'] } : {}),
       } as never));
     }),
+    // The COO works the owner's Inbox down (rework W4): every agent-raised owner item is copied to
+    // him and its push held 15 min. He resolves it for the owner (never pushed; the raiser is told)
+    // or says why it needs the owner (pushed now, his note on top). Loopback only like the rest.
+    r('GET', '/api/coo/owner-inbox', (req, res) => { requireLocal(req); json(res, 200, ownerInbox.list(wp)); }),
+    r('POST', '/api/coo/owner-inbox/:id/resolve', async (req, res, _url, [id]) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      json(res, 200, ownerInbox.resolve(wp, dec(id), {
+        text: typeof body['text'] === 'string' ? body['text'] : '',
+        ...(typeof body['optionId'] === 'string' && body['optionId'].trim() ? { optionId: body['optionId'] } : {}),
+      }));
+    }),
+    r('POST', '/api/coo/owner-inbox/:id/needs-you', async (req, res, _url, [id]) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      json(res, 200, ownerInbox.needsYou(wp, dec(id), { text: typeof body['text'] === 'string' ? body['text'] : '' }));
+    }),
     r('POST', '/api/coo/thread-reply', async (req, res) => {
       requireLocal(req);
       const body = await readJson(req);
@@ -568,6 +587,13 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     r('GET', '/api/focus', (_req, res) => json(res, 200, items.getFocus(wp))),
     // Is the board true (docs/HLD-jira-lifecycle.md §5): the current violations and the clean percentage.
     r('GET', '/api/hygiene', (_req, res) => json(res, 200, hygiene.report(wp))),
+    // Super focus (rework W4): quiet hours off and night rings allowed until `until`. The owner (his
+    // phone) or the COO (this Mac, x-workplace-actor: coo) sets it; `hours: 0` clears it.
+    r('GET', '/api/settings/super-focus', (_req, res) => json(res, 200, superFocus.getSuperFocus(wp))),
+    r('POST', '/api/settings/super-focus', async (req, res) => {
+      const body = await readJson(req);
+      json(res, 200, superFocus.setSuperFocus(wp, { hours: body['hours'] as number, by: actorOf(req) }));
+    }),
     r('POST', '/api/focus', async (req, res) => json(res, 200, items.setFocus(wp, strs((await readJson(req))['epicIds']), actorOf(req)))),
     r('GET', '/api/items', (_req, res, url) => {
       const q = (k: string) => url.searchParams.get(k) ?? undefined;

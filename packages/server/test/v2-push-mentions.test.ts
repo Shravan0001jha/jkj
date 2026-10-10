@@ -7,27 +7,22 @@ import { wireMentionReplies, resetForTest, setCooldownForTest } from '../src/ser
 import { installFakeRuntime } from './fakes/fake-runtime.js';
 import { testWorkplace } from './fakes/workplace.js';
 
-/** Updates reach the phone as pushes (start, block, brief, review — the owner's choice); a comment mention wakes the employee. */
+/** Updates no longer reach the phone (rework W4: only what needs the owner pushes); a comment mention wakes the employee. */
 
 const tick = (ms = 10) => new Promise(r => setTimeout(r, ms));
 
-test('a pushed update becomes a push intent with ids and the deep link only; shipped is feed-only', () => {
+test('no Update becomes a push intent (rework W4), not even a start or a block', () => {
   const { wp, tmp } = testWorkplace();
   try {
     const epic = items.create(wp, { level: 'epic', title: 'Music' }, 'owner');
     const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Mic stays live', assigneeId: 'dev', points: 3 }, 'asha');
     items.update(wp, s.id, { status: 'in-progress' }, 'dev');
     const started = trail.updates(wp)[0]!;
-    const intent = intentFor(wp, { type: 'update.posted', update: started }, ['owner'])!;
-    assert.equal(intent.title, 'Started: Mic stays live — Dev, 3 pts');
-    assert.equal(intent.category, 'WP_UPDATE');
-    assert.equal(intent.level, 'update');
-    assert.equal(intent.collapseId, `update:${s.id}`);
-    assert.deepEqual(intent.data, { link: `item/${s.id}`, itemId: s.id });
+    assert.equal(started.line, 'Started: Mic stays live — Dev, 3 pts');
+    assert.equal(intentFor(wp, { type: 'update.posted', update: started }, ['owner']), null);
 
     items.update(wp, s.id, { status: 'blocked', blockedReason: 'needs the Speaker API', waitingOn: 'external' }, 'dev');
-    const blocked = intentFor(wp, { type: 'update.posted', update: trail.updates(wp)[0]! }, ['owner'])!;
-    assert.equal(blocked.level, 'blocked', 'a block is pushed even in quiet hours');
+    assert.equal(intentFor(wp, { type: 'update.posted', update: trail.updates(wp)[0]! }, ['owner']), null);
 
     items.update(wp, s.id, { status: 'in-progress' }, 'dev');
     items.update(wp, s.id, { status: 'in-review', reviewerId: 'nikhil' }, 'dev');
