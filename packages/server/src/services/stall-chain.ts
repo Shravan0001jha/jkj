@@ -92,6 +92,12 @@ export function evaluate(wp: Workplace, w: WorkItem, nowMs: number, firstSeen = 
   const who = w.employeeId;
   if (!who || !isAgent(wp, who)) return null;
   if (openStartsAfter(wp, w)) return null;
+  // A Ready story queued behind the person's own In-progress story is waiting its turn (one story per person),
+  // not stalled: only the story they are on can stall. Holds whether or not a session is open right now.
+  if (status === 'ready') {
+    const other = wp.db.prepare("select 1 from work where employee_id = ? and status = 'in-progress' and id != ? limit 1").get(who, w.id);
+    if (other) return null;
+  }
   const live = employees.sessionsOf(who).filter(s => employees.isLive(s.agentId));
   // Busy: a running turn (or one parked on a tool approval), or a live session on another story they are working
   // story (or switching to one at its turn's end). That story is the one that can stall, not this.

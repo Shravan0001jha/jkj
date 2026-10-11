@@ -487,3 +487,18 @@ test('old detectors: the manager no longer escalates an old stall alert to the C
     assert.equal(cooStalls(wp, s.id).length, 0);
   } finally { await done(); }
 });
+
+test('stall: a Ready story queued behind its person\'s own In-progress story is waiting its turn, not stalled (11 Oct false rings)', async () => {
+  const { wp, story, rings, done } = setup();
+  try {
+    const onIt = story('The story Ira is on', 'ira');
+    items.update(wp, onIt.id, { status: 'in-progress', reason: 'system: started' }, 'workplace');
+    const queued = story('Next in Ira\'s queue', 'ira');
+    const t0 = Date.now();
+    for (const m of [0, 10, 20, 30, 40, 60]) stallChain.sweep(wp, t0 + m * MIN);
+    await tick();
+    assert.deepEqual(toldStall('dev', queued.title), [], 'the queued story never climbs the chain');
+    assert.ok(!rings.some(r => r.itemIds.includes(queued.id)), 'and never rings the owner');
+    assert.ok(rings.some(r => r.itemIds.includes(onIt.id)), 'the In-progress story with nobody on it still does');
+  } finally { await done(); }
+});
