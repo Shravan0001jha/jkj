@@ -647,7 +647,9 @@ function blockOnSwitch(wp: Workplace, assignmentId: string, err: WorktreeSwitchE
 
 /** A running or waiting session of this employee is on the item, or has it queued for its turn's end. */
 export function sessionOn(employeeId: string, itemId: string): boolean {
-  return sessionsOf(employeeId).some(s => isLive(s.agentId) && (s.assignmentId === itemId || (pendingSwitch.get(s.agentId) ?? []).some(x => x.assignmentId === itemId)));
+  // Also the story whose branch the session has checked out: a session started by a mention or a probe has no
+  // assignment, yet the person works their story in it (11 Oct: Zoya's Mac requests expired every 3 min).
+  return sessionsOf(employeeId).some(s => isLive(s.agentId) && (s.assignmentId === itemId || (pendingSwitch.get(s.agentId) ?? []).some(x => x.assignmentId === itemId) || (!s.assignmentId && currentStory(s) === itemId)));
 }
 
 /** An assignment is waiting for the end of this session's turn (the dispatcher counts that as busy). */

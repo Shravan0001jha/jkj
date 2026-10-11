@@ -2,6 +2,7 @@ import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import * as items from '../src/services/items.js';
@@ -120,6 +121,22 @@ test('mac 2c: an author with an open session on another story is NOT granted for
     const a = story('Still being built', 'tara');
     macQueue.request(wp, { emp: 'tara', itemId: a.id, minutes: 20, why: 'live check' });
     assert.equal(macQueue.sweep(wp, Date.now(), () => false, () => true).granted, undefined);
+  } finally { await done(); }
+});
+
+test('mac 2d: a session started by a mention (no assignment) that has the story\'s branch checked out counts as on the story (11 Oct, Zoya)', async () => {
+  const { wp, story, done } = setup();
+  try {
+    const a = story('Android 16 emulator', 'tara');
+    employees.talk(wp, 'tara', 'ping from the COO', [], { autonomous: true, probe: true, from: 'coo' });
+    const sess = employees.openSession('tara')!;
+    assert.equal(sess.assignmentId, undefined, 'a mention session carries no assignment');
+    assert.equal(employees.sessionOn('tara', a.id), false, 'not on the story yet');
+    const wt = (sess as { worktree?: { path: string } }).worktree!.path;
+    execFileSync('git', ['-C', wt, 'checkout', '-q', '-B', `emp/tara/${a.id}`]);
+    assert.equal(employees.sessionOn('tara', a.id), true, 'its checked-out branch says which story it works');
+    macQueue.request(wp, { emp: 'tara', itemId: a.id, minutes: 20, why: 'live check' });
+    assert.ok(macQueue.sweep(wp, Date.now()).granted, 'and the Mac is granted');
   } finally { await done(); }
 });
 
