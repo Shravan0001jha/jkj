@@ -16,6 +16,9 @@ import { rowsJson } from './store.js';
 import { log } from '../util/logger.js';
 import { branchFor, git } from './worktrees.js';
 
+/** Approved but not merged yet (its merge checks are pending): it WILL finish, so starting after it is fine (11 Oct, gap #18). */
+const awaitingMerge = (w: WorkItem): boolean => !!w.pr && !w.pr.merged && (w.resolution ?? 'done') === 'done';
+
 /** Commits on the story's branch ahead of its trunk; true when it can't tell (keep the rule strict). */
 function hasCommits(wp: Workplace, w: WorkItem): boolean {
   const emp = w.employeeId ? wp.org.employees.find(e => e.id === w.employeeId) : undefined;
@@ -176,7 +179,7 @@ export function conditions(wp: Workplace): Condition[] {
       }
     } else if (w.status === 'ready' && w.startsAfter) {
       const dep = rawGet(wp, w.startsAfter);
-      if (dep && closed(dep) && !finished(dep)) {
+      if (dep && closed(dep) && !finished(dep) && !awaitingMerge(dep)) {
         out.push({ key: `bad-block:${w.id}`, rule: 'bad-block', w, what: `Starts after ${quote(dep.title)}, which closed as ${dep.resolution ?? 'done'} and will never finish`, fix: `clear startsAfter (item_update ${w.id} startsAfter "") or point it at the real dependency`, since: dep.statusSince ?? dep.updatedAt });
       }
     }

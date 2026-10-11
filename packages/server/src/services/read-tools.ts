@@ -104,6 +104,8 @@ export function readItem(wp: Workplace, q: string): string {
   for (const [asked, into] of merged) if (into === it.id) head.push(`(${asked} was merged into ${it.id}; showing ${it.id}.)`);
   if (found.length > 1) head.push(`(Also named: ${found.slice(1).map(f => f.id).join(', ')}; read them with item_read.)`);
   let status = STATUS_LABEL[it.status];
+  // Approved is not merged (11 Oct: agents read "Done" as finished and reported fixes as stranded).
+  if ((it as { trueStatus?: string }).trueStatus === 'approved') status = 'Approved, NOT merged yet (its merge checks are still pending; it is not finished)';
   if (it.resolution && it.resolution !== 'done') status += ` (${it.resolution})`;
   if (it.blocked) status += ` · waiting on ${who(wp, it.blocked.waitingOn)}: ${clip(it.blocked.reason, 200)}`;
   if (it.handoff) status += ` · handed by ${who(wp, it.handoff.fromId)}`;

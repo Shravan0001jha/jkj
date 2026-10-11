@@ -14,6 +14,8 @@ import * as coo from '../src/services/coo.js';
 import * as trail from '../src/services/trail.js';
 import * as manager from '../src/services/manager.js';
 import * as flow from '../src/services/github-flow.js';
+import * as readTools from '../src/services/read-tools.js';
+import * as hygiene from '../src/services/hygiene.js';
 import { childEnv, employee, workplaceTools } from '../src/services/employees.js';
 import * as employees from '../src/services/employees.js';
 import { ensureWorktree } from '../src/services/worktrees.js';
@@ -932,6 +934,23 @@ test('a pre-pr.sh result run only AFTER the push (no workplace/tests at all) is 
     await flow.autoMergeSweep(s.wp);
     assert.equal(pr(s).tests?.state, 'success', 'the missing tests status is read from the result');
     assert.ok(pr(s).merged, 'and the story merges');
+  } finally { await s.done(); }
+});
+
+test('approved but not merged reads as "Approved, NOT merged" to agents, and a story starting after it is not flagged as blocked on a closed item (11 Oct, gaps #18/#21)', async () => {
+  const s = setup('on');
+  try {
+    const head = s.commit('services/agent-svc/memory_client.py', 'x = 1\n', undefined, false);
+    writePrePr(s.wt, head, { mode: 'fast' });                 // tests stay pending, so it cannot merge yet
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
+    assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
+    assert.equal(pr(s).merged, undefined);
+    assert.match(readTools.readItem(s.wp, s.storyId), /Approved, NOT merged yet/);
+    const epicId = rawGet(s.wp, s.storyId)!.parentId!;
+    const next = items.create(s.wp, { level: 'story', title: 'Waits for it', parentId: epicId, assigneeId: 'kabir', startsAfter: s.storyId }, 'owner');
+    assert.ok(!hygiene.report(s.wp).violations.some(v => v.rule === 'bad-block' && v.itemId === next.id), 'it will finish: not "closed and will never finish"');
   } finally { await s.done(); }
 });
 
