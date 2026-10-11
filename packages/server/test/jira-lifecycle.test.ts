@@ -192,7 +192,7 @@ test('PR merged: the story moves to Merged and Asha is told; she closes it to Do
 
 /* ---------- the hygiene rules ---------- */
 
-test('(a) the top of a person\'s queue: idle for 10 min is a violation; working on a lower item is too; Asha\'s top is to be routed', async () => {
+test('(a) the top of a person\'s queue: idle for 10 min is a violation; Ready work behind the story she is on is not; Asha\'s top is to be routed', async () => {
   const { wp, story, done } = setup();
   try {
     const top = story('Top story', 'tara');
@@ -205,11 +205,13 @@ test('(a) the top of a person\'s queue: idle for 10 min is a violation; working 
     assert.match(r.violations[0]!.fix, /start Tara on it/);
     assert.equal(r.violations[0]!.minutes, 11);
 
+    // One story per person (dry run 10 Oct, #13): once she is on a story, Ready work waits its turn
+    // behind it; it is not "top-idle", and nothing suggests switching her.
     const lower = story('Lower story', 'tara');
     employees.assign(wp, lower.id);
     r = hygiene.sweep(wp, t0 + 12 * MIN);
-    const v = r.violations.find(x => x.rule === 'top-idle')!;
-    assert.match(v.what, /Tara is on lower-ranked "Lower story"/);
+    assert.ok(!r.violations.some(x => x.rule === 'top-idle' && x.itemId === top.id), 'Ready behind her In-progress story');
+    assert.ok(!r.violations.some(x => /switch/i.test(x.fix)));
     employees.close(wp, employees.openSession('tara')!.agentId, 'switching'); // not a queued switch
     employees.assign(wp, top.id);
     assert.ok(!hygiene.sweep(wp, t0 + 13 * MIN).violations.some(x => x.itemId === top.id && x.rule === 'top-idle'), 'on it now');
