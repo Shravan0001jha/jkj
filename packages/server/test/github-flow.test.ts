@@ -949,7 +949,7 @@ test('approved but not merged reads as "Approved, NOT merged" to agents, and a s
     assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
     assert.equal(pr(s).merged, undefined);
     assert.match(readTools.readItem(s.wp, s.storyId), /Approved, NOT merged yet/);
-    assert.match(statusAnswers.lineFor(s.wp, items.detail(s.wp, s.storyId).item), /^Approved, NOT merged yet/, 'status_of says it too');
+    assert.match(statusAnswers.lineFor(s.wp, items.detail(s.wp, s.storyId).item), /— Approved, NOT merged yet/, 'status_of says it too');
     const epicId = rawGet(s.wp, s.storyId)!.parentId!;
     const next = items.create(s.wp, { level: 'story', title: 'Waits for it', parentId: epicId, assigneeId: 'kabir', startsAfter: s.storyId }, 'owner');
     assert.ok(!hygiene.report(s.wp).violations.some(v => v.rule === 'bad-block' && v.itemId === next.id), 'it will finish: not "closed and will never finish"');

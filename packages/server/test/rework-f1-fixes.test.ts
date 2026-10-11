@@ -440,3 +440,17 @@ test('#5b: a live check cited mid-paragraph ("… Evidence: live check lc_x — 
   assert.deepEqual(citedLiveChecks('Evidence: live check lc_a\nmore\n  evidence: live check lc_b'), ['lc_a', 'lc_b']);
   assert.deepEqual(citedLiveChecks('no citation here, just evidence: /tmp/log.txt'), []);
 });
+
+test('#23: through the tool, QA approval names the evidence or is refused — approval means ready to merge (11 Oct)', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    const nikhil = await toolsFor(s.wp, 'nikhil');
+    await nikhil('item_read', { itemId: s.storyId });
+    const refused = await nikhil('review_approve', { itemId: s.storyId, qaDoc: qaText(s.wp, []) });
+    assert.match(refused, /Not approved: Name the evidence before approving/);
+    assert.match(await nikhil('review_approve', { itemId: s.storyId, qaDoc: qaText(s.wp, NA) }), /QA approval recorded/);
+  } finally { await s.done(); }
+});

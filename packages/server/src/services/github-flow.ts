@@ -736,6 +736,11 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
   // Owner's review flow step 2 (6 Oct): no QA approval without the edge-case doc and its report; each case cites its proof (10 Oct).
   const doc = qaDoc.require$(qaText, proofRoots(wp, w));
   qaDocExtras(wp, w, doc, qaText!);
+  // 11 Oct: approved stories sat unmerged for hours because the QA doc named no evidence. Through the tool,
+  // approval 2 is the moment the evidence question is answered, so approval means ready to merge.
+  if (opts.requireReads && !(pr.evidence === 'success' || qaDoc.evidenceNa(qaText) || liveCheckEvidence(wp, w, qaText))) {
+    throw new BadRequest('Name the evidence before approving, or the merge will wait: a passing run_evidence on the head, OR "Evidence: live check <lc_id>" for a live check the developer recorded (record_live_check), OR, only for a change the robot suite cannot run (server-only, agent-svc, docs, tooling), "Evidence: n/a — <why>" plus a "Tests: <command> <counts>" line.');
+  }
   const qaPath = qaDoc.file(wp, itemId, { title: w.title, by, sha: pr.headSha, at: approval.at }, qaText!);
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, qaApproval: approval, qaReviewer: by } }));
   if (changed) trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `QA for this story is now ${nameOf(wp, by)} (changed by the Chief of Staff)` });
