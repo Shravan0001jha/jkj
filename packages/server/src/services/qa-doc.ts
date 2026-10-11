@@ -110,7 +110,8 @@ export function require$(text: string | undefined, roots: string[] = []): QaDoc 
 /* ---------- live checks cited as evidence (dry run #5) ---------- */
 
 /** "Evidence: live check lc_…" lines: the developer's recorded live checks the QA doc cites as the evidence. */
-const LIVE_CHECK = /^\s*Evidence:\s*live check\s+(lc_[A-Za-z0-9]+)/gim;
+// Anywhere in the doc, not only at a line start (11 Oct: Aditi cited it at the end of her report paragraph and the merge waited).
+const LIVE_CHECK = /\bEvidence:\s*live check\s+(lc_[A-Za-z0-9]+)/gi;
 
 /** The live-check ids the doc cites as its evidence, in order. */
 export function citedLiveChecks(text: string | undefined): string[] {

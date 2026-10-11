@@ -433,3 +433,10 @@ test('#8: blind cases work without Notion (stored on the item only)', async () =
     assert.deepEqual(rawGet(s.wp, s.storyId)!.qaCases?.titles, ['Empty history']);
   } finally { await s.done(); }
 });
+
+test('#5b: a live check cited mid-paragraph ("… Evidence: live check lc_x — see above") counts (11 Oct, Aditi)', async () => {
+  const { citedLiveChecks } = await import('../src/services/qa-doc.js');
+  assert.deepEqual(citedLiveChecks('Checked the diff … Tests: x 5 passed. Evidence: live check lc_mv3nj8s14z4d — see the case line above.'), ['lc_mv3nj8s14z4d']);
+  assert.deepEqual(citedLiveChecks('Evidence: live check lc_a\nmore\n  evidence: live check lc_b'), ['lc_a', 'lc_b']);
+  assert.deepEqual(citedLiveChecks('no citation here, just evidence: /tmp/log.txt'), []);
+});
