@@ -37,7 +37,7 @@ import * as macQueue from './mac-queue.js';
 import * as testAccounts from './test-accounts.js';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
-import { QA_DOC_FORMAT as qaDocFormat } from './qa-doc.js';
+import { QA_DOC_FORMAT as qaDocFormat, markRead as markQaRead } from './qa-doc.js';
 import * as docs from './docs.js';
 
 /**
@@ -80,7 +80,7 @@ export function hitSessionBudget(subtype: string): boolean {
 
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence', 'request_mac', 'release_mac', 'lease_test_account', 'return_test_account', 'doc_write', 'doc_read', 'doc_comment'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'qa_doc_update', 'record_live_check', 'qa_cases_write', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence', 'request_mac', 'release_mac', 'lease_test_account', 'return_test_account', 'doc_write', 'doc_read', 'doc_comment'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -1323,10 +1323,30 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           return ok(`Review requested.${gh.message ? ` ${gh.message}` : ''}`);
         }),
       // The GitHub flow's two approvals (docs/HLD-github-flow.md D4): in local mode they answer "review as before".
-      tool('review_approve', 'Reviewers only: approve a story in review. Approval 1 of 2 is the developer approver\'s (a member of the author\'s team who is not the author, or the CTO); an extra reviewer (another team\'s lead named on the PR) approves their files; approval 2 of 2 is QA\'s (the one QA named on the story), only after the developer and every extra reviewer, and needs qaDoc: the edge cases where the change might break, each checked with "evidence: <screenshot/log path or URL>", and a report. QA\'s approval marks the story done, and the Workplace merges it once tests and evidence are green (or the doc says "Evidence: n/a — why" with a "Tests:" line). A commit that only merges the trunk keeps the approvals; any other new commit resets them.',
+      tool('review_approve', 'Reviewers only: approve a story in review. Approval 1 of 2 is the developer approver\'s (a member of the author\'s team who is not the author, or the CTO); an extra reviewer (another team\'s lead named on the PR) approves their files; approval 2 of 2 is QA\'s (the one QA named on the story), only after the developer and every extra reviewer, and needs qaDoc: the edge cases where the change might break, each checked with "evidence: <screenshot/log path or URL>", and a report. QA\'s approval marks the story done, and the Workplace merges it once tests and evidence are green (or the doc says "Evidence: n/a — why" with a "Tests:" line). A commit that only merges the trunk keeps the approvals; any other new commit resets them. ' +
+        'QA: open the evidence before approving (item_read the story, doc_read its doc, after their last change), and answer every blind case you wrote with qa_cases_write. ' +
+        'A story with no pull request (non-code work, or work in another repo) is passed by its current reviewer with review_approve and a note saying what was checked; it is then done.',
         { itemId: z.string(), note: z.string().optional(), qaDoc: z.string().optional().describe(`QA only, required for approval 2 of 2: ${qaDocFormat}`) },
         async ({ itemId, note, qaDoc }) => {
-          try { return ok((await githubFlow.approve(wp, itemId, employeeId, note, qaDoc)).message); } catch (err) { return ok(`Not approved: ${err instanceof Error ? err.message : String(err)}`); }
+          try { return ok((await githubFlow.approve(wp, itemId, employeeId, note, qaDoc, { requireReads: true })).message); } catch (err) { return ok(`Not approved: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('qa_doc_update', 'QA only: amend the QA doc you filed with approval 2 of 2 while the story is done but not merged (a missing "Evidence: n/a" or "Tests:" line, a live check to cite). Same format and checks as at approval; the merge gate runs again at once.',
+        { itemId: z.string(), qaDoc: z.string().describe(qaDocFormat) },
+        async ({ itemId, qaDoc }) => {
+          try { return ok((await githubFlow.amendQaDoc(wp, itemId, employeeId, qaDoc)).message); } catch (err) { return ok(`Not updated: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('record_live_check', 'Developers: record a live check of your story (a Mac-queue run, real audio, the desktop app) with the raw logs or screenshots that show it, never retyped text. It is recorded on your branch head; QA cites it in the QA doc as "Evidence: live check <id>", which then counts as the merge evidence for that commit.',
+        { itemId: z.string(), summary: z.string().describe('What you ran and what the logs show.'), logPaths: z.array(z.string()).describe('Files that exist: absolute, or relative to ~/iris-workplace/evidence or your worktree.') },
+        async ({ itemId, summary, logPaths }) => {
+          try {
+            const lc = githubFlow.recordLiveCheck(wp, itemId, employeeId, summary, logPaths);
+            return ok(`Live check ${lc.id} recorded on ${lc.sha.slice(0, 8)} with ${lc.logPaths.length} log${lc.logPaths.length === 1 ? '' : 's'}. QA cites it as "Evidence: live check ${lc.id}"; a new commit needs a new live check.`);
+          } catch (err) { return ok(`Not recorded: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('qa_cases_write', 'QA only, at the plan step and before reading the code: write the blind edge cases for a story, one per line ("- <case> — <why it might break>"). They are hidden from the assignee (a separate Notion page, never the story\'s doc); approval 2 of 2 must answer each with a PASS, FAIL or N/A line. A later call replaces them.',
+        { itemId: z.string(), markdown: z.string() },
+        async ({ itemId, markdown }) => {
+          try { return ok(await githubFlow.writeQaCases(wp, itemId, employeeId, markdown)); } catch (err) { return ok(`Not written: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('review_send_back', 'Reviewers only (the developer approver, an extra reviewer or QA): send a story in review back to its author with exactly what to change; QA adds the root cause (what failed, where, and why). It resets both approvals.',
         { itemId: z.string(), note: z.string() },
@@ -1571,7 +1591,13 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
       tool('item_read', 'Read one item in full before you judge it: title, status, assignee, reviewer, acceptance criteria, body, its children, every comment (author, time, text, details), the last 30 activity entries and the Inbox items linked to it. ' +
         'Reviewing? Read the item first: evidence for no-code, doc and decision stories is often in its comments, activity or a linked Inbox decision (inbox_read). Takes an id (as_…/ft_…), an id inside text, or a merged id (shows the item it was merged into). Read-only.',
         { itemId: z.string() },
-        async ({ itemId }) => ok(readTools.readItem(wp, itemId))),
+        async ({ itemId }) => {
+          const out = readTools.readItem(wp, itemId);
+          // QA opens the evidence before approving (dry run #7): the read is recorded.
+          const read = statusAnswers.resolveIds(wp, itemId).found[0];
+          if (read) markQaRead(wp, read.id, employeeId, 'item');
+          return ok(out);
+        }),
       tool('inbox_read', 'Read the Inbox, read-only: with no itemId, the open items and those answered in the last 7 days (state: open, answered, expired or all); with an Inbox id (in_…), that item with its thread messages, its options, its recommendation and the owner\'s answer; with a work item id, the Inbox items about it. ' +
         'You never answer the owner\'s decisions: only he does. Use it to verify that a decision was filed or answered.',
         { itemId: z.string().optional(), state: z.enum(['open', 'answered', 'expired', 'all']).optional() },
@@ -1583,7 +1609,11 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         async ({ itemId, type, title, markdown, status }) => ok(await docs.docWrite(wp, employeeId, { itemId, type, title, markdown, ...(status ? { status } : {}) }))),
       tool('doc_read', 'Read a story\'s Notion doc as markdown (at most 30k characters; it says when it was cut).',
         { itemId: z.string() },
-        async ({ itemId }) => ok(await docs.docRead(wp, itemId))),
+        async ({ itemId }) => {
+          const out = await docs.docRead(wp, itemId);
+          if (out.startsWith('Doc of ')) markQaRead(wp, itemId, employeeId, 'doc');
+          return ok(out);
+        }),
       tool('doc_comment', 'Comment on a story\'s Notion doc under your name. With `quote` (text copied from the doc) the comment is anchored to the first block containing it; otherwise it goes on the page. Answer the owner\'s doc comments this way.',
         { itemId: z.string(), text: z.string(), quote: z.string().optional() },
         async ({ itemId, text, quote }) => ok(await docs.docComment(wp, employeeId, { itemId, text, ...(quote ? { quote } : {}) }))),

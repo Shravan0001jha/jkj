@@ -119,6 +119,13 @@ export function readItem(wp: Workplace, q: string): string {
   const linked = inbox.linkedTo(wp, it.id);
   head.push('', 'Linked Inbox items (read with inbox_read):', ...(linked.length ? linked.slice(0, 10).map(i => inboxLine(wp, i)) : ['  none']));
   if (linked.length > 10) head.push(`  +${linked.length - 10} more`);
+  // The developer's recorded live checks (dry run #5): QA opens the logs and cites one as "Evidence: live check <id>".
+  const checks = (w.liveChecks ?? []).slice(-5);
+  if (checks.length) {
+    const headSha = w.pr?.headSha;
+    head.push('', 'Live checks (open the logs; cite one in the QA doc as "Evidence: live check <id>"):', ...checks.map(l =>
+      `  - ${l.id} by ${who(wp, l.by)} at ${l.at} on ${l.sha.slice(0, 8)}${headSha && l.sha !== headSha ? ' (an older commit)' : ''}: ${clip(l.summary, 300)}\n      logs: ${l.logPaths.join(', ')}`));
+  }
 
   const commentLine = (c: (typeof d.comments)[number], max: number): string => {
     const details = c.details ? `\n      details: ${named(wp, c.details, DETAILS_MAX)}` : '';

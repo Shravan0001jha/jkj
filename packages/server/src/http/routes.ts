@@ -531,6 +531,17 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       json(res, 200, await githubFlow.approveSpend(wp, str(body['itemId']), 'coo'));
     }),
 
+    // The COO's developer approval of a CTO-authored PR (dry run #12, 10 Oct): the CTO has no team and the
+    // author never approves their own, so the COO gives approval 1 of 2 on the CTO's stories, and only
+    // those (any other author is refused). QA's approval 2 of 2 is still needed, unless the PR changes only
+    // docs (*.md, docs/**): then the COO's approval alone is enough and the Workplace merges it. Body
+    // {itemId, note}; the note (what was checked) is required. Loopback only, like the rest.
+    r('POST', '/api/coo/review-approve', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      json(res, 200, await githubFlow.cooReviewApprove(wp, str(body['itemId']), str(body['note'])));
+    }),
+
     // run_evidence (docs/LLD-evidence.md §5): the queue for the COO (loopback only), and the reports
     // for the owner and reviewers (same auth as every /api route, so the tunnel and the token work).
     r('GET', '/api/coo/evidence', (req, res) => { requireLocal(req); json(res, 200, evidence.state(wp)); }),

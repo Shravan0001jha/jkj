@@ -526,6 +526,30 @@ async function clearPage(wp: Workplace, port: NotionPort, pageId: string): Promi
   for (const b of old) if (b.id) await port.deleteBlock(b.id);
 }
 
+/**
+ * QA's blind cases (dry run #8) as their own page in the docs database: Type "QA report", Story id
+ * "<id> (QA cases)" so doc_write's lookup by story id never finds it, and never linked as the story's
+ * doc (docId/docUrl), so doc_read and item_read never show it to the assignee. Null when Notion is not
+ * set up; throws a Notion error to the caller.
+ */
+export async function writeQaCasesPage(wp: Workplace, by: string, w: WorkItem, markdown: string, pageId?: string): Promise<{ id: string; url: string } | null> {
+  const port = notionPort(wp);
+  if (!port) return null;
+  const dbId = await ensureDocsDb(wp, port);
+  const spec = { type: 'QA report' as const, title: `QA cases (blind): ${w.title}`, status: 'Draft' as const };
+  const props = { ...properties(wp, w, by, spec, !pageId), 'Story id': { rich_text: plainRich(`${w.id} (QA cases)`) } };
+  let page: { id: string; url: string } | undefined;
+  if (pageId) {
+    try { page = await port.updatePage(pageId, { properties: props }); }
+    catch (err) { if (!isGone(err)) throw err; }
+  }
+  const created = !page;
+  if (!page) page = await port.createPage({ parent: { database_id: dbId }, properties: props });
+  if (!created) for (const b of await port.listChildren(page.id)) if (b.id) await port.deleteBlock(b.id);
+  await appendAll(port, page.id, markdownToBlocks(markdown));
+  return { id: page.id, url: page.url };
+}
+
 /** doc_read: the story's doc as markdown, at most 30k characters (and it says when it was cut). */
 export async function docRead(wp: Workplace, itemId: string): Promise<string> {
   const port = notionPort(wp);
