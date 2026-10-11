@@ -1625,7 +1625,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           if (!ended.length) return ok('Nothing to release: you hold no Mac time and have nothing queued.');
           return ok(ended[0]!.was === 'granted' ? `Released the Mac (${ended.map(e => e.ended.itemId).join(', ')}). Thank you.` : `Withdrew ${ended.length} queued request${ended.length === 1 ? '' : 's'}.`);
         }),
-      tool('lease_test_account', 'Lease a staging test account for a test (never the owner\'s account or profile), for 4 hours. You get its id and email, never a password or token. For platform "desktop" the Workplace signs it in for you into a fresh profile and gives you its path: launch the test build with --user-data-dir <that path>. Return it with return_test_account when done.',
+      tool('lease_test_account', 'Lease a staging test account for a test (never the owner\'s account or profile), for 4 hours. You get its id and email, never a password or token. For platform "desktop" the Workplace signs it in for you into a fresh profile and gives you its path: launch the test build with --user-data-dir <that path>. Return it with return_test_account when done. If staging is off, it is started first (this can take a few minutes, at most 6).',
         { itemId: z.string().optional(), platform: z.enum(['desktop', 'ios', 'android']) },
         async ({ itemId, platform }) => {
           const id = itemId ?? currentStory(session());

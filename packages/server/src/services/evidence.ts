@@ -159,6 +159,9 @@ function portsOf(wp: Workplace): EvidencePorts {
   return p as EvidencePorts;
 }
 
+/** Staging as run_evidence starts it (one shared instance, so two callers never run two starts at once). */
+export function stagingPort(wp: Workplace): Staging { return portsOf(wp).staging; }
+
 /* ---------- the engine: queue, slots, persistence ---------- */
 
 interface Engine {
