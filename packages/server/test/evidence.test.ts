@@ -833,3 +833,17 @@ test('iOS staging patch handles the old static base line and the 7 Oct resolveBa
   assert.throws(() => ports.patchIosApi('nothing here', 'https://staging.irisforu.com'), /exactly one prod API base/);
   assert.throws(() => ports.patchIosApi(old + now, 'https://staging.irisforu.com'), /found 1 and 1/);
 });
+
+test('run_evidence androidApi "36" reaches the runner as the Android 16 emulator; a bad value is refused (11 Oct, Play needs API 36)', async () => {
+  const s = setup();
+  try {
+    s.commit('mobile/android/app/build.gradle.kts', '// targetSdk 36\n');
+    const client = await toolClient(s.wp, 'kabir', s.storyId);
+    const bad = text(await client.callTool({ name: 'run_evidence', arguments: { platforms: 'android', features: 'queries', androidApi: '35' } }));
+    assert.match(bad, /34|36|Invalid|enum/i);
+    const reply = text(await client.callTool({ name: 'run_evidence', arguments: { platforms: 'android', features: 'queries', androidApi: '36' } }));
+    assert.match(reply, /queued \(position 1\)/);
+    await until(() => s.runner.calls.length === 1, 'the run to start');
+    assert.equal(s.runner.calls[0]!.androidApi, '36');
+  } finally { await s.done(); }
+});

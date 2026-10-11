@@ -1368,11 +1368,11 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         ' (a feature neither requested platform runs is refused before queueing). Desktop (the Mac app) runs ' + evidenceRuns.PLATFORM_FEATURES.desktop.join(', ') +
         ', but not here: ask for the Mac with request_mac and do a live check (voice checks too). Windows runs ' + evidenceRuns.PLATFORM_FEATURES.windows.join(', ') + ' as a cloud run QA schedules. ' +
         'Evidence belongs to one commit: a new commit makes it stale, so run it again.',
-        { itemId: z.string().optional(), platforms: z.string(), features: z.string() },
-        async ({ itemId, platforms, features }) => {
+        { itemId: z.string().optional(), platforms: z.string(), features: z.string(), androidApi: z.enum(['34', '36']).optional().describe('Android emulator API level: 36 (Android 16, what Google Play now requires new apps to target) or 34 (default)') },
+        async ({ itemId, platforms, features, androidApi }) => {
           const id = itemId ?? currentStory(session());
           if (!id) return ok(evidenceRuns.platformRefusal(platforms) ?? 'Name the story: no story is attached to this session, so call run_evidence again with its itemId.');
-          const r = evidenceRuns.request(wp, { itemId: id, by: employeeId, platforms, features });
+          const r = evidenceRuns.request(wp, { itemId: id, by: employeeId, platforms, features, ...(androidApi ? { androidApi } : {}) });
           return ok(r.ok ? `${id} (${rawGet(wp, id)?.title ?? ''}): ${r.message}` : `Not queued for ${id}: ${r.message}`);
         }),
       tool('write_spec', 'Chief of Staff only: attach the spec (acceptance criteria) to a stated feature. It becomes "specced" and can be decomposed.',

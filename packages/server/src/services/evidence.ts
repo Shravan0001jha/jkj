@@ -116,6 +116,8 @@ export interface EvidenceJob {
   by: string;
   platforms: Platform[];
   features: string[];
+  /** Android emulator API level asked for (11 Oct: the Play build needs API 36); absent = 34. */
+  androidApi?: '34' | '36';
   state: JobState;
   /** The branch head when it was asked for (dedupe); the run builds the head when it starts. */
   requestedSha?: string;
@@ -247,10 +249,12 @@ export function platformRefusal(given: string | string[]): string | null {
   return null;
 }
 
-export function request(wp: Workplace, spec: { itemId: string; by: string; platforms: string | string[]; features: string | string[] }): RequestResult {
+export function request(wp: Workplace, spec: { itemId: string; by: string; platforms: string | string[]; features: string | string[]; androidApi?: string }): RequestResult {
   const no = (message: string): RequestResult => ({ ok: false, message });
   const refusal = platformRefusal(spec.platforms);
   if (refusal) return no(refusal);
+  if (spec.androidApi !== undefined && spec.androidApi !== '34' && spec.androidApi !== '36') return no('androidApi must be 34 or 36 (the emulators the runner has).');
+  const androidApi = spec.androidApi as '34' | '36' | undefined;
   let platforms = listOf(spec.platforms);
   if (platforms.includes('all')) platforms = [...PHONES];
   const features = listOf(spec.features);
@@ -277,7 +281,7 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
   if (unsupported) return no(unsupported);
   const feats = [...new Set(features)];
   const e = engine(wp);
-  const same = (j: EvidenceJob): boolean => j.itemId === w.id && j.requestedSha === ctx.head && j.platforms.join() === plats.join() && j.features.join() === feats.join();
+  const same = (j: EvidenceJob): boolean => j.itemId === w.id && j.requestedSha === ctx.head && j.platforms.join() === plats.join() && j.features.join() === feats.join() && (j.androidApi ?? '34') === (androidApi ?? '34');
   const queuedTwin = e.queue.map(id => e.jobs.get(id)!).find(j => j && same(j));
   const activeTwin = [...e.active.values()].map(a => a.job).find(same);
   if (queuedTwin || activeTwin) {
@@ -289,7 +293,7 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
   }
 
   const server = serverChange(wp, ctx.repo, ctx.trunk, ctx.head).touched;
-  const job: EvidenceJob = { id: newJobId(), itemId: w.id, by: spec.by, platforms: plats, features: feats, state: 'queued', requestedSha: ctx.head, queuedAt: now(), attempts: 0, ...(server ? { server } : {}) };
+  const job: EvidenceJob = { id: newJobId(), itemId: w.id, by: spec.by, platforms: plats, features: feats, ...(androidApi && plats.includes('android' as Platform) ? { androidApi } : {}), state: 'queued', requestedSha: ctx.head, queuedAt: now(), attempts: 0, ...(server ? { server } : {}) };
   persist(wp, job);
   e.queue.push(job.id);
   const position = e.queue.length;
@@ -620,7 +624,7 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
         }
         const before = JSON.stringify(stagingServer(wp));
         job.state = 'running'; job.phase = 'running the suite'; persist(wp, job);
-        const res = await p.runner.run({ checkout, platforms: job.platforms, features: job.features, api: cfg.stagingUrl, apps, slot, out: runDir, log: join(logs, 'runner.log'), onSpawn });
+        const res = await p.runner.run({ checkout, platforms: job.platforms, features: job.features, ...(job.androidApi ? { androidApi: job.androidApi } : {}), api: cfg.stagingUrl, apps, slot, out: runDir, log: join(logs, 'runner.log'), onSpawn });
         const afterState = stagingServer(wp);
         if (!job.server && JSON.stringify(afterState) !== before) srv.changedTo = knownSha(afterState);
         return { ...readOutcome(runDir, res), server: srv };

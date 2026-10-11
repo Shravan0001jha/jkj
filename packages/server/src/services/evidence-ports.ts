@@ -15,6 +15,8 @@ import { linkUntracked } from './worktrees.js';
 export type Platform = 'android' | 'ios';
 
 export interface RunnerRequest {
+  /** Android API level of the emulator (local-run.sh --android-api 34|36); absent = the runner's default (34). */
+  androidApi?: '34' | '36';
   /** The server-owned Iris checkout at the story's head (the suite lives at e2e/ in it, once moved). */
   checkout: string;
   platforms: Platform[];
@@ -221,6 +223,7 @@ export class RealRunner implements EvidenceRunner {
   async run(r: RunnerRequest): Promise<RunnerOutcome> {
     const { script, cwd } = await this.resolve(r.checkout, r.log);
     const args = [script, '--platforms', r.platforms.join(','), '--features', r.features.join(','), '--api', r.api, '--slot', String(r.slot), '--out', r.out];
+    if (r.androidApi) args.push('--android-api', r.androidApi);
     if (r.apps.android) args.push('--app-android', r.apps.android);
     if (r.apps.ios) args.push('--app-ios', r.apps.ios);
     const env = childEnvFor({ IRIS_API: r.api, ANDROID_HOME: this.cfg.androidHome, DEVELOPER_DIR: this.cfg.developerDir });
