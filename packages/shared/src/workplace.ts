@@ -313,6 +313,27 @@ export interface WorkItem {
   prRefused?: { at: string; sha: string; reasons: string[] };
   /** The story's latest finished robot-suite run (run_evidence, docs/LLD-evidence.md §1). */
   evidenceRun?: EvidenceRunRecord;
+  /**
+   * Live checks the developer recorded (record_live_check, dry run #5): a Mac-queue run with its raw
+   * logs. Evidence for the merge only when QA's doc cites one ("Evidence: live check <id>") on its head.
+   */
+  liveChecks?: LiveCheck[];
+  /**
+   * QA's blind cases (qa_cases_write, dry run #8), written at the plan step before seeing the code.
+   * Internal: never projected, never shown to the assignee; approval 2 answers each title.
+   */
+  qaCases?: { markdown: string; titles: string[]; by: string; at: string; docId?: string; docUrl?: string };
+}
+
+/** A developer's live check: what was run, on which commit, and the raw logs that show it. */
+export interface LiveCheck {
+  id: string;
+  by: string;
+  at: string;
+  sha: string;
+  summary: string;
+  /** Files that exist (absolute, resolved when recorded). */
+  logPaths: string[];
 }
 
 /* ---------- evidence runs (docs/LLD-evidence.md) ---------- */

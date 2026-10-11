@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import type { Employee, PrExtraReviewer as ExtraReviewer, GitHubMode, PrApproval, PrRecord, WorkItem } from '@jkj/shared';
+import type { Employee, LiveCheck, PrExtraReviewer as ExtraReviewer, GitHubMode, PrApproval, PrRecord, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { GitHubPort, StatusState } from './github-port.js';
 import { RealGitHub } from './github-port.js';
@@ -23,6 +23,7 @@ import { resolve as resolveOwner } from './ownership.js';
 import { chiefOfStaffId } from './v2-map.js';
 import { freshLink } from './evidence-share.js';
 import * as qaDoc from './qa-doc.js';
+import * as docs from './docs.js';
 import { BadRequest, Conflict, NotFound } from '../util/errors.js';
 import { log } from '../util/logger.js';
 
@@ -284,7 +285,9 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
       tookOver = true;
       record.evidenceNote = `${ev.passed} passed, ${ev.failed} failed on ${ev.platforms.join('+')} (run_evidence)`;
     }
-    return { pr: record, prRefused: undefined };
+    // A live check on the head that only merged the trunk in still describes this code (like the approvals).
+    const liveChecks = moved && carried && cur.liveChecks ? cur.liveChecks.map(l => (l.sha === before ? { ...l, sha: ctx.head } : l)) : cur.liveChecks;
+    return { pr: record, prRefused: undefined, ...(liveChecks ? { liveChecks } : {}) };
   });
   trail.record(wp, {
     itemId, by: 'workplace', kind: 'note',
@@ -302,6 +305,10 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
     if (dev) {
       items.update(wp, itemId, { reviewerId: dev, note: 'system: a developer from the author\'s team reviews first, then QA' }, 'workplace');
       savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, devReviewer: dev } } : {}));
+    } else if (isCto(employeeOf(wp, fresh.employeeId ?? ''))) {
+      // Dry run #12: the CTO has no team and never approves his own, so the COO gives approval 1 of 2.
+      trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `The CTO's story: the COO gives the developer approval (1 of 2) through POST /api/coo/review-approve; QA follows unless the change is docs only.` });
+      coo.notifyStall(wp, { itemId, by: 'workplace', title: `Review the CTO's PR: ${fresh.title}`, body: `PR #${number} by ${nameOf(wp, fresh.employeeId)} needs approval 1 of 2, which only you give on the CTO's stories: POST /api/coo/review-approve {"itemId":"${itemId}","note":"<what you checked>"}. A docs-only change (*.md, docs/**) merges on your approval alone; otherwise QA reviews next.` });
     } else {
       trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `No developer approver for ${nameOf(wp, fresh.employeeId)}: nobody else in their team and no CTO. Asha names one (item_update reviewerId).` });
     }
@@ -506,7 +513,7 @@ export function statusesFor(wp: Workplace, w: WorkItem): Status[] {
   const dev = holds(pr.devApproval, w);
   const qa = dev && holds(pr.qaApproval, w);
   const review: Status = qa
-    ? { context: CONTEXTS.review, state: 'success', description: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer approver) and ${nameOf(wp, pr.qaApproval!.by)} (QA)` }
+    ? { context: CONTEXTS.review, state: 'success', description: cooDocsApproval(w) ? 'Approved by the COO (a docs-only change by the CTO)' : `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer approver) and ${nameOf(wp, pr.qaApproval!.by)} (QA)` }
     : dev
       ? { context: CONTEXTS.review, state: 'pending', description: `Approval 1 of 2 by ${nameOf(wp, pr.devApproval!.by)} (developer approver); waiting for QA (2 of 2)` }
       : { context: CONTEXTS.review, state: 'pending', description: 'Waiting for the developer approver (1 of 2), then QA (2 of 2)' };
@@ -594,7 +601,8 @@ export function devReviewer(wp: Workplace, w: WorkItem): string | undefined {
   if (lead && lead !== author) return lead;
   const members = teamMembers(wp.org, lead ?? author).filter(id => id !== author && !employees.find(e => e.id === id)?.virtual);
   const pick = members.map((id, i) => ({ id, n: openReviews(wp, id), i })).sort((a, b) => a.n - b.n || a.i - b.i)[0]?.id;
-  return pick ?? employees.find(e => isCto(e) && !e.virtual)?.id;
+  // Never the author: the CTO's own story has no developer approver here (the COO gives it, dry run #12).
+  return pick ?? employees.find(e => isCto(e) && !e.virtual && e.id !== author)?.id;
 }
 
 /** The item in review with its PR, its head re-read; a moved head is re-pushed and refused, unless it only merged the trunk in. */
@@ -616,7 +624,7 @@ async function reviewable(wp: Workplace, itemId: string): Promise<WorkItem> {
   return w;
 }
 
-export interface ApproveResult { stage: 'dev' | 'extra' | 'qa'; message: string }
+export interface ApproveResult { stage: 'dev' | 'extra' | 'qa' | 'done'; message: string }
 
 /** The one QA of a story: who it is now, honouring a change the Chief of Staff (or the owner, the COO) made with item_update reviewerId. */
 function assignedQa(wp: Workplace, w: WorkItem, by: string): { qa: string | undefined; changed: boolean } {
@@ -636,7 +644,54 @@ function proofRoots(wp: Workplace, w: WorkItem): string[] {
   return [qaDoc.evidenceDir(wp), ...(author ? [authorWorktree(wp, author)] : [])];
 }
 
-export async function approve(wp: Workplace, itemId: string, by: string, note?: string, qaText?: string): Promise<ApproveResult> {
+/** Approval 1 of 2 recorded (by the author's team, the CTO, or the COO for a CTO-authored story); names the one QA. */
+async function giveDevApproval(wp: Workplace, w: WorkItem, approval: PrApproval): Promise<string> {
+  const itemId = w.id;
+  const by = approval.by;
+  const pr = w.pr!;
+  savePr(wp, itemId, c => ({ pr: { ...c.pr!, devApproval: approval, devReviewer: c.pr!.devReviewer ?? by } }));
+  trail.record(wp, { itemId, by, kind: 'note', text: `Developer approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}${approval.note ? `: ${approval.note}` : ''}` });
+  // One QA per story (owner, 10 Oct): named once, at the first developer approval, and kept.
+  let qa = pr.qaReviewer;
+  if (!qa) {
+    const load: Record<string, number> = {};
+    for (const i of items.list(wp, { status: 'in-review' })) if (i.reviewerId && i.id !== itemId) load[i.reviewerId] = (load[i.reviewerId] ?? 0) + 1;
+    qa = qaReviewer(wp.org.employees, w, [by], load);
+    if (qa) savePr(wp, itemId, c => ({ pr: { ...c.pr!, qaReviewer: qa } }));
+  }
+  if (qa && qa !== w.reviewerId) items.update(wp, itemId, { reviewerId: qa, note: 'system: developer approval given; QA reviews next' }, 'workplace');
+  try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
+  const left = pendingExtra(rawGet(wp, itemId)!);
+  return `Developer approval recorded (approval 1 of 2) on ${pr.headSha.slice(0, 8)}. ${left.length ? `${left.map(e => nameOf(wp, e.id)).join(', ')} approve their files, then ` : ''}QA reviews next${qa ? ` (${nameOf(wp, qa)})` : ''} for approval 2 of 2. A commit that only merges the trunk keeps it; any other new commit resets both approvals.`;
+}
+
+/**
+ * A story with no pull request on purpose (dry run #11, 10 Oct): non-code work, or work in another repo
+ * (the iris-alpha site). Its branch has no commits past the trunk and no push was refused, so no PR is
+ * coming; a story with commits but no PR yet (the push failed or was refused) is not one.
+ */
+export function noPullRequest(wp: Workplace, w: WorkItem): boolean {
+  return !w.pr && !w.prRefused && levelOf(w) !== 'epic' && typeof contextOf(wp, w) === 'string';
+}
+
+/** The current reviewer passes a no-PR story: done, with their note (what they checked) on the story. */
+function passWithoutPr(wp: Workplace, w: WorkItem, by: string, note: string | undefined): ApproveResult {
+  if (w.status !== 'in-review') throw new BadRequest(`This story is not in review (it is ${w.status}); review it once its author moves it to review with you as the reviewer.`);
+  if (by !== w.reviewerId) throw new BadRequest(`${nameOf(wp, w.reviewerId)} is this story's reviewer, so they pass it; add your view with item_comment.`);
+  const why = note?.trim() ?? '';
+  if (why.length < 3) throw new BadRequest('Passing a story with no pull request needs your note: what you checked and why it is done (it goes on the story).');
+  items.update(wp, w.id, { status: 'done', note: `Passed without a pull request by ${nameOf(wp, by)}: ${why}` }, by);
+  return { stage: 'done', message: 'Passed: this story has no pull request (no code on its branch), so your approval closes it. It is done, with your note on the story.' };
+}
+
+export interface ApproveOptions {
+  /** The review_approve tool: QA's approval also needs the evidence opened since it last changed (dry run #7). */
+  requireReads?: boolean;
+}
+
+export async function approve(wp: Workplace, itemId: string, by: string, note?: string, qaText?: string, opts: ApproveOptions = {}): Promise<ApproveResult> {
+  const w0 = rawGet(wp, itemId);
+  if (w0 && noPullRequest(wp, w0)) return passWithoutPr(wp, w0, by, note);
   if (mode(wp) === 'local') throw new BadRequest(LOCAL_REVIEW);
   const w = await reviewable(wp, itemId);
   const pr = w.pr!;
@@ -662,20 +717,8 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
       const team = (lead ? teamMembers(wp.org, lead) : []).filter(id => id !== author && !employees.find(e => e.id === id)?.virtual).map(id => nameOf(wp, id));
       throw new BadRequest(`${nameOf(wp, by)} is not in ${nameOf(wp, author)}'s team, and approval 1 of 2 comes from the developer approver (a member of the author's team who is not the author${team.length ? `: ${team.join(' or ')}` : ''}, or the CTO).${mine ? ' Your own approval as an extra reviewer is already recorded.' : ''}`);
     }
-    savePr(wp, itemId, c => ({ pr: { ...c.pr!, devApproval: approval, devReviewer: c.pr!.devReviewer ?? by } }));
-    trail.record(wp, { itemId, by, kind: 'note', text: `Developer approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}${approval.note ? `: ${approval.note}` : ''}` });
-    // One QA per story (owner, 10 Oct): named once, at the first developer approval, and kept.
-    let qa = pr.qaReviewer;
-    if (!qa) {
-      const load: Record<string, number> = {};
-      for (const i of items.list(wp, { status: 'in-review' })) if (i.reviewerId && i.id !== itemId) load[i.reviewerId] = (load[i.reviewerId] ?? 0) + 1;
-      qa = qaReviewer(employees, w, [by], load);
-      if (qa) savePr(wp, itemId, c => ({ pr: { ...c.pr!, qaReviewer: qa } }));
-    }
-    if (qa && qa !== w.reviewerId) items.update(wp, itemId, { reviewerId: qa, note: 'system: developer approval given; QA reviews next' }, 'workplace');
-    try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
-    const left = pendingExtra(rawGet(wp, itemId)!);
-    return { stage: 'dev', message: `Developer approval recorded (approval 1 of 2) on ${pr.headSha.slice(0, 8)}. ${left.length ? `${left.map(e => nameOf(wp, e.id)).join(', ')} approve their files, then ` : ''}QA reviews next${qa ? ` (${nameOf(wp, qa)})` : ''} for approval 2 of 2. A commit that only merges the trunk keeps it; any other new commit resets both approvals.` };
+    const message = await giveDevApproval(wp, w, approval);
+    return { stage: 'dev', message };
   }
 
   if (!isQa(who)) throw new BadRequest(`It already has the developer approval (1 of 2), and approval 2 of 2 is QA's (${pr.qaReviewer ? nameOf(wp, pr.qaReviewer) : qaNames(wp)}); leave it to QA.`);
@@ -684,8 +727,15 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
   if (qa && qa !== by) throw new BadRequest(`${nameOf(wp, qa)} is this story's QA, and one QA sees a story through: leave approval 2 of 2 to them. Asha can change the QA with item_update reviewerId and a reason.`);
   const waiting = pendingExtra(w);
   if (waiting.length) throw new BadRequest(`Waiting for ${waiting.map(e => nameOf(wp, e.id)).join(', ')} to approve their files: QA approves after every extra reviewer.`);
+  // Dry run #7 (10 Oct): QA approved before opening the developer's evidence. Through the tool, QA's
+  // approval needs the story (and its doc) read since they last changed.
+  if (opts.requireReads) {
+    const unread = unreadEvidence(wp, w, by);
+    if (unread.length) throw new BadRequest(`Open the evidence first: since it last changed you have not read ${unread.join(' or ')}. Read each, cite the specific lines you checked in the QA doc, then approve.`);
+  }
   // Owner's review flow step 2 (6 Oct): no QA approval without the edge-case doc and its report; each case cites its proof (10 Oct).
   const doc = qaDoc.require$(qaText, proofRoots(wp, w));
+  qaDocExtras(wp, w, doc, qaText!);
   const qaPath = qaDoc.file(wp, itemId, { title: w.title, by, sha: pr.headSha, at: approval.at }, qaText!);
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, qaApproval: approval, qaReviewer: by } }));
   if (changed) trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `QA for this story is now ${nameOf(wp, by)} (changed by the Chief of Staff)` });
@@ -693,12 +743,170 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
   items.update(wp, itemId, { status: 'done', reviewerId: by, note: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer) and ${nameOf(wp, by)} (QA)` }, by, { checked: true });
   const auto = await autoMerge(wp, itemId);
-  const tail = auto === 'merged' ? 'The Workplace merged it into the trunk.'
-    : auto === 'waiting' ? 'The Workplace merges it itself once the tests and evidence checks are green (or the QA doc says "Evidence: n/a"): approved is not merged.'
+  return { stage: 'qa', message: `QA approval recorded (approval 2 of 2); the story is done. ${mergeTail(auto)}` };
+}
+
+/** What the automatic merge did, in one sentence for the approver. */
+function mergeTail(auto: AutoMergeOutcome): string {
+  return auto === 'merged' ? 'The Workplace merged it into the trunk.'
+    : auto === 'waiting' ? 'The Workplace merges it itself once the tests and evidence checks are green (or the QA doc cites a recorded live check, or says "Evidence: n/a"): approved is not merged.'
     : auto === 'held' ? 'It changes CI or infrastructure, so it merges once the COO approves the spend: approved is not merged.'
     : auto === 'blocked' ? 'The automatic merge was stopped and the COO is alerted: approved is not merged.'
     : 'The COO merges it once the tests check is green: approved is not merged.';
-  return { stage: 'qa', message: `QA approval recorded (approval 2 of 2); the story is done. ${tail}` };
+}
+
+/**
+ * What QA has not read since it last changed (dry run #7): the story (item_read) since the review began
+ * or the developer's evidence last changed (a robot run, a live check), and its doc (doc_read) since
+ * someone else last wrote it. Empty when everything is read.
+ */
+export function unreadEvidence(wp: Workplace, w: WorkItem, by: string): string[] {
+  const reads = qaDoc.readsOf(wp, w.id, by);
+  const latest = (xs: (string | undefined)[]): string => xs.filter((x): x is string => !!x).sort().pop() ?? '';
+  const itemSince = latest([w.statusSince, w.evidenceRun?.at, ...(w.liveChecks ?? []).map(l => l.at)]);
+  const docSince = latest(trail.activityFor(wp, w.id).filter(a => a.kind === 'doc' && a.by !== by).map(a => a.at));
+  const out: string[] = [];
+  if (!reads.item || reads.item < itemSince) out.push(`the story (item_read ${w.id})`);
+  if (w.docId && docSince && (!reads.doc || reads.doc < docSince)) out.push(`its doc (doc_read ${w.id})`);
+  return out;
+}
+
+/**
+ * The QA doc's checks beyond its shape: every blind case answered (dry run #8), and every live check it
+ * cites as evidence recorded on this story, on this head, with its logs still there (dry run #5).
+ */
+function qaDocExtras(wp: Workplace, w: WorkItem, doc: qaDoc.QaDoc, text: string): void {
+  const blind = w.qaCases?.titles ?? [];
+  const missing = qaDoc.unansweredBlind(blind, doc.cases);
+  if (missing.length) throw new BadRequest(`The QA doc does not answer every blind case: add a "- PASS/FAIL/N/A: <case> — …" line for ${missing.map(t => `"${t}"`).join(', ')}.`);
+  for (const id of qaDoc.citedLiveChecks(text)) {
+    const lc = (w.liveChecks ?? []).find(l => l.id === id);
+    if (!lc) throw new BadRequest(`The QA doc cites live check ${id}, which is not recorded on this story: the developer records it with record_live_check (item_read lists them).`);
+    if (lc.sha !== w.pr?.headSha) throw new BadRequest(`Live check ${id} was recorded on an older commit (${lc.sha.slice(0, 8)}, the head is ${(w.pr?.headSha ?? '').slice(0, 8)}): the developer runs it again on this commit.`);
+    const gone = lc.logPaths.filter(f => !existsSync(f));
+    if (gone.length) throw new BadRequest(`Live check ${id}'s logs are gone (${gone.join(', ')}), so it is not evidence any more.`);
+  }
+}
+
+/** A live check cited by the filed QA doc, on the PR's head, with its logs: evidence for the merge (dry run #5). */
+function liveCheckEvidence(wp: Workplace, w: WorkItem, filedDoc: string | undefined): boolean {
+  const head = w.pr?.headSha;
+  if (!head) return false;
+  return qaDoc.citedLiveChecks(filedDoc).some(id => {
+    const lc = (w.liveChecks ?? []).find(l => l.id === id);
+    return !!lc && lc.sha === head && lc.logPaths.length > 0 && lc.logPaths.every(f => existsSync(f));
+  });
+}
+
+/** Both approvals are the COO's: a CTO-authored docs-only PR (dry run #12), which needs no QA doc or robot evidence. */
+const cooDocsApproval = (w: WorkItem): boolean => w.pr?.devApproval?.by === 'coo' && w.pr?.qaApproval?.by === 'coo';
+
+/**
+ * QA amends its filed doc while the story is done but not merged (dry run #5: the merge held on a doc
+ * that lacked "Evidence: n/a" and QA could not fix it). Only the QA who gave approval 2, while it still
+ * holds; the doc is checked like at approval, refiled, and the merge gate runs again.
+ */
+export async function amendQaDoc(wp: Workplace, itemId: string, by: string, text: string): Promise<{ merge: AutoMergeOutcome; message: string }> {
+  if (mode(wp) === 'local') throw new BadRequest(LOCAL_REVIEW);
+  const w = rawGet(wp, itemId);
+  if (!w) throw new NotFound(`No item ${itemId}`);
+  const pr = w.pr;
+  if (!pr) throw new BadRequest('This story has no pull request, so it has no QA doc to amend.');
+  if (pr.merged) throw new BadRequest(`PR #${pr.number} is already merged: the QA doc is final.`);
+  if (w.status !== 'done' || !pr.qaApproval || !holds(pr.qaApproval, w)) throw new BadRequest(`This story is not done with a QA approval that holds (it is ${w.status}): while it is in review, give the doc with review_approve qaDoc.`);
+  if (by !== pr.qaApproval.by) throw new BadRequest(`${nameOf(wp, pr.qaApproval.by)} gave approval 2 of 2, so only they amend its QA doc.`);
+  const doc = qaDoc.require$(text, proofRoots(wp, w));
+  qaDocExtras(wp, w, doc, text);
+  const path = qaDoc.file(wp, itemId, { title: w.title, by, sha: pr.headSha, at: now() }, text);
+  trail.record(wp, { itemId, by, kind: 'note', text: `QA doc amended by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}: ${doc.cases.length} edge cases (${path})` });
+  // The merge gate runs again on the amended doc; a stop recorded for this head (the evidence) is lifted first.
+  dropSetting(wp, AUTO_BLOCKED_PREFIX + itemId);
+  const merge = await autoMerge(wp, itemId);
+  return { merge, message: `QA doc updated (${doc.cases.length} edge cases). ${mergeTail(merge)}` };
+}
+
+const LIVE_CHECKS_KEPT = 20;
+
+/**
+ * The developer records a live check (dry run #5): a Mac-queue run (real audio, the desktop app) with
+ * the raw logs that show it, on the branch head. It is evidence for the merge only once QA's doc cites
+ * it ("Evidence: live check <id>"), and only for the commit it was run on.
+ */
+export function recordLiveCheck(wp: Workplace, itemId: string, by: string, summary: string, logPaths: string[]): LiveCheck {
+  const w = rawGet(wp, itemId);
+  if (!w) throw new NotFound(`No item ${itemId}`);
+  if (by !== w.employeeId) throw new BadRequest(`Only the story's author (${nameOf(wp, w.employeeId)}) records a live check on it; QA cites it in the QA doc.`);
+  if (!summary?.trim()) throw new BadRequest('A live check needs its summary: what you ran and what the logs show.');
+  if (!logPaths?.length) throw new BadRequest('A live check needs its raw logs: logPaths of the log files or screenshots (not retyped text).');
+  const roots = proofRoots(wp, w);
+  const resolved = logPaths.map(p => ({ p, at: /^[a-z]+:\/\//i.test(p.trim()) ? null : qaDoc.proofOf(`evidence: ${p.trim()}`, roots) }));
+  const missing = resolved.filter(r => !r.at).map(r => r.p);
+  if (missing.length) throw new BadRequest(`These logs do not exist: ${missing.join(', ')}. Attach the raw files (absolute, or relative to ~/iris-workplace/evidence or your worktree).`);
+  const ctx = contextOf(wp, w);
+  const sha = typeof ctx === 'string' ? w.pr?.headSha : ctx.head;
+  if (!sha) throw new BadRequest('No commit to record it on: commit your change on the story branch first.');
+  const lc: LiveCheck = { id: `lc_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, by, at: now(), sha, summary: summary.trim(), logPaths: resolved.map(r => r.at!) };
+  const cur = rawGet(wp, itemId)!;
+  work.saveQuiet(wp, { ...cur, liveChecks: [...(cur.liveChecks ?? []), lc].slice(-LIVE_CHECKS_KEPT) });
+  trail.record(wp, { itemId, by, kind: 'note', text: `Live check ${lc.id} by ${nameOf(wp, by)} on ${sha.slice(0, 8)}: ${lc.summary} (logs: ${lc.logPaths.join(', ')})` });
+  return lc;
+}
+
+/**
+ * QA's blind cases (dry run #8): written at the plan step, before the code, by QA only. Stored on the
+ * item (never projected or shown to the assignee) and, when Notion is set up, as a separate "QA report"
+ * page that is not the story's doc. Approval 2 must answer each one. Returns the tool's reply.
+ */
+export async function writeQaCases(wp: Workplace, itemId: string, by: string, markdown: string): Promise<string> {
+  const w = rawGet(wp, itemId);
+  if (!w) throw new NotFound(`No item ${itemId}`);
+  if (!isQa(employeeOf(wp, by))) throw new BadRequest('Only QA writes blind cases: the developer never sees them.');
+  if (by === w.employeeId) throw new BadRequest('You are the story\'s assignee: blind cases come from QA who does not build it.');
+  const titles = qaDoc.blindTitles(markdown ?? '');
+  if (!titles.length) throw new BadRequest('No cases found: write one case per line ("- <case> — <why it might break>").');
+  let page: { id: string; url: string } | null = null;
+  let notionNote = '';
+  try { page = await docs.writeQaCasesPage(wp, by, w, markdown, w.qaCases?.docId); }
+  catch (err) { notionNote = ` Notion was not written (${errText(err)}); the cases are kept on the story.`; log.warn('github', `${itemId}: blind QA cases to Notion: ${errText(err)}`); }
+  const cur = rawGet(wp, itemId)!;
+  const docId = page?.id ?? cur.qaCases?.docId;
+  const docUrl = page?.url ?? cur.qaCases?.docUrl;
+  work.saveQuiet(wp, { ...cur, qaCases: { markdown, titles, by, at: now(), ...(docId ? { docId } : {}), ...(docUrl ? { docUrl } : {}) } });
+  // The trail says that they exist, never what they are: the assignee reads the trail.
+  trail.record(wp, { itemId, by, kind: 'note', text: `${nameOf(wp, by)} wrote ${titles.length} blind QA case${titles.length === 1 ? '' : 's'} (hidden from the assignee)` });
+  return `Wrote ${titles.length} blind case${titles.length === 1 ? '' : 's'} on ${itemId}${page ? ` (${page.url}, not linked on the story)` : ''}. Your approval (2 of 2) must answer each with a PASS, FAIL or N/A line.${notionNote}`;
+}
+
+/**
+ * The COO's developer approval of a CTO-authored PR (dry run #12, POST /api/coo/review-approve): the CTO
+ * has no team, and the author never approves their own, so the COO (who reconciles the tech and product
+ * docs) gives approval 1 of 2 on the CTO's stories, and only those. QA's approval 2 is still needed,
+ * unless the PR changes only docs (*.md, docs/**): then the COO's approval alone is enough to merge.
+ */
+export async function cooReviewApprove(wp: Workplace, itemId: string, note: string): Promise<{ stage: 'dev' | 'approved'; message: string; merge?: AutoMergeOutcome }> {
+  if (mode(wp) === 'local') throw new BadRequest(LOCAL_REVIEW);
+  const pre = rawGet(wp, itemId);
+  if (!pre) throw new NotFound(`No item ${itemId}`);
+  if (!isCto(employeeOf(wp, pre.employeeId ?? ''))) throw new BadRequest(`The COO's review approval is only for stories the CTO authored (he has no team to give approval 1 of 2); ${nameOf(wp, pre.employeeId)}'s story is approved by their own team.`);
+  if (!note?.trim()) throw new BadRequest('The approval needs a note: what you checked.');
+  const w = await reviewable(wp, itemId);
+  const pr = w.pr!;
+  if (holds(pr.devApproval, w)) throw new BadRequest(`This story already has the developer approval (1 of 2, ${nameOf(wp, pr.devApproval!.by)}); QA gives approval 2 of 2.`);
+  const approval: PrApproval = { by: 'coo', at: now(), sha: pr.headSha, episode: w.statusSince ?? '', note: note.trim() };
+  const ctx = contextOf(wp, w);
+  let files: string[] = [];
+  try { if (typeof ctx !== 'string') files = changedFiles(ctx.repo, ctx.base, pr.headSha); } catch { files = []; }
+  const docsOnly = files.length > 0 && files.every(notCode);
+  if (!docsOnly) {
+    const message = await giveDevApproval(wp, w, approval);
+    return { stage: 'dev', message };
+  }
+  savePr(wp, itemId, c => ({ pr: { ...c.pr!, devApproval: approval, qaApproval: approval, devReviewer: 'coo' } }));
+  trail.record(wp, { itemId, by: 'coo', kind: 'note', text: `COO approval on ${pr.headSha.slice(0, 8)} of the CTO's docs-only change (${files.length} file${files.length === 1 ? '' : 's'}); no QA approval needed: ${approval.note}` });
+  try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
+  items.update(wp, itemId, { status: 'done', reviewerId: 'coo', note: `Approved by the COO (a docs-only change by the CTO): ${approval.note}` }, 'coo', { checked: true });
+  const merge = await autoMerge(wp, itemId);
+  return { stage: 'approved', merge, message: `COO approval recorded: a docs-only change, so it is done without QA. ${mergeTail(merge)}` };
 }
 
 export async function sendBack(wp: Workplace, itemId: string, by: string, note: string): Promise<WorkItem> {
@@ -944,9 +1152,15 @@ export type AutoMergeOutcome = 'merged' | 'waiting' | 'held' | 'blocked' | 'off'
 const AUTO_BLOCKED_PREFIX = 'github:automerge-blocked:';
 const autoInFlight = new Set<string>();
 
-/** Evidence before merge: workplace/evidence passed, or the filed QA doc says "Evidence: n/a — <why>" with its "Tests:" line. */
+/**
+ * Evidence before merge: workplace/evidence passed, or the filed QA doc says "Evidence: n/a — <why>" with
+ * its "Tests:" line, or cites a live check recorded on the head (dry run #5), or the change is the CTO's
+ * docs-only one the COO approved (dry run #12).
+ */
 export function evidenceOk(wp: Workplace, w: WorkItem): boolean {
-  return w.pr?.evidence === 'success' || qaDoc.evidenceNa(qaDoc.filed(wp, w.id));
+  if (w.pr?.evidence === 'success' || cooDocsApproval(w)) return true;
+  const filed = qaDoc.filed(wp, w.id);
+  return qaDoc.evidenceNa(filed) || liveCheckEvidence(wp, w, filed);
 }
 
 /**

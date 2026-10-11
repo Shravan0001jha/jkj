@@ -122,7 +122,7 @@ test('who can reassign: within your subtree or up to your manager; Asha routes t
     assert.equal(items.update(wp, id, { assigneeId: 'asha', reason: 'needs routing elsewhere' }, 'dev').assigneeId, 'asha', 'a lead to their manager');
     const other = story(wp, 'arjun', 'Second story');
     assert.throws(() => items.update(wp, other, { assigneeId: 'ira', reason: 'Ira is free' }, 'dev'), /Forbidden/, 'a lead to another team');
-    assert.throws(() => items.update(wp, other, { assigneeId: 'sameer', reason: 'Sameer is free' }, 'asha'), /route to the charter lead; the lead assigns within the team/, 'Asha to an engineer');
+    assert.throws(() => items.update(wp, other, { assigneeId: 'ira', reason: 'Ira is free' }, 'asha'), /route to the charter lead; the lead assigns within the team/, 'Asha to another team\'s engineer (within one team she may move it: dry run #16)');
     assert.equal(items.update(wp, other, { assigneeId: 'mira', reason: 'it is an experts story' }, 'asha').assigneeId, 'mira', 'Asha to a lead');
     assert.throws(() => items.update(wp, other, { assigneeId: 'zoya', reason: 'QA it' }, 'asha'), /route to the charter lead/, 'Asha to a QA member (role qa under the QA lead)');
     assert.equal(items.update(wp, other, { assigneeId: 'nikhil', reason: 'QA first' }, 'asha').assigneeId, 'nikhil', 'Asha to the QA lead');

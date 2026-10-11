@@ -33,7 +33,8 @@ const CASE = /^\s*[-*]\s*(PASS|FAIL|N\/A)\s*:\s*(.+)$/i;
 export interface QaCase { verdict: 'PASS' | 'FAIL' | 'N/A'; text: string }
 export interface QaDoc { cases: QaCase[]; report: string }
 
-export const QA_DOC_FORMAT = '"## Edge cases" with one line per case ("- PASS: <case> — <how checked> evidence: <screenshot/log path or URL>", "- N/A: <case> — <why>"), then "## Report" (what was checked, what was not, residual risk; "Evidence: n/a — <why>" only together with "Tests: <command> <counts>")';
+export const QA_DOC_FORMAT = '"## Edge cases" with one line per case ("- PASS: <case> — <how checked> evidence: <screenshot/log path or URL>", "- N/A: <case> — <why>"; every blind case you wrote with qa_cases_write gets its own line), then "## Report" (what was checked, what was not, residual risk, citing specific log lines). ' +
+  'The merge needs evidence: a passing run_evidence on the head, or "Evidence: live check <lc_id> — <what the logs show>" for a live check the developer recorded (record_live_check), or, only when the change has no app surface the robot suite can run (server-only, agent-svc, docs, tooling), "Evidence: n/a — <why>" together with "Tests: <command> <counts>"';
 
 export const PROOF_NEEDED = 'Each case needs proof: add "evidence: <screenshot/log path or URL>"';
 const PROOF = /\bevidence:\s*(\S+)/i;
@@ -104,6 +105,60 @@ export function require$(text: string | undefined, roots: string[] = []): QaDoc 
   const failed = doc.cases.filter(c => c.verdict === 'FAIL');
   if (failed.length) throw new BadRequest(`The QA doc has ${failed.length} failing case(s) (${failed.map(c => c.text).join('; ')}), so this is not an approval: call review_send_back with the root cause.`);
   return doc;
+}
+
+/* ---------- live checks cited as evidence (dry run #5) ---------- */
+
+/** "Evidence: live check lc_…" lines: the developer's recorded live checks the QA doc cites as the evidence. */
+const LIVE_CHECK = /^\s*Evidence:\s*live check\s+(lc_[A-Za-z0-9]+)/gim;
+
+/** The live-check ids the doc cites as its evidence, in order. */
+export function citedLiveChecks(text: string | undefined): string[] {
+  if (!text) return [];
+  return [...new Set([...text.matchAll(LIVE_CHECK)].map(m => m[1]!))];
+}
+
+/* ---------- blind cases (dry run #8) ---------- */
+
+const BLIND_LINE = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.+)$/;
+
+/**
+ * The titles of QA's blind cases: one per bullet or numbered line (headings and prose are ignored). A
+ * title ends at " — " or " -- ", so a case may carry its why after it.
+ */
+export function blindTitles(markdown: string): string[] {
+  const out: string[] = [];
+  for (const line of markdown.split('\n')) {
+    const m = BLIND_LINE.exec(line);
+    if (!m) continue;
+    const title = m[1]!.split(/\s+(?:—|--|–)\s+/)[0]!.trim();
+    if (title && !out.includes(title)) out.push(title);
+  }
+  return out;
+}
+
+const plain = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+/** The blind cases no PASS/FAIL/N/A line of the doc answers (a case line answers a title it contains). */
+export function unansweredBlind(titles: string[], cases: QaCase[]): string[] {
+  const lines = cases.map(c => ` ${plain(c.text)} `);
+  return titles.filter(t => { const p = plain(t); return !!p && !lines.some(l => l.includes(` ${p} `)); });
+}
+
+/* ---------- what QA has read (dry run #7) ---------- */
+
+const READS_PREFIX = 'qa-read:';
+export interface Reads { item?: string; doc?: string }
+
+/** Who read what of a story, and when: item_read of the story, doc_read of its doc. */
+export function readsOf(wp: Workplace, itemId: string, who: string): Reads {
+  const row = wp.db.prepare('select value from settings where key = ?').get(`${READS_PREFIX}${itemId}:${who}`) as { value: string } | undefined;
+  try { return row ? JSON.parse(row.value) as Reads : {}; } catch { return {}; }
+}
+
+export function markRead(wp: Workplace, itemId: string, who: string, what: keyof Reads, at = new Date().toISOString()): void {
+  const next: Reads = { ...readsOf(wp, itemId, who), [what]: at };
+  wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`${READS_PREFIX}${itemId}:${who}`, JSON.stringify(next));
 }
 
 export function dir(wp: Workplace): string { return join(wp.config.workplaceDir, 'qa'); }
