@@ -255,7 +255,8 @@ function subjectOf(wp: Workplace, w: WorkItem): string | undefined {
  * - any change: the actor is the assignee or above them, or is the current reviewer sending a story
  *   in review back, passing it on, or approving it;
  * - a reassignment: to someone below the actor, to the actor's manager, or to the actor; the Chief of
- *   Staff routes only to a lead or the QA lead ("route to the charter lead; the lead assigns within the team").
+ *   Staff routes only to a lead or the QA lead ("route to the charter lead; the lead assigns within the team"),
+ *   or moves a story between members of its current team (dry run #16).
  */
 export function checkActor(wp: Workplace, actor: string, prev: WorkItem, patch: UpdateItemRequest): void {
   if (EXEMPT.has(actor) || !wp.org.employees.some(e => e.id === actor)) return;
@@ -269,7 +270,12 @@ export function checkActor(wp: Workplace, actor: string, prev: WorkItem, patch: 
   if (!reassigning) return;
   const to = patch.assigneeId!;
   if (actor === chiefOfStaffId(wp)) {
-    if (to !== actor && !isTeamLead(wp.org, to)) throw new Forbidden('Forbidden: route to the charter lead; the lead assigns within the team');
+    // Dry run #16 (11 Oct): she may also move a story between members of one team below her (the lead
+    // himself stalled); a new or unassigned story, or one changing teams, still goes to that team's lead.
+    const from = prev.employeeId;
+    const team = from ? teamOf(wp.org, from) : undefined;
+    const sameTeam = !!team && team === teamOf(wp.org, to) && subtree(wp.org, actor).includes(to);
+    if (to !== actor && !isTeamLead(wp.org, to) && !sameTeam) throw new Forbidden('Forbidden: route to the charter lead; the lead assigns within the team (you may move a story only between members of its own team)');
     return;
   }
   if (to === actor || to === managerOf(wp.org, actor) || subtree(wp.org, actor).includes(to)) return;
@@ -377,7 +383,9 @@ export function create(wp: Workplace, req0: CreateItemRequest, by: string, opts:
 
 /**
  * Rework (Oct 2026): `waiting` and `parked` are entered from ready or in-progress (and parked from
- * Backlog too: a hold parks it), and leave to ready, in-progress or backlog.
+ * Backlog too: a hold parks it), and leave to ready, in-progress or backlog. A Blocked story can be
+ * parked as well (dry run #3, 10 Oct: a stall resolved elsewhere kept re-escalating because Blocked →
+ * Parked was refused); parking still needs a reason and resumeWhen.
  */
 const TRANSITIONS: Record<ItemStatus, ItemStatus[]> = {
   backlog: ['ready', 'in-progress', 'parked', 'done'],
@@ -386,7 +394,7 @@ const TRANSITIONS: Record<ItemStatus, ItemStatus[]> = {
   'in-review': ['in-progress', 'done', 'blocked'],
   waiting: ['ready', 'in-progress', 'backlog'],
   parked: ['ready', 'in-progress', 'backlog'],
-  blocked: ['backlog', 'ready', 'in-progress', 'in-review'],
+  blocked: ['backlog', 'ready', 'in-progress', 'in-review', 'parked'],
   done: ['in-progress'],
 };
 
