@@ -20,7 +20,8 @@ const ORDER = ['in-progress', 'blocked', 'in-review', 'ready', 'backlog', 'done'
 
 /** One line about one item: "Story 'X' — Blocked · Rohan · 2 pts · waiting on Dev: why". */
 export function lineFor(wp: Workplace, it: Item): string {
-  const parts: string[] = [STATUS_LABEL[it.status]];
+  // Approved is not merged (11 Oct: "Done" here made Asha nearly unblock work on an unmerged fix).
+  const parts: string[] = [(it as { trueStatus?: string }).trueStatus === 'approved' ? 'Approved, NOT merged yet' : STATUS_LABEL[it.status]];
   if (it.level === 'epic') {
     const p = items.progress(wp, it.id);
     parts.push(`${p.pct}% (${p.storiesDone}/${p.storiesTotal} stories)`);
