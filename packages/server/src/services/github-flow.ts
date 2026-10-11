@@ -1098,7 +1098,7 @@ export async function merge(wp: Workplace, itemId: string, by: string): Promise<
     const r = await onReview(wp, itemId, 'workplace');
     if (!r.carried) blockers.push(`new commits on ${ctx0.branch} since the review (${ctx0.head.slice(0, 8)}): approvals reset`);
   }
-  if (typeof ctx0 !== 'string' && ctx0.head === w0.pr.headSha && w0.pr.tests?.state === 'pending') await recordTests(wp, itemId, ctx0);
+  if (typeof ctx0 !== 'string' && ctx0.head === w0.pr.headSha && testsStale(w0.pr)) await recordTests(wp, itemId, ctx0);
   const w = rawGet(wp, itemId)!;
   const pr = w.pr!;
   if (!holds(pr.devApproval, w)) blockers.push('needs the developer approval');
@@ -1218,6 +1218,9 @@ function blockAuto(wp: Workplace, w: WorkItem, why: string): void {
  * is green, the Workplace merges it with `merge` (pinned to the reviewed head, branch deleted, trunk
  * fast-forwarded). Any blocker alerts the COO once per head and is left for him; never forced, never throws.
  */
+/** workplace/tests is worth re-reading from the author's pre-pr.sh results: missing, pending, or for another commit (11 Oct: a docs PR whose pre-pr ran after its push sat unmerged). */
+const testsStale = (pr: { tests?: { state: string; sha: string }; headSha: string }): boolean => !pr.tests || pr.tests.state === 'pending' || pr.tests.sha !== pr.headSha;
+
 export async function autoMerge(wp: Workplace, itemId: string): Promise<AutoMergeOutcome> {
   if (mode(wp) !== 'on') return 'off';
   const w = rawGet(wp, itemId);
@@ -1225,7 +1228,7 @@ export async function autoMerge(wp: Workplace, itemId: string): Promise<AutoMerg
   if (getSetting(wp, AUTO_BLOCKED_PREFIX + itemId) === w.pr.headSha) return 'blocked';
   // A pre-pr.sh result that arrives after review (B7, 7 Oct: approved, tests stuck pending all night)
   // is only read at submit time, so re-read it here before deciding to wait.
-  if (w.pr.tests?.state === 'pending') { const ctx = contextOf(wp, w); if (typeof ctx !== 'string' && ctx.head === w.pr.headSha) await recordTests(wp, itemId, ctx); }
+  if (testsStale(w.pr)) { const ctx = contextOf(wp, w); if (typeof ctx !== 'string' && ctx.head === w.pr.headSha) await recordTests(wp, itemId, ctx); }
   const cur = rawGet(wp, itemId) ?? w;
   const ready = autoReady(wp, cur);
   if (ready === 'waiting') return 'waiting';

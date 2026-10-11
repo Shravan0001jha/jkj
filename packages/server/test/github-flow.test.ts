@@ -916,6 +916,25 @@ test('a full pre-pr.sh result that arrives after approval is re-read: the sweep 
   } finally { await s.done(); }
 });
 
+test('a pre-pr.sh result run only AFTER the push (no workplace/tests at all) is read before merging (11 Oct, gap #19)', async () => {
+  const s = setup('on');
+  try {
+    const head = s.commit('services/agent-svc/memory_client.py', 'x = 1\n', undefined, false);
+    writePrePr(s.wt, head, { mode: 'fast' });
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, QA_DOC);
+    const w = rawGet(s.wp, s.storyId)!;
+    delete (w.pr as { tests?: unknown }).tests;                                // as if the push recorded nothing
+    s.wp.db.prepare('update work set json = ? where id = ?').run(JSON.stringify(w), s.storyId);
+    assert.equal(pr(s).tests, undefined);
+    writePrePr(s.wt, head, { mode: 'full' });
+    await flow.autoMergeSweep(s.wp);
+    assert.equal(pr(s).tests?.state, 'success', 'the missing tests status is read from the result');
+    assert.ok(pr(s).merged, 'and the story merges');
+  } finally { await s.done(); }
+});
+
 test("owner, 7 Oct: the COO may close stale or unlanded work as won't-do or duplicate with a reason; 'done' still needs the trunk", async () => {
   const s = setup('on');
   try {
