@@ -1342,7 +1342,10 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
       tool('run_evidence', 'Run the robot suite on the Mac\'s simulators against the staging server, for your story branch\'s head commit, with the platforms and features your change touches (for example platforms "android,ios", features "memory"). ' +
         'It returns at once with its place in the queue and links a report with screenshots to your story. Never wait for it: the summary comes back to you and onto the story when it finishes; open screenshots only for failures. ' +
         'Platforms: android, ios. Features: ' + evidenceRuns.RUNNER_FEATURES.join(', ') + ' (or all); setup always runs (install, sign-in), so don\'t name it. ' +
-        'Evidence belongs to one commit: a new commit makes it stale, so run it again. Mac desktop features run only in a live window the COO opens (ask on the item); Windows evidence is a cloud run QA schedules.',
+        'What each platform runs: android: ' + evidenceRuns.PLATFORM_FEATURES.android.join(', ') + '; ios: ' + evidenceRuns.PLATFORM_FEATURES.ios.join(', ') +
+        ' (a feature neither requested platform runs is refused before queueing). Desktop (the Mac app) runs ' + evidenceRuns.PLATFORM_FEATURES.desktop.join(', ') +
+        ', but not here: ask for the Mac with request_mac and do a live check (voice checks too). Windows runs ' + evidenceRuns.PLATFORM_FEATURES.windows.join(', ') + ' as a cloud run QA schedules. ' +
+        'Evidence belongs to one commit: a new commit makes it stale, so run it again.',
         { itemId: z.string().optional(), platforms: z.string(), features: z.string() },
         async ({ itemId, platforms, features }) => {
           const id = itemId ?? currentStory(session());
@@ -1577,10 +1580,16 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         { itemId: z.string().optional(), state: z.enum(['open', 'answered', 'expired', 'all']).optional() },
         async ({ itemId, state }) => ok(readTools.readInbox(wp, { ...(itemId ? { itemId } : {}), ...(state ? { state } : {}) }))),
       /* ---------- Notion docs (LLD W7): big documents live in Notion, one per story ---------- */
-      tool('doc_write', 'Write the story\'s doc in Notion (the "Iris Docs" database): designs, RCAs, research, QA and release reports, incidents, decisions. One doc per story: the first call creates it (with the type\'s template headings), later calls replace its content. ' +
-        'Markdown: # headings, paragraphs, - bullets, 1. lists, - [ ] to-dos, ``` code (```mermaid for diagrams), | pipe | tables |, > quotes, **bold**, *italic*, `code`, [links](url). The doc is linked on the item; returns its URL. Read it first with doc_read before rewriting someone else\'s doc.',
-        { itemId: z.string(), type: z.enum(docs.DOC_TYPES), title: z.string(), markdown: z.string(), status: z.enum(docs.DOC_STATUSES).optional().describe('Draft (default for a new doc), In review or Final.') },
-        async ({ itemId, type, title, markdown, status }) => ok(await docs.docWrite(wp, employeeId, { itemId, type, title, markdown, ...(status ? { status } : {}) }))),
+      tool('doc_write', 'Write your section of the story\'s doc in Notion (the "Iris Docs" database): designs, RCAs, research, QA and release reports, incidents, decisions. One doc per story, one section per writer: your section is the heading "## <section> — <your name>" and what follows it. ' +
+        'The first call on a story creates the doc (with the type\'s template headings); each later call of yours replaces only your own section, in place, and adds it if you have none. Other people\'s sections are never changed, so write only your own part (an RCA, a live verification, a QA report) and don\'t copy theirs in. ' +
+        'The page title and properties follow the story. Markdown: # headings (shown one level below your section heading), paragraphs, - bullets, 1. lists, - [ ] to-dos, ``` code (```mermaid for diagrams), | pipe | tables |, > quotes, **bold**, *italic*, `code`, [links](url). The doc is linked on the item; returns its URL. Read it with doc_read first.',
+        {
+          itemId: z.string(), type: z.enum(docs.DOC_TYPES), markdown: z.string(),
+          section: z.string().optional().describe('Your section\'s name, e.g. "RCA" or "Live verification". Default: title, else the type.'),
+          title: z.string().optional().describe('Kept for older calls: used as the section name when section is not given. The page title is the story\'s.'),
+          status: z.enum(docs.DOC_STATUSES).optional().describe('Draft (default for a new doc), In review or Final.'),
+        },
+        async ({ itemId, type, title, section, markdown, status }) => ok(await docs.docWrite(wp, employeeId, { itemId, type, markdown, ...(title ? { title } : {}), ...(section ? { section } : {}), ...(status ? { status } : {}) }))),
       tool('doc_read', 'Read a story\'s Notion doc as markdown (at most 30k characters; it says when it was cut).',
         { itemId: z.string() },
         async ({ itemId }) => ok(await docs.docRead(wp, itemId))),
@@ -1622,7 +1631,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           if (!ended.length) return ok('Nothing to release: you hold no Mac time and have nothing queued.');
           return ok(ended[0]!.was === 'granted' ? `Released the Mac (${ended.map(e => e.ended.itemId).join(', ')}). Thank you.` : `Withdrew ${ended.length} queued request${ended.length === 1 ? '' : 's'}.`);
         }),
-      tool('lease_test_account', 'Lease a staging test account for a test (never the owner\'s account or profile), for 4 hours. You get its id and email, never a password or token. For platform "desktop" the Workplace signs it in for you into a fresh profile and gives you its path: launch the test build with --user-data-dir <that path>. Return it with return_test_account when done.',
+      tool('lease_test_account', 'Lease a staging test account for a test (never the owner\'s account or profile), for 4 hours. You get its id and email, never a password or token. For platform "desktop" the Workplace signs it in for you into a fresh profile and gives you its path: launch the test build with --user-data-dir <that path>. Return it with return_test_account when done. If staging is off, it is started first (this can take a few minutes, at most 6).',
         { itemId: z.string().optional(), platform: z.enum(['desktop', 'ios', 'android']) },
         async ({ itemId, platform }) => {
           const id = itemId ?? currentStory(session());

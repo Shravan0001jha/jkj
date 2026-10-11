@@ -331,6 +331,86 @@ test('accounts 9: a lease expires after 4 hours', async () => {
   } finally { restore(); await done(); }
 });
 
+/* ---- staging off (dry run 10 Oct, gap #4: "fetch failed" because staging was stopped) ---- */
+
+function fakeStaging(behaviour: 'up' | 'starts' | 'fails' | 'hangs') {
+  const calls: string[] = [];
+  const staging = {
+    async ensureUp() {
+      calls.push('ensureUp');
+      if (behaviour === 'fails') throw new Error('fetch failed');
+      if (behaviour === 'hangs') await new Promise(() => undefined);
+      if (behaviour === 'starts') await new Promise(r => setTimeout(r, 10));
+    },
+  };
+  return { staging, calls };
+}
+
+test('accounts 10: a stopped staging is started (the evidence staging port) before the account is signed in', async () => {
+  const { wp, story, done } = setup();
+  const fake = fakeAccounts();
+  const order: string[] = [];
+  const port: testAccounts.TestAccountPort = { signIn: async e => { order.push('signIn'); return fake.port.signIn(e); }, tokenValid: fake.port.tokenValid };
+  const st = fakeStaging('starts');
+  const restore = testAccounts.usePort(port);
+  const restoreStaging = testAccounts.useStaging({ ensureUp: async () => { order.push('ensureUp'); await st.staging.ensureUp(); } });
+  try {
+    const s = story('Sign-in flow', 'tara');
+    const lease = await testAccounts.lease(wp, { emp: 'tara', itemId: s.id, platform: 'desktop' });
+    assert.ok(lease.accountId);
+    assert.deepEqual(order, ['ensureUp', 'signIn'], 'staging is up before any account call');
+    assert.equal(coo.listItems(wp).length, 0, 'nothing for the COO when it came up');
+  } finally { restoreStaging(); restore(); await done(); }
+});
+
+test('accounts 11: staging that cannot be started gives a clear message and tells the COO, never a raw "fetch failed"', async () => {
+  const { wp, story, done } = setup();
+  const fake = fakeAccounts();
+  const restore = testAccounts.usePort(fake.port);
+  const st = fakeStaging('fails');
+  const restoreStaging = testAccounts.useStaging(st.staging);
+  try {
+    const s = story('Sign-in flow', 'tara');
+    await assert.rejects(testAccounts.lease(wp, { emp: 'tara', itemId: s.id, platform: 'desktop' }), (err: Error) => {
+      assert.equal(err.message, 'Staging is off and could not be started; told the COO.');
+      return true;
+    });
+    assert.deepEqual(fake.created, [], 'no account call against a dead staging');
+    assert.equal(testAccounts.list(wp).length, 0, 'no half-made account row');
+    const raised = coo.listItems(wp).filter(i => i.kind === 'stall');
+    assert.equal(raised.length, 1, 'the COO is told');
+    assert.match(raised[0]!.title, /staging/i);
+    assert.match(raised[0]!.body, /fetch failed/, 'the COO gets the cause');
+    assert.equal(raised[0]!.itemId, s.id);
+    // Through the tool: the clear message, not the fetch error; a second try within the hour does not ring the COO again.
+    const client = await connect(wp, 'tara');
+    const text = textOf(await client.callTool({ name: 'lease_test_account', arguments: { itemId: s.id, platform: 'ios' } }));
+    await client.close();
+    assert.match(text, /Staging is off and could not be started; told the COO/);
+    assert.doesNotMatch(text, /fetch failed/);
+    assert.equal(coo.listItems(wp).filter(i => i.kind === 'stall').length, 1, 'one COO item per outage, not one per try');
+  } finally { restoreStaging(); restore(); await done(); }
+});
+
+test('accounts 12: the wait for staging is bounded (6 min by default); past it, the same clear message', async () => {
+  const { wp, story, done } = setup();
+  const fake = fakeAccounts();
+  const restore = testAccounts.usePort(fake.port);
+  assert.equal(testAccounts.STAGING_WAIT_MS, 6 * MIN);
+  const st = fakeStaging('hangs');
+  const restoreStaging = testAccounts.useStaging(st.staging, 30);
+  try {
+    const s = story('Sign-in flow', 'tara');
+    const t0 = Date.now();
+    await assert.rejects(testAccounts.lease(wp, { emp: 'tara', itemId: s.id, platform: 'android' }), /Staging is off and could not be started; told the COO/);
+    assert.ok(Date.now() - t0 < 2000, 'gave up at the bound');
+    assert.deepEqual(fake.created, []);
+    const raised = coo.listItems(wp).filter(i => i.kind === 'stall');
+    assert.equal(raised.length, 1);
+    assert.match(raised[0]!.body, /did not come up/i);
+  } finally { restoreStaging(); restore(); await done(); }
+});
+
 /* -------------------------------- Cost watcher -------------------------------- */
 
 const IST = (day: string, hhmm: string): number => Date.parse(`${day}T${hhmm}:00+05:30`);

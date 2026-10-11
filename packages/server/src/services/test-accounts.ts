@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Workplace } from './workplace.js';
 import type { Db } from './store.js';
 import * as trail from './trail.js';
+import * as coo from './coo.js';
 import { newId } from './store.js';
 import { underTest } from './test-guard.js';
 import { BadRequest } from '../util/errors.js';
@@ -154,6 +155,72 @@ function currentPort(wp: Workplace): TestAccountPort {
   return port;
 }
 
+/* ---------- staging: up before any account call (dry run 10 Oct, gap #4) ---------- */
+
+/** What the lease needs of staging: healthy, or started and then healthy; throws when it does not come up. */
+export interface StagingGate { ensureUp(): Promise<void> }
+
+/** How long a lease waits for a stopped staging to start. */
+export const STAGING_WAIT_MS = 6 * 60_000;
+export const STAGING_OFF = 'Staging is off and could not be started; told the COO.';
+/** One COO item per outage: a repeat within this window is not raised again. */
+const COO_REPEAT_MS = 60 * 60_000;
+
+let stagingGate: StagingGate | null = null;
+let stagingWaitMs = STAGING_WAIT_MS;
+const cooToldAt = new WeakMap<Workplace, number>();
+
+/** Swap the staging gate (tests), optionally with a shorter wait; returns the restore. */
+export function useStaging(s: StagingGate, waitMs = STAGING_WAIT_MS): () => void {
+  const prev = { gate: stagingGate, wait: stagingWaitMs };
+  stagingGate = s;
+  stagingWaitMs = waitMs;
+  return () => { stagingGate = prev.gate; stagingWaitMs = prev.wait; };
+}
+
+/** The gate: the one run_evidence uses (evidence-ports RealStaging: healthz, else staging.sh start). */
+async function currentStaging(wp: Workplace): Promise<StagingGate | null> {
+  if (stagingGate) return stagingGate;
+  // Never a real staging from a test run: without a fake, staging counts as up.
+  if (underTest()) return null;
+  const evidence = await import('./evidence.js');
+  return evidence.stagingPort(wp);
+}
+
+/**
+ * Staging up, within the bound; else the clear message (and the COO told once per outage), never a
+ * raw network error. A start still running past the bound carries on: the next lease finds it up.
+ */
+async function ensureStaging(wp: Workplace, spec: { emp: string; itemId: string }): Promise<void> {
+  const gate = await currentStaging(wp);
+  if (!gate) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      gate.ensureUp(),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`staging did not come up within ${Math.round(stagingWaitMs / 60_000) || '<1'} min`)), stagingWaitMs); timer.unref?.(); }),
+    ]);
+    cooToldAt.delete(wp);
+  } catch (err) {
+    const why = safeError(err);
+    log.warn('test-accounts', `staging is not up for ${spec.emp} on ${spec.itemId}: ${why}`);
+    const last = cooToldAt.get(wp);
+    if (last === undefined || Date.now() - last > COO_REPEAT_MS) {
+      cooToldAt.set(wp, Date.now());
+      try {
+        coo.notifyStall(wp, {
+          itemId: spec.itemId, by: 'workplace',
+          title: 'Staging is off and could not be started (test-account lease)',
+          body: `lease_test_account for ${spec.emp} on ${spec.itemId} needed staging (${wp.config.evidence.stagingUrl}), which is not answering and did not come up: ${why}. Start it (scripts/staging.sh start) and tell them to try again.`,
+        });
+      } catch (e) { log.warn('test-accounts', `COO not told: ${safeError(e)}`); }
+    }
+    throw new BadRequest(STAGING_OFF);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /* ---------- lease / return / expiry ---------- */
 
 /** The least recently used free account, claimed in one synchronous step (two leases never share one). */
@@ -175,6 +242,7 @@ function release(wp: Workplace, id: string, state: AccountState = 'free'): void 
 export async function lease(wp: Workplace, spec: { emp: string; itemId: string; platform: TestPlatform }, nowMs = Date.now()): Promise<Lease> {
   expireLeases(wp, nowMs);
   const p = currentPort(wp);
+  await ensureStaging(wp, spec);
   const at = new Date(nowMs).toISOString();
   const expiresAt = new Date(nowMs + LEASE_MS).toISOString();
   for (let attempt = 0; attempt < 3; attempt++) {

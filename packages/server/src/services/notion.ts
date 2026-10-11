@@ -60,8 +60,13 @@ export interface NotionPort {
   queryDatabase(databaseId: string, body?: Record<string, unknown>): Promise<NotionPage[]>;
   createPage(body: Record<string, unknown>): Promise<NotionPage>;
   updatePage(pageId: string, body: Record<string, unknown>): Promise<NotionPage>;
-  /** At most 100 children per call (the API's limit); returns the blocks created, in order. */
-  appendBlocks(blockId: string, children: Block[]): Promise<Block[]>;
+  /**
+   * At most 100 children per call (the API's limit); returns the blocks created, in order. With
+   * `after` (a child of `blockId`) they go right after that block instead of at the end.
+   */
+  appendBlocks(blockId: string, children: Block[], after?: string): Promise<Block[]>;
+  /** Change one block's payload (e.g. a heading's text). */
+  updateBlock(blockId: string, body: Record<string, unknown>): Promise<Block>;
   /** Every child of a block or page (pages through the results). */
   listChildren(blockId: string): Promise<Block[]>;
   deleteBlock(blockId: string): Promise<void>;
@@ -153,11 +158,13 @@ export class NotionClient implements NotionPort {
 
   updatePage(pageId: string, body: Record<string, unknown>) { return this.call<NotionPage>('PATCH', `/pages/${pageId}`, body); }
 
-  async appendBlocks(blockId: string, children: Block[]): Promise<Block[]> {
+  async appendBlocks(blockId: string, children: Block[], after?: string): Promise<Block[]> {
     if (children.length > 100) throw new NotionError(400, 'validation_error', `at most 100 children per append, got ${children.length}`);
-    const r = await this.call<{ results: Block[] }>('PATCH', `/blocks/${blockId}/children`, { children });
+    const r = await this.call<{ results: Block[] }>('PATCH', `/blocks/${blockId}/children`, { children, ...(after ? { after } : {}) });
     return r.results;
   }
+
+  updateBlock(blockId: string, body: Record<string, unknown>) { return this.call<Block>('PATCH', `/blocks/${blockId}`, body); }
 
   listChildren(blockId: string) {
     return this.paged<Block>(cursor => this.call('GET', `/blocks/${blockId}/children?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ''}`));

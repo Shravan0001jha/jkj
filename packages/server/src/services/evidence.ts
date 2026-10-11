@@ -55,6 +55,49 @@ export function runnerFeatures(wp: Workplace, repo: string, sha: string): string
   return [...RUNNER_FEATURES];
 }
 
+/**
+ * What each platform runs (e2e/scripts/local-run.sh supported(), from scripts/plan.mjs PER): the
+ * phones run only part of the suite; the Mac app runs all of it, but only in a live check on the
+ * owner's Mac (request_mac); Windows is a cloud run QA schedules (plan.mjs PER.windows).
+ */
+export const PLATFORM_FEATURES: Readonly<Record<'android' | 'ios' | 'desktop' | 'windows', readonly string[]>> = {
+  android: ['queries', 'memory', 'files', 'errand'],
+  ios: ['queries', 'memory', 'files', 'errand'],
+  desktop: RUNNER_FEATURES,
+  windows: ['queries', 'voice', 'memory', 'music', 'files', 'timer', 'apps', 'errand', 'update'],
+};
+
+/**
+ * The features each phone runs with the runner at `sha`: its own supported() line when it has one;
+ * a runner without that line restricts nothing (it runs what it lists); no runner in the commit, the
+ * shared list.
+ */
+export function phoneFeatures(wp: Workplace, repo: string, sha: string): Record<Platform, string[]> | null {
+  let src: string;
+  try { src = git(repo, ['show', `${sha}:${wp.config.evidence.runnerInRepo}`]); }
+  catch { return { android: [...PLATFORM_FEATURES.android], ios: [...PLATFORM_FEATURES.ios] }; }
+  const line = /^\s*supported\(\)\s*\{(.*)\}\s*;?\s*$/m.exec(src)?.[1];
+  if (!line) return null;
+  const of = (p: Platform): string[] | null => {
+    const m = new RegExp(`(?:^|[\\s;(])${p}\\)\\s*echo\\s+([^;]*);;`).exec(line);
+    if (!m) return null;
+    const v = m[1]!.trim().replace(/^['"]|['"]$/g, '');
+    if (v === '$ALL_FEATURES') return runnerFeatures(wp, repo, sha);
+    return v.split(',').map(x => x.trim()).filter(Boolean);
+  };
+  const android = of('android'), ios = of('ios');
+  return android && ios ? { android, ios } : null;
+}
+
+/** The refusal when a named feature runs on none of the requested platforms, or null. */
+export function unsupportedRefusal(byPlatform: Record<Platform, string[]>, platforms: Platform[], features: string[]): string | null {
+  const missing = features.filter(f => f !== 'all' && !platforms.some(p => byPlatform[p].includes(f)));
+  if (!missing.length) return null;
+  const lists = platforms.map(p => `${p}: ${byPlatform[p].join(', ') || 'none'}`).join('; ');
+  return `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not run on ${platforms.join(' or ')} (${lists}); ` +
+    'for voice or desktop checks ask for the Mac with request_mac and do a live check there, and call run_evidence again only with features from those lists.';
+}
+
 export const featureRefusal = (allowed: readonly string[]): string =>
   `Features must be from ${allowed.join(', ')} (or all); setup always runs, so don't name it, and call run_evidence again with those.`;
 const DESKTOP = new Set(['mac', 'macos', 'osx', 'desktop']);
@@ -115,6 +158,9 @@ function portsOf(wp: Workplace): EvidencePorts {
   ports.set(wp, p);
   return p as EvidencePorts;
 }
+
+/** Staging as run_evidence starts it (one shared instance, so two callers never run two starts at once). */
+export function stagingPort(wp: Workplace): Staging { return portsOf(wp).staging; }
 
 /* ---------- the engine: queue, slots, persistence ---------- */
 
@@ -225,6 +271,10 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
   if (features.some(f => f !== 'all' && !known.includes(f))) return no(featureRefusal(known));
 
   const plats = PHONES.filter(p => platforms.includes(p));
+  // Refused before anything is queued: a feature none of these platforms runs would be dropped silently.
+  const byPlatform = phoneFeatures(wp, ctx.repo, ctx.head);
+  const unsupported = byPlatform ? unsupportedRefusal(byPlatform, plats, features) : null;
+  if (unsupported) return no(unsupported);
   const feats = [...new Set(features)];
   const e = engine(wp);
   const same = (j: EvidenceJob): boolean => j.itemId === w.id && j.requestedSha === ctx.head && j.platforms.join() === plats.join() && j.features.join() === feats.join();
