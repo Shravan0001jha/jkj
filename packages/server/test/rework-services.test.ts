@@ -84,8 +84,7 @@ test('mac 2: the sweep grants the head only when the requester has a live sessio
     assert.equal(macQueue.sweep(wp, t0).granted, undefined, 'no session at all: not granted');
     employees.assign(wp, other.id);
     assert.ok(employees.sessionOn('tara', other.id));
-    assert.equal(macQueue.sweep(wp, t0 + 30_000).granted, undefined, 'a session on another story does not count');
-    assert.equal(coo.isLiveWindowOpen(wp, 'tara'), false);
+    // 11 Oct: her own open story qualifies with any open session (a mention session on another branch counts).
     employees.close(wp, employees.openSession('tara')!.agentId, 'test');
     employees.assign(wp, a.id);
     const s = macQueue.sweep(wp, t0 + 60_000);
@@ -115,12 +114,16 @@ test('mac 2b: an approved story held at the merge gate for its live check is gra
   } finally { await done(); }
 });
 
-test('mac 2c: an author with an open session on another story is NOT granted for a story that is not awaiting a live check', async () => {
+test('mac 2c: the assignee of an open story with any open session is granted (in review, waiting on its live check); someone else\'s story is not', async () => {
   const { wp, story, done } = setup();
   try {
-    const a = story('Still being built', 'tara');
+    const notMine = story('Someone else\'s story', 'kabir');
+    macQueue.request(wp, { emp: 'tara', itemId: notMine.id, minutes: 20, why: 'live check' });
+    assert.equal(macQueue.sweep(wp, Date.now(), () => false, () => true).granted, undefined, 'not her story');
+    macQueue.release(wp, 'tara');
+    const a = story('Waiting on its live check', 'tara');
     macQueue.request(wp, { emp: 'tara', itemId: a.id, minutes: 20, why: 'live check' });
-    assert.equal(macQueue.sweep(wp, Date.now(), () => false, () => true).granted, undefined);
+    assert.ok(macQueue.sweep(wp, Date.now() + 30_000, () => false, () => true).granted, 'her open story, any open session');
   } finally { await done(); }
 });
 

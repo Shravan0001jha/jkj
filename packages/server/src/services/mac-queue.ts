@@ -167,7 +167,9 @@ function grant(wp: Workplace, r: MacRequest, by: string): MacRequest {
  */
 function awaitingLiveCheck(wp: Workplace, emp: string, itemId: string): boolean {
   const w = rawGet(wp, itemId);
-  return !!w && w.employeeId === emp && w.status === 'done' && !!w.pr && !w.pr.merged;
+  // Any open, unmerged story of theirs (11 Oct: Arjun's in-review story expired 6x: his session was a mention
+  // session on a general branch, and the story was waiting on exactly this live check).
+  return !!w && w.employeeId === emp && (w.status !== 'done' || (!!w.pr && !w.pr.merged)) && !w.mergedInto;
 }
 
 /**
