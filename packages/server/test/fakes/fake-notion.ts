@@ -78,10 +78,17 @@ export class FakeNotion implements NotionPort {
     throw new Error(`Notion 404 object_not_found: ${parentId}`);
   }
 
-  async appendBlocks(blockId: string, children: Block[]): Promise<Block[]> {
-    this.rec('appendBlocks', blockId, children.length);
+  async appendBlocks(blockId: string, children: Block[], after?: string): Promise<Block[]> {
+    this.rec('appendBlocks', blockId, children.length, ...(after ? [after] : []));
     if (children.length > 100) throw new Error(`Notion 400 validation_error: body.children.length should be ≤ 100, instead was ${children.length}`);
     const list = this.childList(blockId);
+    // `after`: inserted right after that child, in order (the API's append-after); else at the end.
+    let at = list.length;
+    if (after) {
+      const k = list.indexOf(after);
+      if (k < 0) throw new Error(`Notion 400 validation_error: ${after} is not a child of ${blockId}`);
+      at = k + 1;
+    }
     const made: Block[] = [];
     for (const child of children) {
       const id = this.id('blk');
@@ -94,7 +101,7 @@ export class FakeNotion implements NotionPort {
       }
       const stored: Stored = { block: { object: 'block', id, ...copy, has_children: rows.length > 0 }, parentId: blockId, children: [] };
       this.blocks.set(id, stored);
-      list.push(id);
+      list.splice(at++, 0, id);
       if (rows.length) await this.appendBlocks(id, rows);
       made.push(stored.block);
     }
@@ -110,6 +117,18 @@ export class FakeNotion implements NotionPort {
       return { ...JSON.parse(JSON.stringify(s.block)) as Block, has_children: s.children.length > 0 };
     });
   }
+
+  async updateBlock(blockId: string, body: Record<string, unknown>): Promise<Block> {
+    this.rec('updateBlock', blockId, body);
+    const s = this.blocks.get(blockId);
+    if (!s) throw new Error(`Notion 404 object_not_found: ${blockId}`);
+    const type = s.block.type;
+    if (body[type]) s.block = { ...s.block, [type]: { ...(s.block[type] as Record<string, unknown>), ...(body[type] as Record<string, unknown>) } };
+    return JSON.parse(JSON.stringify(s.block)) as Block;
+  }
+
+  /** Someone editing in Notion (or an old whole-page write): blocks put straight on a page. */
+  async seed(pageId: string, blocks: Block[]): Promise<Block[]> { return this.appendBlocks(pageId, blocks); }
 
   async deleteBlock(blockId: string): Promise<void> {
     this.rec('deleteBlock', blockId);

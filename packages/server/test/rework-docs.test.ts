@@ -163,15 +163,17 @@ test('4. the first doc_write creates the database and a page with the properties
     assert.equal(notion.count('createPage'), 1);
     const page = [...notion.pages.values()][0]!;
     const props = page.properties as Record<string, Record<string, unknown>>;
-    assert.equal(plain(props['Name']!['title'] as RichText[]), 'RCA: names forgotten');
+    assert.equal(plain(props['Name']!['title'] as RichText[]), 'Names are forgotten after restart', 'the page title follows the story');
     assert.deepEqual(props['Type']!['select'], { name: 'RCA' });
     assert.deepEqual(props['Status']!['select'], { name: 'Draft' });
     assert.equal(plain(props['Owner']!['rich_text'] as RichText[]), 'Mira');
     assert.equal(plain(props['Story id']!['rich_text'] as RichText[]), s.id);
     assert.match(props['Story']!['url'] as string, new RegExp(`/api/items/${s.id}$`));
     assert.match((props['Date']!['date'] as { start: string }).start, /^\d{4}-\d{2}-\d{2}$/);
-    const headings = notion.pageBlocks(page.id).filter(b => b.type.startsWith('heading_')).map(b => plain(payload<{ rich_text: RichText[] }>(b).rich_text));
-    assert.deepEqual(headings, ['Symptom', 'Root cause', 'Why it escaped', 'Fix at the root', 'Regression guard'], 'template headings the markdown lacked are added, none twice');
+    const headingBlocks = notion.pageBlocks(page.id).filter(b => b.type.startsWith('heading_'));
+    const headings = headingBlocks.map(b => plain(payload<{ rich_text: RichText[] }>(b).rich_text));
+    assert.deepEqual(headings, ['RCA: names forgotten — Mira', 'Symptom', 'Root cause', 'Why it escaped', 'Fix at the root', 'Regression guard'], 'the writer\'s section heading, then the template headings the markdown lacked, none twice');
+    assert.deepEqual(headingBlocks.map(b => b.type), ['heading_2', ...Array(5).fill('heading_3')], 'the section is a ## heading; its own headings sit one level below');
     assert.match(out, new RegExp(page.url.replace(/[.]/g, '\\.')));
     assert.equal(wp.db.prepare('select value from settings where key = ?').get('notion:docs-db') ? true : false, true);
     await mira.client.close();
@@ -192,12 +194,15 @@ test('5. a second doc_write on the same story updates that same page: one doc pe
     assert.equal(notion.count('createDatabase'), 1, 'the database is found, not made again');
     assert.equal(work.get(wp, s.id)!.docId, pageId);
     const props = notion.pages.get(pageId)!.properties as Record<string, Record<string, unknown>>;
-    assert.equal(plain(props['Name']!['title'] as RichText[]), 'Names design v2');
+    assert.equal(plain(props['Name']!['title'] as RichText[]), 'Names are forgotten after restart');
     assert.deepEqual(props['Status']!['select'], { name: 'In review' });
     const md = docs.blocksToMarkdown(notion.pageBlocks(pageId));
     assert.match(md, /Second draft\./);
     assert.doesNotMatch(md, /First draft\./, 'the old content is replaced, not appended to');
-    assert.equal(md.match(/## Context/g)!.length, 1);
+    assert.equal(md.match(/### Context/g)!.length, 1);
+    assert.match(md, /^## Names design v2 — Mira$/m, 'the section heading follows the writer\'s latest label');
+    assert.doesNotMatch(md, /Names design — Mira/);
+    assert.equal(notion.pageBlocks(pageId).filter(b => b.type === 'heading_2').length, 1, 'still one section');
     assert.match(out, /notion\.so/);
     // Read back through doc_read.
     const read = await mira.call('doc_read', { itemId: s.id });
@@ -238,6 +243,159 @@ test('6. doc_write sets item.docUrl and docId, records a doc activity, and the i
     assert.equal(act.length, 1);
     assert.equal(act[0]!.by, 'mira');
     assert.equal(act[0]!.link, page.url);
+  } finally { tmp.cleanup(); }
+});
+
+/* ---------- sections per writer (dry run 10 Oct, gap #6: a later write erased Nikhil's RCA) ---------- */
+
+const ids = (bs: Block[]) => bs.map(b => b.id!);
+const headingTexts = (n: FakeNotion, pageId: string) => n.pageBlocks(pageId).filter(b => b.type === 'heading_2').map(b => plain(payload<{ rich_text: RichText[] }>(b).rich_text));
+
+test('11. a second writer adds their own section; the first writer\'s section is untouched', async () => {
+  const { wp, tmp } = testWorkplace();
+  const notion = new FakeNotion();
+  docs.setNotionPort(wp, notion);
+  try {
+    const s = story(wp);
+    const nikhil = await toolsFor(wp, 'nikhil');
+    await nikhil.call('doc_write', { itemId: s.id, type: 'RCA', title: 'RCA', markdown: '## Root cause\n\nThe name cache is per process.' });
+    const pageId = work.get(wp, s.id)!.docId!;
+    const before = notion.pageBlocks(pageId);
+    const kabir = await toolsFor(wp, 'kabir');
+    const out = await kabir.call('doc_write', { itemId: s.id, type: 'QA report', title: 'Live verification', markdown: 'Verified live on the Mac: names survive a restart.' });
+    assert.match(out, /Doc updated/);
+    assert.equal(notion.count('createPage'), 1, 'one page per story');
+    const after = notion.pageBlocks(pageId);
+    assert.deepEqual(ids(after.slice(0, before.length)), ids(before), 'Nikhil\'s blocks are the same blocks, in place');
+    assert.equal(notion.count('deleteBlock'), 0, 'nothing of Nikhil\'s was deleted');
+    assert.deepEqual(headingTexts(notion, pageId), ['RCA — Nikhil', 'Live verification — Kabir']);
+    const md = docs.blocksToMarkdown(after);
+    assert.match(md, /The name cache is per process\./);
+    assert.match(md, /Verified live on the Mac/);
+    // The doc is read whole by anyone.
+    assert.match(await kabir.call('doc_read', { itemId: s.id }), /The name cache is per process\.[\s\S]*Verified live/);
+    await nikhil.client.close(); await kabir.client.close();
+  } finally { tmp.cleanup(); }
+});
+
+test('12. a rewrite replaces only the writer\'s own section, in place; the other sections keep their blocks', async () => {
+  const { wp, tmp } = testWorkplace();
+  const notion = new FakeNotion();
+  docs.setNotionPort(wp, notion);
+  try {
+    const s = story(wp);
+    await docs.docWrite(wp, 'nikhil', { itemId: s.id, type: 'RCA', title: 'RCA', markdown: '## Root cause\n\nFirst guess.' });
+    await docs.docWrite(wp, 'kabir', { itemId: s.id, type: 'QA report', title: 'Live verification', markdown: 'Checked live.\n\n- restart\n- names kept' });
+    await docs.docWrite(wp, 'tara', { itemId: s.id, type: 'QA report', title: 'Phones', markdown: 'Android and iOS pass.' });
+    const pageId = work.get(wp, s.id)!.docId!;
+    const kabirsBefore = ids(notion.pageBlocks(pageId)).slice(-6, -2);
+    const tarasBefore = ids(notion.pageBlocks(pageId)).slice(-2);
+    await docs.docWrite(wp, 'nikhil', { itemId: s.id, type: 'RCA', title: 'RCA', markdown: '## Root cause\n\nThe cache is per process (confirmed).\n\n## Fix at the root\n\nPersist it.' });
+    const md = docs.blocksToMarkdown(notion.pageBlocks(pageId));
+    assert.doesNotMatch(md, /First guess\./, 'his old content is gone');
+    assert.match(md, /confirmed[\s\S]*Persist it\.[\s\S]*Checked live\.[\s\S]*Android and iOS pass\./, 'his section stays first, before the others');
+    assert.deepEqual(headingTexts(notion, pageId), ['RCA — Nikhil', 'Live verification — Kabir', 'Phones — Tara']);
+    const now = ids(notion.pageBlocks(pageId));
+    assert.deepEqual(now.slice(-6, -2), kabirsBefore, 'Kabir\'s blocks untouched');
+    assert.deepEqual(now.slice(-2), tarasBefore, 'Tara\'s blocks untouched');
+    // The middle writer rewrites: still in the middle.
+    await docs.docWrite(wp, 'kabir', { itemId: s.id, type: 'QA report', title: 'Live verification', markdown: 'Checked live again.' });
+    const md2 = docs.blocksToMarkdown(notion.pageBlocks(pageId));
+    assert.match(md2, /Persist it\.[\s\S]*Checked live again\.[\s\S]*Android and iOS pass\./);
+    assert.doesNotMatch(md2, /names kept/);
+    assert.deepEqual(ids(notion.pageBlocks(pageId)).slice(-2), tarasBefore);
+  } finally { tmp.cleanup(); }
+});
+
+test('13. a page written whole before sections counts as one section of its last writer (migration)', async () => {
+  const { wp, tmp } = testWorkplace();
+  const notion = new FakeNotion();
+  docs.setNotionPort(wp, notion);
+  try {
+    const s = story(wp);
+    // Nikhil's RCA as the old doc_write left it: the whole page, no section heading.
+    await docs.docWrite(wp, 'nikhil', { itemId: s.id, type: 'RCA', title: 'RCA', markdown: 'placeholder' });
+    const pageId = work.get(wp, s.id)!.docId!;
+    for (const b of notion.pageBlocks(pageId)) await notion.deleteBlock(b.id!);
+    wp.db.prepare("delete from settings where key like 'notion:sections:%'").run();
+    // The old doc_write remembered its last writer here.
+    wp.db.prepare("insert into settings (key, value) values (?, 'nikhil') on conflict(key) do update set value = excluded.value").run(`notion:owner:${pageId}`);
+    const legacy = await notion.seed(pageId, docs.markdownToBlocks('## Symptom\n\nNames vanish.\n\n## Root cause\n\nPer-process cache.'));
+    // Sameer-style later write by someone else: the legacy content survives as Nikhil's.
+    await docs.docWrite(wp, 'kabir', { itemId: s.id, type: 'QA report', title: 'Live verification', markdown: 'Verified live.' });
+    let blocks = notion.pageBlocks(pageId);
+    assert.deepEqual(ids(blocks.slice(0, legacy.length)), ids(legacy), 'the legacy blocks are kept as they were');
+    assert.match(docs.blocksToMarkdown(blocks), /Per-process cache\.[\s\S]*## Live verification — Kabir[\s\S]*Verified live\./);
+    // Nikhil, the legacy owner, rewrites: the legacy content is his section and is replaced; Kabir's stays.
+    const kabirs = ids(blocks.slice(legacy.length));
+    await docs.docWrite(wp, 'nikhil', { itemId: s.id, type: 'RCA', title: 'RCA', markdown: '## Root cause\n\nPer-process cache, confirmed.' });
+    blocks = notion.pageBlocks(pageId);
+    const md = docs.blocksToMarkdown(blocks);
+    assert.doesNotMatch(md, /Names vanish\./);
+    assert.match(md, /## RCA — Nikhil[\s\S]*confirmed\./);
+    assert.ok(kabirs.every(id => ids(blocks).includes(id)), 'Kabir\'s section untouched');
+    assert.deepEqual(headingTexts(notion, pageId).sort(), ['Live verification — Kabir', 'RCA — Nikhil']);
+  } finally { tmp.cleanup(); }
+});
+
+test('14. the page title and properties follow the story, not the last writer', async () => {
+  const { wp, tmp } = testWorkplace();
+  const notion = new FakeNotion();
+  docs.setNotionPort(wp, notion);
+  try {
+    const s = story(wp);
+    await docs.docWrite(wp, 'nikhil', { itemId: s.id, type: 'RCA', title: 'Nikhil\'s RCA', markdown: 'Cause.' });
+    await docs.docWrite(wp, 'kabir', { itemId: s.id, type: 'QA report', title: 'Live verification', markdown: 'Checked.', status: 'In review' });
+    const pageId = work.get(wp, s.id)!.docId!;
+    const props = notion.pages.get(pageId)!.properties as Record<string, Record<string, unknown>>;
+    assert.equal(plain(props['Name']!['title'] as RichText[]), s.title);
+    assert.equal(plain(props['Owner']!['rich_text'] as RichText[]), 'Mira', 'the story\'s assignee');
+    assert.deepEqual(props['Type']!['select'], { name: 'RCA' }, 'a later writer\'s type does not flip the doc\'s');
+    assert.deepEqual(props['Status']!['select'], { name: 'In review' });
+    assert.equal(plain(props['Story id']!['rich_text'] as RichText[]), s.id);
+    // Each write is recorded under its writer.
+    assert.deepEqual(trail.activityFor(wp, s.id).filter(a => a.kind === 'doc').map(a => a.by).sort(), ['kabir', 'nikhil']);
+  } finally { tmp.cleanup(); }
+});
+
+test('15. two writers at once on a new story: one page, both sections', async () => {
+  const { wp, tmp } = testWorkplace();
+  const notion = new FakeNotion();
+  docs.setNotionPort(wp, notion);
+  try {
+    const s = story(wp);
+    await Promise.all([
+      docs.docWrite(wp, 'nikhil', { itemId: s.id, type: 'RCA', title: 'RCA', markdown: 'Cause.' }),
+      docs.docWrite(wp, 'kabir', { itemId: s.id, type: 'QA report', title: 'Live verification', markdown: 'Checked.' }),
+    ]);
+    assert.equal(notion.count('createPage'), 1);
+    const md = docs.blocksToMarkdown(notion.pageBlocks(work.get(wp, s.id)!.docId!));
+    assert.match(md, /Cause\./);
+    assert.match(md, /Checked\./);
+  } finally { tmp.cleanup(); }
+});
+
+test('16. an owner comment on a block goes to that section\'s writer; a rewrite keeps comments on deleted blocks for their writer', async () => {
+  const { wp, tmp } = testWorkplace();
+  const notion = new FakeNotion();
+  docs.setNotionPort(wp, notion);
+  try {
+    const s = story(wp);
+    await docs.docWrite(wp, 'nikhil', { itemId: s.id, type: 'RCA', title: 'RCA', markdown: 'The cache is per process.' });
+    await docs.docWrite(wp, 'kabir', { itemId: s.id, type: 'QA report', title: 'Live verification', markdown: 'Checked on the Mac.' });
+    const pageId = work.get(wp, s.id)!.docId!;
+    const para = (t: string) => notion.pageBlocks(pageId).find(b => b.type === 'paragraph' && plain(payload<{ rich_text: RichText[] }>(b).rich_text).includes(t))!;
+    notion.ownerComments(para('per process').id!, 'Prove it.');
+    notion.ownerComments(para('on the Mac').id!, 'Which build?');
+    // Kabir rewrites before the sweep: the comment on his deleted block still reaches him.
+    notion.ownerComments(para('on the Mac').id!, 'And which account?');
+    await docs.docWrite(wp, 'kabir', { itemId: s.id, type: 'QA report', title: 'Live verification', markdown: 'Checked on build 0.2.21.' });
+    const delivered: { to: string; text: string }[] = [];
+    await docs.relaySweep(wp, { deliver: (to, text) => { delivered.push({ to, text }); } });
+    const to = (needle: string) => delivered.find(d => d.text.includes(needle))?.to;
+    assert.equal(to('Prove it.'), 'nikhil');
+    assert.equal(to('Which build?'), 'kabir');
+    assert.equal(to('And which account?'), 'kabir');
   } finally { tmp.cleanup(); }
 });
 

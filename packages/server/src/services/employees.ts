@@ -1580,10 +1580,16 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         { itemId: z.string().optional(), state: z.enum(['open', 'answered', 'expired', 'all']).optional() },
         async ({ itemId, state }) => ok(readTools.readInbox(wp, { ...(itemId ? { itemId } : {}), ...(state ? { state } : {}) }))),
       /* ---------- Notion docs (LLD W7): big documents live in Notion, one per story ---------- */
-      tool('doc_write', 'Write the story\'s doc in Notion (the "Iris Docs" database): designs, RCAs, research, QA and release reports, incidents, decisions. One doc per story: the first call creates it (with the type\'s template headings), later calls replace its content. ' +
-        'Markdown: # headings, paragraphs, - bullets, 1. lists, - [ ] to-dos, ``` code (```mermaid for diagrams), | pipe | tables |, > quotes, **bold**, *italic*, `code`, [links](url). The doc is linked on the item; returns its URL. Read it first with doc_read before rewriting someone else\'s doc.',
-        { itemId: z.string(), type: z.enum(docs.DOC_TYPES), title: z.string(), markdown: z.string(), status: z.enum(docs.DOC_STATUSES).optional().describe('Draft (default for a new doc), In review or Final.') },
-        async ({ itemId, type, title, markdown, status }) => ok(await docs.docWrite(wp, employeeId, { itemId, type, title, markdown, ...(status ? { status } : {}) }))),
+      tool('doc_write', 'Write your section of the story\'s doc in Notion (the "Iris Docs" database): designs, RCAs, research, QA and release reports, incidents, decisions. One doc per story, one section per writer: your section is the heading "## <section> — <your name>" and what follows it. ' +
+        'The first call on a story creates the doc (with the type\'s template headings); each later call of yours replaces only your own section, in place, and adds it if you have none. Other people\'s sections are never changed, so write only your own part (an RCA, a live verification, a QA report) and don\'t copy theirs in. ' +
+        'The page title and properties follow the story. Markdown: # headings (shown one level below your section heading), paragraphs, - bullets, 1. lists, - [ ] to-dos, ``` code (```mermaid for diagrams), | pipe | tables |, > quotes, **bold**, *italic*, `code`, [links](url). The doc is linked on the item; returns its URL. Read it with doc_read first.',
+        {
+          itemId: z.string(), type: z.enum(docs.DOC_TYPES), markdown: z.string(),
+          section: z.string().optional().describe('Your section\'s name, e.g. "RCA" or "Live verification". Default: title, else the type.'),
+          title: z.string().optional().describe('Kept for older calls: used as the section name when section is not given. The page title is the story\'s.'),
+          status: z.enum(docs.DOC_STATUSES).optional().describe('Draft (default for a new doc), In review or Final.'),
+        },
+        async ({ itemId, type, title, section, markdown, status }) => ok(await docs.docWrite(wp, employeeId, { itemId, type, markdown, ...(title ? { title } : {}), ...(section ? { section } : {}), ...(status ? { status } : {}) }))),
       tool('doc_read', 'Read a story\'s Notion doc as markdown (at most 30k characters; it says when it was cut).',
         { itemId: z.string() },
         async ({ itemId }) => ok(await docs.docRead(wp, itemId))),

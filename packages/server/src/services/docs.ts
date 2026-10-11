@@ -386,13 +386,14 @@ function storyUrl(wp: Workplace, itemId: string): string {
   return `${wp.config.github.linkBase.replace(/\/+$/, '')}/api/items/${itemId}`;
 }
 
-function properties(wp: Workplace, w: WorkItem, by: string, spec: { type: DocType; title: string; status?: DocStatus }, creating: boolean): Record<string, unknown> {
+/** The page follows its story: its title, charter and assignee; the type is the first writer's; status when given. */
+function properties(wp: Workplace, w: WorkItem, by: string, spec: { type: DocType; status?: DocStatus }, creating: boolean): Record<string, unknown> {
   const charter = charterName(wp, w);
   return {
-    'Name': { title: plainRich(spec.title.trim() || w.title) },
-    'Type': { select: { name: spec.type } },
+    'Name': { title: plainRich(w.title) },
+    ...(creating ? { 'Type': { select: { name: spec.type } } } : {}),
     ...(charter ? { 'Charter': { select: { name: charter } } } : {}),
-    'Owner': { rich_text: plainRich(nameOf(wp, by)) },
+    'Owner': { rich_text: plainRich(nameOf(wp, w.employeeId ?? by)) },
     ...(spec.status || creating ? { 'Status': { select: { name: spec.status ?? 'Draft' } } } : {}),
     'Story': { url: storyUrl(wp, w.id) },
     'Story id': { rich_text: plainRich(w.id) },
@@ -400,8 +401,12 @@ function properties(wp: Workplace, w: WorkItem, by: string, spec: { type: DocTyp
   };
 }
 
-/** Append in groups the API accepts (≤100 children, ≤1000 blocks counting table rows); a table over 100 rows is filled after. */
-async function appendAll(port: NotionPort, parentId: string, blocks: Block[]): Promise<void> {
+/**
+ * Append in groups the API accepts (≤100 children, ≤1000 blocks counting table rows); a table over
+ * 100 rows is filled after. With `after`, the blocks go right after that child, in order. Returns the
+ * top-level blocks made.
+ */
+async function appendAll(port: NotionPort, parentId: string, blocks: Block[], after?: string): Promise<Block[]> {
   const later: { index: number; rows: Block[] }[] = [];
   const prepared = blocks.map((b, index) => {
     if (b.type !== 'table') return b;
@@ -413,7 +418,15 @@ async function appendAll(port: NotionPort, parentId: string, blocks: Block[]): P
   const made: Block[] = [];
   let group: Block[] = [];
   let weight = 0;
-  const send = async () => { if (group.length) { made.push(...await port.appendBlocks(parentId, group)); group = []; weight = 0; } };
+  let anchor = after;
+  const send = async () => {
+    if (!group.length) return;
+    const got = await port.appendBlocks(parentId, group, anchor);
+    made.push(...got);
+    // The next group goes after the last block of this one (only when placing mid-page).
+    if (anchor) anchor = got.at(-1)?.id ?? anchor;
+    group = []; weight = 0;
+  };
   for (const b of prepared) {
     const w = 1 + (b.type === 'table' ? (b['table'] as { children: Block[] }).children.length : 0);
     if (group.length >= APPEND_MAX || weight + w > APPEND_WEIGHT_MAX) await send();
@@ -425,6 +438,7 @@ async function appendAll(port: NotionPort, parentId: string, blocks: Block[]): P
     if (!tableId) throw new Error('Notion did not return the table it made; its remaining rows were not written.');
     for (let i = 0; i < rows.length; i += APPEND_MAX) await port.appendBlocks(tableId, rows.slice(i, i + APPEND_MAX));
   }
+  return made;
 }
 
 /** A page's blocks with their children attached under `<type>.children` (tables' rows, nested lists). */
@@ -463,67 +477,155 @@ async function isOwnerComment(wp: Workplace, port: NotionPort, c: NotionComment)
 
 /* ---------- the tools ---------- */
 
-export interface DocWriteSpec { itemId: string; type: DocType; title: string; markdown: string; status?: DocStatus }
+export interface DocWriteSpec { itemId: string; type: DocType; title?: string; section?: string; markdown: string; status?: DocStatus }
+
+/* ---------- sections: each writer owns one (dry run 10 Oct, gap #6) ---------- */
+
+/** Between a section's label and its writer's name in its heading: "## RCA — Nikhil". */
+export const SECTION_SEP = ' — ';
+const sectionsKey = (pageId: string): string => `notion:sections:${pageId}`;
+
+/** Section heading block id → writer, kept as the marker; the heading's text is the fallback. */
+function sectionMap(wp: Workplace, pageId: string): Record<string, string> {
+  try { return JSON.parse(getSetting(wp, sectionsKey(pageId)) ?? '{}') as Record<string, string>; } catch { return {}; }
+}
+
+interface Section { owner: string | undefined; heading?: Block; body: Block[] }
+
+/** The writer a "## <Section> — <Name>" heading names: the caller first, then anyone in the org (longest name first). */
+function ownerByHeading(wp: Workplace, text: string, by: string): string | undefined {
+  const named = (name: string) => text.length > SECTION_SEP.length + name.length && text.endsWith(`${SECTION_SEP}${name}`);
+  if (named(nameOf(wp, by))) return by;
+  return [...wp.org.employees].sort((a, b) => b.name.length - a.name.length).find(e => named(e.name))?.id;
+}
 
 /**
- * doc_write: one doc per story. Updates the story's page (its properties, then its content replaced)
- * or creates it (with the type's template headings), links it on the item, records a `doc` activity.
+ * The page's top-level blocks as sections: a section is its ## heading (known by block id, else by
+ * its "<Section> — <Name>" text) and every block up to the next section heading. Blocks before the
+ * first section heading were written whole by the old doc_write (or added by hand): they are one
+ * section of the page's last whole-page writer (notion:owner), else of the story's assignee.
+ */
+function splitSections(wp: Workplace, w: WorkItem, pageId: string, blocks: Block[], by: string): { legacy: Section; sections: Section[] } {
+  const map = sectionMap(wp, pageId);
+  const legacy: Section = { owner: getSetting(wp, `notion:owner:${pageId}`) ?? w.employeeId, body: [] };
+  const sections: Section[] = [];
+  for (const b of blocks) {
+    const owner = b.type === 'heading_2' ? (b.id && map[b.id]) || ownerByHeading(wp, blockPlain(b), by) : undefined;
+    if (owner) { sections.push({ owner, heading: b, body: [] }); continue; }
+    (sections.at(-1) ?? legacy).body.push(b);
+  }
+  return { legacy, sections };
+}
+
+/** A writer's markdown inside their section: its headings one level below the section's ##. */
+function sectionContent(md: string): Block[] {
+  return markdownToBlocks(md).map(b => {
+    const m = /^heading_([123])$/.exec(b.type);
+    if (!m) return b;
+    const { [b.type]: payload, ...rest } = b;
+    const type = `heading_${Math.min(Number(m[1]) + 1, 3)}`;
+    return { ...rest, type, [type]: payload } as Block;
+  });
+}
+
+const sectionLabel = (spec: DocWriteSpec): string =>
+  ((spec.section ?? spec.title ?? '').replace(/\s+/g, ' ').trim() || spec.type).slice(0, 120);
+
+/** One doc_write at a time per story: two writers at once still get one page and both sections. */
+const writing = new WeakMap<Workplace, Map<string, Promise<unknown>>>();
+function serialised<T>(wp: Workplace, itemId: string, fn: () => Promise<T>): Promise<T> {
+  let m = writing.get(wp);
+  if (!m) { m = new Map(); writing.set(wp, m); }
+  const prev = m.get(itemId) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  const tail = run.catch(() => undefined);
+  m.set(itemId, tail);
+  void tail.then(() => { if (m!.get(itemId) === tail) m!.delete(itemId); });
+  return run;
+}
+
+/**
+ * doc_write: one doc per story, one section per writer. The caller's section ("## <Section> —
+ * <Name>" and what follows it, up to the next section) is replaced in place, or added at the end;
+ * every other writer's section is left as it is. The page (created with the type's template
+ * headings) carries the story's title and properties; it is linked on the item, and the write is
+ * recorded as a `doc` activity of the caller.
  */
 export async function docWrite(wp: Workplace, by: string, spec: DocWriteSpec): Promise<string> {
   const port = notionPort(wp);
   if (!port) return NOT_SET_UP;
-  const w = rawGet(wp, spec.itemId);
-  if (!w) return `Not written: no item ${spec.itemId}.`;
+  const w0 = rawGet(wp, spec.itemId);
+  if (!w0) return `Not written: no item ${spec.itemId}.`;
   if (!DOC_TYPES.includes(spec.type)) return `Not written: type must be one of ${DOC_TYPES.join(', ')}.`;
   if (!spec.markdown.trim()) return 'Not written: the markdown is empty.';
-  try {
-    const dbId = await ensureDocsDb(wp, port);
-    let page: { id: string; url: string } | undefined;
-    if (w.docId) {
-      try { page = await port.updatePage(w.docId, { properties: properties(wp, w, by, spec, false) }); }
-      catch (err) { if (!isGone(err)) throw err; log.warn('docs', `the doc of ${w.id} is gone from Notion; making a new one`); }
+  return serialised(wp, w0.id, async () => {
+    const w = rawGet(wp, w0.id) ?? w0;
+    try {
+      const dbId = await ensureDocsDb(wp, port);
+      let page: { id: string; url: string } | undefined;
+      if (w.docId) {
+        try { page = await port.updatePage(w.docId, { properties: properties(wp, w, by, spec, false) }); }
+        catch (err) { if (!isGone(err)) throw err; log.warn('docs', `the doc of ${w.id} is gone from Notion; making a new one`); }
+      }
+      if (!page) {
+        const existing = (await port.queryDatabase(dbId, { filter: { property: 'Story id', rich_text: { equals: w.id } } }))[0];
+        if (existing) page = await port.updatePage(existing.id, { properties: properties(wp, w, by, spec, false) });
+      }
+      let created = false;
+      if (!page) {
+        page = await port.createPage({ parent: { database_id: dbId }, properties: properties(wp, w, by, spec, true) });
+        created = true;
+      }
+      // Link it now: a failure while writing the content leaves the story pointing at its one page.
+      const linked: WorkItem = { ...(rawGet(wp, w.id) ?? w), docId: page.id, docUrl: page.url };
+      work.saveQuiet(wp, linked);
+      const label = sectionLabel(spec);
+      const headingText = `${label}${SECTION_SEP}${nameOf(wp, by)}`;
+      const content = sectionContent(created ? withTemplate(spec.markdown, spec.type) : spec.markdown);
+      const map = sectionMap(wp, page.id);
+      const { legacy, sections } = created ? { legacy: { owner: undefined, body: [] } as Section, sections: [] as Section[] } : splitSections(wp, w, page.id, await port.listChildren(page.id), by);
+      const mine = sections.find(x => x.owner === by && x.heading?.id);
+      let replaced = false;
+      if (mine) {
+        const heading = mine.heading!;
+        if (blockPlain(heading) !== headingText) await port.updateBlock(heading.id!, { heading_2: { rich_text: plainRich(headingText) } });
+        await removeBlocks(wp, port, page.id, mine.body, by);
+        await appendAll(port, page.id, content, heading.id);
+        map[heading.id!] = by;
+        replaced = true;
+      } else {
+        // The old whole-page content is the legacy writer's: theirs to replace, never anyone else's.
+        if (legacy.body.length && legacy.owner === by) { await removeBlocks(wp, port, page.id, legacy.body, by); replaced = true; }
+        const made = await appendAll(port, page.id, [block('heading_2', { rich_text: plainRich(headingText) }), ...content]);
+        if (made[0]?.id) map[made[0].id] = by;
+      }
+      putSetting(wp, sectionsKey(page.id), JSON.stringify(map));
+      trail.record(wp, { itemId: w.id, by, kind: 'doc', text: `${created ? 'Wrote' : replaced ? 'Rewrote' : 'Added'} the "${label}" section of the ${spec.type} doc of "${w.title}"`, link: page.url });
+      return `${created ? 'Doc created' : 'Doc updated'}: ${page.url} (linked on ${w.id}). Your section "${headingText}" ${replaced ? 'was replaced' : 'was written'}; other writers' sections are untouched.`;
+    } catch (err) {
+      log.warn('docs', `doc_write on ${w.id}: ${errText(err)}`);
+      return `Not written: ${errText(err)}`;
     }
-    if (!page) {
-      const existing = (await port.queryDatabase(dbId, { filter: { property: 'Story id', rich_text: { equals: w.id } } }))[0];
-      if (existing) page = await port.updatePage(existing.id, { properties: properties(wp, w, by, spec, false) });
-    }
-    let created = false;
-    if (!page) {
-      page = await port.createPage({ parent: { database_id: dbId }, properties: properties(wp, w, by, spec, true) });
-      created = true;
-    }
-    // Link it now: a failure while writing the content leaves the story pointing at its one page.
-    const linked: WorkItem = { ...(rawGet(wp, w.id) ?? w), docId: page.id, docUrl: page.url };
-    work.saveQuiet(wp, linked);
-    putSetting(wp, `notion:owner:${page.id}`, by);
-    if (!created) await clearPage(wp, port, page.id);
-    const blocks = markdownToBlocks(created ? withTemplate(spec.markdown, spec.type) : spec.markdown);
-    await appendAll(port, page.id, blocks);
-    trail.record(wp, { itemId: w.id, by, kind: 'doc', text: `${created ? 'Wrote' : 'Rewrote'} the ${spec.type} doc "${spec.title.trim() || w.title}"`, link: page.url });
-    return `${created ? 'Doc created' : 'Doc updated'}: ${page.url} (linked on ${w.id}).`;
-  } catch (err) {
-    log.warn('docs', `doc_write on ${w.id}: ${errText(err)}`);
-    return `Not written: ${errText(err)}`;
-  }
+  });
 }
 
 /**
- * Remove a page's content before a rewrite. Owner comments on the blocks about to go are kept
- * first (notion:pending:<docId>), so the next relay sweep still delivers them.
+ * Remove blocks before a rewrite. Owner comments on them are kept first (notion:pending:<docId>),
+ * with the writer they belong to, so the next relay sweep still delivers them.
  */
-async function clearPage(wp: Workplace, port: NotionPort, pageId: string): Promise<void> {
-  const old = await port.listChildren(pageId);
+async function removeBlocks(wp: Workplace, port: NotionPort, pageId: string, blocks: Block[], owner: string): Promise<void> {
   const seen = seenSet(wp, pageId);
   const pending = pendingOf(wp, pageId);
-  for (const b of old) {
+  const before = pending.length;
+  for (const b of blocks) {
     if (!b.id) continue;
     for (const c of await port.listComments(b.id)) {
       if (seen.has(c.id) || pending.some(p => p.comment.id === c.id)) continue;
-      if (await isOwnerComment(wp, port, c)) pending.push({ comment: c, on: blockPlain(b) });
+      if (await isOwnerComment(wp, port, c)) pending.push({ comment: c, on: blockPlain(b), to: owner });
     }
   }
-  if (pending.length) putSetting(wp, `notion:pending:${pageId}`, JSON.stringify(pending));
-  for (const b of old) if (b.id) await port.deleteBlock(b.id);
+  if (pending.length > before) putSetting(wp, `notion:pending:${pageId}`, JSON.stringify(pending));
+  for (const b of blocks) if (b.id) await port.deleteBlock(b.id);
 }
 
 /** doc_read: the story's doc as markdown, at most 30k characters (and it says when it was cut). */
@@ -574,7 +676,7 @@ export async function docComment(wp: Workplace, by: string, spec: { itemId: stri
 
 export type Deliver = (employeeId: string, text: string, about: { itemId: string; title: string }) => void;
 
-interface Pending { comment: NotionComment; on?: string }
+interface Pending { comment: NotionComment; on?: string; /** The writer whose section the block was in. */ to?: string }
 
 const seenSet = (wp: Workplace, docId: string): Set<string> => {
   try { return new Set(JSON.parse(getSetting(wp, `notion:seen:${docId}`) ?? '[]') as string[]); } catch { return new Set(); }
@@ -611,7 +713,7 @@ export async function relaySweep(wp: Workplace, opts: { deliver: Deliver; blockB
       const seen = seenSet(wp, docId);
       for (const p of pendingOf(wp, docId)) {
         if (!w || seen.has(p.comment.id)) continue;
-        relay(wp, w, docId, p.comment, p.on, opts.deliver, seen);
+        relay(wp, w, docId, p.comment, p.on, opts.deliver, seen, p.to);
         relayed++;
       }
       delSetting(wp, r.key);
@@ -630,14 +732,19 @@ export async function relaySweep(wp: Workplace, opts: { deliver: Deliver; blockB
           relay(wp, w, docId, c, undefined, opts.deliver, seen);
           relayed++;
         }
-        const blocks = (await port.listChildren(docId)).filter(b => b.id);
+        const listed = await port.listChildren(docId);
+        const blocks = listed.filter(b => b.id);
         if (!blocks.length) continue;
+        // A comment on a block goes to the writer of the section it is in.
+        const writerOf = new Map<string, string | undefined>();
+        const split = splitSections(wp, w, docId, listed, w.employeeId ?? '');
+        for (const sec of [split.legacy, ...split.sections]) for (const b of [...(sec.heading ? [sec.heading] : []), ...sec.body]) if (b.id) writerOf.set(b.id, sec.owner);
         let at = (cursors.get(docId) ?? 0) % blocks.length;
         for (let n = 0; n < Math.min(perDoc, blocks.length); n++) {
           const b = blocks[at]!;
           for (const c of await port.listComments(b.id!)) {
             if (seen.has(c.id) || !(await isOwnerComment(wp, port, c))) continue;
-            relay(wp, w, docId, c, blockPlain(b), opts.deliver, seen);
+            relay(wp, w, docId, c, blockPlain(b), opts.deliver, seen, writerOf.get(b.id!));
             relayed++;
           }
           at = (at + 1) % blocks.length;
@@ -658,7 +765,7 @@ function findByDoc(wp: Workplace, docId: string): WorkItem | undefined {
   return rows.map(r => JSON.parse(r.json) as WorkItem).find(w => w.docId === docId);
 }
 
-function relay(wp: Workplace, w: WorkItem, docId: string, c: NotionComment, on: string | undefined, deliver: Deliver, seen: Set<string>): void {
+function relay(wp: Workplace, w: WorkItem, docId: string, c: NotionComment, on: string | undefined, deliver: Deliver, seen: Set<string>, writer?: string): void {
   const text = plainText(c.rich_text).trim();
   const snippet = on ? (on.length > 200 ? `${on.slice(0, 200)}…` : on) : undefined;
   // Seen first: the item comment is the durable record, and a failed delivery must not repeat it.
@@ -667,7 +774,8 @@ function relay(wp: Workplace, w: WorkItem, docId: string, c: NotionComment, on: 
   try {
     trail.comment(wp, w.id, { by: 'owner', text: `On the doc${snippet ? ` (at "${snippet}")` : ''}: ${text || '(an empty comment)'}` });
   } catch (err) { log.warn('docs', `owner comment on ${w.id}: ${errText(err)}`); }
-  const to = getSetting(wp, `notion:owner:${docId}`) ?? w.employeeId ?? chiefOfStaffId(wp);
+  // A block's comment to its section's writer; a page comment to the story's assignee.
+  const to = writer ?? w.employeeId ?? getSetting(wp, `notion:owner:${docId}`) ?? chiefOfStaffId(wp);
   if (!to) return;
   const prompt = [
     `The owner commented on your Notion doc for "${w.title}" (${w.id})${snippet ? `, on the passage "${snippet}"` : ''}:`,
@@ -675,7 +783,7 @@ function relay(wp: Workplace, w: WorkItem, docId: string, c: NotionComment, on: 
     `"${text}"`,
     '',
     `Doc: ${w.docUrl ?? docId}`,
-    `Answer him in the doc with doc_comment (itemId ${w.id}${snippet ? ', quote the passage' : ''}); change the doc with doc_write (read it first with doc_read) if he asks for a change.`,
+    `Answer him in the doc with doc_comment (itemId ${w.id}${snippet ? ', quote the passage' : ''}); change your section with doc_write (read the doc first with doc_read) if he asks for a change.`,
   ].join('\n');
   try { deliver(to, prompt, { itemId: w.id, title: w.title }); }
   catch (err) { log.warn('docs', `relay to ${to} on ${w.id}: ${errText(err)}`); }
