@@ -6,6 +6,7 @@ import * as runs from './runs.js';
 import * as items from './items.js';
 import * as stuck from './stuck.js';
 import * as coo from './coo.js';
+import * as dispatch from './dispatch.js';
 import * as floor from './floor.js';
 import * as lifecycleWatch from './lifecycle-watch.js';
 import { closed, finished, label, openStartsAfter, trueStatus } from './lifecycle.js';
@@ -85,9 +86,16 @@ function queueSort(wp: Workplace, rows: WorkItem[]): WorkItem[] {
 const startable = (wp: Workplace, w: WorkItem): boolean =>
   (w.status === 'ready' || w.status === 'in-progress') && !openStartsAfter(wp, w);
 
-/** A person's queue: their Ready and In-progress work, highest-ranked first. */
+/**
+ * A person's queue, in the order they work it (LLD-rework W2 §1-2): their In-progress work first (one
+ * story per person: Ready work waits behind it), then their Ready work in the dispatcher's own order
+ * (routed-to-lead, then focus, then rank and age), so hygiene's "top" is what the dispatcher starts next.
+ */
 export function personQueue(wp: Workplace, employeeId: string, rows = openRows(wp)): WorkItem[] {
-  return queueSort(wp, rows.filter(w => w.employeeId === employeeId && startable(wp, w)));
+  const mine = rows.filter(w => w.employeeId === employeeId && startable(wp, w));
+  const wip = queueSort(wp, mine.filter(w => w.status === 'in-progress'));
+  const ready = new Set(mine.filter(w => w.status === 'ready').map(w => w.id));
+  return [...wip, ...dispatch.queue(wp, employeeId).filter(w => ready.has(w.id))];
 }
 
 /** The global Ready queue, highest-ranked first. */
@@ -96,6 +104,29 @@ export function globalQueue(wp: Workplace, rows = openRows(wp)): WorkItem[] {
 }
 
 const liveSessions = (employeeId: string) => employees.sessionsOf(employeeId).filter(s => employees.isLive(s.agentId));
+
+const COS_CHARTER = 'chief-of-staff';
+
+/**
+ * (a) for one person: the top of their queue (their In-progress story if they have one) with nobody on
+ * it. One story per person (LLD-rework W2 §2; dry run 10 Oct, #13): the fix is never to switch them off
+ * the story they are on; it is to let them finish it, or re-rank.
+ */
+function topIdle(wp: Workplace, id: string, name: string, q: WorkItem[], noSession: Set<string>, out: Condition[]): void {
+  const top = q[0];
+  if (!top) return;
+  if (employees.sessionOn(id, top.id)) return;
+  const live = liveSessions(id);
+  const lower = live.map(s => q.find(w => w.id !== top.id && w.id === s.assignmentId)).find(Boolean);
+  if (lower) {
+    out.push({ key: `top-idle:${top.id}`, rule: 'top-idle', w: top, what: `top of ${name}'s queue (${label(trueStatus(wp, top))}), but ${name} is on lower-ranked ${quote(lower.title)}`, fix: `let ${name} finish ${quote(lower.title)} first (one story per person), or re-rank ${quote(top.title)} below it` });
+    return;
+  }
+  if (noSession.has(top.id)) return; // (b) says it already
+  const busy = live.some(s => { const a = runs.getRunAgent(s.agentId); return !!a && (a.status === 'running' || !!a.approval); });
+  if (busy) return; // a review, or the owner talking: real work
+  out.push({ key: `top-idle:${top.id}`, rule: 'top-idle', w: top, what: `top of ${name}'s queue (${label(trueStatus(wp, top))}), and ${name} is idle`, fix: `start ${name} on it (POST /api/items/${top.id} with start: true), or move it to Backlog if it is not for now` });
+}
 
 /** Every condition that holds now, before the "for how long" thresholds. */
 export function conditions(wp: Workplace): Condition[] {
@@ -113,28 +144,21 @@ export function conditions(wp: Workplace): Condition[] {
     out.push({ key: `no-session:${w.id}`, rule: 'no-session', w, what: `In progress, but ${nameOf(wp, w.employeeId)} has no live session on it`, fix: c.action });
   }
 
-  // (a) The top of a person's queue nobody is on. Asha's queue is a routing queue: its top is to be routed.
+  // (a) The top of a person's queue nobody is on. Asha's queue is mostly a routing queue: its top is to
+  // be routed. Work she holds in a charter of her own (product-and-business), not the routing charter,
+  // is routed already: it is her own queue, judged like anyone's (dry run 10 Oct, #10).
   for (const e of wp.org.employees) {
     if (e.virtual || !isAgent(wp, e.id)) continue;
     const q = personQueue(wp, e.id, rows);
-    const top = q[0];
-    if (!top) continue;
-    const name = e.name;
     if (e.id === cos) {
-      out.push({ key: `top-idle:${top.id}`, rule: 'top-idle', w: top, what: `top of ${name}'s routing queue, not routed to a developer`, fix: `${name} routes it: item_update ${top.id} assigneeId <the owning developer>` });
+      const own = new Set(e.charterIds.filter(c => c !== COS_CHARTER));
+      const isOwn = (w: WorkItem): boolean => !!w.charterId && own.has(w.charterId);
+      const route = q.find(w => !isOwn(w));
+      if (route) out.push({ key: `top-idle:${route.id}`, rule: 'top-idle', w: route, what: `top of ${e.name}'s routing queue, not routed to a developer`, fix: `${e.name} routes it: item_update ${route.id} assigneeId <the owning developer>` });
+      topIdle(wp, e.id, e.name, q.filter(isOwn), noSession, out);
       continue;
     }
-    if (employees.sessionOn(e.id, top.id)) continue;
-    const live = liveSessions(e.id);
-    const lower = live.map(s => q.find(w => w.id !== top.id && w.id === s.assignmentId)).find(Boolean);
-    if (lower) {
-      out.push({ key: `top-idle:${top.id}`, rule: 'top-idle', w: top, what: `top of ${name}'s queue (${label(trueStatus(wp, top))}), but ${name} is on lower-ranked ${quote(lower.title)}`, fix: `switch ${name} to it, or re-rank it below ${quote(lower.title)}` });
-      continue;
-    }
-    if (noSession.has(top.id)) continue; // (b) says it already
-    const busy = live.some(s => { const a = runs.getRunAgent(s.agentId); return !!a && (a.status === 'running' || !!a.approval); });
-    if (busy) continue; // a review, or the owner talking: real work
-    out.push({ key: `top-idle:${top.id}`, rule: 'top-idle', w: top, what: `top of ${name}'s queue (${label(trueStatus(wp, top))}), and ${name} is idle`, fix: `start ${name} on it (POST /api/items/${top.id} with start: true), or move it to Backlog if it is not for now` });
+    topIdle(wp, e.id, e.name, q, noSession, out);
   }
 
   for (const w of rows) {

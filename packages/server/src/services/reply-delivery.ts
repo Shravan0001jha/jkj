@@ -4,6 +4,7 @@ import * as inbox from './inbox.js';
 import * as employees from './employees.js';
 import * as manager from './manager.js';
 import * as coo from './coo.js';
+import * as floor from './floor.js';
 import { chiefOfStaffId, isAgent, nameOf, rawGet } from './v2-map.js';
 import { now, rowJson, rowsJson } from './store.js';
 import { log } from '../util/logger.js';
@@ -33,6 +34,17 @@ export const ASHA_AFTER_MS = 10 * MIN;
 export const COO_AFTER_MS = 20 * MIN;
 /** Deliveries to a session that then vanished; past this only the escalations act. */
 export const MAX_ATTEMPTS = 5;
+/**
+ * New sessions a sweep may start to hand replies over (dry run 10 Oct, #2: resuming the floor woke all
+ * 15 people with a reply queued at once). The rest wait for the next sweep, so the start is staggered.
+ */
+export const SPAWNS_PER_SWEEP = 2;
+/**
+ * A reply to someone with Ready or In-progress work and no live session waits for the session the
+ * dispatcher starts on that work (it lands there, not in a talk session of its own) for at most this
+ * long; after it, it is handed over like any other (within SPAWNS_PER_SWEEP).
+ */
+export const RIDE_ALONG_MS = 6 * MIN;
 
 export interface ReplyDelivery {
   messageId: string;
@@ -51,6 +63,9 @@ export interface ReplyDelivery {
   lastError?: string;
   ackedAt?: string;
   ackedBy?: 'thread' | 'activity' | 'bridge';
+  /** Waiting to be handed over (the floor paused, the sweep's session budget spent, riding along): since when. */
+  heldSince?: string;
+  heldWhy?: string;
   ashaAt?: string;
   cooAt?: string;
 }
@@ -97,8 +112,25 @@ function prompt(item: InboxItem, d: ReplyDelivery): string {
     `The item is ${item.state === 'open' ? 'still open' : item.state}${item.options.length ? `; its options are ${item.options.map(o => o.label).join(', ')}` : ''}.${again}`;
 }
 
-/** Hand it over once: the COO bridge, or the employee's open session, else a short session. */
-function deliver(wp: Workplace, d: ReplyDelivery, nowMs = Date.now()): ReplyDelivery {
+/** How a hand-over that needs a new session is paced: a sweep's budget of new sessions. Absent: at once. */
+interface Pace { spawns: number }
+
+/** Ready or In-progress work of theirs that the dispatcher will start a session on. */
+const hasWork = (wp: Workplace, employeeId: string): boolean =>
+  !!wp.db.prepare("select 1 from work where employee_id = ? and status in ('ready', 'in-progress') limit 1").get(employeeId);
+
+function hold(wp: Workplace, d: ReplyDelivery, why: string, nowMs: number): ReplyDelivery {
+  if (d.heldWhy === why && d.heldSince) return d;
+  return save(wp, { ...d, heldSince: d.heldSince ?? new Date(nowMs).toISOString(), heldWhy: why });
+}
+
+/**
+ * Hand it over once: the COO bridge, or the employee's open session, else a new one. A new session is
+ * never started while the floor is paused (the reply is held, not failed), and in a sweep (`pace`)
+ * it is started only within the sweep's budget, after giving the dispatcher's own start a chance to
+ * carry it (dry run 10 Oct, #2).
+ */
+function deliver(wp: Workplace, d: ReplyDelivery, nowMs = Date.now(), pace?: Pace): ReplyDelivery {
   const item = inbox.get(wp, d.inboxId);
   if (!item) return save(wp, { ...d, ackedAt: new Date(nowMs).toISOString(), ackedBy: 'thread', lastError: 'the Inbox item is gone' });
   const at = new Date(nowMs).toISOString();
@@ -106,9 +138,18 @@ function deliver(wp: Workplace, d: ReplyDelivery, nowMs = Date.now()): ReplyDeli
     coo.relayInboxReply(wp, { inboxId: item.id, title: item.title, text: d.text, messageId: d.messageId });
     return save(wp, { ...d, deliveredAt: at, attempts: d.attempts + 1, ackedAt: at, ackedBy: 'bridge' });
   }
+  if (!employees.openSession(d.target)) {
+    if (floor.paused(wp)) return hold(wp, d, floor.describe(wp), nowMs);
+    if (pace) {
+      const since = Date.parse(d.heldSince ?? at);
+      if (hasWork(wp, d.target) && nowMs - since < RIDE_ALONG_MS) return hold(wp, d, 'waiting for the session on their work', nowMs);
+      if (pace.spawns <= 0) return hold(wp, d, 'staggered: this sweep\'s new sessions are used', nowMs);
+      pace.spawns -= 1;
+    }
+  }
   try {
     const agent = employees.talk(wp, d.target, prompt(item, d), [], { autonomous: true });
-    const { lastError: _e, ...rest } = d;
+    const { lastError: _e, heldSince: _h, heldWhy: _w, ...rest } = d;
     log.info('inbox', `owner reply ${d.messageId} on ${d.inboxId} delivered to ${d.target} (${agent.id}, attempt ${d.attempts + 1})`);
     return save(wp, { ...rest, deliveredAt: at, agentId: agent.id, attempts: d.attempts + 1 });
   } catch (err) {
@@ -182,20 +223,26 @@ function needsRedelivery(d: ReplyDelivery): boolean {
 export function sweep(wp: Workplace, nowMs = Date.now()): { acked: string[]; redelivered: string[]; asha: string[]; coo: string[] } {
   const acked = checkAcks(wp, nowMs);
   const out = { acked, redelivered: [] as string[], asha: [] as string[], coo: [] as string[] };
+  const pace: Pace = { spawns: SPAWNS_PER_SWEEP };
+  // Nobody can answer while the floor is paused: the clocks run from the resume, not from the reply.
+  const fl = floor.state(wp);
+  if (fl.paused) return out;
+  const resumedMs = fl.at ? Date.parse(fl.at) : 0;
   for (let d of pending(wp)) {
     if (needsRedelivery(d)) {
       const before = d.attempts;
-      d = deliver(wp, d, nowMs);
+      d = deliver(wp, d, nowMs, pace);
       if (d.attempts > before) out.redelivered.push(d.messageId);
     }
     if (d.ackedAt) continue;
     const age = nowMs - Date.parse(d.at);
+    const due = nowMs - Math.max(Date.parse(d.at), resumedMs);
     const item = inbox.get(wp, d.inboxId);
     const title = item?.title ?? d.inboxId;
     const who = nameOf(wp, d.target);
     const mins = Math.round(age / MIN);
     const whose = d.from === 'coo' ? 'COO\'s answer' : 'Owner\'s reply';
-    if (age >= ASHA_AFTER_MS && !d.ashaAt) {
+    if (due >= ASHA_AFTER_MS && !d.ashaAt) {
       manager.alert(wp, {
         // The Inbox id, not a work item: manager.escalate leaves it alone; the COO step is ours, at 20 min.
         key: ashaKey(d), itemId: d.inboxId, by: 'workplace', subjectId: d.target,
@@ -207,7 +254,7 @@ export function sweep(wp: Workplace, nowMs = Date.now()): { acked: string[]; red
       d = save(wp, { ...d, ashaAt: new Date(nowMs).toISOString() });
       out.asha.push(d.messageId);
     }
-    if (age >= COO_AFTER_MS && !d.cooAt) {
+    if (due >= COO_AFTER_MS && !d.cooAt) {
       const linked = item ? linkedItems(wp, item)[0] : undefined;
       coo.notifyStall(wp, {
         itemId: linked ?? d.inboxId, by: 'workplace',

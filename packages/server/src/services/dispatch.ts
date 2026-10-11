@@ -253,14 +253,17 @@ export function idleAlerts(wp: Workplace, _nowMs = Date.now()): string[] {
 }
 
 /**
- * One pass: the owner's unacknowledged Inbox replies (re-delivered, escalated; LLD §19.14), stale
- * reviews, every free employee, then the idle alerts. The first pass after boot is the replies' boot
- * re-delivery: it runs after the staggered resumes, so a reply lands in the resumed session.
+ * One pass: stale reviews, every free employee, then the owner's unacknowledged Inbox replies
+ * (re-delivered, escalated; LLD §19.14), then the idle alerts. The first pass after boot is the
+ * replies' boot re-delivery: it runs after the staggered resumes and this pass's starts, so a reply
+ * lands in the session on the person's work.
  */
 export function sweep(wp: Workplace, nowMs = Date.now()): { reviews: string[]; started: DispatchResult[]; alerts: string[] } {
-  try { replyDelivery.sweep(wp, nowMs); } catch (err) { log.warn('dispatch', `inbox replies: ${err instanceof Error ? err.message : err}`); }
+  const replies = (): void => {
+    try { replyDelivery.sweep(wp, nowMs); } catch (err) { log.warn('dispatch', `inbox replies: ${err instanceof Error ? err.message : err}`); }
+  };
   // Paused: no review wakes, no starts, and no "idle with queued work" alerts for an idleness that is the switch.
-  if (floor.paused(wp)) return { reviews: [], started: [], alerts: [] };
+  if (floor.paused(wp)) { replies(); return { reviews: [], started: [], alerts: [] }; }
   const reviews = wakeStaleReviews(wp);
   const started: DispatchResult[] = [];
   for (const id of agents(wp)) {
@@ -271,6 +274,9 @@ export function sweep(wp: Workplace, nowMs = Date.now()): { reviews: string[]; s
       log.warn('dispatch', `${id}: ${err instanceof Error ? err.message : err}`);
     }
   }
+  // The replies go after the starts (dry run 10 Oct, #2): a reply to someone just started on their work
+  // rides into that session instead of a talk session of its own.
+  replies();
   return { reviews, started, alerts: idleAlerts(wp, nowMs) };
 }
 

@@ -180,31 +180,64 @@ function compose(list: AlertRecord[]): string {
   return [alerts ? INTRO : '', ...lines].filter(Boolean).join('\n');
 }
 
+/** The story is being worked: In progress with its assignee's live session on it. Nothing about it is an alert. */
+function beingWorked(wp: Workplace, itemId: string): boolean {
+  const w = itemId ? rawGet(wp, itemId) : undefined;
+  return !!w && w.status === 'in-progress' && !!w.employeeId && employees.sessionOn(w.employeeId, w.id);
+}
+
+/**
+ * Right before a hand-over, what waits is brought up to date (dry run 10 Oct, #9: a digest composed at
+ * 14:32 while Asha was busy reached her at 14:45 saying a P0 was "waiting on you"; she read it as the
+ * CTO's session started on it). An alert about a story now being worked is resolved, not told; a
+ * queued digest is composed again from the state now (against what she was last told), or dropped
+ * when nothing in it is news any more.
+ */
+function refreshQueued(wp: Workplace, nowMs: number): void {
+  for (const r of all(wp)) {
+    if (r.state !== 'queued' || r.resolved) continue;
+    if (r.key.startsWith('digest:')) {
+      const d = composeDigest(wp, nowMs, lastSeen(wp));
+      if (!d) { wp.db.prepare('delete from settings where key = ?').run(PREFIX + r.key); continue; }
+      write(wp, { ...r, body: d.text, text: d.text, seen: d.seen });
+      continue;
+    }
+    if (!report(r) && beingWorked(wp, r.itemId)) {
+      write(wp, { ...r, resolved: true });
+      log.info('manager', `${r.key}: not told, ${r.itemId} is In progress with a live session on it`);
+    }
+  }
+}
+
+const waiting = (wp: Workplace): AlertRecord[] => all(wp).filter(r => r.state === 'queued' && !r.resolved);
+
 /**
  * Hand Asha every queued alert in one go: a message into her open session between turns, else a short
  * session. Mid-turn (or an approval pending, or an assignment queued for her turn's end) they wait.
- * Returns how many were delivered.
+ * What waits is brought up to date first (refreshQueued). Returns how many were delivered.
  */
 export function deliver(wp: Workplace, nowMs = Date.now()): number {
   const asha = ashaId(wp);
   if (!asha) return 0;
-  const queued = all(wp).filter(r => r.state === 'queued');
-  if (!queued.length) return 0;
-  const text = compose(queued);
+  if (!waiting(wp).length) return 0;
   const open = employees.openSession(asha);
+  if (open) {
+    const a = runs.getRunAgent(open.agentId);
+    if (!a || a.status === 'running' || a.approval || employees.hasPendingSwitch(open.agentId)) return 0;
+  } else {
+    // "Pause all": nothing starts a session for Asha; what waits goes to her after the resume.
+    if (floor.paused(wp)) return 0;
+    if (ashaStuck(wp, nowMs)) return 0;
+  }
+  refreshQueued(wp, nowMs);
+  const queued = waiting(wp);
+  if (!queued.length) return 0;
+  // Notices never start a session of their own: they ride along with the next alert or digest.
+  if (!open && !queued.some(r => !r.notice || report(r))) return 0;
+  const text = compose(queued);
   try {
-    if (open) {
-      const a = runs.getRunAgent(open.agentId);
-      if (!a || a.status === 'running' || a.approval || employees.hasPendingSwitch(open.agentId)) return 0;
-      runs.sendMessage(open.agentId, text, [], { from: 'workplace' });
-    } else {
-      // Notices never start a session of their own: they ride along with the next alert or digest.
-      // "Pause all": nothing starts a session for Asha; what waits goes to her after the resume.
-      if (floor.paused(wp)) return 0;
-      if (!queued.some(r => !r.notice || report(r))) return 0;
-      if (ashaStuck(wp, nowMs)) return 0;
-      employees.talk(wp, asha, text, [], { autonomous: true });
-    }
+    if (open) runs.sendMessage(open.agentId, text, [], { from: 'workplace' });
+    else employees.talk(wp, asha, text, [], { autonomous: true });
   } catch (err) {
     log.warn('manager', `could not reach Asha: ${err instanceof Error ? err.message : err}`);
     return 0;
@@ -297,6 +330,8 @@ function digestEntries(wp: Workplace, nowMs: number): Entry[] {
     const open = employees.openSession(e.id);
     const a = open ? runs.getRunAgent(open.agentId) : undefined;
     if (a && (a.status === 'running' || a.approval)) continue;
+    // One story per person: queued work behind the story they have a live session on is waiting its turn.
+    if (rowsJson<WorkItem>(wp.db.prepare("select json from work where employee_id = ? and status = 'in-progress'").all(e.id)).some(w => employees.sessionOn(e.id, w.id))) continue;
     const titles = [...reviews.map(id => `review ${quote(rawGet(wp, id)?.title ?? id)}`), ...stories.map(w => quote(w.title))].slice(0, 3).join(', ');
     const why = dispatch.lastReason(wp, e.id) ?? dispatch.busyReason(wp, e.id, nowMs);
     out.push({
@@ -387,7 +422,7 @@ export function digest(wp: Workplace, nowMs = Date.now()): string | null {
 function prune(wp: Workplace, nowMs: number): void {
   const cutoff = nowMs - 2 * 24 * 60 * MIN;
   for (const r of all(wp)) {
-    if (Date.parse(r.at) < cutoff && (r.state !== 'queued' || r.notice)) wp.db.prepare('delete from settings where key = ?').run(PREFIX + r.key);
+    if (Date.parse(r.at) < cutoff && (r.state !== 'queued' || r.notice || r.resolved)) wp.db.prepare('delete from settings where key = ?').run(PREFIX + r.key);
   }
 }
 
