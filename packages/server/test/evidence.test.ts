@@ -339,6 +339,46 @@ test('features are checked at call time against the runner\'s list: "setup" and 
   } finally { await s.done(); }
 });
 
+test('features a platform does not support are refused before queueing, naming each platform\'s list and pointing voice and desktop checks to request_mac (gap #15)', async () => {
+  const s = setup();
+  try {
+    s.commit('services/agent-svc/a.py', 'a = 1\n');
+    for (const [p, f] of [['android', 'voice'], ['ios', 'apps'], ['android,ios', 'voice'], ['android', 'memory,music'], ['all', 'reminder']] as const) {
+      const r = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: p, features: f });
+      assert.equal(r.ok, false, `${p} / ${f}`);
+      const m = r.ok ? '' : r.message;
+      const bad = f.split(',').at(-1)!;
+      assert.match(m, new RegExp(`\\b${bad}\\b`), 'names the unsupported feature');
+      assert.doesNotMatch(m, /\bmemory is not\b/, 'a supported feature is not named as unsupported');
+      for (const plat of p === 'all' ? ['android', 'ios'] : p.split(',')) assert.match(m, new RegExp(`${plat}: queries, memory, files, errand`), `lists ${plat}'s features`);
+      assert.match(m, /request_mac/, 'points voice and desktop checks to the Mac queue');
+      assert.match(m, /live check/i);
+    }
+    assert.equal(s.runner.calls.length, 0, 'nothing ran');
+    assert.equal(s.builder.builds.length, 0, 'nothing was built');
+    // Supported on at least one requested platform: queued (the runner runs each platform's share).
+    const ok = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android,ios', features: 'queries,memory,files,errand' });
+    assert.ok(ok.ok, ok.ok ? '' : ok.message);
+    assert.ok(evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'ios', features: 'all' }).ok, '"all" means whatever each platform supports');
+    // The list comes from the runner's own supported() in the story's commit when it has one.
+    s.commit('e2e/scripts/local-run.sh', '#!/usr/bin/env bash\nALL_FEATURES=queries,voice,memory\nsupported() { case $1 in android) echo queries,voice;; ios) echo queries,memory;; mac) echo $ALL_FEATURES;; ios-uitests) echo \'\';; esac; }\n');
+    assert.ok(evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'voice' }).ok, 'that runner supports voice on android');
+    const ios = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'ios', features: 'voice' });
+    assert.equal(ios.ok, false);
+    assert.match(ios.ok ? '' : ios.message, /ios: queries, memory\b/);
+    // Through the tool: the refusal, and the per-platform lists in its description.
+    const client = await toolClient(s.wp, 'kabir', s.storyId);
+    const desc = (await client.listTools()).tools.find(t => t.name === 'run_evidence')!.description!;
+    assert.match(desc, /android: queries, memory, files, errand/);
+    assert.match(desc, /ios: queries, memory, files, errand/);
+    assert.match(desc, /desktop[^.]*queries, voice, memory, music, dance, files, timer, reminder, apps, errand/i);
+    assert.match(desc, /windows[^.]*QA/i);
+    assert.match(desc, /request_mac/);
+    assert.match(text(await client.callTool({ name: 'run_evidence', arguments: { platforms: 'ios', features: 'voice' } })), /Not queued[\s\S]*request_mac/);
+    await client.close();
+  } finally { await s.done(); }
+});
+
 /* ---------- the build cache ---------- */
 
 test('build cache: a story with no app change reuses the trunk build; an app change builds; the same app tree hits', async () => {
