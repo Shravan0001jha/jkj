@@ -320,11 +320,35 @@ function checkAssignee(wp: Workplace, id: string | undefined): void {
 /**
  * `opts.reason`: why it is created this way ("filed by Arjun"), recorded as the created row's text.
  * A bug with no assignee goes to the QA lead first (rework, Oct 2026: QA posts the RCA, then routes it).
+ * A bug filed with its complete five-part "## RCA" in the body skips that step (owner, 11 Oct: the
+ * security review's findings sat in QA's queue with their RCA already written): the RCA is recorded,
+ * the bug stays unassigned for the Chief of Staff to route by charter, and the QA lead gets an RCA
+ * ticket beside it for why QA missed it.
  */
 export function create(wp: Workplace, req0: CreateItemRequest, by: string, opts: { reason?: string } = {}): Item {
   let req = req0;
   let reason = opts.reason?.trim() || undefined;
-  if (req.type === 'bug' && req.level === 'story' && !req.assigneeId) {
+  const filedRca = req.type === 'bug' && req.level === 'story' && !req.assigneeId && req.body ? work.parseRca(req.body) : null;
+  if (filedRca && !filedRca.missing.length) {
+    const item = createOne(wp, req, by, reason ?? `Filed by ${nameOf(wp, authorId(wp, by))} with its RCA: the Chief of Staff routes it by charter`);
+    work.attachRca(wp, item.id, req.body!, by);
+    const qa = qaLead(wp);
+    if (qa) {
+      createOne(wp, {
+        level: 'story', parentId: req.parentId, type: 'rca', assigneeId: qa,
+        title: `QA escape review: why QA missed "${item.title}"`,
+        body: `The bug ${item.id} was filed with its RCA, so its fix goes straight to the owning developer. This ticket is QA's part: post a five-part "## RCA" on why our tests and QA passes did not catch it, and what QA now checks so it cannot escape again. No code.`,
+      }, by, `QA's escape review for ${item.id}`);
+    }
+    return toItem(wp, rawGet(wp, item.id)!);
+  }
+  return createOne(wp, req, by, reason);
+}
+
+function createOne(wp: Workplace, req0: CreateItemRequest, by: string, reason0: string | undefined): Item {
+  let req = req0;
+  let reason = reason0;
+  if (req.type === 'bug' && req.level === 'story' && !req.assigneeId && !(req.body && work.parseRca(req.body)?.missing.length === 0)) {
     const qa = qaLead(wp);
     if (qa) { req = { ...req, assigneeId: qa }; reason ??= `Filed by ${nameOf(wp, authorId(wp, by))}: a bug goes to QA first for its RCA`; }
   }

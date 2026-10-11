@@ -303,6 +303,28 @@ test('item_create: an engineer\'s bug goes to the QA lead, a story to their mana
   } finally { tmp.cleanup(); }
 });
 
+test('a bug filed with its five-part RCA skips QA: Asha routes it by charter, QA gets an escape-review ticket (owner, 11 Oct)', () => {
+  const { wp, tmp } = treeWorkplace();
+  try {
+    const epic = items.create(wp, { level: 'epic', title: 'Security' }, 'owner');
+    const rca = '## RCA\nSymptom: the STT relay meters zero for a bad sample_rate\nRoot cause: float() throws before _meter\nWhy it escaped: no test sends a malformed rate\nFix: validate the rate before accept\nRegression: a test with sample_rate=16000%26model=x';
+    const bug = items.create(wp, { level: 'story', parentId: epic.id, type: 'bug', title: 'STT meter bypass', body: `From the security review.\n\n${rca}` }, 'cto');
+    const row = rawGet(wp, bug.id)!;
+    assert.equal(row.employeeId, undefined, 'not sent to QA: unassigned, so Asha routes it by charter');
+    assert.ok(row.rca, 'the RCA is recorded, so code is unlocked for whoever gets it');
+    const escape = items.list(wp, { parentId: epic.id }).find(c => c.id !== bug.id);
+    assert.ok(escape, 'a QA escape-review ticket is filed beside it');
+    const e = rawGet(wp, escape!.id)!;
+    assert.equal(e.type, 'rca');
+    assert.equal(e.employeeId, 'nikhil', 'the escape review goes to the QA lead');
+    assert.match(e.title, /STT meter bypass/);
+
+    const partial = items.create(wp, { level: 'story', parentId: epic.id, type: 'bug', title: 'Half an RCA', body: '## RCA\nSymptom: x\nRoot cause: y' }, 'cto');
+    assert.equal(rawGet(wp, partial.id)!.employeeId, 'nikhil', 'an incomplete RCA still goes to QA first');
+    assert.equal(rawGet(wp, partial.id)!.rca, undefined);
+  } finally { tmp.cleanup(); }
+});
+
 test('item_update takes reason, waitingOn, resumeWhen and the new statuses', async () => {
   const { wp, tmp } = treeWorkplace();
   try {
