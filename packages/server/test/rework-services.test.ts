@@ -10,6 +10,7 @@ import * as employees from '../src/services/employees.js';
 import * as inbox from '../src/services/inbox.js';
 import * as trail from '../src/services/trail.js';
 import * as macQueue from '../src/services/mac-queue.js';
+import { rawGet } from '../src/services/v2-map.js';
 import * as testAccounts from '../src/services/test-accounts.js';
 import * as costWatch from '../src/services/cost-watch.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
@@ -96,6 +97,29 @@ test('mac 2: the sweep grants the head only when the requester has a live sessio
     assert.ok(Math.abs(until - (Date.now() + 20 * MIN)) < 5_000, 'for the minutes asked');
     assert.ok(trail.comments(wp, a.id).some(c => c.by === 'workplace' && /Mac.*open.*20 min/i.test(c.text)), 'the person is told on the story');
     assert.ok(runtime.last().sent.some(m => /Mac.*open/i.test(m.text)), 'and in their session');
+  } finally { await done(); }
+});
+
+test('mac 2b: an approved story held at the merge gate for its live check is granted to its author with any open session (11 Oct, gap #20)', async () => {
+  const { wp, story, done } = setup();
+  try {
+    const a = story('Errand read guard', 'tara');
+    const raw = rawGet(wp, a.id)!;
+    raw.status = 'done'; (raw as { pr?: unknown }).pr = { number: 9, url: 'u', branch: 'b', base: 'feat/iris-character', headSha: 'abc', pushedAt: new Date().toISOString() };
+    wp.db.prepare('update work set status = ?, json = ? where id = ?').run('done', JSON.stringify(raw), a.id);
+    macQueue.request(wp, { emp: 'tara', itemId: a.id, minutes: 20, why: 'live check' });
+    const t0 = Date.now();
+    assert.equal(macQueue.sweep(wp, t0, () => false, () => false).granted, undefined, 'no open session at all: not granted');
+    assert.ok(macQueue.sweep(wp, t0 + 30_000, () => false, () => true).granted, 'the author with an open session gets it');
+  } finally { await done(); }
+});
+
+test('mac 2c: an author with an open session on another story is NOT granted for a story that is not awaiting a live check', async () => {
+  const { wp, story, done } = setup();
+  try {
+    const a = story('Still being built', 'tara');
+    macQueue.request(wp, { emp: 'tara', itemId: a.id, minutes: 20, why: 'live check' });
+    assert.equal(macQueue.sweep(wp, Date.now(), () => false, () => true).granted, undefined);
   } finally { await done(); }
 });
 

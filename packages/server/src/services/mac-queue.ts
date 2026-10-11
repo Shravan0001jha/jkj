@@ -162,11 +162,20 @@ function grant(wp: Workplace, r: MacRequest, by: string): MacRequest {
 }
 
 /**
+ * An approved story held at the merge gate for its live check (11 Oct, gap #20): it is Done, so nobody is
+ * ever "on" it and its author's request would never be granted. The author with any open session qualifies.
+ */
+function awaitingLiveCheck(wp: Workplace, emp: string, itemId: string): boolean {
+  const w = rawGet(wp, itemId);
+  return !!w && w.employeeId === emp && w.status === 'done' && !!w.pr && !w.pr.merged;
+}
+
+/**
  * The 30-second sweep. Ends grants whose window ran out; then, if nothing holds the Mac (no grant and
  * no window the COO opened by hand), grants the first queued request whose requester has a live
  * session on that story. Requests passed over while the Mac was free count a skip; the sixth expires.
  */
-export function sweep(wp: Workplace, nowMs = Date.now(), hasLiveSession: (emp: string, itemId: string) => boolean = employees.sessionOn): { granted?: string; expired: string[]; done: string[] } {
+export function sweep(wp: Workplace, nowMs = Date.now(), hasLiveSession: (emp: string, itemId: string) => boolean = employees.sessionOn, hasAnySession: (emp: string) => boolean = emp => !!employees.openSession(emp)): { granted?: string; expired: string[]; done: string[] } {
   const out: { granted?: string; expired: string[]; done: string[] } = { expired: [], done: [] };
   for (const r of rows(wp, "where state = 'granted'")) {
     const until = r.until ? Date.parse(r.until) : NaN;
@@ -177,7 +186,7 @@ export function sweep(wp: Workplace, nowMs = Date.now(), hasLiveSession: (emp: s
   }
   if (grantedRow(wp) || coo.openLiveWindows(wp, nowMs).length) return out;
   for (const r of queued(wp)) {
-    if (hasLiveSession(r.emp, r.itemId)) {
+    if (hasLiveSession(r.emp, r.itemId) || (awaitingLiveCheck(wp, r.emp, r.itemId) && hasAnySession(r.emp))) {
       out.granted = grant(wp, r, 'queue').id;
       break;
     }
