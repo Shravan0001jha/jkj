@@ -64,7 +64,7 @@ done
 
 # Awake for as long as this pid lives: no idle sleep (-i), no system sleep on AC (-s). The display
 # may sleep; closing the lid is beyond any assertion (docs/RESILIENCE-workplace.md §6).
-/usr/bin/caffeinate -i -s -w $$ &
+/usr/bin/caffeinate -s -w $$ &   # AC only: on battery the stay-awake daemon (30% floor) decides; -i drained the battery (12 Oct)
 
 say "starting $NODE ($("$NODE" -v)) pid $$ in $REPO, port $WORKPLACE_PORT"
 exec "$NODE" "$CLI" --no-open --port "$WORKPLACE_PORT"
