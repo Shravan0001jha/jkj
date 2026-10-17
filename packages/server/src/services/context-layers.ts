@@ -35,6 +35,14 @@ const KEPT = new Set(['assignment', 'workspace']);
 /** A handoff is trimmed to its last part (the newest notes) before any layer is dropped. */
 export const HANDOFF_KEEP_CHARS = 6000;
 
+/**
+ * Owner rule (17 Oct): long work runs in the background so the session can still answer the owner,
+ * mentions and reviews. Every guard applies to that background work too.
+ */
+export const BACKGROUND_WORK =
+  'Long work (anything over a couple of minutes: a full test suite, a build, a long investigation) goes to a background subagent or a background command ' +
+  '(Agent or Bash with run_in_background). Keep this session free for messages, mentions and reviews; collect the result when it reports, before report_done.';
+
 export function assembleContext(
   org: Org,
   employee: Employee,
@@ -80,7 +88,8 @@ export function assembleContext(
     push('workspace', 'local', 'Your workspace', 'Where you work, and what you may change.', '',
       `Worktree: ${options.worktree} (your own branch; the base branch is ${employee.workspace.branch ?? 'main'}). Never work in the main checkout.\n` +
       `Commit on your branch; never push or rebase; merging the trunk into your branch is allowed. The Workplace merges after both approvals.\n` +
-      `Paths your charters own (the only ones you may change): ${(options.ownedPaths ?? []).join(', ') || 'none listed; ask the Chief of Staff'}.`);
+      `Paths your charters own (the only ones you may change): ${(options.ownedPaths ?? []).join(', ') || 'none listed; ask the Chief of Staff'}.\n` +
+      BACKGROUND_WORK);
   }
   return render(employee, layers, options.maxTokens ?? 24_000);
 }

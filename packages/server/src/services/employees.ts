@@ -5,7 +5,7 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { Agent, Attachment, Employee, EmployeeCard, EmployeeState, Evidence, Item, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
-import type { RunResult } from '../runtime/claude-agent.js';
+import type { RunOptions, RunResult } from '../runtime/claude-agent.js';
 import * as runs from './runs.js';
 import * as floor from './floor.js';
 import * as work from './work.js';
@@ -103,6 +103,38 @@ export const FREE_TOOLS = [
   'Bash(ls:*)', 'Bash(cat:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(wc:*)', 'Bash(find:*)', 'Bash(grep:*)', 'Bash(rg:*)', 'Bash(pwd)',
   'Bash(npm test:*)', 'Bash(npm run test:*)', 'Bash(node --test:*)', 'Bash(../../.venv/bin/python -m pytest:*)', 'Bash(.venv/bin/python -m pytest:*)', 'Bash(python3 -m pytest:*)', 'Bash(pytest:*)',
 ];
+/**
+ * Background work (owner, 17 Oct): the subagent tool (and its older name) plus reading and stopping
+ * background tasks never prompt, so long work can leave the session free for messages. A background
+ * Bash command is the same Bash call with run_in_background: the same allow and deny rules apply.
+ */
+export const BACKGROUND_TOOLS = ['Agent', 'Task', 'TaskOutput', 'TaskStop'];
+
+/**
+ * The only subagents an employee may start (guards.ts SUBAGENT_TYPES), defined here so they override
+ * any built-in or repo-defined agent of the same name. The SDK runs the session's PreToolUse hooks and
+ * permission rules for a subagent's tool calls too (the hook input carries agent_id); each also carries
+ * the session's whole deny list itself, so the rules hold even if that ever changed. No permission
+ * mode: a subagent inherits the session's. No nesting: a subagent cannot start another one.
+ */
+export function subagents(disallowed: string[]): NonNullable<RunOptions['agents']> {
+  const deny = [...disallowed, 'Agent', 'Task'];
+  const rules = 'You work only in the current working directory (the employee\'s own worktree). Never push, rebase, ssh, deploy or release, or run aws or gh. ' +
+    'Report what you ran and what you found, briefly, with the exact failing test names or errors.';
+  return {
+    'general-purpose': {
+      description: 'Long work in the background: a full test suite, a build, a long investigation, a multi-step change in this worktree.',
+      prompt: `You do one long task for an Iris Workplace employee and report back. ${rules}`,
+      disallowedTools: deny,
+    },
+    Explore: {
+      description: 'Read-only search across the codebase: where code lives and how it connects.',
+      prompt: `You search and read code for an Iris Workplace employee; you never change files. ${rules}`,
+      disallowedTools: [...deny, 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'],
+    },
+  };
+}
+
 const stateOverride = new Map<string, EmployeeState>();
 const lastReport = new Map<string, string>();
 
@@ -216,6 +248,7 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
 
   const session: Session = { agentId: '', employeeId, ...(options.assignment ? { assignmentId: options.assignment.id } : {}), worktree, guard, startedAt: now(), seen: {}, planCaptured: !!options.assignment?.plan, ...(options.probe ? { probe: true } : {}), ...(options.ownerTalk ? { ownerTalk: true } : {}) };
 
+  const disallowed = [...FORBIDDEN_TOOLS, ...(role?.tools.disallowed ?? []).map(t => t.startsWith('mcp__') || /^[A-Z]/.test(t) ? t : `mcp__workplace__${t}`)];
   const agent = runs.createRunDirect({
     projectId: `employee:${employeeId}`,
     name: options.assignment ? options.assignment.title : `${emp.name}`,
@@ -238,11 +271,13 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
       systemPromptAppend: context.append,
       settingSources: ['user', 'project'],
       // The Workplace's own tools are the reporting channel; they never prompt.
-      allowedTools: [...WORKPLACE_TOOLS.map(t => `mcp__workplace__${t}`), ...FREE_TOOLS, ...(role?.tools.allowed ?? [])],
-      disallowedTools: [...FORBIDDEN_TOOLS, ...(role?.tools.disallowed ?? []).map(t => t.startsWith('mcp__') || /^[A-Z]/.test(t) ? t : `mcp__workplace__${t}`)],
+      allowedTools: [...WORKPLACE_TOOLS.map(t => `mcp__workplace__${t}`), ...FREE_TOOLS, ...BACKGROUND_TOOLS, ...(role?.tools.allowed ?? [])],
+      disallowedTools: disallowed,
+      agents: subagents(disallowed),
       hooks: {
         PreToolUse: [{
-          matcher: 'Read|Edit|Write|MultiEdit|NotebookEdit|Bash',
+          // Agent|Task: a subagent start is judged too (its own type, never isolated elsewhere).
+          matcher: 'Read|Edit|Write|MultiEdit|NotebookEdit|Bash|Agent|Task',
           hooks: [async input => {
             const i = input as { tool_name: string; tool_input: Record<string, unknown> };
             const d = guardTool(i.tool_name, i.tool_input ?? {}, guard);
@@ -602,7 +637,8 @@ function releaseLeft(wp: Workplace, leftId: string, employeeId: string, next: Wo
 
 function midTurn(agentId: string): boolean {
   const a = runs.getRunAgent(agentId);
-  return !a || a.status === 'running' || !!a.approval;
+  // Background work (a subagent, a background command) still runs in this worktree after the turn ends.
+  return !a || a.status === 'running' || !!a.approval || runs.backgroundTasks(agentId) > 0;
 }
 
 /**

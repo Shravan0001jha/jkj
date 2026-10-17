@@ -164,6 +164,32 @@ test('sessions 3b: a send-back redirect leaves the story the session was on Read
   } finally { await done(); }
 });
 
+test('sessions 3c: a session idle between turns but with background work running keeps its branch until that work settles', async () => {
+  const { wp, story, done } = setup();
+  try {
+    const a = story('Sent back', 'dev');
+    const b = story('Long suite', 'dev');
+    employees.assign(wp, b.id);
+    await tick();
+    const s = of('dev')[0]!;
+    // The turn ended, but a background subagent is still running the full suite in this worktree.
+    s.events.onBackgroundTasks?.(1);
+    s.result();
+    await tick();
+    assert.equal(runs.backgroundTasks(employees.openSession('dev')!.agentId), 1);
+    items.update(wp, a.id, { status: 'in-progress', note: 'sent back by review' }, 'owner');
+    assert.equal(employees.redirectTo(wp, a.id, 'Fix the review comments'), true);
+    await tick();
+    assert.equal(employees.openSession('dev')!.assignmentId, b.id, 'no branch switch under a running background job');
+    assert.ok(!s.sent.some(m => m.text === 'Fix the review comments'));
+    // The work settles: the queued switch happens and the message is delivered.
+    s.events.onBackgroundTasks?.(0);
+    await tick();
+    assert.equal(employees.openSession('dev')!.assignmentId, a.id);
+    assert.ok(s.sent.some(m => m.text === 'Fix the review comments'));
+  } finally { await done(); }
+});
+
 test('sessions 4: reassigning an item ends the old assignee\'s session bound to it', async () => {
   const { wp, story, done } = setup();
   const stop = dispatch.startDispatch(wp);

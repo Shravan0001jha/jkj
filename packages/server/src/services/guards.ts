@@ -126,7 +126,27 @@ export const FORBIDDEN_COMMANDS: { pattern: RegExp; why: string }[] = [
   { pattern: /curl[^|;]*-X\s*(POST|PUT|DELETE)[^|;]*\/api\/(releases|proposals|inbox)/i, why: 'the Workplace API is driven by the owner, not by employees' },
 ];
 
+/**
+ * The subagent types an employee may start (owner, 17 Oct: long work goes to the background). The
+ * session defines both itself (employees.ts SUBAGENTS), so a repo's own .claude/agents cannot widen
+ * them; built-ins like `fork` or a project agent with its own permission mode are refused.
+ */
+export const SUBAGENT_TYPES = ['general-purpose', 'Explore'] as const;
+/** The subagent tool's name, and its older name. */
+export const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
+
+/** A subagent runs in the session's own worktree, with the session's guards: never isolated elsewhere. */
+export function guardSubagent(input: Record<string, unknown>): GuardDecision {
+  if (input['isolation'] !== undefined) return { decision: 'deny', reason: `isolation "${String(input['isolation'])}" would run it outside your worktree; subagents work in your own worktree` };
+  const type = input['subagent_type'];
+  if (type !== undefined && !(SUBAGENT_TYPES as readonly string[]).includes(String(type))) {
+    return { decision: 'deny', reason: `subagent type "${String(type)}" is not one of ${SUBAGENT_TYPES.join(', ')}` };
+  }
+  return { decision: 'allow' };
+}
+
 export function guardTool(tool: string, input: Record<string, unknown>, ctx: GuardContext): GuardDecision {
+  if (SUBAGENT_TOOLS.has(tool)) return guardSubagent(input);
   if (ctx.readOnly && (EDIT_TOOLS.has(tool) || tool === 'Bash')) return { decision: 'deny', reason: ctx.readOnly };
   // The gate is read only for a write (it may be a live getter on the session's story).
   if (EDIT_TOOLS.has(tool) || (tool === 'Bash' && GIT_WRITE.test(String(input['command'] ?? '')))) {

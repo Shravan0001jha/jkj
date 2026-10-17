@@ -49,6 +49,8 @@ interface Run {
   unread: { uuid: string; entryId: string; talkId?: string }[];
   /** Between a turn's first reply frame and its result. */
   inTurn: boolean;
+  /** Live background tasks (subagents, background commands): they outlast the turn that started them. */
+  background?: number;
 }
 
 /** A turn boundary: `start` with the messages it consumed (in order), `end` on result, error, interrupt or close. */
@@ -168,6 +170,11 @@ export function note(agentId: string, label: string, text: string): void {
 }
 
 /** How long since the run last did anything, for stall detection. */
+/** Background tasks still running for this session (0 when none, or no such run). */
+export function backgroundTasks(agentId: string): number {
+  return runs.get(agentId)?.background ?? 0;
+}
+
 export function idleMs(agentId: string, now = Date.now()): number | null {
   const run = runs.get(agentId);
   if (!run) return null;
@@ -355,6 +362,9 @@ function spawn(options: SpawnOptions): Agent {
 
       onTurnStart: uuids => turnStart(run, uuids),
 
+      // A change is an event: a worktree switch queued behind background work (employees.ts) waits for it.
+      onBackgroundTasks: count => { if ((run.background ?? 0) === count) return; run.background = count; emit({ agent: run.agent }); },
+
       onText: text => { heard(run); if (!run.inTurn) turnStart(run, undefined); sawFrame(run, false); append(run, 'assistant', '', text, { talkId: newTalkId() }); },
 
       onToolUse: (tool, input) => { heard(run); if (!run.inTurn) turnStart(run, undefined); sawFrame(run, true); append(run, kindForTool(tool), tool, describeInput(tool, input)); },
@@ -405,6 +415,7 @@ function spawn(options: SpawnOptions): Agent {
 
       onError: message => {
         heard(run);
+        run.background = 0;   // the process is gone, and its background tasks with it
         turnEnd(run);
         append(run, 'error', 'Failed', message);
         update(run, { status: 'error' });

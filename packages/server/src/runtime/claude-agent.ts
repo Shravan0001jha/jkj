@@ -1,6 +1,6 @@
 import {
   query,
-  type HookCallbackMatcher, type HookEvent, type McpServerConfig, type Options, type PermissionMode as SdkPermissionMode,
+  type AgentDefinition, type HookCallbackMatcher, type HookEvent, type McpServerConfig, type Options, type PermissionMode as SdkPermissionMode,
   type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage, type SettingSource,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { PermissionMode } from '@jkj/shared';
@@ -63,6 +63,12 @@ export interface RunEvents {
    * "the agent read it" signal for read receipts (docs/LLD-app-fixes.md §3).
    */
   onTurnStart?(uuids: string[] | undefined): void;
+  /**
+   * How many background tasks (subagents, background commands) are live, from the SDK's
+   * `background_tasks_changed` level signal (ambient housekeeping tasks not counted). They keep
+   * running after a turn ends; each reports later as a task notification that starts a new turn.
+   */
+  onBackgroundTasks?(count: number): void;
 }
 
 /** An image the model should look at, already decoded from the wire. */
@@ -128,6 +134,8 @@ export interface RunOptions {
   mcpServers?: Record<string, McpServerConfig>;
   /** Hooks run inside the CLI before/after tools: the Workplace's guards. */
   hooks?: Partial<Record<HookEvent, HookCallbackMatcher[]>>;
+  /** Subagents the session may start through the Agent tool; these override same-named built-in or repo agents. */
+  agents?: Record<string, AgentDefinition>;
 }
 
 export function startRun(options: RunOptions, events: RunEvents): RunHandle {
@@ -156,6 +164,7 @@ export function startRun(options: RunOptions, events: RunEvents): RunHandle {
     ...(options.maxTurns !== undefined ? { maxTurns: options.maxTurns } : {}),
     ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
     ...(options.hooks ? { hooks: options.hooks } : {}),
+    ...(options.agents ? { agents: options.agents } : {}),
     stderr: (data: string) => { for (const line of data.split('\n')) if (line.trim()) events.onStderr?.(line); },
 
     // Every tool call routes through the browser unless the mode auto-allows.
@@ -214,6 +223,10 @@ async function consume(stream: Query, events: RunEvents): Promise<void> {
       switch (message.type) {
         case 'system':
           if ('session_id' in message && message.session_id) events.onSessionId(message.session_id);
+          if ('subtype' in message && message.subtype === 'background_tasks_changed') {
+            const tasks = (message as unknown as { tasks?: { ambient?: boolean }[] }).tasks ?? [];
+            events.onBackgroundTasks?.(tasks.filter(t => !t.ambient).length);
+          }
           if ('subtype' in message && message.subtype === 'init') {
             const init = message as unknown as { mcp_servers?: { name: string; status: string }[]; tools?: string[] };
             events.onInit?.({
