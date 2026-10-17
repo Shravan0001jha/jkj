@@ -435,6 +435,26 @@ export interface PrRecord {
   extraReviewers?: PrExtraReviewer[];
   /** A PR touching CI or infra (spend) merges only after POST /api/coo/approve-spend. */
   spendApprovedAt?: string;
+  /**
+   * The mobile areas pre-pr.sh left to GitHub (cloud migration, 17 Oct): the mobile-checks.yml run for
+   * `sha`. workplace/tests stays pending until it finishes, then carries both results.
+   */
+  mobileCi?: MobileCiRecord;
+}
+
+export interface MobileCiRecord {
+  sha: string;
+  /** `<item id>-<sha8>`: the run-name the workflow echoes, how the run is found again. */
+  requestId: string;
+  areas: string[];
+  /** dispatched: asked, not seen yet; running: GitHub shows the run; error: the dispatch was refused (retried). */
+  state: 'dispatched' | 'running' | 'success' | 'failure' | 'error';
+  /** The last dispatch attempt. */
+  attemptAt: string;
+  attempts: number;
+  runId?: number;
+  runUrl?: string;
+  lastError?: string;
 }
 
 /** An extra reviewer's approval holds, like the two approvals, only for its commit and its stay in review. */

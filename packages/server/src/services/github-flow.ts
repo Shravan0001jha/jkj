@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import type { Employee, LiveCheck, PrExtraReviewer as ExtraReviewer, GitHubMode, PrApproval, PrRecord, WorkItem } from '@jkj/shared';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Employee, LiveCheck, MobileCiRecord, PrExtraReviewer as ExtraReviewer, GitHubMode, PrApproval, PrRecord, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { GitHubPort, StatusState } from './github-port.js';
 import { RealGitHub } from './github-port.js';
@@ -481,27 +482,131 @@ export function prePrGate(wp: Workplace, itemId: string): string | null {
 /** Kept for callers that wait for checks: workplace/tests is now recorded synchronously. */
 export async function settled(): Promise<void> { /* nothing runs in the background */ }
 
-/** workplace/tests from the author's pre-pr.sh results for this head (the server runs no suites). */
+/** workplace/tests from the author's pre-pr.sh results for this head, plus GitHub's for the mobile areas it deferred. */
 async function recordTests(wp: Workplace, itemId: string, ctx: Ctx): Promise<void> {
   const sha = ctx.head;
   try {
     const r = prePr.read(authorWorktree(wp, ctx.emp), sha);
     const valid = r && r.sha === sha ? r : null;
     // Only a full run counts (pre-pr.ts passes); a fast or partial pass stays pending.
-    const tests: NonNullable<PrRecord['tests']> = !valid
+    let tests: NonNullable<PrRecord['tests']> = !valid
       ? { state: 'pending', sha, at: now(), summary: `Waiting for scripts/pre-pr.sh results on ${sha.slice(0, 7)}` }
       : !valid.ok
         ? { state: 'failure', sha, at: now(), summary: prePr.describe(valid), details: prePr.failureDetails(valid).slice(-4000) }
         : { state: prePr.passes(valid, sha) ? 'success' : 'pending', sha, at: now(), summary: prePr.describe(valid) };
+    let failureText = `scripts/pre-pr.sh failed on ${sha.slice(0, 8)} (${tests.summary}). Fix it on your branch, commit, run scripts/pre-pr.sh again, then call report_done.`;
+    // Cloud migration (17 Oct): the mobile areas a Linux pre-pr.sh could not build run on GitHub.
+    if (valid && tests.state === 'success' && prePr.deferredAreas(valid).length) {
+      const gh = await mobileChecks(wp, itemId, sha, valid);
+      tests = gh.tests;
+      if (gh.failureText) failureText = gh.failureText;
+    }
+    const prev = rawGet(wp, itemId)?.pr?.tests;
+    const changed = !prev || prev.sha !== sha || prev.state !== tests.state || prev.summary !== tests.summary;
     savePr(wp, itemId, c => (c.pr && c.pr.headSha === sha ? { pr: { ...c.pr, tests } } : {}));
-    trail.record(wp, { itemId, by: 'workplace', kind: 'test', text: `Pre-PR checks ${tests.state === 'success' ? 'green' : tests.state} on ${sha.slice(0, 8)}: ${tests.summary}` });
-    if (tests.state === 'failure') {
-      trail.comment(wp, itemId, { by: 'workplace', text: `scripts/pre-pr.sh failed on ${sha.slice(0, 8)} (${tests.summary}). Fix it on your branch, commit, run scripts/pre-pr.sh again, then call report_done.`, ...(tests.details ? { details: tests.details } : {}) });
+    // A sweep re-reads a pending result every minute: the trail says it once per change, not per minute.
+    if (changed) {
+      trail.record(wp, { itemId, by: 'workplace', kind: 'test', text: `Pre-PR checks ${tests.state === 'success' ? 'green' : tests.state} on ${sha.slice(0, 8)}: ${tests.summary}` });
+      if (tests.state === 'failure') {
+        trail.comment(wp, itemId, { by: 'workplace', text: failureText, ...(tests.details ? { details: tests.details } : {}) });
+      }
     }
     try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
   } catch (err) {
     log.warn('github', `${itemId}: tests status: ${errText(err)}`);
   }
+}
+
+/* ---------- mobile checks on GitHub (cloud migration, 17 Oct) ---------- */
+
+export const MOBILE_WORKFLOW = 'mobile-checks.yml';
+export const MOBILE_ARTIFACT = 'mobile-checks-result';
+/** retryMs: a refused dispatch is tried again after this; lostMs: a dispatch whose run never appeared is redone after this. */
+export const mobileCiTiming = { retryMs: 5 * 60_000, lostMs: 30 * 60_000 };
+
+export const mobileRequestId = (itemId: string, sha: string): string => `${itemId}-${sha.slice(0, 8)}`;
+const agoMs = (iso: string): number => Date.now() - Date.parse(iso);
+
+/**
+ * The GitHub half of workplace/tests for a head whose local pre-pr.sh passed with mobile areas deferred:
+ * dispatch mobile-checks.yml once per head, follow the run on later calls (the minute sweep), and on
+ * completion merge its result.json into the local result. Never throws: a GitHub error is recorded and
+ * the tests stay pending, so the merge waits.
+ */
+async function mobileChecks(wp: Workplace, itemId: string, sha: string, local: prePr.PrePrResult): Promise<{ tests: NonNullable<PrRecord['tests']>; failureText?: string }> {
+  const areas = prePr.deferredAreas(local);
+  const requestId = mobileRequestId(itemId, sha);
+  const port = gitHubPort(wp);
+  const pending = (summary: string): { tests: NonNullable<PrRecord['tests']> } => ({ tests: { state: 'pending', sha, at: now(), summary } });
+  const save = (rec: MobileCiRecord): void => { savePr(wp, itemId, c => (c.pr && c.pr.headSha === sha ? { pr: { ...c.pr, mobileCi: rec } } : {})); };
+  let rec = rawGet(wp, itemId)?.pr?.mobileCi;
+  if (rec && rec.sha !== sha) rec = undefined;
+
+  // Done before (a later re-read): the stored verdict stands.
+  if (rec && (rec.state === 'success' || rec.state === 'failure')) {
+    const prev = rawGet(wp, itemId)?.pr?.tests;
+    if (prev && prev.sha === sha && prev.state !== 'pending') return { tests: prev };
+  }
+
+  const dispatch = async (attempts: number): Promise<{ tests: NonNullable<PrRecord['tests']> }> => {
+    try {
+      await port.dispatchWorkflow(MOBILE_WORKFLOW, { iris_ref: sha, areas: areas.join(','), request_id: requestId });
+    } catch (err) {
+      const why = errText(err);
+      recordFailure(wp, 'dispatch mobile checks', itemId, Date.now(), why);
+      save({ sha, requestId, areas, state: 'error', attemptAt: now(), attempts, lastError: why });
+      return pending(`mobile checks (${areas.join(', ')}) could not start on GitHub (${why.slice(0, 60)}); retrying`);
+    }
+    save({ sha, requestId, areas, state: 'dispatched', attemptAt: now(), attempts });
+    trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Mobile checks (${areas.join(', ')}) started on GitHub for ${sha.slice(0, 8)} (${MOBILE_WORKFLOW}, ${requestId})` });
+    return pending(`mobile checks (${areas.join(', ')}) running on GitHub`);
+  };
+
+  if (!rec) return dispatch(1);
+  if (rec.state === 'error') {
+    return agoMs(rec.attemptAt) >= mobileCiTiming.retryMs ? dispatch(rec.attempts + 1) : pending(`mobile checks (${areas.join(', ')}) could not start on GitHub (${(rec.lastError ?? '').slice(0, 60)}); retrying`);
+  }
+
+  let run;
+  try { run = await port.findWorkflowRun(MOBILE_WORKFLOW, requestId); } catch (err) {
+    recordFailure(wp, 'find mobile checks run', itemId, Date.now(), errText(err));
+    return pending(`mobile checks (${areas.join(', ')}) running on GitHub${rec.runUrl ? `: ${rec.runUrl}` : ''}`);
+  }
+  if (!run) {
+    if (agoMs(rec.attemptAt) >= mobileCiTiming.lostMs) return dispatch(rec.attempts + 1);
+    return pending(`mobile checks (${areas.join(', ')}) queued on GitHub`);
+  }
+  if (run.status !== 'completed') {
+    if (rec.state !== 'running' || rec.runId !== run.id) save({ ...rec, state: 'running', runId: run.id, runUrl: run.url });
+    return pending(`mobile checks (${areas.join(', ')}) running on GitHub: ${run.url}`);
+  }
+
+  // Completed: its result.json decides, whatever the run's own conclusion says.
+  const dir = join(wp.config.workplaceDir, 'ci', itemId, requestId);
+  let gh: prePr.GitHubChecksResult | null = null;
+  try {
+    const art = (await port.listArtifacts(run.id)).find(a => a.name === MOBILE_ARTIFACT);
+    if (art) {
+      rmSync(dir, { recursive: true, force: true });
+      await port.downloadArtifact(art.id, dir);
+      const raw = JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8')) as prePr.GitHubChecksResult;
+      if (raw && raw.sha === sha && typeof raw.ok === 'boolean' && Array.isArray(raw.areas)) gh = raw;
+    }
+  } catch (err) {
+    log.warn('github', `${itemId}: mobile checks result of run ${run.id}: ${errText(err)}`);
+  }
+  if (!gh) {
+    save({ ...rec, state: 'failure', runId: run.id, runUrl: run.url });
+    return { tests: { state: 'error', sha, at: now(), summary: `mobile checks on GitHub ended ${run.conclusion ?? 'without a conclusion'} with no result for ${sha.slice(0, 7)}: ${run.url}`.slice(0, 300) } };
+  }
+  const merged = prePr.withGitHub(local, gh);
+  save({ ...rec, state: merged.ok ? 'success' : 'failure', runId: run.id, runUrl: run.url });
+  trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Mobile checks on GitHub ${merged.ok ? 'passed' : 'failed'} for ${sha.slice(0, 8)}: ${run.url}` });
+  if (merged.ok) return { tests: { state: 'success', sha, at: now(), summary: prePr.describe(merged) } };
+  return {
+    tests: { state: 'failure', sha, at: now(), summary: prePr.describe(merged), details: prePr.failureDetails(merged).slice(-4000) },
+    failureText: `The mobile checks on GitHub failed on ${sha.slice(0, 8)} (${prePr.describe(merged)}): ${run.url}. Fix it on your branch, commit, run scripts/pre-pr.sh again, then call report_done.`,
+  };
 }
 
 /* ---------- statuses ---------- */
@@ -518,7 +623,8 @@ export function statusesFor(wp: Workplace, w: WorkItem): Status[] {
       ? { context: CONTEXTS.review, state: 'pending', description: `Approval 1 of 2 by ${nameOf(wp, pr.devApproval!.by)} (developer approver); waiting for QA (2 of 2)` }
       : { context: CONTEXTS.review, state: 'pending', description: 'Waiting for the developer approver (1 of 2), then QA (2 of 2)' };
   const t = pr.tests && pr.tests.sha === pr.headSha ? pr.tests : undefined;
-  const tests: Status = t ? { context: CONTEXTS.tests, state: t.state, description: t.summary } : { context: CONTEXTS.tests, state: 'pending', description: 'Checks queued' };
+  const ci = pr.mobileCi && pr.mobileCi.sha === pr.headSha && pr.mobileCi.runUrl ? pr.mobileCi.runUrl : undefined;
+  const tests: Status = t ? { context: CONTEXTS.tests, state: t.state, description: t.summary, ...(ci ? { targetUrl: ci } : {}) } : { context: CONTEXTS.tests, state: 'pending', description: 'Checks queued' };
   const evidence: Status = pr.evidence === 'success' ? { context: CONTEXTS.evidence, state: 'success', description: pr.evidenceNote ?? 'Evidence checked' }
     : pr.evidence === 'failure' ? { context: CONTEXTS.evidence, state: 'failure', description: pr.evidenceNote ?? 'Evidence missing' }
     : pr.evidence === 'stale' ? { context: CONTEXTS.evidence, state: 'pending', description: 'Stale: a new commit needs run_evidence again' }
@@ -1013,11 +1119,14 @@ export async function syncHeads(wp: Workplace): Promise<string[]> {
     const ctx = contextOf(wp, w);
     if (typeof ctx === 'string') continue;
     if (ctx.head !== w.pr.headSha) {
-      await onReview(wp, w.id, 'workplace');
+      // The sweep finishes one story before the next: its tests (and any mobile-checks dispatch) included.
+      await (await onReview(wp, w.id, 'workplace')).tests;
       moved.push(w.id);
       continue;
     }
     await catchUp(wp, w, ctx);
+    // Mobile checks running on GitHub for this head (cloud migration, 17 Oct): follow the run.
+    if (w.pr.mobileCi?.sha === ctx.head && testsStale(w.pr)) await recordTests(wp, w.id, ctx);
   }
   return moved;
 }
