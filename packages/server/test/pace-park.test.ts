@@ -251,3 +251,22 @@ test('parked: a queued digest waits instead of starting a turn in Asha\'s open s
     tmp.cleanup();
   }
 });
+
+test('the pace-trip decision goes to the owner at once: no 15-minute COO hold (COO, 17 Oct)', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const alerts: string[] = [];
+    const off = wp.on(e => { if (e.type === 'alert') alerts.push((e as { title: string }).title); });
+    const nowMs = Date.now();
+    pace.apply(wp, { utilization: 0.30, resetsAtMs: nowMs - 1.5 * DAY + 7 * DAY }, nowMs);
+    off();
+    const item = paceItems(wp)[0]!;
+    assert.equal(item.cooHold, undefined, 'not held for the COO');
+    assert.ok(alerts.includes(item.title), 'the owner is pinged now');
+    // Any other Workplace-raised decision is still held (rework W4 unchanged).
+    const other = inbox.raise(wp, { kind: 'decision', title: 'Something else', body: 'x', raisedBy: 'workplace' });
+    assert.ok(other.cooHold);
+  } finally {
+    tmp.cleanup();
+  }
+});

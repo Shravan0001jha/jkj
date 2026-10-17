@@ -34,6 +34,11 @@ export interface RaiseOptions {
   details?: string;
   /** False for routine housekeeping that must never reach the owner's Inbox (see InboxItem). */
   ownerFacing?: boolean;
+  /**
+   * Push to the owner at once, skipping the rework-W4 15-minute COO hold. Only for an item the COO
+   * has already been told about and must not triage (the weekly pace trip, COO 17 Oct).
+   */
+  skipCooHold?: boolean;
   /** v2: shown by colour and label. Derived from the kind and the level of the work when absent (`urgencyOf`). */
   urgency?: InboxItem['urgency'];
   /**
@@ -208,7 +213,7 @@ function insert(wp: Workplace, spec: RaiseOptions): InboxItem {
   // Rework W4: the COO is copied on everything an agent sends the owner, and the push waits 15 min
   // for him to triage it (resolve it, or say why it needs the owner). If the copy cannot be written
   // the item is not held: the owner is never left waiting on a COO who was not told.
-  if (isOwnerFacing(item) && heldForCoo(item)) {
+  if (isOwnerFacing(item) && heldForCoo(item) && !spec.skipCooHold) {
     try {
       appendBridgeLine(wp, { kind: 'owner-inbox', inboxId: item.id, title: item.title, raisedBy: item.raisedBy, summary: item.summary });
       item.cooHold = { until: new Date(Date.now() + COO_HOLD_MS).toISOString() };

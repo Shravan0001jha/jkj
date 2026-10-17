@@ -118,7 +118,8 @@ function trip(wp: Workplace, r: Reading, v: Verdict, until: string): void {
   } catch (err) { log.warn('pace', `could not tell the COO: ${err instanceof Error ? err.message : err}`); }
   try {
     inbox.raise(wp, {
-      kind: 'decision', raisedBy: 'workplace', urgency: 'high',
+      // Straight to the owner (COO, 17 Oct): the COO was told above and never answers it for him.
+      kind: 'decision', raisedBy: 'workplace', urgency: 'high', skipCooHold: true,
       title: `Weekly pace cap reached (${used}): bypass?`,
       body: `Today is pace day ${v.dayIndex} of the week: the team may use ${pct(v.allowance)}% of the weekly limit and has used ${pct(r.utilization)}%. New work is parked until the next pace day (${ist(until)}); running turns finish and you can still talk to anyone.\n\nBypass: work starts again now and pacing resumes by itself at ${ist(until)}. Keep parked: nothing changes.`,
       options: [{ id: 'bypass', label: 'Bypass until the next pace day' }, { id: 'keep-parked', label: 'Keep parked' }],
