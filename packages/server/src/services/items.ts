@@ -745,6 +745,16 @@ export function update(wp: Workplace, id: string, given0: UpdateItemRequest, giv
   const saved = work.put(wp, prev, next, by, req.note);
   if (held && !prev.hold) trail.record(wp, { itemId: id, by, kind: 'note', text: `Held in Backlog by ${nameOf(wp, by)}: the dispatcher will not start it` });
   if (line) trail.record(wp, { itemId: id, by, kind: 'note', text: line });
+  // A new wait on a teammate tells the teammate (17 Oct: a doc sat Waiting on Asha for 5 h after she
+  // had finished her part, because a recorded wait reached nobody). Once per new wait, not per edit.
+  const on = saved.waiting?.on;
+  if (on && isAgent(wp, on) && on !== saved.employeeId && !(prev.status === 'waiting' && prev.waiting?.on === on)) {
+    trail.comment(wp, id, {
+      by,
+      text: `@${on} ${nameOf(wp, saved.employeeId ?? by)} is waiting on you here: ${clause(saved.waiting!.reason)}. If your part is already done, say so here so they can move on.`,
+      mentions: [on],
+    });
+  }
   if (level === 'epic' && saved.areaId && saved.areaId !== prev.areaId) room.epicThread(wp, saved);
   // `start: true` (hand it to the assignee's session) is the route's to act on: POST /api/items/:id.
   return toItem(wp, saved);

@@ -132,6 +132,26 @@ test('who can reassign: within your subtree or up to your manager; Asha routes t
 
 /* ---------- waiting and parked (15–18) ---------- */
 
+test('a wait on a teammate tells them, once per new wait (17 Oct: a doc sat Waiting on Asha 5 h after she had finished)', () => {
+  const { wp, tmp } = treeWorkplace();
+  try {
+    const id = story(wp, 'arjun');
+    items.update(wp, id, { status: 'in-progress', reason: 'starting' }, 'arjun');
+    items.update(wp, id, { status: 'waiting', waitingOn: 'sameer', reason: 'needs his schema change merged' }, 'arjun');
+    const told = trail.comments(wp, id).filter(c => (c.mentions ?? []).includes('sameer'));
+    assert.equal(told.length, 1, 'the teammate waited on is @mentioned');
+    assert.match(told[0]!.text, /needs his schema change merged/);
+    // Same wait, reason reworded: no second ping.
+    items.update(wp, id, { status: 'waiting', waitingOn: 'sameer', reason: 'still needs the schema change' }, 'arjun');
+    assert.equal(trail.comments(wp, id).filter(c => (c.mentions ?? []).includes('sameer')).length, 1);
+    // A wait on the owner goes to his Inbox, not a mention.
+    const o = story(wp, 'arjun', 'Owner one');
+    items.update(wp, o, { status: 'in-progress', reason: 'starting' }, 'arjun');
+    items.update(wp, o, { status: 'waiting', waitingOn: 'owner', reason: 'his call on scope', recommendation: 'ship the small one' }, 'arjun');
+    assert.equal(trail.comments(wp, o).filter(c => (c.mentions ?? []).length).length, 0);
+  } finally { tmp.cleanup(); }
+});
+
 test('waiting on a teammate stays waiting without kind; a legacy block on a person maps to waiting', () => {
   const { wp, tmp } = treeWorkplace();
   try {
