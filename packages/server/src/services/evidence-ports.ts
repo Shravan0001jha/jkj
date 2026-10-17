@@ -1,7 +1,8 @@
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { GitHubPort } from './github-port.js';
 import type { EvidenceConfig } from '../config.js';
 import { linkUntracked } from './worktrees.js';
 
@@ -31,6 +32,12 @@ export interface RunnerRequest {
   /** Where the runner's own output goes (outside `out`, which must start empty). */
   log: string;
   onSpawn?: (pid: number) => void;
+  /** The commit under test and where it lives: a runner that builds the apps itself (GitHub) pushes and builds it. */
+  sha?: string;
+  repo?: string;
+  branch?: string;
+  /** Unique per run; a GitHub run carries it in its run name. */
+  requestId?: string;
 }
 
 export interface RunnerOutcome {
@@ -42,7 +49,11 @@ export interface RunnerOutcome {
   runner?: string;
 }
 
-export interface EvidenceRunner { run(r: RunnerRequest): Promise<RunnerOutcome> }
+export interface EvidenceRunner {
+  run(r: RunnerRequest): Promise<RunnerOutcome>;
+  /** True when the runner builds the commit's apps itself (GitHub): run_evidence then builds nothing here. */
+  buildsApps?: boolean;
+}
 
 export interface BuildRequest {
   platform: Platform;
@@ -230,6 +241,80 @@ export class RealRunner implements EvidenceRunner {
     const ran = await runLogged('bash', args, { cwd, env, logFile: r.log, timeoutMs: 100 * 60_000, ...(r.onSpawn ? { onSpawn: r.onSpawn } : {}) });
     return { exitCode: ran.code, ...(ran.signal ? { signal: ran.signal } : {}), stderrTail: ran.tail, runner: script };
   }
+}
+
+/* ---------- the GitHub runner (cloud migration, 17 Oct) ---------- */
+
+export const SUITE_WORKFLOW = 'suite.yml';
+export const SUITE_REPORT = 'suite-report';
+
+/**
+ * The robot suite on GitHub Actions, for a machine with no simulators or emulators (the Linux
+ * server): push the story's branch, dispatch iris-e2e's suite.yml to build that commit and run it
+ * against staging, follow the run, and unpack its report into `out` where the local runner would
+ * have written results.json and summary.txt. Exit 0 pass, 1 fail, 2 plumbing (no report), as
+ * local-run.sh; it never throws.
+ */
+export class GitHubRunner implements EvidenceRunner {
+  readonly buildsApps = true;
+  constructor(private readonly port: () => GitHubPort, private readonly timing: { pollMs: number; timeoutMs: number } = { pollMs: 30_000, timeoutMs: 120 * 60_000 }) {}
+
+  async run(r: RunnerRequest): Promise<RunnerOutcome> {
+    const say = (line: string): void => { try { mkdirSync(dirname(r.log), { recursive: true }); appendFileSync(r.log, `[github] ${line}\n`); } catch { /* best effort */ } };
+    const plumbing = (why: string): RunnerOutcome => { say(why); return { exitCode: 2, stderrTail: why, runner: `github:${SUITE_WORKFLOW}` }; };
+    if (!r.sha || !r.repo || !r.branch) return plumbing('the GitHub runner needs the commit, its repo and branch');
+    const gh = this.port();
+    try { await gh.push(r.repo, r.branch); } catch (err) { return plumbing(`could not push ${r.branch} to GitHub: ${errLine(err)}`); }
+    const requestId = r.requestId ?? `ev-${Date.now()}`;
+    const inputs = { iris_ref: r.sha, build_ref: r.sha, platforms: r.platforms.join(','), features: r.features.join(','), target: 'staging', account_mode: 'new', windows_default_smoke: 'false', request_id: requestId };
+    try { await gh.dispatchWorkflow(SUITE_WORKFLOW, inputs); } catch (err) { return plumbing(`could not start ${SUITE_WORKFLOW} on GitHub: ${errLine(err)}`); }
+    say(`dispatched ${SUITE_WORKFLOW} for ${r.sha.slice(0, 8)} (${requestId})`);
+    const end = Date.now() + this.timing.timeoutMs;
+    let run = null as Awaited<ReturnType<GitHubPort['findWorkflowRun']>>;
+    for (;;) {
+      try { run = await gh.findWorkflowRun(SUITE_WORKFLOW, requestId); } catch (err) { say(`polling: ${errLine(err)}`); }
+      if (run?.status === 'completed') break;
+      if (Date.now() > end) return plumbing(`${SUITE_WORKFLOW} did not finish within ${Math.round(this.timing.timeoutMs / 60_000)} min${run ? `: ${run.url}` : ''}`);
+      await new Promise(res => setTimeout(res, this.timing.pollMs));
+    }
+    say(`${run.url} finished: ${run.conclusion ?? '?'}`);
+    try {
+      const art = (await gh.listArtifacts(run.id)).find(a => a.name === SUITE_REPORT || a.name.startsWith(`${SUITE_REPORT}-`));
+      if (!art) return plumbing(`${run.url} ended ${run.conclusion ?? '?'} with no ${SUITE_REPORT} artifact`);
+      mkdirSync(r.out, { recursive: true });
+      await gh.downloadArtifact(art.id, r.out);
+      hoistReport(r.out);
+      if (!existsSync(join(r.out, 'results.json'))) return plumbing(`${run.url}: the report has no results.json`);
+      if (!existsSync(join(r.out, 'summary.txt'))) writeFileSync(join(r.out, 'summary.txt'), summaryFromResults(readFileSync(join(r.out, 'results.json'), 'utf8')));
+    } catch (err) {
+      return plumbing(`${run.url}: the report could not be fetched: ${errLine(err)}`);
+    }
+    return { exitCode: run.conclusion === 'success' ? 0 : 1, stderrTail: `GitHub run ${run.url}: ${run.conclusion ?? '?'}`, runner: `github:${SUITE_WORKFLOW}` };
+  }
+}
+
+const errLine = (err: unknown): string => (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 200);
+
+/** An artifact may wrap the report in one directory: move its contents up to `out`. */
+function hoistReport(out: string): void {
+  if (existsSync(join(out, 'results.json'))) return;
+  const dirs = readdirSync(out, { withFileTypes: true }).filter(e => e.isDirectory());
+  const inner = dirs.find(d => existsSync(join(out, d.name, 'results.json')));
+  if (!inner) return;
+  const from = join(out, inner.name);
+  for (const e of readdirSync(from)) renameSync(join(from, e), join(out, e));
+  rmSync(from, { recursive: true, force: true });
+}
+
+/** summary.txt as local-run.sh writes it, from results.json (platforms.<p>.tests.<id> = { status, note }). */
+export function summaryFromResults(json: string): string {
+  let res: { verdict?: string; platforms?: Record<string, { tests?: Record<string, { status?: string; note?: string }> }> } = {};
+  try { res = JSON.parse(json) as typeof res; } catch { /* unreadable */ }
+  const failures: string[] = [];
+  for (const [p, v] of Object.entries(res.platforms ?? {})) {
+    for (const [id, t] of Object.entries(v.tests ?? {})) if (t.status === 'FAIL' || t.status === 'BLOCKED') failures.push(`  ${p} ${id} ${t.status}: ${t.note ?? ''}`.trimEnd());
+  }
+  return [`Iris robot suite (GitHub) verdict ${res.verdict ?? '?'}`, '', failures.length ? `FAILURES (${failures.length})` : 'FAILURES none', ...failures, ''].join('\n');
 }
 
 /** `npm ci` in the suite's directory when its lockfile changed since the last install there. */

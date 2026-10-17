@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import type { EvidenceRunRecord, EvidenceServer, EvidenceState, StagingServerState, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { AppBuilder, EvidenceRunner, Platform, RunnerOutcome, ServerDeployer, Staging, StagingLock } from './evidence-ports.js';
-import { BUILDER_VERSION, BuildError, killGroupIfOurs, RealBuilder, RealRunner, RealServerDeployer, RealStaging, RealStagingLock } from './evidence-ports.js';
+import { BUILDER_VERSION, BuildError, GitHubRunner, killGroupIfOurs, RealBuilder, RealRunner, RealServerDeployer, RealStaging, RealStagingLock } from './evidence-ports.js';
 import * as work from './work.js';
 import * as trail from './trail.js';
 import * as coo from './coo.js';
@@ -150,7 +150,8 @@ export function useEvidencePorts(wp: Workplace, p: Partial<EvidencePorts>): void
 function portsOf(wp: Workplace): EvidencePorts {
   const p = ports.get(wp) ?? {};
   const cfg = wp.config.evidence;
-  p.runner ??= new RealRunner(cfg);
+  // On the Linux server (cloud migration, 17 Oct) GitHub builds the commit and runs the suite.
+  p.runner ??= cfg.runOn === 'github' ? new GitHubRunner(() => githubFlow.gitHubPort(wp)) : new RealRunner(cfg);
   p.builder ??= new RealBuilder(cfg);
   p.staging ??= new RealStaging(cfg, join(cfg.dir, '_logs', 'staging.log'));
   // Tests never touch staging or SSM: without a fake, the lock does nothing.
@@ -160,6 +161,9 @@ function portsOf(wp: Workplace): EvidencePorts {
   ports.set(wp, p);
   return p as EvidencePorts;
 }
+
+/** The ports a Workplace runs with (tests: which runner was chosen). */
+export const portsForTest = (wp: Workplace): EvidencePorts => portsOf(wp);
 
 /** Staging as run_evidence starts it (one shared instance, so two callers never run two starts at once). */
 export function stagingPort(wp: Workplace): Staging { return portsOf(wp).staging; }
@@ -560,7 +564,8 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
     const stagingUp = p.staging.ensureUp().then(() => null, (err: unknown) => errText(err));
 
     const apps: Partial<Record<Platform, string>> = {};
-    for (const platform of job.platforms) {
+    // A runner that builds the commit itself (GitHub) gets no apps from here.
+    for (const platform of p.runner.buildsApps ? [] : job.platforms) {
       job.phase = `building ${platform}`; persist(wp, job);
       const plan = buildPlan(wp, ctx.repo, ctx.trunk, sha, platform);
       if (!plan) { outcome = { state: 'error', passed: 0, failed: 0, failures: [], note: `there is no ${cfg.appPaths[platform]} at ${sha.slice(0, 8)} to build` }; break; }
@@ -624,7 +629,7 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
         }
         const before = JSON.stringify(stagingServer(wp));
         job.state = 'running'; job.phase = 'running the suite'; persist(wp, job);
-        const res = await p.runner.run({ checkout, platforms: job.platforms, features: job.features, ...(job.androidApi ? { androidApi: job.androidApi } : {}), api: cfg.stagingUrl, apps, slot, out: runDir, log: join(logs, 'runner.log'), onSpawn });
+        const res = await p.runner.run({ checkout, platforms: job.platforms, features: job.features, ...(job.androidApi ? { androidApi: job.androidApi } : {}), api: cfg.stagingUrl, apps, slot, out: runDir, log: join(logs, 'runner.log'), onSpawn, sha, repo: ctx.repo, branch: ctx.branch, requestId: `${job.itemId}-${job.run}` });
         const afterState = stagingServer(wp);
         if (!job.server && JSON.stringify(afterState) !== before) srv.changedTo = knownSha(afterState);
         return { ...readOutcome(runDir, res), server: srv };
