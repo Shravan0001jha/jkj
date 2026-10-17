@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, readFileSync, statSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
+import { macHost, NO_MAC_REFUSAL } from './mac-host.js';
 import type { Comment, CooItem, CooMessage, CooPresence, InboxItem, InboxOption, RoomMessage, TalkAttachment } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as inbox from './inbox.js';
@@ -305,6 +306,7 @@ const LIVE_WINDOW_KEY = (employeeId: string): string => `live-window:${employeeI
  * it on its own.
  */
 export function openLiveWindow(wp: Workplace, employeeId: string, minutes: number): { employeeId: string; until: string } {
+  if (!macHost()) throw new BadRequest(NO_MAC_REFUSAL);
   if (!Number.isFinite(minutes) || minutes <= 0) throw new BadRequest('minutes must be a positive number.');
   const until = new Date(Date.now() + minutes * 60_000).toISOString();
   wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(LIVE_WINDOW_KEY(employeeId), until);

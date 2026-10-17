@@ -8,6 +8,10 @@ import { loadConfig } from '../src/config.js';
 import { start, type Running } from '../src/index.js';
 import { installFakeRuntime, type FakeRuntime } from './fakes/fake-runtime.js';
 import { tmpWorkplace, type TmpWorkplace } from './fakes/tmp-workplace.js';
+import { setMacHostForTest } from '../src/services/mac-host.js';
+
+// These cover behaviour on a Mac; mac-host.test.ts covers the cloud server with no Mac attached.
+setMacHostForTest(true);
 
 /**
  * The COO bridge and the chat-view query param, over real HTTP — same shape as api.test.ts.

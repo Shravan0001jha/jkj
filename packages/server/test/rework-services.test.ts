@@ -19,6 +19,10 @@ import { testWorkplace } from './fakes/workplace.js';
 import { createServer } from 'node:http';
 import { createRouter } from '../src/http/routes.js';
 import { Auth } from '../src/http/auth.js';
+import { setMacHostForTest } from '../src/services/mac-host.js';
+
+// These cover behaviour on a Mac; mac-host.test.ts covers the cloud server with no Mac attached.
+setMacHostForTest(true);
 
 /**
  * W6 services (docs/LLD-rework-2026-10.md §W6, TDD §W6): the Mac queue, the test-account pool and

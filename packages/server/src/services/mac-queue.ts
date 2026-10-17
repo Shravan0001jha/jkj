@@ -6,6 +6,7 @@ import * as runs from './runs.js';
 import * as trail from './trail.js';
 import { newId, now } from './store.js';
 import { rawGet } from './v2-map.js';
+import { macHost, NO_MAC_REFUSAL } from './mac-host.js';
 import { BadRequest, NotFound } from '../util/errors.js';
 import { log } from '../util/logger.js';
 
@@ -107,6 +108,7 @@ const positionOf = (wp: Workplace, id: string): number => queued(wp).findIndex(r
  * returns the one already queued (or granted) instead of a second.
  */
 export function request(wp: Workplace, spec: { emp: string; itemId: string; minutes: number; why: string }): { request: MacRequest; position: number; existing: boolean } {
+  if (!macHost()) throw new BadRequest(NO_MAC_REFUSAL);
   const minutes = Math.round(Number(spec.minutes));
   if (!Number.isFinite(minutes) || minutes <= 0 || minutes > MAX_MINUTES) throw new BadRequest(`minutes must be between 1 and ${MAX_MINUTES}.`);
   const why = (spec.why ?? '').trim();
@@ -186,7 +188,8 @@ export function sweep(wp: Workplace, nowMs = Date.now(), hasLiveSession: (emp: s
     out.done.push(r.id);
     tell(wp, r.emp, r.itemId, `@${r.emp} Your Mac time for ${r.itemId} is up; the Mac goes to the next person. Ask again with request_mac if you need more.`);
   }
-  if (grantedRow(wp) || coo.openLiveWindows(wp, nowMs).length) return out;
+  // No Mac attached (the cloud server): nothing to grant, and waiting is not the requester's skip.
+  if (!macHost() || grantedRow(wp) || coo.openLiveWindows(wp, nowMs).length) return out;
   for (const r of queued(wp)) {
     if (hasLiveSession(r.emp, r.itemId) || (awaitingLiveCheck(wp, r.emp, r.itemId) && hasAnySession(r.emp))) {
       out.granted = grant(wp, r, 'queue').id;
@@ -212,6 +215,7 @@ export function sweep(wp: Workplace, nowMs = Date.now(), hasLiveSession: (emp: s
 export function grantNow(wp: Workplace, id: string, by: 'owner' | 'coo'): MacRequest {
   const r = get(wp, id);
   if (!r) throw new NotFound(`No Mac request ${id}`);
+  if (!macHost()) throw new BadRequest(NO_MAC_REFUSAL);
   if (r.state === 'granted') return r;
   if (r.state !== 'queued') throw new BadRequest(`${id} is ${r.state}; ask again with request_mac.`);
   const current = grantedRow(wp);

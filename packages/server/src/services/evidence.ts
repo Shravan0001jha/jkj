@@ -1,5 +1,6 @@
 import { BadRequest } from '../util/errors.js';
 import { execFileSync } from 'node:child_process';
+import { macHost, NO_MAC_REFUSAL } from './mac-host.js';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, sep } from 'node:path';
@@ -95,7 +96,8 @@ export function unsupportedRefusal(byPlatform: Record<Platform, string[]>, platf
   if (!missing.length) return null;
   const lists = platforms.map(p => `${p}: ${byPlatform[p].join(', ') || 'none'}`).join('; ');
   return `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not run on ${platforms.join(' or ')} (${lists}); ` +
-    'for voice or desktop checks ask for the Mac with request_mac and do a live check there, and call run_evidence again only with features from those lists.';
+    (macHost() ? 'for voice or desktop checks ask for the Mac with request_mac and do a live check there, ' : `voice and desktop checks need a Mac: ${NO_MAC_REFUSAL} `) +
+    'Call run_evidence again only with features from those lists.';
 }
 
 export const featureRefusal = (allowed: readonly string[]): string =>
@@ -245,7 +247,7 @@ function storyOf(wp: Workplace, w: WorkItem): StoryCtx | string {
 /** Why these platforms are refused (desktop, Windows, unknown, none), or null. */
 export function platformRefusal(given: string | string[]): string | null {
   const platforms = listOf(given);
-  if (platforms.some(p => DESKTOP.has(p))) return DESKTOP_REFUSAL;
+  if (platforms.some(p => DESKTOP.has(p))) return macHost() ? DESKTOP_REFUSAL : `Mac desktop checks: ${NO_MAC_REFUSAL}`;
   if (platforms.some(p => WINDOWS.has(p))) return WINDOWS_REFUSAL;
   if (!platforms.length) return 'Name the platforms your change touches (android, ios or both), then call run_evidence again.';
   const unknown = platforms.filter(p => p !== 'all' && !(PHONES as string[]).includes(p));

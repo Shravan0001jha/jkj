@@ -5,6 +5,10 @@ import * as room from '../src/services/room.js';
 import * as employees from '../src/services/employees.js';
 import * as inbox from '../src/services/inbox.js';
 import { testWorkplace } from './fakes/workplace.js';
+import { setMacHostForTest } from '../src/services/mac-host.js';
+
+// These cover behaviour on a Mac; mac-host.test.ts covers the cloud server with no Mac attached.
+setMacHostForTest(true);
 
 /**
  * The COO bridge (owner, 29 Sep): "Claude — COO" is a virtual employee — shown in Office and Org,

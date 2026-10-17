@@ -20,6 +20,10 @@ import { FakeGitHub } from './fakes/fake-github.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
 import { FakeBuilder, FakeDeployer, FakeLock, FakeRunner, FakeStaging, FakeStore } from './fakes/fake-evidence.js';
 import { useEvidenceStore } from '../src/services/evidence-share.js';
+import { setMacHostForTest } from '../src/services/mac-host.js';
+
+// These cover behaviour on a Mac; mac-host.test.ts covers the cloud server with no Mac attached.
+setMacHostForTest(true);
 
 /**
  * Infra checkpoint 7 (docs/HLD-evidence.md): run_evidence queues a robot-suite run for a story's

@@ -34,6 +34,7 @@ import { humanizeIds } from './id-names.js';
 import { now } from './store.js';
 import * as talkStore from './talk-store.js';
 import * as macQueue from './mac-queue.js';
+import { macHost, NO_MAC_REFUSAL } from './mac-host.js';
 import * as testAccounts from './test-accounts.js';
 import { BadRequest } from '../util/errors.js';
 import { log } from '../util/logger.js';
@@ -1403,7 +1404,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         'Platforms: android, ios. Features: ' + evidenceRuns.RUNNER_FEATURES.join(', ') + ' (or all); setup always runs (install, sign-in), so don\'t name it. ' +
         'What each platform runs: android: ' + evidenceRuns.PLATFORM_FEATURES.android.join(', ') + '; ios: ' + evidenceRuns.PLATFORM_FEATURES.ios.join(', ') +
         ' (a feature neither requested platform runs is refused before queueing). Desktop (the Mac app) runs ' + evidenceRuns.PLATFORM_FEATURES.desktop.join(', ') +
-        ', but not here: ask for the Mac with request_mac and do a live check (voice checks too). Windows runs ' + evidenceRuns.PLATFORM_FEATURES.windows.join(', ') + ' as a cloud run QA schedules. ' +
+        (macHost() ? ', but not here: ask for the Mac with request_mac and do a live check (voice checks too). Windows runs ' : `, but not here, and voice checks too need a Mac. ${NO_MAC_REFUSAL} Windows runs `) + evidenceRuns.PLATFORM_FEATURES.windows.join(', ') + ' as a cloud run QA schedules. ' +
         'Evidence belongs to one commit: a new commit makes it stale, so run it again.',
         { itemId: z.string().optional(), platforms: z.string(), features: z.string(), androidApi: z.enum(['34', '36']).optional().describe('Android emulator API level: 36 (Android 16, what Google Play now requires new apps to target) or 34 (default)') },
         async ({ itemId, platforms, features, androidApi }) => {
@@ -1682,9 +1683,10 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           }
         }),
       /* ---------- services: the Mac queue and the test-account pool (LLD-rework §W6) ---------- */
-      tool('request_mac', `Ask for the owner's Mac for a live check (a desktop app run, real audio, a host command): you join the queue and get your place. The Workplace opens it for you, for the minutes you ask (at most ${macQueue.MAX_MINUTES}), when it is your turn AND your session is on that story; you are told on the story and in your session. A request that comes up ${macQueue.MAX_SKIPS} times while you are not on the story expires. Call release_mac the moment you are done.`,
+      tool('request_mac', !macHost() ? `Not available now. ${NO_MAC_REFUSAL}` : `Ask for the owner's Mac for a live check (a desktop app run, real audio, a host command): you join the queue and get your place. The Workplace opens it for you, for the minutes you ask (at most ${macQueue.MAX_MINUTES}), when it is your turn AND your session is on that story; you are told on the story and in your session. A request that comes up ${macQueue.MAX_SKIPS} times while you are not on the story expires. Call release_mac the moment you are done.`,
         { itemId: z.string().optional(), minutes: z.number(), why: z.string() },
         async ({ itemId, minutes, why }) => {
+          if (!macHost()) return ok(`Not queued: ${NO_MAC_REFUSAL}`);
           const id = itemId ?? currentStory(session());
           if (!id) return ok('Name the story: no story is attached to this session, so call request_mac again with its itemId.');
           try {
