@@ -5,6 +5,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import * as items from '../src/services/items.js';
 import * as trail from '../src/services/trail.js';
 import * as inbox from '../src/services/inbox.js';
+import * as coo from '../src/services/coo.js';
 import { workplaceTools } from '../src/services/employees.js';
 import { ancestors, isAbove, leadOfCharter, managerOf, subtree, teamMembers, teamOf } from '../src/services/org.js';
 import { rawGet } from '../src/services/v2-map.js';
@@ -144,6 +145,11 @@ test('a wait on a teammate tells them, once per new wait (17 Oct: a doc sat Wait
     // Same wait, reason reworded: no second ping.
     items.update(wp, id, { status: 'waiting', waitingOn: 'sameer', reason: 'still needs the schema change' }, 'arjun');
     assert.equal(trail.comments(wp, id).filter(c => (c.mentions ?? []).includes('sameer')).length, 1);
+    // A wait on the COO reaches the COO's queue.
+    const c = story(wp, 'arjun', 'Coo one');
+    items.update(wp, c, { status: 'in-progress', reason: 'starting' }, 'arjun');
+    items.update(wp, c, { status: 'waiting', waitingOn: 'coo', reason: 'needs a staging deploy' }, 'arjun');
+    assert.ok(coo.listItems(wp).some(x => x.kind === 'stall' && /needs a staging deploy/.test(x.body)), 'the COO is told');
     // A wait on the owner goes to his Inbox, not a mention.
     const o = story(wp, 'arjun', 'Owner one');
     items.update(wp, o, { status: 'in-progress', reason: 'starting' }, 'arjun');

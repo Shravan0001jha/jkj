@@ -5,6 +5,7 @@ import { ITEM_STATUSES, POINTS } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as work from './work.js';
 import * as trail from './trail.js';
+import * as coo from './coo.js';
 import * as areas from './areas.js';
 import * as room from './room.js';
 import * as watch from './watch.js';
@@ -754,6 +755,9 @@ export function update(wp: Workplace, id: string, given0: UpdateItemRequest, giv
       text: `@${on} ${nameOf(wp, saved.employeeId ?? by)} is waiting on you here: ${clause(saved.waiting!.reason)}. If your part is already done, say so here so they can move on.`,
       mentions: [on],
     });
+  } else if (on === 'coo' && !(prev.status === 'waiting' && prev.waiting?.on === on)) {
+    // A wait on the COO reaches the COO's queue (17 Oct: Kabir waited 7 h on the COO, unheard).
+    coo.notifyStall(wp, { itemId: id, by, title: `Waiting on you: ${saved.title}`, body: `${nameOf(wp, saved.employeeId ?? by)} is waiting on the COO for ${id} "${saved.title}": ${saved.waiting!.reason}` });
   }
   if (level === 'epic' && saved.areaId && saved.areaId !== prev.areaId) room.epicThread(wp, saved);
   // `start: true` (hand it to the assignee's session) is the route's to act on: POST /api/items/:id.
