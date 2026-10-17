@@ -35,9 +35,10 @@ test('over the allowance: unattended work is held until the next pace day, then 
     assert.equal(pace.holdUntil(wp, nowMs), new Date(v.nextDayMs).toISOString());
     assert.deepEqual(spend.canSpend(wp, 'mira'), { ok: false, scope: 'weekly-pace' });
     await new Promise(r => setTimeout(r, 20));
-    const st = employees.stateWithReason(wp, 'mira');
-    assert.equal(st.state, 'blocked', 'the open session was interrupted and the card says why');
-    assert.match(st.reason!, /weekly limit/);
+    // Park, not kill (owner, 17 Oct): the running turn finishes; nothing new starts.
+    assert.equal(fake.last().interrupted, 0, 'the open session is not interrupted');
+    assert.equal(employees.stateWithReason(wp, 'mira').state, 'working');
+    assert.match(employees.stateWithReason(wp, 'rohan').reason!, /weekly limit/, 'an idle card says why');
 
     // A second reading the same day does not stack holds.
     pace.apply(wp, { utilization: 0.31, resetsAtMs }, nowMs + 60_000);
