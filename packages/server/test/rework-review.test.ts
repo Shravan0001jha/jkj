@@ -581,6 +581,83 @@ test('22b: when the trunk advances, the sweep brings the PR up to date through G
   } finally { await s.done(); }
 });
 
+/** The trunk moves on and GitHub's update-branch merges it into the story's branch; the local ref follows. */
+async function trunkMergedOnGitHub(s: Setup): Promise<string> {
+  writeFileSync(join(s.trunkRepo, 'services', 'agent-svc', 'other.py'), 'y = 2\n');
+  git(s.trunkRepo, ['add', '-A']);
+  git(s.trunkRepo, ['-c', 'user.email=t@iris.local', '-c', 'user.name=t', 'commit', '-q', '-m', 'trunk moves']);
+  git(s.trunkRepo, ['push', '-q', s.gh.bare, TRUNK]);
+  const branch = `emp/kabir/${s.storyId}`;
+  assert.equal((await s.gh.updateBranch(pr(s).number, pr(s).headSha)).updated, true);
+  git(s.wt, ['checkout', '-q', '-b', 'emp/kabir/as_other']);
+  await s.gh.fetchBranch(s.wt, branch);
+  return git(s.wt, ['rev-parse', `refs/heads/${branch}`]).trim();
+}
+
+test('22c: PR #374 (16 Oct): a story done with both approvals, tests and evidence on A, moved to B by a trunk-only update, merges with no new approval', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, qaText(s.wp, false));
+    await flow.setEvidence(s.wp, s.storyId, 'success', '3 passed on ios');
+    const a = pr(s);
+    assert.equal(rawGet(s.wp, s.storyId)!.status, 'done');
+    assert.equal(a.qaApproval?.sha, a.headSha);
+    const b = await trunkMergedOnGitHub(s);
+    assert.notEqual(b, a.headSha);
+    // The sweep sees the moved head of the approved story and carries everything over.
+    await flow.syncHeads(s.wp);
+    const after = pr(s);
+    assert.equal(after.headSha, b);
+    assert.equal(after.devApproval?.sha, b, 'the developer approval moves to B');
+    assert.equal(after.qaApproval?.sha, b, 'the QA approval moves to B');
+    assert.equal(after.tests?.sha, b);
+    assert.equal(after.evidence, 'success');
+    const w = rawGet(s.wp, s.storyId)!;
+    assert.equal(w.status, 'done');
+    assert.equal(flow.approvalHolds(w, 'qa'), true);
+    flow.setMode(s.wp, 'on', 'coo');
+    assert.equal(flow.autoReady(s.wp, w), 'ready');
+    assert.equal(await flow.autoMerge(s.wp, s.storyId), 'merged');
+    assert.ok(pr(s).merged, 'merged with no new approval');
+  } finally { await s.done(); }
+});
+
+test('22d: the COO merge of a done story whose head moved trunk-only (before any sweep) carries the approvals and merges', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, qaText(s.wp));
+    const b = await trunkMergedOnGitHub(s);
+    flow.setMode(s.wp, 'on', 'coo');
+    const r = await flow.merge(s.wp, s.storyId, 'coo');
+    assert.equal(r.merged, true);
+    assert.equal(pr(s).qaApproval?.sha, b);
+  } finally { await s.done(); }
+});
+
+test('22e: a done story whose head moved by a real author commit keeps refusing the merge (approvals do not move)', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, qaText(s.wp));
+    const a = pr(s).headSha;
+    s.commit({ 'services/memory-svc/recall.py': 'x = 2\n' });
+    await flow.syncHeads(s.wp);
+    assert.equal(pr(s).headSha, a, 'not carried');
+    assert.equal(pr(s).qaApproval?.sha, a);
+    flow.setMode(s.wp, 'on', 'coo');
+    await assert.rejects(flow.merge(s.wp, s.storyId, 'coo'), /new commits .* approvals reset/);
+    assert.equal(pr(s).merged, undefined);
+  } finally { await s.done(); }
+});
+
 test('24: a PR touching .github/workflows holds until the COO approves the spend', async () => {
   const s = setup('on');
   try {

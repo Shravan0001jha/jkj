@@ -205,9 +205,16 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   if (mode(wp) === 'local') return { skipped: 'local', message: '' };
   const w = rawGet(wp, itemId);
   if (!w) return { skipped: 'no such item', message: '' };
-  if (w.status !== 'in-review') return { skipped: 'not in review', message: '' };
+  // Done by approval but not merged yet (PR #374, 16 Oct): its head can still move by a trunk-only
+  // update (GitHub update-branch, or the author merging the trunk in). That carries the approvals over
+  // like it does in review; any other move leaves the record alone and the merge refuses it.
+  const approvedDone = w.status === 'done' && !!w.pr && !w.pr.merged;
+  if (w.status !== 'in-review' && !approvedDone) return { skipped: 'not in review', message: '' };
   const ctx = contextOf(wp, w);
   if (typeof ctx === 'string') return { skipped: ctx, message: '' };
+  if (approvedDone && (ctx.head === w.pr!.headSha || ctx.branch !== w.pr!.branch || !trunkOnly(ctx.repo, ctx.base, w.pr!.headSha, ctx.head))) {
+    return { skipped: 'not in review', message: '' };
+  }
 
   let cfg: quality.QualityConfig;
   try { cfg = quality.loadConfig(wp.config.workplaceDir); } catch (err) {
@@ -246,7 +253,8 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   // Rework W3 (owner, 10 Oct): a head that moved only by merging the trunk in keeps the approvals,
   // the tests and the evidence; any commit of the author's own resets them.
   const carried = moved && trunkOnly(ctx.repo, ctx.base, reuse!.headSha, ctx.head);
-  const episode = w.statusSince ?? '';
+  // The review stay the approvals belong to: in review, this one; done, the one QA approved in.
+  const episode = approvedDone ? w.pr!.qaApproval?.episode ?? '' : w.statusSince ?? '';
   const at = now();
   let tookOver = false;
   const extra = codeReviewersFor(wp, ctx);
@@ -1107,8 +1115,20 @@ export async function dispute(wp: Workplace, itemId: string, by: string, reason:
 export async function syncHeads(wp: Workplace): Promise<string[]> {
   if (mode(wp) === 'local') return [];
   const moved: string[] = [];
-  const rows = (wp.db.prepare("select json from work where status = 'in-review'").all() as { json: string }[]).map(r => JSON.parse(r.json) as WorkItem);
-  for (const w of rows) {
+  const rows = (wp.db.prepare("select json from work where status in ('in-review', 'done')").all() as { json: string }[]).map(r => JSON.parse(r.json) as WorkItem);
+  for (const row of rows) {
+    // Re-read: an earlier story's turn in this sweep can take minutes (its tests), and a review may
+    // have finished meanwhile (PR #374: update-branch ran on a snapshot taken before QA approved).
+    const w = rawGet(wp, row.id);
+    if (!w) continue;
+    if (w.status === 'done') {
+      // Approved, waiting to merge: only a trunk-only move of its head is picked up (onReview carries it).
+      if (!w.pr || w.pr.merged) continue;
+      const ctx = contextOf(wp, w);
+      if (typeof ctx !== 'string' && ctx.head !== w.pr.headSha && (await onReview(wp, w.id, 'workplace')).carried) moved.push(w.id);
+      continue;
+    }
+    if (w.status !== 'in-review') continue;
     if (!w.pr) {
       // The first push failed (GitHub down): try again, unless that head was refused on policy.
       const ctx = contextOf(wp, w);
