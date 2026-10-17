@@ -123,6 +123,24 @@ cmd_status() {
   return $rc
 }
 
+# The cloud server (Linux, 17 Oct): the same verbs over a systemd --user unit, iris-workplace.service
+# (unit file: iris-ops/aws/systemd/). Linger is on, so it runs with nobody logged in.
+if [ "$(uname -s)" != Darwin ]; then
+  U=iris-workplace.service
+  case "${1:-}" in
+    install) systemctl --user daemon-reload && systemctl --user enable --now "$U" && echo "enabled and started $U" ;;
+    uninstall) systemctl --user disable --now "$U" && echo "disabled $U" ;;
+    start) systemctl --user start "$U" && echo "started $U" ;;
+    stop) systemctl --user stop "$U" && echo "stopped $U (it will not restart until: $0 start)" ;;
+    restart) systemctl --user restart "$U" && echo "restarted $U" ;;
+    status) systemctl --user --no-pager status "$U" | head -12
+            curl -s -m 5 "http://localhost:${WORKPLACE_PORT:-4317}/api/health" >/dev/null && echo "  api: up" || echo "  api: not answering" ;;
+    logs) tail -n "${2:-50}" "$HOME/.local/state/iris-workplace/logs/workplace.log" ;;
+    *) usage ;;
+  esac
+  exit $?
+fi
+
 case "${1:-}" in
   install) cmd_install "${2:-}" ;;
   uninstall) cmd_uninstall ;;

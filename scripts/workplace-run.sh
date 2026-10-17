@@ -1,5 +1,5 @@
 #!/bin/bash
-# The Iris Workplace under launchd (docs/RESILIENCE-workplace.md §2).
+# The Iris Workplace under launchd (Mac) or systemd (the cloud server) (docs/RESILIENCE-workplace.md §2).
 #
 # launchd runs this script; it sets the environment, rotates the log, waits while another live
 # Workplace holds the pid lock, keeps the Mac awake for exactly as long as it runs, and then
@@ -9,7 +9,7 @@ set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export HOME="${HOME:-/Users/$(id -un)}"
-export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"   # /opt/homebrew is simply absent on Linux
 export LANG="${LANG:-en_US.UTF-8}"
 # Employees run on the subscription token in ~/iris-ops/workplace/claude-oauth.env; a key here would
 # turn free usage into billed usage, so it never reaches this process (HOWTO: "never reaches them").
@@ -18,7 +18,8 @@ export IRIS_OPS_DIR="${IRIS_OPS_DIR:-$HOME/iris-ops}"
 export IRIS_WORKPLACE_DIR="${IRIS_WORKPLACE_DIR:-$HOME/iris-workplace}"
 export WORKPLACE_PORT="${WORKPLACE_PORT:-4317}"
 
-LOG_DIR="$HOME/Library/Logs/IrisWorkplace"
+# macOS keeps it under ~/Library/Logs; the Linux server under ~/.local/state (cloud move, 17 Oct).
+if [ "$(uname -s)" = Darwin ]; then LOG_DIR="$HOME/Library/Logs/IrisWorkplace"; else LOG_DIR="$HOME/.local/state/iris-workplace/logs"; fi
 LOG="$LOG_DIR/workplace.log"
 MAX_BYTES=$((10 * 1024 * 1024))
 KEEP=5
@@ -28,7 +29,7 @@ mkdir -p "$LOG_DIR"
 # in place, never renamed under it. workplace.log.1 is the newest of the kept copies.
 rotate() {
   local size
-  size=$(stat -f %z "$LOG" 2>/dev/null || echo 0)
+  size=$(stat -f %z "$LOG" 2>/dev/null || stat -c %s "$LOG" 2>/dev/null || echo 0)   # BSD, then GNU
   [ "$size" -gt "$MAX_BYTES" ] || return 0
   local i
   for ((i = KEEP - 1; i >= 1; i--)); do [ -f "$LOG.$i" ] && mv -f "$LOG.$i" "$LOG.$((i + 1))"; done
@@ -64,7 +65,7 @@ done
 
 # Awake for as long as this pid lives: no idle sleep (-i), no system sleep on AC (-s). The display
 # may sleep; closing the lid is beyond any assertion (docs/RESILIENCE-workplace.md §6).
-/usr/bin/caffeinate -s -w $$ &   # AC only: on battery the stay-awake daemon (30% floor) decides; -i drained the battery (12 Oct)
+[ -x /usr/bin/caffeinate ] && /usr/bin/caffeinate -s -w $$ &   # macOS only (a server never sleeps); AC only: on battery the stay-awake daemon (30% floor) decides; -i drained the battery (12 Oct)
 
 say "starting $NODE ($("$NODE" -v)) pid $$ in $REPO, port $WORKPLACE_PORT"
 exec "$NODE" "$CLI" --no-open --port "$WORKPLACE_PORT"
