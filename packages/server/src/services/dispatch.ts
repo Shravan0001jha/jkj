@@ -169,6 +169,8 @@ export function dispatch(wp: Workplace, employeeId: string, nowMs = Date.now()):
   if (!isAgent(wp, employeeId)) return { action: 'none' };
   // "Pause all": nothing is started, new or resumed, until the floor is resumed.
   if (floor.paused(wp)) return { action: 'skipped', reason: floor.describe(wp) };
+  // Weekly pace hold (park, not kill): nothing new starts, a review into an open session included.
+  if (floor.paceHeld(wp, nowMs)) return { action: 'skipped', reason: 'parked by the weekly pace cap until the next pace day' };
   const resumed = resumeOrphan(wp, employeeId, nowMs);
   if (resumed) return resumed;
   const busy = busyReason(wp, employeeId, nowMs);
@@ -263,7 +265,7 @@ export function sweep(wp: Workplace, nowMs = Date.now()): { reviews: string[]; s
     try { replyDelivery.sweep(wp, nowMs); } catch (err) { log.warn('dispatch', `inbox replies: ${err instanceof Error ? err.message : err}`); }
   };
   // Paused: no review wakes, no starts, and no "idle with queued work" alerts for an idleness that is the switch.
-  if (floor.paused(wp)) { replies(); return { reviews: [], started: [], alerts: [] }; }
+  if (floor.paused(wp) || floor.paceHeld(wp, nowMs)) { replies(); return { reviews: [], started: [], alerts: [] }; }
   const reviews = wakeStaleReviews(wp);
   const started: DispatchResult[] = [];
   for (const id of agents(wp)) {

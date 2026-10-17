@@ -220,6 +220,8 @@ export function deliver(wp: Workplace, nowMs = Date.now()): number {
   const asha = ashaId(wp);
   if (!asha) return 0;
   if (!waiting(wp).length) return 0;
+  // Weekly pace hold (park, not kill): no digest starts a turn, not even in her open session; it waits.
+  if (floor.paceHeld(wp, nowMs)) return 0;
   const open = employees.openSession(asha);
   if (open) {
     const a = runs.getRunAgent(open.agentId);

@@ -24,6 +24,16 @@ export function state(wp: Workplace): FloorState {
 
 export const paused = (wp: Workplace): boolean => state(wp).paused === true;
 
+/**
+ * The weekly pace hold (pace.ts) parks new work the same way, for the starts that spend.canSpend does
+ * not gate (a review or digest into an open session, an idle nudge). Read straight from the setting
+ * (pace.ts imports employees, which imports this). Talk is not affected.
+ */
+export function paceHeld(wp: Workplace, nowMs = Date.now()): boolean {
+  const row = wp.db.prepare("select value from settings where key = 'pace:until'").get() as { value: string } | undefined;
+  return !!row && Date.parse(row.value) > nowMs;
+}
+
 /** For the refusals: "the floor is paused (reason)". */
 export function describe(wp: Workplace): string {
   const s = state(wp);

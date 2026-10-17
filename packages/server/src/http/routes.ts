@@ -502,12 +502,14 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       json(res, 200, st);
     }),
 
-    // Weekly pacing on/off (owner's call, relayed by the COO): off lifts any hold at once.
+    // Weekly pacing on/off (owner's call, relayed by the COO): off lifts any hold at once. This is the
+    // permanent switch; the owner's one-day bypass is his answer to the pace-cap decision in the Inbox.
+    r('GET', '/api/coo/pace', (req, res) => { requireLocal(req); json(res, 200, pace.status(wp)); }),
     r('POST', '/api/coo/pace', async (req, res) => {
       requireLocal(req);
       const body = await readJson(req);
       pace.setDisabled(wp, body['disabled'] === true);
-      json(res, 200, { disabled: pace.disabled(wp), holdUntil: pace.holdUntil(wp) });
+      json(res, 200, pace.status(wp));
     }),
 
     // The GitHub flow (docs/LLD-github-flow.md §6): the mode, and the COO's merge. Loopback only, like the rest.

@@ -218,3 +218,36 @@ test('GET /api/coo/pace reports the state; POST {"disabled":true} stays the perm
     await b.stop();
   }
 });
+
+test('parked: a queued digest waits instead of starting a turn in Asha\'s open session; it goes after the lift', async () => {
+  const { wp, tmp } = testWorkplace();
+  const fake = installFakeRuntime();
+  try {
+    const manager = await import('../src/services/manager.js');
+    const items = await import('../src/services/items.js');
+    writeToken(tmp.dir);
+    const epic = items.create(wp, { level: 'epic', title: 'Iris during music' }, 'owner');
+    items.setFocus(wp, [epic.id], 'owner');
+    const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'QA the bundle', assigneeId: 'nikhil' }, 'asha');
+    items.update(wp, s.id, { status: 'in-progress', reason: 'test: moved' }, 'nikhil');
+    items.update(wp, s.id, { status: 'blocked', blockedReason: 'Needs the vendor build.', waitingOn: 'external', reason: 'test: moved' }, 'nikhil');
+    const t0 = Date.now() + 60 * 60_000;
+    // Asha mid-turn: the digest queues for her turn's end.
+    employees.talk(wp, 'asha', 'COO: hello');
+    await new Promise(r => setTimeout(r, 10));
+    const asha = fake.sessions.find(x => x.options.cwd.includes('/asha/'))!;
+    assert.ok(manager.digest(wp, t0));
+    const sent = asha.sent.length;
+    // The cap trips; then her turn ends. Parked: the digest must not start her next turn.
+    pace.apply(wp, { utilization: 0.30, resetsAtMs: Date.now() - 1.5 * DAY + 7 * DAY }, Date.now());
+    asha.result();
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(manager.deliver(wp, t0 + 60_000), 0);
+    assert.equal(asha.sent.length, sent, 'nothing sent into her session while parked');
+    pace.setDisabled(wp, true);
+    assert.ok(manager.deliver(wp, t0 + 60_000) > 0, 'delivered once pacing is lifted');
+  } finally {
+    fake.restore();
+    tmp.cleanup();
+  }
+});

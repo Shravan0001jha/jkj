@@ -87,7 +87,7 @@ export function check(wp: Workplace, id: string, nowMs = Date.now()): { rule: St
   const w = rawGet(wp, id);
   if (!w) return null;
   // "Pause all": nothing is parked, queued or moved while the floor is paused (LLD-rework W2 §7).
-  if (floor.paused(wp)) return null;
+  if (floor.paused(wp) || floor.paceHeld(wp, nowMs)) return null;
   const ev = evaluate(wp, w, nowMs);
   if (!ev?.stalled) return null;
   const episode = `${ev.rule}:${ev.since}`;
