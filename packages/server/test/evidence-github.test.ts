@@ -91,6 +91,42 @@ test('a report without summary.txt gets one from results.json, so a red run list
   } finally { gh.cleanup(); cleanup(); }
 });
 
+/** suite-report as iris-e2e's report job really uploads it (run 39043490750): matrix.json carries the
+ *  verdict per platform test; the only results.json is plan/'s account-setup rows (no verdict, no counts). */
+const realReport = (ios: Record<string, { status: string; note: string }>, planStatus = 'PASS'): Record<string, string> => ({
+  'matrix.json': JSON.stringify({ cells: { 'ios.queries': { status: 'PASS', tests: Object.keys(ios) } }, tests: Object.keys(ios).length ? { ios } : {}, cost: { total_usd: 0.38 } }),
+  'plan/results.json': JSON.stringify({ 'account run-1-ios@e2e.irisforu.com': { status: planStatus, ms: 1, note: 'created=true' } }),
+  'plan/plan.json': '{}',
+  'index.html': '<html></html>',
+  'shots/ios/screens/i-math.png': 'png',
+});
+const iosGreen = { download: { status: 'PASS', note: 'local build' }, install: { status: 'PASS', note: 'simctl' }, app_signin: { status: 'PASS', note: 'signed in' },
+  'queries.typed_math': { status: 'PASS', note: '42' }, 'queries.web_current': { status: 'PASS', note: '$' }, account_usage: { status: 'PASS', note: 'tier=robot' } };
+
+test('the real suite-report layout (matrix.json, plan/results.json) reads as its verdict, never 0/0 "did not pass"', async () => {
+  const cases: Array<{ name: string; conclusion: 'success' | 'failure'; art: Record<string, string>; state: string; passed: number; failed: number; failures?: string[] }> = [
+    { name: 'green iOS run (as_mvcgh9l1mtujs, 17 Oct)', conclusion: 'success', art: realReport(iosGreen), state: 'success', passed: 6, failed: 0 },
+    { name: 'a red test in a job that exited 0', conclusion: 'success', art: realReport({ ...iosGreen, 'queries.web_current': { status: 'FAIL', note: 'no dollar figure' } }), state: 'failure', passed: 5, failed: 1, failures: ['ios queries.web_current FAIL: no dollar figure'] },
+    { name: 'the job died before any test', conclusion: 'success', art: realReport({}), state: 'failure', passed: 0, failed: 0 },
+    { name: 'account setup failed', conclusion: 'success', art: realReport(iosGreen, 'FAIL'), state: 'failure', passed: 6, failed: 1 },
+  ];
+  for (const c of cases) {
+    const { repo, sha, cleanup } = repoWithBranch();
+    const gh = new FakeGitHub(repo);
+    const out = join(mkdtempSync(join(tmpdir(), 'iris-ev-out-')), 'run');
+    try {
+      const runner = new GitHubRunner(() => gh, { pollMs: 5, timeoutMs: 10_000 });
+      const [res] = await Promise.all([runner.run(request(repo, sha, out)), finishWhenDispatched(gh, c.conclusion, { 'suite-report-900': c.art })]);
+      const o = evidence.readOutcome(out, res);
+      assert.equal(o.state, c.state, c.name);
+      assert.equal(o.passed, c.passed, c.name);
+      assert.equal(o.failed, c.failed, c.name);
+      if (c.failures) assert.deepEqual(o.failures, c.failures, c.name);
+      assert.ok(existsSync(join(out, 'plan', 'results.json')) && existsSync(join(out, 'shots', 'ios', 'screens', 'i-math.png')), `${c.name}: plan/ is not hoisted over the report`);
+    } finally { gh.cleanup(); cleanup(); }
+  }
+});
+
 test('no report, a refused push or a refused dispatch is plumbing (an error), never a pass', async () => {
   const { repo, sha, cleanup } = repoWithBranch();
   const gh = new FakeGitHub(repo);

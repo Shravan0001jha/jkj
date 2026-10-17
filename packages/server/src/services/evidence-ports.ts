@@ -283,6 +283,7 @@ export class GitHubRunner implements EvidenceRunner {
       if (!art) return plumbing(`${run.url} ended ${run.conclusion ?? '?'} with no ${SUITE_REPORT} artifact`);
       mkdirSync(r.out, { recursive: true });
       await gh.downloadArtifact(art.id, r.out);
+      resultsFromMatrix(r.out);
       hoistReport(r.out);
       if (!existsSync(join(r.out, 'results.json'))) return plumbing(`${run.url}: the report has no results.json`);
       if (!existsSync(join(r.out, 'summary.txt'))) writeFileSync(join(r.out, 'summary.txt'), summaryFromResults(readFileSync(join(r.out, 'results.json'), 'utf8')));
@@ -294,6 +295,41 @@ export class GitHubRunner implements EvidenceRunner {
 }
 
 const errLine = (err: unknown): string => (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 200);
+
+type TestRow = { status?: string; note?: string; ms?: number };
+
+/**
+ * iris-e2e's suite-report has no top-level results.json: its verdict lives in matrix.json
+ * (`tests.<platform>.<id> = { status, note }`, gathered from every results-<platform> artifact),
+ * and the only results.json in it is plan/results.json (account setup rows, no verdict, no counts).
+ * Hoisting that one made a green iOS run read as 0 passed / 0 failed / "the suite did not pass"
+ * (as_mvcgh9l1mtujs, 17 Oct, run 39043490750). Write results.json as local-run.sh does, from the
+ * matrix: PASS only when some platform test ran and none failed or was blocked; a failed account
+ * setup row (plan) counts as a failure too.
+ */
+export function resultsFromMatrix(out: string): void {
+  const matrixFile = join(out, 'matrix.json');
+  if (existsSync(join(out, 'results.json')) || !existsSync(matrixFile)) return;
+  let matrix: { tests?: Record<string, Record<string, TestRow>> } = {};
+  try { matrix = JSON.parse(readFileSync(matrixFile, 'utf8')) as typeof matrix; } catch { return; }
+  const platforms: Record<string, { tests: Record<string, TestRow> }> = {};
+  for (const [p, tests] of Object.entries(matrix.tests ?? {})) {
+    platforms[p] = { tests: Object.fromEntries(Object.entries(tests ?? {}).map(([id, t]) => [id, { status: t.status, note: t.note, ms: t.ms }])) };
+  }
+  const ran = Object.values(platforms).reduce((n, v) => n + Object.keys(v.tests).length, 0);
+  const planFile = join(out, 'plan', 'results.json');
+  if (existsSync(planFile)) {
+    try {
+      const plan = JSON.parse(readFileSync(planFile, 'utf8')) as Record<string, TestRow>;
+      const bad = Object.entries(plan).filter(([, t]) => t?.status === 'FAIL' || t?.status === 'BLOCKED');
+      if (bad.length) platforms['plan'] = { tests: Object.fromEntries(bad.map(([id, t]) => [id, { status: t.status, note: t.note, ms: t.ms }])) };
+    } catch { /* unreadable plan rows: the platform rows still decide */ }
+  }
+  const counts: Record<string, number> = {};
+  for (const v of Object.values(platforms)) for (const t of Object.values(v.tests)) { const st = t.status ?? '?'; counts[st] = (counts[st] ?? 0) + 1; }
+  const verdict = ran > 0 && !counts['FAIL'] && !counts['BLOCKED'] ? 'PASS' : 'FAIL';
+  writeFileSync(join(out, 'results.json'), JSON.stringify({ source: 'matrix.json', verdict, counts, platforms }, null, 1));
+}
 
 /** An artifact may wrap the report in one directory: move its contents up to `out`. */
 function hoistReport(out: string): void {
