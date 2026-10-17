@@ -1,4 +1,7 @@
 import { execFile } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { log } from '../util/logger.js';
 
@@ -23,6 +26,9 @@ export interface PullRequest {
   merged: boolean;
 }
 
+/** A GitHub Actions run of a workflow in the workflow repo (iris-e2e). */
+export interface WorkflowRun { id: number; url: string; status: string; conclusion: string | null }
+
 export interface GitHubPort {
   /** Push `refs/heads/<branch>` of `repoDir` to the same name on GitHub. Never forced. */
   push(repoDir: string, branch: string): Promise<void>;
@@ -44,9 +50,20 @@ export interface GitHubPort {
   updateBranch(n: number, expectedHeadSha: string): Promise<{ updated: boolean; conflict?: boolean }>;
   /** Fast-forward the local `refs/heads/<branch>` of `repoDir` to GitHub's (no checkout touched); throws when it cannot. */
   fetchBranch(repoDir: string, branch: string): Promise<void>;
+  /**
+   * GitHub Actions in the workflow repo (cloud migration, 17 Oct: mobile checks and evidence run on
+   * GitHub, not on the server). Dispatch a workflow with string inputs on the workflow repo's ref.
+   */
+  dispatchWorkflow(workflow: string, inputs: Record<string, string>): Promise<void>;
+  /** The run a dispatch started, found by the request id its run-name carries; null while it has not appeared. */
+  findWorkflowRun(workflow: string, requestId: string): Promise<WorkflowRun | null>;
+  /** A run's unexpired artifacts. */
+  listArtifacts(runId: number): Promise<{ id: number; name: string }[]>;
+  /** Download an artifact's zip and unpack it into `destDir` (created). */
+  downloadArtifact(artifactId: number, destDir: string): Promise<void>;
 }
 
-export type Fetch = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ status: number; json(): Promise<unknown> }>;
+export type Fetch = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ status: number; json(): Promise<unknown>; arrayBuffer?(): Promise<ArrayBuffer> }>;
 
 export interface RealGitHubOptions {
   org: string;
@@ -54,6 +71,10 @@ export interface RealGitHubOptions {
   tokenScript: string;
   pushApp: string;
   reviewApp: string;
+  /** The repo whose GitHub Actions workflows the Workplace dispatches (mobile-checks.yml, suite.yml). */
+  workflowRepo?: string;
+  /** The ref those workflows are dispatched on. */
+  workflowRef?: string;
   fetch?: Fetch;
   apiBase?: string;
   python?: string;
@@ -83,6 +104,7 @@ export class RealGitHub implements GitHubPort {
   }
 
   private get repoPath(): string { return `/repos/${this.o.org}/${this.o.repo}`; }
+  private get workflowPath(): string { return `/repos/${this.o.org}/${this.o.workflowRepo ?? `${this.o.repo}-e2e`}`; }
 
   /** An installation token for the App, from token.py, cached for 50 minutes. Never logged. */
   private async token(slug: string): Promise<string> {
@@ -205,6 +227,42 @@ export class RealGitHub implements GitHubPort {
     if (status === 422) return { updated: false, conflict: true };
     const msg = typeof (data as { message?: unknown })?.message === 'string' ? `: ${(data as { message: string }).message}` : '';
     throw new Error(redact(`GitHub PUT ${this.repoPath}/pulls/${n}/update-branch failed (${status})${msg}`));
+  }
+
+  async dispatchWorkflow(workflow: string, inputs: Record<string, string>): Promise<void> {
+    await this.ok(this.o.pushApp, 'POST', `${this.workflowPath}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, { ref: this.o.workflowRef ?? 'main', inputs }, [204]);
+  }
+
+  async findWorkflowRun(workflow: string, requestId: string): Promise<WorkflowRun | null> {
+    const data = await this.ok(this.o.pushApp, 'GET', `${this.workflowPath}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=workflow_dispatch&per_page=50`) as { workflow_runs?: unknown[] };
+    for (const raw of data?.workflow_runs ?? []) {
+      const r = raw as { id: number; html_url: string; display_title?: string; name?: string; status?: string; conclusion?: string | null };
+      const title = `${r.display_title ?? ''} ${r.name ?? ''}`;
+      if (title.split(/\s+/).includes(requestId)) return { id: r.id, url: r.html_url, status: r.status ?? 'queued', conclusion: r.conclusion ?? null };
+    }
+    return null;
+  }
+
+  async listArtifacts(runId: number): Promise<{ id: number; name: string }[]> {
+    const data = await this.ok(this.o.pushApp, 'GET', `${this.workflowPath}/actions/runs/${runId}/artifacts?per_page=100`) as { artifacts?: unknown[] };
+    return (data?.artifacts ?? []).map(a => a as { id: number; name: string; expired?: boolean }).filter(a => !a.expired).map(a => ({ id: a.id, name: a.name }));
+  }
+
+  async downloadArtifact(artifactId: number, destDir: string): Promise<void> {
+    const path = `${this.workflowPath}/actions/artifacts/${artifactId}/zip`;
+    const token = await this.token(this.o.pushApp);
+    // GitHub answers with a redirect to a signed storage URL; fetch follows it and drops the token there.
+    const res = await this.fetchImpl(`${this.apiBase}${path}`, { headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'iris-workplace' } });
+    if (res.status !== 200 || !res.arrayBuffer) throw new Error(redact(`GitHub GET ${path} failed (${res.status})`));
+    const tmp = mkdtempSync(join(tmpdir(), 'iris-artifact-'));
+    try {
+      const zip = join(tmp, 'artifact.zip');
+      writeFileSync(zip, Buffer.from(await res.arrayBuffer()));
+      mkdirSync(destDir, { recursive: true });
+      await run('unzip', ['-o', '-q', zip, '-d', destDir], { timeout: 120_000, maxBuffer: 1024 * 1024 });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   }
 
   async deleteBranch(branch: string): Promise<void> {

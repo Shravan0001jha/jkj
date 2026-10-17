@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { GitHubPort, PullRequest, StatusState } from '../../src/services/github-port.js';
+import type { GitHubPort, PullRequest, StatusState, WorkflowRun } from '../../src/services/github-port.js';
 
 /**
  * GitHub, faked with a local bare repository as the remote: pushes, merges, branch deletes and the
@@ -11,7 +11,10 @@ import type { GitHubPort, PullRequest, StatusState } from '../../src/services/gi
  * way an outage or a revoked token would.
  */
 
-export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly' | 'updateBranch' | 'fetchBranch';
+export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly' | 'updateBranch' | 'fetchBranch' | 'dispatchWorkflow' | 'findWorkflowRun' | 'listArtifacts' | 'downloadArtifact';
+
+/** A faked GitHub Actions run: what a dispatch started, and the files its artifacts hold. */
+export interface FakeRun { id: number; workflow: string; requestId: string; inputs: Record<string, string>; status: string; conclusion: string | null; artifacts: Record<string, Record<string, string>> }
 
 export interface FakePr extends PullRequest { title: string; body: string; head: string; base: string }
 
@@ -24,6 +27,10 @@ export class FakeGitHub implements GitHubPort {
   /** PR number → the comments posted on it. */
   readonly comments = new Map<number, string[]>();
   private readonly failures = new Map<Op, number>();
+  /** Workflow runs started by dispatchWorkflow (they appear at once, queued; tests finish them with finishRun). */
+  readonly runs: FakeRun[] = [];
+  /** When false, a dispatch starts nothing GitHub shows yet (the run has not appeared). */
+  runsAppear = true;
 
   constructor(trunkRepo: string) {
     this.bare = mkdtempSync(join(tmpdir(), 'iris-fake-gh-'));
@@ -147,6 +154,43 @@ export class FakeGitHub implements GitHubPort {
   async pullFfOnly(repoDir: string, branch: string): Promise<void> {
     this.enter('pullFfOnly', repoDir, branch);
     execFileSync('git', ['-C', repoDir, 'pull', '-q', '--ff-only', this.bare, branch], { stdio: 'pipe' });
+  }
+
+  async dispatchWorkflow(workflow: string, inputs: Record<string, string>): Promise<void> {
+    this.enter('dispatchWorkflow', workflow, inputs);
+    if (!this.runsAppear) return;
+    this.runs.push({ id: 900 + this.runs.length, workflow, requestId: inputs['request_id'] ?? '', inputs, status: 'queued', conclusion: null, artifacts: {} });
+  }
+
+  async findWorkflowRun(workflow: string, requestId: string): Promise<WorkflowRun | null> {
+    this.enter('findWorkflowRun', workflow, requestId);
+    const r = [...this.runs].reverse().find(x => x.workflow === workflow && x.requestId === requestId);
+    return r ? { id: r.id, url: `https://github.com/shravan0001jha-iris-hq/iris-e2e/actions/runs/${r.id}`, status: r.status, conclusion: r.conclusion } : null;
+  }
+
+  async listArtifacts(runId: number): Promise<{ id: number; name: string }[]> {
+    this.enter('listArtifacts', runId);
+    const r = this.runs.find(x => x.id === runId);
+    return r ? Object.keys(r.artifacts).map((name, i) => ({ id: runId * 100 + i, name })) : [];
+  }
+
+  async downloadArtifact(artifactId: number, destDir: string): Promise<void> {
+    this.enter('downloadArtifact', artifactId, destDir);
+    const r = this.runs.find(x => x.id === Math.floor(artifactId / 100));
+    const files = r ? Object.values(r.artifacts)[artifactId % 100] : undefined;
+    if (!files) throw new Error('fake GitHub: no such artifact (404)');
+    for (const [name, body] of Object.entries(files)) {
+      mkdirSync(join(destDir, name, '..'), { recursive: true });
+      writeFileSync(join(destDir, name), body);
+    }
+  }
+
+  /** Finish the latest run of `workflow` (by request id when given) with a conclusion and its artifacts. */
+  finishRun(conclusion: 'success' | 'failure' | 'cancelled', artifacts: Record<string, Record<string, string>> = {}, requestId?: string): FakeRun {
+    const r = [...this.runs].reverse().find(x => requestId === undefined || x.requestId === requestId);
+    if (!r) throw new Error('fake GitHub: no run to finish');
+    r.status = 'completed'; r.conclusion = conclusion; r.artifacts = artifacts;
+    return r;
   }
 
   cleanup(): void { rmSync(this.bare, { recursive: true, force: true }); }

@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -125,4 +126,60 @@ test('a token never reaches an error message or a git command line', async () =>
 test('redact strips tokens and basic credentials from any text', () => {
   const t = redact('push https://x-access-token:ghs_abcdefghijklmnopqrstuv@github.com/x AUTHORIZATION: basic eC1hY2Nlc3M= and ghp_abcdefghijklmnopqrstuvwxyz0123456789 and github_pat_11AAAA_bbbb');
   assert.ok(!/ghs_abc|ghp_abc|eC1hY2Nlc3M|github_pat_11/.test(t), t);
+});
+
+/* ---------- GitHub Actions: mobile checks and evidence run on GitHub (cloud migration, 17 Oct) ---------- */
+
+function workflowPort(dir: string, fetch: Fetch): RealGitHub {
+  return new RealGitHub({ org: 'shravan0001jha-iris-hq', repo: 'iris', tokenScript: tokenScript(dir), pushApp: 'iris-workplace', reviewApp: 'iris-review', workflowRepo: 'iris-e2e', workflowRef: 'main', fetch });
+}
+
+test('dispatchWorkflow posts the inputs to the workflow repo as the push App; a refusal is an error', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iris-ghport-'));
+  try {
+    const calls: Call[] = [];
+    const gh = workflowPort(dir, fakeFetch(calls, c => (c.body && (c.body as { inputs?: { request_id?: string } }).inputs?.request_id === 'bad' ? { status: 422, body: { message: 'Unexpected inputs provided' } } : { status: 204, body: null })));
+    await gh.dispatchWorkflow('mobile-checks.yml', { iris_ref: 'a'.repeat(40), areas: 'mobile-android', request_id: 'as_1-aaaaaaaa' });
+    assert.equal(calls[0]!.url, 'https://api.github.com/repos/shravan0001jha-iris-hq/iris-e2e/actions/workflows/mobile-checks.yml/dispatches');
+    assert.equal(calls[0]!.method, 'POST');
+    assert.equal(calls[0]!.auth, 'Bearer ghs_irisworkplace0123456789abcdefghij');
+    assert.deepEqual(calls[0]!.body, { ref: 'main', inputs: { iris_ref: 'a'.repeat(40), areas: 'mobile-android', request_id: 'as_1-aaaaaaaa' } });
+    await assert.rejects(gh.dispatchWorkflow('mobile-checks.yml', { request_id: 'bad' }), /422.*Unexpected inputs/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('findWorkflowRun finds the dispatched run by the request id in its run name', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iris-ghport-'));
+  try {
+    const calls: Call[] = [];
+    const gh = workflowPort(dir, fakeFetch(calls, () => ({ status: 200, body: { workflow_runs: [
+      { id: 11, html_url: 'https://github.com/x/actions/runs/11', display_title: 'mobile-checks as_2-bbbbbbbb', status: 'completed', conclusion: 'success' },
+      { id: 12, html_url: 'https://github.com/x/actions/runs/12', display_title: 'mobile-checks as_1-aaaaaaaa', status: 'in_progress', conclusion: null },
+    ] } })));
+    assert.deepEqual(await gh.findWorkflowRun('mobile-checks.yml', 'as_1-aaaaaaaa'), { id: 12, url: 'https://github.com/x/actions/runs/12', status: 'in_progress', conclusion: null });
+    assert.match(calls[0]!.url, /\/repos\/shravan0001jha-iris-hq\/iris-e2e\/actions\/workflows\/mobile-checks\.yml\/runs\?event=workflow_dispatch&per_page=50$/);
+    assert.equal(await gh.findWorkflowRun('mobile-checks.yml', 'as_9-cccccccc'), null);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('an artifact is listed by run and downloaded and unpacked into a directory', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iris-ghport-'));
+  try {
+    const zip = join(dir, 'a.zip');
+    execFileSync('python3', ['-c', `import zipfile; z=zipfile.ZipFile(${JSON.stringify(zip)},'w'); z.writestr('result.json','{"ok":true}'); z.writestr('shots/1.png','png'); z.close()`]);
+    const bytes = readFileSync(zip);
+    const calls: Call[] = [];
+    const fetch: Fetch = async (url, init) => {
+      calls.push({ url, method: init?.method ?? 'GET', ...(init?.headers?.['authorization'] ? { auth: init.headers['authorization'] } : {}) });
+      if (url.endsWith('/actions/runs/12/artifacts?per_page=100')) return { status: 200, json: async () => ({ artifacts: [{ id: 77, name: 'mobile-checks-result', expired: false }] }) };
+      return { status: 200, json: async () => ({}), arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+    };
+    const gh = workflowPort(dir, fetch);
+    assert.deepEqual(await gh.listArtifacts(12), [{ id: 77, name: 'mobile-checks-result' }]);
+    const out = join(dir, 'out');
+    await gh.downloadArtifact(77, out);
+    assert.equal(calls[1]!.url, 'https://api.github.com/repos/shravan0001jha-iris-hq/iris-e2e/actions/artifacts/77/zip');
+    assert.equal(readFileSync(join(out, 'result.json'), 'utf8'), '{"ok":true}');
+    assert.equal(readFileSync(join(out, 'shots', '1.png'), 'utf8'), 'png');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
