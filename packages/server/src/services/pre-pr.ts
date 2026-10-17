@@ -12,7 +12,9 @@ import { join } from 'node:path';
 export const PRE_PR_REFUSAL = 'Run scripts/pre-pr.sh on your latest commit first (results belong to a commit).';
 
 /** passed/failed are null for a check without counts (a syntax check, the iOS build). */
-export interface PrePrCheck { name: string; cmd?: string; ok: boolean; passed?: number | null; failed?: number | null; skipped?: number | null; durationSec?: number; exitCode?: number; timedOut?: boolean; tail?: string }
+/** `deferred: 'github'`: on the Linux server pre-pr.sh cannot build the apps, so a mobile area is one
+ *  placeholder check the Workplace runs on GitHub (mobile-checks.yml) once the branch is pushed. */
+export interface PrePrCheck { name: string; cmd?: string; ok: boolean; passed?: number | null; failed?: number | null; skipped?: number | null; durationSec?: number; exitCode?: number; timedOut?: boolean; tail?: string; deferred?: 'github' }
 export interface PrePrResult {
   schema?: number; sha: string; base?: string; at?: string; by?: string; ok: boolean;
   /** Only a full run counts: `fast`, or a run limited to some areas (`only`), never passes the gate. */
@@ -51,12 +53,39 @@ export function refusal(r: PrePrResult | null, sha: string): string | null {
   return `${PRE_PR_REFUSAL} Now: ${why}. Run plain scripts/pre-pr.sh (no --only, no --fast) on the head commit.`;
 }
 
+/** The areas pre-pr.sh left to GitHub, in order. */
+export function deferredAreas(r: PrePrResult | null): string[] {
+  return r ? r.areas.filter(a => a.checks.some(c => c.deferred === 'github')).map(a => a.area) : [];
+}
+
+/** What mobile-checks.yml leaves in its `mobile-checks-result` artifact (result.json). */
+export interface GitHubChecksResult { sha: string; ok: boolean; areas: PrePrResult['areas']; runUrl?: string }
+
+/**
+ * The local result with each deferred area replaced by GitHub's: ok only when both are. An area
+ * GitHub was asked to run and said nothing about fails; it never passes silently.
+ */
+export function withGitHub(local: PrePrResult, gh: GitHubChecksResult): PrePrResult {
+  const theirs = new Map(gh.areas.map(a => [a.area, a]));
+  let missing = false;
+  const areas = local.areas.map(a => {
+    if (!a.checks.some(c => c.deferred === 'github')) return a;
+    const got = theirs.get(a.area);
+    if (got) return got;
+    missing = true;
+    return { area: a.area, checks: [{ name: 'github', ok: false, passed: null, failed: null, tail: 'no result from GitHub for this area' }] };
+  });
+  const ok = local.ok && gh.ok && !missing && areas.every(a => a.checks.every(c => c.ok));
+  return { ...local, ok, areas };
+}
+
 /** The workplace/tests description: "mobile-android unit 16 passed · iris-api unit 379 passed — run by tara on bbd2d88". */
 export function describe(r: PrePrResult): string {
   const parts: string[] = [];
   for (const a of r.areas) {
     for (const c of a.checks) {
       const label = c.name && c.name !== a.area ? `${a.area} ${c.name}` : a.area;
+      if (c.deferred === 'github') { parts.push(`${a.area} on GitHub`); continue; }
       const counted = typeof c.passed === 'number' || typeof c.failed === 'number';
       const counts = !counted ? (c.ok ? 'ok' : c.timedOut ? 'timed out' : 'failed')
         : [`${c.passed ?? 0} passed`, ...(c.failed ? [`${c.failed} failed`] : []), ...(!c.ok && !c.failed ? ['failed'] : [])].join(', ');
@@ -73,5 +102,5 @@ export function describe(r: PrePrResult): string {
 
 /** The failing checks' output tails, for the item comment. */
 export function failureDetails(r: PrePrResult): string {
-  return r.areas.flatMap(a => a.checks.filter(c => !c.ok).map(c => `${a.area} ${c.name}: ${c.timedOut ? 'timed out' : `${c.failed ?? '?'} failed`} (exit ${c.exitCode ?? '?'})\n${(c.tail ?? '').slice(-1500)}`)).join('\n\n');
+  return r.areas.flatMap(a => a.checks.filter(c => !c.ok).map(c => `${a.area} ${c.name}: ${c.timedOut ? 'timed out' : typeof c.failed === 'number' ? `${c.failed} failed` : (c.tail ?? 'failed').split('\n')[0]} (exit ${c.exitCode ?? '?'})\n${(c.tail ?? '').slice(-1500)}`)).join('\n\n');
 }
