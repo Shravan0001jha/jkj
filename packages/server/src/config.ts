@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -84,7 +85,13 @@ export interface EvidenceConfig {
   runnerInRepo: string;
   /** The runner used while the built commit has no e2e/ yet (an iris-e2e clone). */
   runnerFallback: string;
+  /** Empty on a machine without it (the Linux server): then nothing is set. */
   androidHome: string;
+  /**
+   * Where apps are built and the robot suite runs: `local` (this Mac's simulators and emulators) or
+   * `github` (iris-e2e suite.yml builds the commit and runs the suite; the default off macOS).
+   */
+  runOn: 'local' | 'github';
   /** JDK 17 (gradle): builds and every employee session (pre-pr.sh). */
   javaHome: string;
   /** Full Xcode (employee worktrees only have the command-line tools). */
@@ -112,11 +119,17 @@ export interface GitHubConfig {
   pushApp: string;
   /** The App that posts the workplace/* commit statuses. */
   reviewApp: string;
+  /** The repo whose GitHub Actions the Workplace dispatches (mobile-checks.yml, suite.yml), and its ref. */
+  workflowRepo: string;
+  workflowRef: string;
   /** Where a PR body links the item (GET <linkBase>/api/items/<id>). */
   linkBase: string;
 }
 
-export function loadConfig(argv: string[] = process.argv.slice(2), env = process.env): Config {
+export function loadConfig(argv: string[] = process.argv.slice(2), env = process.env, platform: NodeJS.Platform = process.platform): Config {
+  // A Mac toolchain path is a default only on a Mac (or where it really exists): on the Linux server
+  // (cloud migration, 17 Oct) an invented /Applications path would reach every employee session.
+  const macPath = (given: string | undefined, path: string): string => given ?? (platform === 'darwin' || existsSync(path) ? path : '');
   const flag = (name: string): string | undefined => {
     const i = argv.indexOf(`--${name}`);
     return i >= 0 ? argv[i + 1] : undefined;
@@ -169,6 +182,8 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
       python: env['WORKPLACE_GITHUB_PYTHON'] ?? join(env['IRIS_OPS_DIR'] ?? join(homedir(), 'iris-ops'), 'github', '.venv', 'bin', 'python'),
       pushApp: env['WORKPLACE_GITHUB_PUSH_APP'] ?? 'iris-workplace',
       reviewApp: env['WORKPLACE_GITHUB_REVIEW_APP'] ?? 'iris-review',
+      workflowRepo: env['WORKPLACE_GITHUB_WORKFLOW_REPO'] ?? 'iris-e2e',
+      workflowRef: env['WORKPLACE_GITHUB_WORKFLOW_REF'] ?? 'main',
       linkBase: env['WORKPLACE_GITHUB_LINK_BASE'] ?? `http://127.0.0.1:${num(flag('port') ?? env['WORKPLACE_PORT'], 4317)}`,
     },
     evidence: {
@@ -177,9 +192,10 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
       stagingScript: env['WORKPLACE_STAGING_SCRIPT'] ?? join(homedir(), 'claude-dev', 'scripts', 'staging.sh'),
       runnerInRepo: 'e2e/scripts/local-run.sh',
       runnerFallback: env['WORKPLACE_EVIDENCE_RUNNER'] ?? join(homedir(), 'iris-e2e', 'scripts', 'local-run.sh'),
-      androidHome: env['ANDROID_HOME'] ?? '/opt/homebrew/share/android-commandlinetools',
-      javaHome: env['WORKPLACE_JAVA_HOME'] ?? '/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home',
-      developerDir: env['WORKPLACE_DEVELOPER_DIR'] ?? '/Applications/Xcode.app/Contents/Developer',
+      androidHome: macPath(env['ANDROID_HOME'], '/opt/homebrew/share/android-commandlinetools'),
+      javaHome: macPath(env['WORKPLACE_JAVA_HOME'], '/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home'),
+      developerDir: macPath(env['WORKPLACE_DEVELOPER_DIR'], '/Applications/Xcode.app/Contents/Developer'),
+      runOn: env['WORKPLACE_EVIDENCE_ON'] === 'github' || env['WORKPLACE_EVIDENCE_ON'] === 'local' ? env['WORKPLACE_EVIDENCE_ON'] : platform === 'darwin' ? 'local' : 'github',
       slots: 2,
       keepBuilds: 4,
       appPaths: { android: 'mobile/android', ios: 'mobile/ios' },

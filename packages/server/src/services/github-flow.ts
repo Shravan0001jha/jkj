@@ -61,7 +61,7 @@ export function gitHubPort(wp: Workplace): GitHubPort {
   let port = ports.get(wp);
   if (!port) {
     const g = wp.config.github;
-    port = new RealGitHub({ org: g.org, repo: g.repo, tokenScript: g.tokenScript, python: existsSync(g.python) ? g.python : 'python3', pushApp: g.pushApp, reviewApp: g.reviewApp });
+    port = new RealGitHub({ org: g.org, repo: g.repo, tokenScript: g.tokenScript, python: existsSync(g.python) ? g.python : 'python3', pushApp: g.pushApp, reviewApp: g.reviewApp, workflowRepo: g.workflowRepo, workflowRef: g.workflowRef });
     ports.set(wp, port);
   }
   return port;

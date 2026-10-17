@@ -355,9 +355,10 @@ export function childEnv(wp: Workplace, employeeId?: string): Record<string, str
   // Who is running: scripts/pre-pr.sh records it as "run by <id>" (dry run #11: it showed the owner's git email).
   if (employeeId) env['WORKPLACE_EMPLOYEE'] = employeeId; else delete env['WORKPLACE_EMPLOYEE'];
   // The toolchains scripts/pre-pr.sh needs (Android SDK, JDK 17, full Xcode, not the CLI tools).
-  env['ANDROID_HOME'] = wp.config.evidence.androidHome;
-  env['JAVA_HOME'] = wp.config.evidence.javaHome;
-  env['DEVELOPER_DIR'] = wp.config.evidence.developerDir;
+  // Only what this machine has: on the Linux server the Mac paths are empty and nothing is set.
+  if (wp.config.evidence.androidHome) env['ANDROID_HOME'] = wp.config.evidence.androidHome;
+  if (wp.config.evidence.javaHome) env['JAVA_HOME'] = wp.config.evidence.javaHome;
+  if (wp.config.evidence.developerDir) env['DEVELOPER_DIR'] = wp.config.evidence.developerDir;
   return env;
 }
 
