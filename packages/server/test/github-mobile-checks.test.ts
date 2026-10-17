@@ -1,7 +1,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WorkItem } from '@jkj/shared';
 import type { Workplace } from '../src/services/workplace.js';
@@ -185,5 +185,89 @@ test('a head with no deferred areas never touches GitHub Actions (the Mac path i
     await reviewed(s);
     assert.equal(s.gh.count('dispatchWorkflow'), 0);
     assert.equal(pr(s).tests?.state, 'success');
+  } finally { s.done(); }
+});
+
+/* ---------- 18 Oct (as_mvcghfuyq2bi8, PR #400): a finished run was never picked up ---------- */
+
+/** The trunk moves on and the author merges it in: a trunk-only head move (the PR diff is unchanged). */
+function trunkOnlyMove(s: Setup): string {
+  const repo = employee(s.wp, 'kabir').workspace.repo;
+  const trunk = s.wp.config.github.trunk;
+  writeFileSync(join(repo, `trunk-${Date.now()}.txt`), 'trunk moves\n');
+  git(repo, ['add', '-A']);
+  git(repo, ['-c', 'user.email=t@iris.local', '-c', 'user.name=t', 'commit', '-q', '-m', 'trunk moves']);
+  git(s.wt, ['-c', 'user.email=k@iris.local', '-c', 'user.name=k', 'merge', '-q', '--no-edit', trunk]);
+  return git(s.wt, ['rev-parse', 'HEAD']).trim();
+}
+const comments = (s: Setup): string => trail.comments(s.wp, s.storyId).map(c => `${c.text}\n${c.details ?? ''}`).join('\n');
+
+test('PR #400: a trunk-only head move while the run is going carries the run over; its result lands on the new head, no second dispatch', async () => {
+  const s = setup('on');
+  try {
+    const head = s.commit('mobile/android/app/Alarm.kt', 'class Alarm\n');
+    await reviewed(s);
+    const head2 = trunkOnlyMove(s);
+    assert.deepEqual(await flow.syncHeads(s.wp), [s.storyId]);
+    assert.equal(pr(s).headSha, head2);
+    assert.equal(pr(s).tests?.state, 'pending');
+    s.gh.finishRun('failure', { 'mobile-checks-result': result(head, false) });
+    await flow.syncHeads(s.wp);
+    assert.equal(s.gh.count('dispatchWorkflow'), 1, 'the run for the old head counts: the PR diff is the same');
+    assert.equal(pr(s).tests?.state, 'failure');
+    assert.equal(pr(s).tests?.sha, head2);
+    assert.equal(s.gh.status(head2, 'workplace/tests')?.state, 'failure');
+    assert.match(comments(s), /AlarmTest > rings FAILED/);
+  } finally { s.done(); }
+});
+
+test('PR #400: a run that finishes after the story was sent back (building, then blocked) is still picked up', async () => {
+  const s = setup('on');
+  try {
+    const head = s.commit('mobile/android/app/Alarm.kt', 'class Alarm\n');
+    await reviewed(s);
+    items.update(s.wp, s.storyId, { status: 'in-progress', note: 'sent back: wait for the GitHub run' }, 'owner');
+    items.update(s.wp, s.storyId, { status: 'blocked', blockedReason: 'waiting for the GitHub run', waitingOn: 'external', note: 'waiting for the run' }, 'owner');
+    s.gh.finishRun('success', { 'mobile-checks-result': result(head, true) });
+    await flow.syncHeads(s.wp);
+    assert.equal(pr(s).tests?.state, 'success');
+    assert.equal(pr(s).mobileCi?.state, 'success');
+    assert.equal(s.gh.status(head, 'workplace/tests')?.state, 'success');
+  } finally { s.done(); }
+});
+
+test('PR #400 as stored: a record left on the old head by an earlier trunk-only carry heals on the next sweep', async () => {
+  const s = setup('on');
+  try {
+    const head = s.commit('mobile/android/app/Alarm.kt', 'class Alarm\n');
+    await reviewed(s);
+    const old = pr(s).mobileCi!;
+    const head2 = trunkOnlyMove(s);
+    await flow.syncHeads(s.wp);
+    // What the live DB holds: tests carried to the new head, the run record still on the old one.
+    const w = rawGet(s.wp, s.storyId)!;
+    work.saveQuiet(s.wp, { ...w, pr: { ...w.pr!, mobileCi: old } });
+    items.update(s.wp, s.storyId, { status: 'in-progress', note: 'sent back' }, 'owner');
+    s.gh.finishRun('failure', { 'mobile-checks-result': result(head, false) });
+    await flow.syncHeads(s.wp);
+    assert.equal(pr(s).tests?.state, 'failure');
+    assert.equal(pr(s).tests?.sha, head2);
+    assert.equal(s.gh.count('dispatchWorkflow'), 1);
+  } finally { s.done(); }
+});
+
+test('a finished run whose result cannot be applied is said on the story once, never silent', async () => {
+  const s = setup('on');
+  try {
+    const head = s.commit('mobile/android/app/Alarm.kt', 'class Alarm\n');
+    await reviewed(s);
+    // The local pre-pr result is gone (worktree cleaned): the GitHub result has nothing to merge into.
+    rmSync(join(s.wt, '.workplace', 'pre-pr', `${head}.json`));
+    s.gh.finishRun('failure', { 'mobile-checks-result': result(head, false) });
+    await flow.syncHeads(s.wp);
+    await flow.syncHeads(s.wp);
+    const said = trail.comments(s.wp, s.storyId).filter(c => /mobile checks run .*finished .*could not/i.test(c.text));
+    assert.equal(said.length, 1, comments(s));
+    assert.match(said[0]!.text, /actions\/runs\/900/);
   } finally { s.done(); }
 });

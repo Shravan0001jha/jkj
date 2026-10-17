@@ -443,7 +443,13 @@ export interface PrRecord {
 }
 
 export interface MobileCiRecord {
+  /** The PR head this record answers for. */
   sha: string;
+  /**
+   * The commit the run actually checks, when the head has since moved by a trunk-only merge (the PR's
+   * diff unchanged, so its result carries over like the approvals; 18 Oct, PR #400). Absent: `sha`.
+   */
+  runSha?: string;
   /** `<item id>-<sha8>`: the run-name the workflow echoes, how the run is found again. */
   requestId: string;
   areas: string[];

@@ -271,6 +271,9 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
         const note = 'carried: trunk-only merge';
         record.tests = { ...record.tests, sha: ctx.head, at, summary: record.tests.summary.includes(note) ? record.tests.summary : `${record.tests.summary} (${note})` };
       }
+      // The mobile-checks run on the old head checks the same diff: it carries over too, and its result
+      // lands on this head (18 Oct, PR #400: left on the old head, the finished run was never picked up).
+      if (record.mobileCi && record.mobileCi.sha === before) record.mobileCi = carryMobileCi(record.mobileCi, ctx.head);
       record.extraReviewers = (record.extraReviewers ?? []).map(e => (e.approvedAt && e.sha === before ? { ...e, sha: ctx.head } : e));
     } else if (moved) {
       delete record.devApproval; delete record.qaApproval; delete record.tests; delete record.spendApprovedAt;
@@ -494,14 +497,18 @@ export async function settled(): Promise<void> { /* nothing runs in the backgrou
 async function recordTests(wp: Workplace, itemId: string, ctx: Ctx): Promise<void> {
   const sha = ctx.head;
   try {
-    const r = prePr.read(authorWorktree(wp, ctx.emp), sha);
-    const valid = r && r.sha === sha ? r : null;
+    // A head reached by a trunk-only merge while its mobile checks ran: the pre-pr.sh result those
+    // checks complete is the one of the commit they run on (PR #400).
+    const ci = rawGet(wp, itemId)?.pr?.mobileCi;
+    const localSha = ci && ci.sha === sha && ci.runSha ? ci.runSha : sha;
+    const r = prePr.read(authorWorktree(wp, ctx.emp), localSha);
+    const valid = r && r.sha === localSha ? r : null;
     // Only a full run counts (pre-pr.ts passes); a fast or partial pass stays pending.
     let tests: NonNullable<PrRecord['tests']> = !valid
-      ? { state: 'pending', sha, at: now(), summary: `Waiting for scripts/pre-pr.sh results on ${sha.slice(0, 7)}` }
+      ? { state: 'pending', sha, at: now(), summary: `Waiting for scripts/pre-pr.sh results on ${localSha.slice(0, 7)}` }
       : !valid.ok
         ? { state: 'failure', sha, at: now(), summary: prePr.describe(valid), details: prePr.failureDetails(valid).slice(-4000) }
-        : { state: prePr.passes(valid, sha) ? 'success' : 'pending', sha, at: now(), summary: prePr.describe(valid) };
+        : { state: prePr.passes(valid, localSha) ? 'success' : 'pending', sha, at: now(), summary: prePr.describe(valid) };
     let failureText = `scripts/pre-pr.sh failed on ${sha.slice(0, 8)} (${tests.summary}). Fix it on your branch, commit, run scripts/pre-pr.sh again, then call report_done.`;
     // Cloud migration (17 Oct): the mobile areas a Linux pre-pr.sh could not build run on GitHub.
     if (valid && tests.state === 'success' && prePr.deferredAreas(valid).length) {
@@ -543,12 +550,14 @@ const agoMs = (iso: string): number => Date.now() - Date.parse(iso);
  */
 async function mobileChecks(wp: Workplace, itemId: string, sha: string, local: prePr.PrePrResult): Promise<{ tests: NonNullable<PrRecord['tests']>; failureText?: string }> {
   const areas = prePr.deferredAreas(local);
-  const requestId = mobileRequestId(itemId, sha);
   const port = gitHubPort(wp);
   const pending = (summary: string): { tests: NonNullable<PrRecord['tests']> } => ({ tests: { state: 'pending', sha, at: now(), summary } });
   const save = (rec: MobileCiRecord): void => { savePr(wp, itemId, c => (c.pr && c.pr.headSha === sha ? { pr: { ...c.pr, mobileCi: rec } } : {})); };
   let rec = rawGet(wp, itemId)?.pr?.mobileCi;
   if (rec && rec.sha !== sha) rec = undefined;
+  // A run carried over a trunk-only head move is still found by its own request id, and checks its own commit.
+  const requestId = rec?.requestId ?? mobileRequestId(itemId, sha);
+  const runSha = rec?.runSha ?? sha;
 
   // Done before (a later re-read): the stored verdict stands.
   if (rec && (rec.state === 'success' || rec.state === 'failure')) {
@@ -557,6 +566,8 @@ async function mobileChecks(wp: Workplace, itemId: string, sha: string, local: p
   }
 
   const dispatch = async (attempts: number): Promise<{ tests: NonNullable<PrRecord['tests']> }> => {
+    // A new run is always for this head itself.
+    const requestId = mobileRequestId(itemId, sha);
     try {
       await port.dispatchWorkflow(MOBILE_WORKFLOW, { iris_ref: sha, areas: areas.join(','), request_id: requestId });
     } catch (err) {
@@ -598,14 +609,14 @@ async function mobileChecks(wp: Workplace, itemId: string, sha: string, local: p
       rmSync(dir, { recursive: true, force: true });
       await port.downloadArtifact(art.id, dir);
       const raw = JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8')) as prePr.GitHubChecksResult;
-      if (raw && raw.sha === sha && typeof raw.ok === 'boolean' && Array.isArray(raw.areas)) gh = raw;
+      if (raw && raw.sha === runSha && typeof raw.ok === 'boolean' && Array.isArray(raw.areas)) gh = raw;
     }
   } catch (err) {
     log.warn('github', `${itemId}: mobile checks result of run ${run.id}: ${errText(err)}`);
   }
   if (!gh) {
     save({ ...rec, state: 'failure', runId: run.id, runUrl: run.url });
-    return { tests: { state: 'error', sha, at: now(), summary: `mobile checks on GitHub ended ${run.conclusion ?? 'without a conclusion'} with no result for ${sha.slice(0, 7)}: ${run.url}`.slice(0, 300) } };
+    return { tests: { state: 'error', sha, at: now(), summary: `mobile checks on GitHub ended ${run.conclusion ?? 'without a conclusion'} with no result for ${runSha.slice(0, 7)}: ${run.url}`.slice(0, 300) } };
   }
   const merged = prePr.withGitHub(local, gh);
   save({ ...rec, state: merged.ok ? 'success' : 'failure', runId: run.id, runUrl: run.url });
@@ -615,6 +626,54 @@ async function mobileChecks(wp: Workplace, itemId: string, sha: string, local: p
     tests: { state: 'failure', sha, at: now(), summary: prePr.describe(merged), details: prePr.failureDetails(merged).slice(-4000) },
     failureText: `The mobile checks on GitHub failed on ${sha.slice(0, 8)} (${prePr.describe(merged)}): ${run.url}. Fix it on your branch, commit, run scripts/pre-pr.sh again, then call report_done.`,
   };
+}
+
+/** The record moved to a head reached from its own by a trunk-only merge: same run, same request id. */
+function carryMobileCi(rec: MobileCiRecord, head: string): MobileCiRecord {
+  return { ...rec, sha: head, runSha: rec.runSha ?? rec.sha };
+}
+
+const MOBILE_UNAPPLIED_PREFIX = 'github:mobile-ci-unapplied:';
+
+/**
+ * Follow the mobile-checks run of an open PR, whatever the story's status (18 Oct, PR #400: a story sent
+ * back to building, then blocked, while its run finished was never looked at again). Reads the PR's own
+ * head, not wherever the author's branch has gone since. A record an earlier trunk-only carry left on the
+ * old head is moved first. A run GitHub shows finished whose result still could not be applied is said
+ * on the story once per run, never left silent.
+ */
+async function followMobileCi(wp: Workplace, itemId: string): Promise<void> {
+  const w = rawGet(wp, itemId);
+  const pr = w?.pr;
+  if (!w || !pr || pr.merged || !pr.mobileCi) return;
+  const ctx = contextOf(wp, w);
+  if (typeof ctx === 'string') return;
+  const head = pr.headSha;
+  const rec = pr.mobileCi;
+  if (rec.sha !== head) {
+    const inFlight = rec.state === 'dispatched' || rec.state === 'running';
+    if (!inFlight || pr.tests?.sha !== head || pr.tests.state !== 'pending' || !trunkOnly(ctx.repo, ctx.base, rec.runSha ?? rec.sha, head)) return;
+    savePr(wp, itemId, c => (c.pr && c.pr.headSha === head && c.pr.mobileCi?.sha === rec.sha ? { pr: { ...c.pr, mobileCi: carryMobileCi(c.pr.mobileCi, head) } } : {}));
+    log.info('github', `${itemId}: mobile checks run ${rec.requestId} carried from ${rec.sha.slice(0, 8)} to ${head.slice(0, 8)} (trunk-only merge)`);
+  }
+  if (!testsStale(pr)) return;
+  await recordTests(wp, itemId, { ...ctx, head });
+
+  const after = rawGet(wp, itemId)?.pr?.mobileCi;
+  if (!after || after.sha !== head || (after.state !== 'dispatched' && after.state !== 'running')) return;
+  let run;
+  try { run = await gitHubPort(wp).findWorkflowRun(MOBILE_WORKFLOW, after.requestId); } catch { return; }
+  if (!run || run.status !== 'completed') return;
+  const key = MOBILE_UNAPPLIED_PREFIX + itemId;
+  if (getSetting(wp, key) === String(run.id)) return;
+  putSetting(wp, key, String(run.id));
+  const tests = rawGet(wp, itemId)?.pr?.tests;
+  const why = tests && tests.sha === head ? tests.summary : `no workplace/tests record for ${head.slice(0, 8)}`;
+  log.warn('github', `${itemId}: mobile checks run ${run.id} finished (${run.conclusion ?? 'no conclusion'}) but its result could not be applied: ${why}`);
+  trail.comment(wp, itemId, {
+    by: 'workplace',
+    text: `The mobile checks run on GitHub finished (${run.conclusion ?? 'no conclusion'}) but the Workplace could not apply its result to ${head.slice(0, 8)}: ${why}. workplace/tests stays pending. Run: ${run.url}. Run scripts/pre-pr.sh again on this commit and call report_done, or ask the COO.`,
+  });
 }
 
 /* ---------- statuses ---------- */
@@ -1146,8 +1205,11 @@ export async function syncHeads(wp: Workplace): Promise<string[]> {
     }
     await catchUp(wp, w, ctx);
     // Mobile checks running on GitHub for this head (cloud migration, 17 Oct): follow the run.
-    if (w.pr.mobileCi?.sha === ctx.head && testsStale(w.pr)) await recordTests(wp, w.id, ctx);
+    await followMobileCi(wp, w.id);
   }
+  // A run is followed whatever the story's status (PR #400: sent back to building, then blocked).
+  const others = (wp.db.prepare("select id from work where status not in ('in-review') and json like '%\"mobileCi\"%'").all() as { id: string }[]);
+  for (const { id } of others) await followMobileCi(wp, id);
   return moved;
 }
 
