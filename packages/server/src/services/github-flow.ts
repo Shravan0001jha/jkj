@@ -425,15 +425,29 @@ const COMMENT_LINE = /^(\/\/|#|\*|\/\*|<!--)/;
 /** Docs never call for a code review from another team. */
 const notCode = (file: string): boolean => /\.md$/i.test(file) || file.startsWith('docs/');
 
-/** The files a branch changes against the trunk (since they diverged). */
+/**
+ * The merge-base of the head with the trunk, taking the nearest of the local and origin trunk refs: a stale
+ * local trunk would otherwise put everything a catch-up merge brought in on the author's diff (19 Oct).
+ */
+export function trunkMergeBase(repo: string, base: string, head: string): string {
+  const bases: string[] = [];
+  for (const r of [`refs/remotes/origin/${base}`, `refs/heads/${base}`]) {
+    try { bases.push(git(repo, ['merge-base', r, head]).trim()); } catch { /* ref missing */ }
+  }
+  if (!bases.length) return base;
+  // The nearest one is the one every other is an ancestor of.
+  return bases.find(b => bases.every(o => o === b || isAncestor(repo, o, b))) ?? bases[0]!;
+}
+
+/** The files a branch changes against the trunk (since they diverged): the diff from the merge-base only. */
 export function changedFiles(repo: string, base: string, head: string): string[] {
-  return git(repo, ['diff', '--name-only', `${base}...${head}`]).split('\n').map(f => f.trim()).filter(Boolean);
+  return git(repo, ['diff', '--name-only', `${trunkMergeBase(repo, base, head)}..${head}`]).split('\n').map(f => f.trim()).filter(Boolean);
 }
 
 /** A file's change counts as code when at least one added or removed line (whitespace and blank lines aside) is not a comment. */
 export function realCodeChange(repo: string, base: string, head: string, file: string): boolean {
   if (notCode(file)) return false;
-  const diff = git(repo, ['diff', '-w', '--ignore-blank-lines', `${base}...${head}`, '--', file]);
+  const diff = git(repo, ['diff', '-w', '--ignore-blank-lines', `${trunkMergeBase(repo, base, head)}..${head}`, '--', file]);
   return diff.split('\n').some(l => (l.startsWith('+') || l.startsWith('-')) && !l.startsWith('+++') && !l.startsWith('---') && !!l.slice(1).trim() && !COMMENT_LINE.test(l.slice(1).trim()));
 }
 
@@ -444,6 +458,8 @@ function codeReviewersFor(wp: Workplace, ctx: Ctx): ExtraReviewer[] {
   const repoId = wp.org.repos.find(r => r.root === ctx.repo)?.id ?? 'iris';
   const byLead = new Map<string, string[]>();
   let files: string[];
+  // A fresh origin trunk first, so the merge-base is the real one (best effort: offline keeps the last fetch).
+  try { execFileSync('git', ['-C', ctx.repo, 'fetch', '--quiet', 'origin', ctx.base], { stdio: 'ignore', timeout: 30_000 }); } catch { /* keep what we have */ }
   try { files = changedFiles(ctx.repo, ctx.base, ctx.head); } catch { return []; }
   for (const f of files) {
     if (notCode(f)) continue;
@@ -457,6 +473,21 @@ function codeReviewersFor(wp: Workplace, ctx: Ctx): ExtraReviewer[] {
     byLead.set(lead, [...(byLead.get(lead) ?? []), f]);
   }
   return [...byLead].map(([id, fs]) => ({ id, files: fs }));
+}
+
+/**
+ * Re-evaluate the extra reviewers on a head that did not move (19 Oct: as_mv6varf8ftb1v kept two reviewers
+ * computed against a stale trunk): the code reviewers drop or gain with the real diff; approvals and
+ * reviewers the author asked for stay.
+ */
+function refreshExtraReviewers(wp: Workplace, w: WorkItem, ctx: Ctx): void {
+  const prev = w.pr?.extraReviewers ?? [];
+  const fresh = codeReviewersFor(wp, ctx);
+  const next: ExtraReviewer[] = fresh.map(c => { const p = prev.find(e => e.id === c.id); return p ? { ...p, files: c.files } : c; });
+  for (const e of prev) if (e.requested && !next.some(x => x.id === e.id)) next.push(e);
+  if (next.length === prev.length && next.every(n => prev.some(p => p.id === n.id && p.files.join() === n.files.join()))) return;
+  savePr(wp, w.id, cur => { const pr = { ...cur.pr! }; if (next.length) pr.extraReviewers = next; else delete pr.extraReviewers; return { pr }; });
+  trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'note', text: `Extra reviewers re-evaluated against the real diff: ${next.length ? next.map(e => nameOf(wp, e.id)).join(', ') : 'none'}.` });
 }
 
 /** The extra reviewers whose approval does not hold on this head and stay in review. */
@@ -1318,6 +1349,7 @@ export async function syncHeads(wp: Workplace): Promise<string[]> {
     // A PR closed without a merge is not caught up with the trunk: GitHub refuses update-branch on it, which
     // read as a conflict and sent the story back (18 Oct, as_mvdf2ivfmuhtz, PR #448 closed: twice).
     if (w.pr.closed) continue;
+    refreshExtraReviewers(wp, w, ctx);
     await catchUp(wp, w, ctx);
     // Mobile checks running on GitHub for this head (cloud migration, 17 Oct): follow the run.
     await followMobileCi(wp, w.id);
