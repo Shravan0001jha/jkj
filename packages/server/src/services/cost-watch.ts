@@ -3,6 +3,7 @@ import type { Workplace } from './workplace.js';
 import * as inbox from './inbox.js';
 import { istParts } from './rhythm.js';
 import { underTest } from './test-guard.js';
+import * as spendCaps from './spend-caps.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -156,6 +157,33 @@ export async function maybeRun(wp: Workplace, nowMs = Date.now(), given?: GitHub
     return r;
   } catch (err) {
     log.warn('cost-watch', `GitHub billing not read: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+}
+
+/** How often today's (partial) GitHub bill is read for the daily cap. */
+export const LIVE_EVERY_MS = 30 * 60_000;
+
+/**
+ * Today's GitHub bill so far (daily spend caps, owner 18 Oct), every LIVE_EVERY_MS from the rhythm timer,
+ * kept as `cost:github:live:<day>` (never `cost:github:<day>`, which check() treats as the final figure).
+ * The billing API lags by hours, so spend-caps.ts also estimates from the Workplace's own runs and takes
+ * the max. Returns the USD read, or null when it did not run or failed.
+ */
+export async function pollToday(wp: Workplace, nowMs = Date.now(), given?: GitHubBillingPort): Promise<number | null> {
+  const last = Number(getSetting(wp, 'cost-watch:live-attempt') ?? NaN);
+  if (Number.isFinite(last) && nowMs - last < LIVE_EVERY_MS && nowMs >= last) return null;
+  const p = given ?? currentPort();
+  if (!p) return null;
+  setSetting(wp, 'cost-watch:live-attempt', String(nowMs));
+  const day = istParts(nowMs).day;
+  try {
+    const v = await p.usageUsd(parts(day));
+    setSetting(wp, `cost:github:live:${day}`, String(v));
+    spendCaps.evaluate(wp, nowMs);
+    return v;
+  } catch (err) {
+    log.warn('cost-watch', `today's GitHub billing not read: ${err instanceof Error ? err.message : err}`);
     return null;
   }
 }

@@ -1,4 +1,5 @@
 import { BadRequest } from '../util/errors.js';
+import * as spendCaps from './spend-caps.js';
 import { execFileSync } from 'node:child_process';
 import { macHost, NO_MAC_REFUSAL } from './mac-host.js';
 import { createHash } from 'node:crypto';
@@ -164,6 +165,9 @@ function portsOf(wp: Workplace): EvidencePorts {
   return p as EvidencePorts;
 }
 
+/** Evidence runs on GitHub Actions (and so under the daily GitHub cap). */
+const onGitHub = (wp: Workplace): boolean => portsOf(wp).runner instanceof GitHubRunner;
+
 /** The ports a Workplace runs with (tests: which runner was chosen). */
 export const portsForTest = (wp: Workplace): EvidencePorts => portsOf(wp);
 
@@ -279,6 +283,10 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
   // Checked now, against the runner the run will use, not minutes later by the runner itself.
   const known = runnerFeatures(wp, ctx.repo, ctx.head);
   if (features.some(f => f !== 'all' && !known.includes(f))) return no(featureRefusal(known));
+
+  // The daily GitHub Actions cap (owner, 18 Oct): a run on GitHub is refused, not queued.
+  const capped = onGitHub(wp) ? spendCaps.githubBlock(wp) : null;
+  if (capped) return no(`${capped.message}. Call run_evidence again then; carry on with other work meanwhile.`);
 
   const plats = PHONES.filter(p => platforms.includes(p));
   // Refused before anything is queued: a feature none of these platforms runs would be dropped silently.
@@ -557,7 +565,10 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
   if (server.touched !== !!job.server) { if (server.touched) job.server = true; else delete job.server; persist(wp, job); }
 
   let outcome: Outcome | undefined;
-  if (server.scripts.length) {
+  // Queued before the daily GitHub cap was reached: it does not start the suite on GitHub now.
+  const capped = onGitHub(wp) ? spendCaps.githubBlock(wp) : null;
+  if (capped) outcome = errorOf(capped.message);
+  else if (server.scripts.length) {
     outcome = errorOf(`this story changes the deploy scripts (${server.scripts.join(', ')}), so its server code is not deployed to staging automatically; ask the COO to deploy it by hand`);
   }
   if (!outcome) try {
@@ -699,7 +710,7 @@ export function summaryText(rec: EvidenceRunRecord, title: string): string {
     ...(rec.server ? [evidenceShare.serverLine(rec.server)] : []),
     ...(rec.note && rec.state !== 'failure' ? [`Why: ${rec.note}.`] : []),
     ...(rec.failures.length ? ['Failures:', ...rec.failures.slice(0, 5).map(f => `- ${f}`), ...(rec.failures.length > 5 ? [`- … ${rec.failures.length - 5} more in the report`] : [])] : []),
-    `Next: ${NEXT[rec.state]}`,
+    `Next: ${rec.state === 'error' && rec.note?.startsWith(spendCaps.GITHUB_PAUSED) ? 'Nothing is wrong with your change: call run_evidence again once GitHub Actions resume (tomorrow, or when the owner lifts the cap).' : NEXT[rec.state]}`,
   ].join('\n');
 }
 

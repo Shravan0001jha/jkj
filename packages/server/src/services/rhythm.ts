@@ -6,6 +6,7 @@ import * as room from './room.js';
 import * as inbox from './inbox.js';
 import * as proposals from './proposals.js';
 import * as costWatch from './cost-watch.js';
+import * as spendCaps from './spend-caps.js';
 import { rowsJson } from './store.js';
 import { chiefOfStaffId, levelOf, nameOf, rawGet } from './v2-map.js';
 import { log } from '../util/logger.js';
@@ -124,6 +125,9 @@ export function maybeRun(wp: Workplace, nowMs = Date.now()): string[] {
   }
   // The GitHub cost watcher (LLD-rework §W6.3): from 09:00 IST, once a day; it keeps its own once-a-day mark.
   void costWatch.maybeRun(wp, nowMs).catch(err => log.warn('cost-watch', String(err)));
+  // The daily spend caps (owner, 18 Oct): today's GitHub bill every 30 min, both caps every minute.
+  void costWatch.pollToday(wp, nowMs).catch(err => log.warn('cost-watch', String(err)));
+  spendCaps.tick(wp, nowMs);
   if (ran.length) log.info('rhythm', `${day}: ${ran.join(', ')}`);
   return ran;
 }

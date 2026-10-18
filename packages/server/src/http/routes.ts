@@ -31,6 +31,7 @@ import * as areas from '../services/areas.js';
 import * as releasePosts from '../services/release-posts.js';
 import * as statusAnswers from '../services/status.js';
 import * as pace from '../services/pace.js';
+import * as spendCaps from '../services/spend-caps.js';
 import * as floor from '../services/floor.js';
 import * as dispatch from '../services/dispatch.js';
 import * as githubFlow from '../services/github-flow.js';
@@ -510,6 +511,16 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const body = await readJson(req);
       pace.setDisabled(wp, body['disabled'] === true);
       json(res, 200, pace.status(wp));
+    }),
+
+    // The daily spend caps (owner, 18 Oct): GitHub Actions $5, agents' work $10 (AWS excluded), per IST day.
+    // POST {"liftGithubCap":true} is the owner's lift of the GitHub cap for the rest of today.
+    r('GET', '/api/coo/spend-today', (req, res) => { requireLocal(req); json(res, 200, spendCaps.today(wp)); }),
+    r('POST', '/api/coo/spend-today', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      if (body['liftGithubCap'] === true) spendCaps.liftGithub(wp, 'owner (via the COO)');
+      json(res, 200, spendCaps.today(wp));
     }),
 
     // The GitHub flow (docs/LLD-github-flow.md §6): the mode, and the COO's merge. Loopback only, like the rest.

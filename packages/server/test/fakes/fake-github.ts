@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { GitHubPort, PullRequest, StatusState, WorkflowRun } from '../../src/services/github-port.js';
+import type { GitHubPort, PullRequest, StatusState, WorkflowJob, WorkflowRun } from '../../src/services/github-port.js';
 
 /**
  * GitHub, faked with a local bare repository as the remote: pushes, merges, branch deletes and the
@@ -11,7 +11,7 @@ import type { GitHubPort, PullRequest, StatusState, WorkflowRun } from '../../sr
  * way an outage or a revoked token would.
  */
 
-export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly' | 'updateBranch' | 'fetchBranch' | 'dispatchWorkflow' | 'findWorkflowRun' | 'listArtifacts' | 'downloadArtifact';
+export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly' | 'updateBranch' | 'fetchBranch' | 'dispatchWorkflow' | 'findWorkflowRun' | 'listArtifacts' | 'downloadArtifact' | 'runJobs';
 
 /** A faked GitHub Actions run: what a dispatch started, and the files its artifacts hold. */
 export interface FakeRun { id: number; workflow: string; requestId: string; inputs: Record<string, string>; status: string; conclusion: string | null; artifacts: Record<string, Record<string, string>> }
@@ -31,6 +31,8 @@ export class FakeGitHub implements GitHubPort {
   readonly runs: FakeRun[] = [];
   /** When false, a dispatch starts nothing GitHub shows yet (the run has not appeared). */
   runsAppear = true;
+  /** Run id → its jobs, for the Actions-minutes estimate (empty unless a test sets them). */
+  readonly jobs: Record<number, WorkflowJob[]> = {};
 
   constructor(trunkRepo: string) {
     this.bare = mkdtempSync(join(tmpdir(), 'iris-fake-gh-'));
@@ -166,6 +168,11 @@ export class FakeGitHub implements GitHubPort {
     this.enter('findWorkflowRun', workflow, requestId);
     const r = [...this.runs].reverse().find(x => x.workflow === workflow && x.requestId === requestId);
     return r ? { id: r.id, url: `https://github.com/shravan0001jha-iris-hq/iris-e2e/actions/runs/${r.id}`, status: r.status, conclusion: r.conclusion } : null;
+  }
+
+  async runJobs(runId: number): Promise<WorkflowJob[]> {
+    this.enter('runJobs', runId);
+    return this.jobs[runId] ?? [];
   }
 
   async listArtifacts(runId: number): Promise<{ id: number; name: string }[]> {

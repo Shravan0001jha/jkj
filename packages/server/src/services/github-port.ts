@@ -29,6 +29,9 @@ export interface PullRequest {
 /** A GitHub Actions run of a workflow in the workflow repo (iris-e2e). */
 export interface WorkflowRun { id: number; url: string; status: string; conclusion: string | null }
 
+/** One job of a run, for the Actions-minutes estimate (daily spend caps, 18 Oct): its runner labels and times. */
+export interface WorkflowJob { labels: string[]; startedAt: string | null; completedAt: string | null }
+
 export interface GitHubPort {
   /** Push `refs/heads/<branch>` of `repoDir` to the same name on GitHub. Never forced. */
   push(repoDir: string, branch: string): Promise<void>;
@@ -57,6 +60,8 @@ export interface GitHubPort {
   dispatchWorkflow(workflow: string, inputs: Record<string, string>): Promise<void>;
   /** The run a dispatch started, found by the request id its run-name carries; null while it has not appeared. */
   findWorkflowRun(workflow: string, requestId: string): Promise<WorkflowRun | null>;
+  /** A run's jobs (runner labels, start and end), to price its minutes. Optional: a port without it is not estimated. */
+  runJobs?(runId: number): Promise<WorkflowJob[]>;
   /** A run's unexpired artifacts. */
   listArtifacts(runId: number): Promise<{ id: number; name: string }[]>;
   /** Download an artifact's zip and unpack it into `destDir` (created). */
@@ -241,6 +246,17 @@ export class RealGitHub implements GitHubPort {
       if (title.split(/\s+/).includes(requestId)) return { id: r.id, url: r.html_url, status: r.status ?? 'queued', conclusion: r.conclusion ?? null };
     }
     return null;
+  }
+
+  async runJobs(runId: number): Promise<WorkflowJob[]> {
+    const out: WorkflowJob[] = [];
+    for (let page = 1; page <= 5; page++) {
+      const data = await this.ok(this.o.pushApp, 'GET', `${this.workflowPath}/actions/runs/${runId}/jobs?filter=all&per_page=100&page=${page}`) as { jobs?: unknown[]; total_count?: number };
+      const jobs = (data?.jobs ?? []).map(j => j as { labels?: string[]; started_at?: string | null; completed_at?: string | null });
+      for (const j of jobs) out.push({ labels: j.labels ?? [], startedAt: j.started_at ?? null, completedAt: j.completed_at ?? null });
+      if (jobs.length < 100) break;
+    }
+    return out;
   }
 
   async listArtifacts(runId: number): Promise<{ id: number; name: string }[]> {

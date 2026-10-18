@@ -103,7 +103,16 @@ export function record(wp: Workplace, s: Spend): SpendEntry {
     .run(at, dayOf(at), entry.employeeId, entry.sessionId, '', typeof s.detail?.['usd'] === 'number' ? s.detail['usd'] : 0, entry.inr, entry.tag ?? null, entry.source, entry.basis, entry.what, s.detail ? JSON.stringify(s.detail) : null);
   const summary = REAL.includes(s.source) ? check(wp, dayOf(at)) : summary_(wp, dayOf(at));
   wp.emit({ type: 'spend.updated', summary });
+  for (const fn of recordListeners) { try { fn(wp, s.source); } catch (err) { log.warn('spend', `record listener: ${err instanceof Error ? err.message : err}`); } }
   return entry;
+}
+
+type RecordListener = (wp: Workplace, source: SpendSource) => void;
+const recordListeners = new Set<RecordListener>();
+/** Called after every ledger row (the daily spend caps, spend-caps.ts, check right away). */
+export function onRecord(fn: RecordListener): () => void {
+  recordListeners.add(fn);
+  return () => void recordListeners.delete(fn);
 }
 
 /** The day's actual from a provider replaces that day's estimates for the same source in the total. */

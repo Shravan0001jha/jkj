@@ -18,6 +18,8 @@ import { now } from './store.js';
 import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { branchFor, worktreePath } from './worktrees.js';
 import * as prePr from './pre-pr.js';
+import * as spendCaps from './spend-caps.js';
+import { dayOf } from './spend.js';
 import { GITHUB_MODES, githubMode, holds, canApproveAsDeveloper, isCto, isQa, qaReviewer, writeGithubMode } from './review-policy.js';
 import { leadOfCharter, teamMembers, teamOf } from './org.js';
 import { resolve as resolveOwner } from './ownership.js';
@@ -57,6 +59,9 @@ const ports = new WeakMap<Workplace, GitHubPort>();
 /** Tests (and the real-app trial) hand the flow their own GitHub. */
 export function useGitHub(wp: Workplace, port: GitHubPort): void { ports.set(wp, port); }
 
+const cappedPorts = new WeakMap<GitHubPort, GitHubPort>();
+
+/** The Workplace's GitHub, with the daily GitHub Actions cap applied (spend-caps.ts, owner 18 Oct). */
 export function gitHubPort(wp: Workplace): GitHubPort {
   let port = ports.get(wp);
   if (!port) {
@@ -64,7 +69,9 @@ export function gitHubPort(wp: Workplace): GitHubPort {
     port = new RealGitHub({ org: g.org, repo: g.repo, tokenScript: g.tokenScript, python: existsSync(g.python) ? g.python : 'python3', pushApp: g.pushApp, reviewApp: g.reviewApp, workflowRepo: g.workflowRepo, workflowRef: g.workflowRef });
     ports.set(wp, port);
   }
-  return port;
+  let c = cappedPorts.get(port);
+  if (!c) { c = spendCaps.capped(wp, port); cappedPorts.set(port, c); }
+  return c;
 }
 
 /* ---------- the mode and the fallback ---------- */
@@ -565,12 +572,27 @@ async function mobileChecks(wp: Workplace, itemId: string, sha: string, local: p
     if (prev && prev.sha === sha && prev.state !== 'pending') return { tests: prev };
   }
 
+  // Kept as a refused dispatch (state error) so the sweep keeps following it, retried on every pass while capped.
+  const capped = (message: string, attempts: number): { tests: NonNullable<PrRecord['tests']> } => {
+    save({ sha, requestId: mobileRequestId(itemId, sha), areas, state: 'error', attemptAt: now(), attempts, lastError: message });
+    const key = `spend-cap:told:${itemId}:${dayOf()}`;
+    if (!getSetting(wp, key)) {
+      putSetting(wp, key, now());
+      trail.comment(wp, itemId, { by: 'workplace', text: `Mobile checks (${areas.join(', ')}) for ${sha.slice(0, 8)} not started: ${message}. workplace/tests stays pending, and they start by themselves once it lifts.` });
+    }
+    return pending(`${message} (mobile checks ${areas.join(', ')} waiting)`);
+  };
   const dispatch = async (attempts: number): Promise<{ tests: NonNullable<PrRecord['tests']> }> => {
     // A new run is always for this head itself.
     const requestId = mobileRequestId(itemId, sha);
+    // The daily GitHub cap (owner, 18 Oct): no dispatch; the tests stay pending (never failed) and the
+    // story hears why once a day. The next sweep dispatches once the cap lifts.
+    const blocked = spendCaps.githubBlock(wp);
+    if (blocked) return capped(blocked.message, attempts - 1);
     try {
       await port.dispatchWorkflow(MOBILE_WORKFLOW, { iris_ref: sha, areas: areas.join(','), request_id: requestId });
     } catch (err) {
+      if (err instanceof spendCaps.GitHubCapError) return capped(err.message, attempts - 1);
       const why = errText(err);
       recordFailure(wp, 'dispatch mobile checks', itemId, Date.now(), why);
       save({ sha, requestId, areas, state: 'error', attemptAt: now(), attempts, lastError: why });
@@ -583,6 +605,8 @@ async function mobileChecks(wp: Workplace, itemId: string, sha: string, local: p
 
   if (!rec) return dispatch(1);
   if (rec.state === 'error') {
+    // Waiting on the daily GitHub cap is not a failed attempt: try again on every pass, at no cost.
+    if (rec.lastError?.startsWith(spendCaps.GITHUB_PAUSED)) return dispatch(rec.attempts + 1);
     return agoMs(rec.attemptAt) >= mobileCiTiming.retryMs ? dispatch(rec.attempts + 1) : pending(`mobile checks (${areas.join(', ')}) could not start on GitHub (${(rec.lastError ?? '').slice(0, 60)}); retrying`);
   }
 
