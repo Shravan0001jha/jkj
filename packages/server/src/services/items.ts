@@ -479,15 +479,14 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
       const n = unlandedPatches(wp, next);
       if (n > 0) throw new BadRequest(`Not done yet: ${n} change${n === 1 ? '' : 's'} on this story's branch never reached the trunk. Land them through a pull request (report_done), or show they are already on the trunk, before closing.`);
     }
-    if (cosOverBoard(wp, by, w) && level !== 'epic') {
-      // The Chief of Staff closes any story but the COO's (owner, 18 Oct); a PR still needs its two approvals (doneProblem above).
-    } else if (from === 'backlog' || from === 'ready') {
+    if (from === 'backlog' || from === 'ready') {
       if (by !== 'owner') throw new BadRequest('Closing work that never started is the owner\'s call.');
     } else if (level === 'epic') {
       if (by !== 'owner' && by !== w.ownerId) throw new BadRequest('An epic is closed by the owner or its owner.');
     } else if (from === 'in-progress') {
       if (by !== 'owner') throw new BadRequest('Done goes through review: name a reviewer and move it to in-review.');
-    } else if (by !== 'owner' && by !== next.reviewerId) {
+    } else if (by !== 'owner' && by !== next.reviewerId && !cosOverBoard(wp, by, w)) {
+      // (The Chief of Staff closes a reviewed story whoever reviews it, the COO's excepted: owner, 18 Oct; a PR still needs its approvals.)
       throw new BadRequest('Only the reviewer (or the owner) marks it done; an assignee never verifies its own work.');
     }
     if (by === next.employeeId && by !== 'owner') throw new BadRequest('An assignee never marks its own work done.');

@@ -301,6 +301,8 @@ test('the Chief of Staff changes, parks from review and closes any story but the
     const parked = items.update(s.wp, theirs.id, { status: 'parked', reason: 'waiting for the next batch', resumeWhen: 'the next trunk batch is cut' }, 'asha');
     assert.equal(parked.status, 'parked', 'in-review to parked in one move');
     items.update(s.wp, theirs.id, { status: 'ready', reason: 'batch is cut, back on the board' }, 'asha');
+    items.update(s.wp, theirs.id, { status: 'in-progress', reason: 'back in work for the test' }, 'asha');
+    items.update(s.wp, theirs.id, { status: 'in-review', reviewerId: 'nikhil', reason: 'review by someone else' }, 'asha');
     items.update(s.wp, theirs.id, { status: 'done', reason: 'closing a no-code story of the CTO' }, 'asha');
     assert.equal(rawGet(s.wp, theirs.id)!.status, 'done');
     // The COO's own story stays out of her reach.
