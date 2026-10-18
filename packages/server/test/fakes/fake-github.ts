@@ -11,7 +11,7 @@ import type { GitHubPort, PullRequest, StatusState, WorkflowJob, WorkflowRun } f
  * way an outage or a revoked token would.
  */
 
-export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly' | 'updateBranch' | 'fetchBranch' | 'dispatchWorkflow' | 'findWorkflowRun' | 'listArtifacts' | 'downloadArtifact' | 'runJobs' | 'closePr' | 'fetchRemotes' | 'pushRef' | 'forcePush';
+export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly' | 'updateBranch' | 'behindBy' | 'fetchBranch' | 'dispatchWorkflow' | 'findWorkflowRun' | 'listArtifacts' | 'downloadArtifact' | 'runJobs' | 'closePr' | 'fetchRemotes' | 'pushRef' | 'forcePush';
 
 /** A faked GitHub Actions run: what a dispatch started, and the files its artifacts hold. */
 export interface FakeRun { id: number; workflow: string; requestId: string; inputs: Record<string, string>; status: string; conclusion: string | null; artifacts: Record<string, Record<string, string>> }
@@ -143,6 +143,11 @@ export class FakeGitHub implements GitHubPort {
     } finally {
       rmSync(work, { recursive: true, force: true });
     }
+  }
+
+  async behindBy(base: string, head: string): Promise<number> {
+    this.enter('behindBy', base, head);
+    return Number(execFileSync('git', ['-C', this.bare, 'rev-list', '--count', `refs/heads/${head}..refs/heads/${base}`], { encoding: 'utf8' }).trim());
   }
 
   /** GitHub's update-branch: a real merge of the base into the head branch in the bare repo; a conflict is GitHub's 422. */

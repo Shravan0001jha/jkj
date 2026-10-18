@@ -1329,6 +1329,17 @@ export async function syncHeads(wp: Workplace): Promise<string[]> {
 }
 
 const UPDATE_BRANCH_PREFIX = 'github:update-branch:';
+const UPDATE_BRANCH_AT_PREFIX = 'github:update-branch-at:';
+/** At most one automatic catch-up per branch per this long (19 Oct: ~10 per story in 50 minutes starved pre-pr). */
+export const CATCH_UP_MIN_GAP_MS = 30 * 60_000;
+
+/** Files changed on `ref` since its merge-base with the trunk. */
+function changedSinceBase(repo: string, trunk: string, ref: string): Set<string> {
+  try {
+    const mb = git(repo, ['merge-base', trunk, ref]).trim();
+    return new Set(git(repo, ['diff', '--name-only', mb, ref]).split('\n').map(x => x.trim()).filter(Boolean));
+  } catch { return new Set(); }
+}
 
 /**
  * The trunk moved past the PR's base: ask GitHub to merge the trunk into the branch (once per trunk
@@ -1341,8 +1352,19 @@ async function catchUp(wp: Workplace, w: WorkItem, ctx: Ctx): Promise<void> {
   if (!trunk || isAncestor(ctx.repo, trunk, ctx.head)) return;
   const key = UPDATE_BRANCH_PREFIX + w.id;
   if (getSetting(wp, key) === `${ctx.head}|${trunk}`) return;
-  putSetting(wp, key, `${ctx.head}|${trunk}`);
+  const atKey = UPDATE_BRANCH_AT_PREFIX + w.id;
+  const last = Number(getSetting(wp, atKey) ?? 0);
+  if (last && Date.now() - last < CATCH_UP_MIN_GAP_MS) return;
+  // pre-pr is running on this head: a catch-up would move the head and reset it, unless the trunk change touches
+  // files this branch touches (then the sooner the conflict shows, the better).
+  const t = pr.tests;
+  if (t && t.state === 'pending' && t.sha === ctx.head) {
+    const mine = changedSinceBase(ctx.repo, trunk, ctx.head);
+    const theirs = changedSinceBase(ctx.repo, ctx.head, trunk);
+    if (![...theirs].some(f => mine.has(f))) return;
+  }
   const port = gitHubPort(wp);
+  putSetting(wp, key, `${ctx.head}|${trunk}`);
   try {
     const gh = await port.getPr(pr.number);
     if (gh.state === 'closed' && !gh.merged) {
@@ -1350,6 +1372,10 @@ async function catchUp(wp: Workplace, w: WorkItem, ctx: Ctx): Promise<void> {
       return;
     }
   } catch { /* GitHub unreachable: the update below reports it */ }
+  // GitHub's own view: when the branch is not behind there, local trunk refs (which may hold commits GitHub
+  // never saw) must not trigger an update, which would only mint a fresh head each time.
+  try { if (await port.behindBy(pr.base, pr.branch) === 0) return; } catch { /* unknown: carry on */ }
+  putSetting(wp, atKey, String(Date.now()));
   let res: { updated: boolean; conflict?: boolean };
   try { res = await port.updateBranch(pr.number, pr.headSha); } catch (err) {
     recordFailure(wp, 'update branch', w.id, Date.now(), errText(err));

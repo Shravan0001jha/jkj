@@ -581,6 +581,53 @@ test('22b: when the trunk advances, the sweep brings the PR up to date through G
   } finally { await s.done(); }
 });
 
+function trunkCommit(s: Setup, file: string, push: boolean): void {
+  writeFileSync(join(s.trunkRepo, 'services', 'agent-svc', file), 'y = 2\n');
+  git(s.trunkRepo, ['add', '-A']);
+  git(s.trunkRepo, ['-c', 'user.email=t@iris.local', '-c', 'user.name=t', 'commit', '-q', '-m', `trunk ${file}`]);
+  if (push) git(s.trunkRepo, ['push', '-q', s.gh.bare, TRUNK]);
+}
+
+test('22d: no catch-up when GitHub says the branch is not behind (local trunk has commits GitHub never saw)', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    trunkCommit(s, 'local_only.py', false);
+    await flow.syncHeads(s.wp);
+    assert.equal(s.gh.count('updateBranch'), 0, 'behind_by is 0 on GitHub: nothing to merge');
+  } finally { await s.done(); }
+});
+
+test('22e: no catch-up while workplace/tests is pending for the current head and the trunk change is elsewhere', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    flow.savePr(s.wp, s.storyId, c => ({ pr: { ...c.pr!, tests: { state: 'pending', sha: c.pr!.headSha, at: new Date().toISOString(), summary: 'waiting' } } }));
+    trunkCommit(s, 'other.py', true);
+    await flow.syncHeads(s.wp);
+    assert.equal(s.gh.count('updateBranch'), 0, 'pre-pr is still running: do not reset it');
+    flow.savePr(s.wp, s.storyId, c => ({ pr: { ...c.pr!, tests: { state: 'success', sha: c.pr!.headSha, at: new Date().toISOString(), summary: 'ok' } } }));
+    await flow.syncHeads(s.wp);
+    assert.equal(s.gh.count('updateBranch'), 1, 'once tests are recorded the catch-up goes ahead');
+  } finally { await s.done(); }
+});
+
+test('22f: at most one catch-up per branch per 30 minutes', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    trunkCommit(s, 'a.py', true);
+    await flow.syncHeads(s.wp);
+    assert.equal(s.gh.count('updateBranch'), 1);
+    trunkCommit(s, 'b.py', true);
+    await flow.syncHeads(s.wp);
+    assert.equal(s.gh.count('updateBranch'), 1, 'throttled: the trunk moved again within the window');
+  } finally { await s.done(); }
+});
+
 /** The trunk moves on and GitHub's update-branch merges it into the story's branch; the local ref follows. */
 async function trunkMergedOnGitHub(s: Setup): Promise<string> {
   writeFileSync(join(s.trunkRepo, 'services', 'agent-svc', 'other.py'), 'y = 2\n');

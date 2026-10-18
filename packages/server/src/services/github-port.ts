@@ -59,6 +59,8 @@ export interface GitHubPort {
    * still `expectedHeadSha`. `conflict` when GitHub refuses with 422 (a conflict, or the head moved).
    */
   updateBranch(n: number, expectedHeadSha: string): Promise<{ updated: boolean; conflict?: boolean }>;
+  /** How many trunk commits `head` lacks on GitHub (compare `base...head`, behind_by). */
+  behindBy(base: string, head: string): Promise<number>;
   /** Fast-forward the local `refs/heads/<branch>` of `repoDir` to GitHub's (no checkout touched); throws when it cannot. */
   fetchBranch(repoDir: string, branch: string): Promise<void>;
   /**
@@ -248,6 +250,11 @@ export class RealGitHub implements GitHubPort {
 
   async fetchBranch(repoDir: string, branch: string): Promise<void> {
     await this.git(repoDir, url => ['fetch', '--quiet', url, `refs/heads/${branch}:refs/heads/${branch}`]);
+  }
+
+  async behindBy(base: string, head: string): Promise<number> {
+    const data = await this.ok(this.o.pushApp, 'GET', `${this.repoPath}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=1`) as { behind_by?: number };
+    return typeof data?.behind_by === 'number' ? data.behind_by : 1;
   }
 
   async updateBranch(n: number, expectedHeadSha: string): Promise<{ updated: boolean; conflict?: boolean }> {
