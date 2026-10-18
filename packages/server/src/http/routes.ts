@@ -510,7 +510,12 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     r('POST', '/api/coo/pace', async (req, res) => {
       requireLocal(req);
       const body = await readJson(req);
-      pace.setDisabled(wp, body['disabled'] === true);
+      if (body['capToday'] !== undefined) {
+        // Raise today's cap only (never lowers; gone at the next pace day).
+        const cap = Number(body['capToday']);
+        try { pace.setCapOverride(wp, cap, 'coo (for the owner)'); } catch (err) { throw new BadRequest(err instanceof Error ? err.message : String(err)); }
+      }
+      if (body['disabled'] !== undefined || body['capToday'] === undefined) pace.setDisabled(wp, body['disabled'] === true);
       json(res, 200, pace.status(wp));
     }),
 

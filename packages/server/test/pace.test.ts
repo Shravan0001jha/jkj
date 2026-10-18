@@ -102,3 +102,38 @@ test('owner switch: pacing off lifts a hold at once and later readings never re-
     tmp.cleanup();
   }
 });
+
+/** Per-pace-day cap override (owner, 18 Oct): raises today's cap only, expires with the pace day, never lowers. */
+test('a cap override raises today\'s cap, lifts a hold below it, expires at the next pace day, never lowers', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const nowMs = Date.now();
+    const resetsAtMs = nowMs - 3.5 * DAY + 7 * DAY;            // day 4: allowance 56%
+    const r = { utilization: 0.58, resetsAtMs };
+    const v = pace.apply(wp, r, nowMs);
+    assert.equal(v.over, true);
+    assert.ok(pace.holdUntil(wp, nowMs), 'held at 58% of 56%');
+
+    assert.throws(() => pace.setCapOverride(wp, 0.50, 'coo', nowMs), /lower|allowance/i, 'cannot lower');
+    assert.equal(pace.status(wp, nowMs).capOverride, null);
+
+    pace.setCapOverride(wp, 0.60, 'coo', nowMs);
+    assert.equal(pace.holdUntil(wp, nowMs), null, 'the hold below the new cap is lifted at once');
+    const st = pace.status(wp, nowMs);
+    assert.equal(st.capToday, 0.60);
+    assert.deepEqual(st.capOverride, { value: 0.60, paceDay: 4 });
+    // A later reading the same day uses the raised cap: 59% is fine, 60% holds.
+    assert.equal(pace.apply(wp, { ...r, utilization: 0.59 }, nowMs + 60_000).over, false);
+    assert.equal(pace.holdUntil(wp, nowMs + 60_000), null);
+    assert.equal(pace.apply(wp, { ...r, utilization: 0.60 }, nowMs + 120_000).over, true);
+    assert.ok(pace.holdUntil(wp, nowMs + 120_000));
+
+    // Next pace day (day 5, allowance 70%): the override is gone and the plain allowance applies.
+    const next = v.nextDayMs + 60_000;
+    const v5 = pace.apply(wp, { ...r, utilization: 0.65 }, next);
+    assert.equal(v5.allowance, 0.70);
+    const st5 = pace.status(wp, next);
+    assert.equal(st5.capOverride, null);
+    assert.equal(st5.capToday, 0.70);
+  } finally { tmp.cleanup(); }
+});

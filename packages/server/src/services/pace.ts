@@ -34,6 +34,7 @@ const DAY_MS = 86_400_000;
 const KEY = 'pace:until';
 const BYPASS = 'pace:bypass';
 const PROBE = 'pace:probe';
+const CAP_OVERRIDE = 'pace:cap-override';
 /** Consecutive failed probes (5 min apart) before the COO is told pacing is blind. */
 export const PROBE_FAIL_NOTIFY = 3;
 const RENOTIFY_EVERY = 12;
@@ -61,6 +62,44 @@ export function evaluate(r: Reading, nowMs: number, perDay = PER_DAY): Verdict {
   return { dayIndex, allowance, over: r.utilization >= allowance, nextDayMs: startMs + dayIndex * DAY_MS };
 }
 
+interface CapOverride { value: number; paceDay: number; endsAtMs: number; by: string }
+
+/** Today's cap override (owner raised it for this pace day only); null once the pace day has changed. */
+function capOverride(wp: Workplace, nowMs: number): CapOverride | null {
+  const raw = getSetting(wp, CAP_OVERRIDE);
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw) as CapOverride;
+    if (Number.isFinite(o.value) && Number.isFinite(o.endsAtMs) && nowMs < o.endsAtMs) return o;
+  } catch { /* fall through: unreadable is expired */ }
+  delSetting(wp, CAP_OVERRIDE);
+  return null;
+}
+
+/** The verdict with today's override applied (it only ever raises the allowance). */
+function effective(wp: Workplace, v: Verdict, utilization: number, nowMs: number): Verdict {
+  const o = capOverride(wp, nowMs);
+  if (!o || o.value <= v.allowance) return v;
+  return { ...v, allowance: o.value, over: utilization >= o.value };
+}
+
+/**
+ * Raise the cap for the current pace day only (owner, 18 Oct: "60% instead of the usual 56%"). Never
+ * lowers; expires by itself when the pace day changes. A hold that is now under the cap lifts at once.
+ */
+export function setCapOverride(wp: Workplace, value: number, by: string, nowMs = Date.now()): Verdict {
+  let last: Reading | null = null;
+  try { last = JSON.parse(getSetting(wp, 'pace:last') ?? 'null') as Reading | null; } catch { /* none */ }
+  if (!last || !Number.isFinite(last.resetsAtMs)) throw new Error('No usage reading yet: cannot tell today\'s pace day.');
+  if (!(value > 0 && value <= 1)) throw new Error('capToday must be a fraction between 0 and 1 (0.60 = 60%).');
+  const v = evaluate(last, nowMs);
+  if (value < v.allowance) throw new Error(`capToday ${value} is lower than today's allowance ${v.allowance}: an override only raises the cap.`);
+  putSetting(wp, CAP_OVERRIDE, JSON.stringify({ value, paceDay: v.dayIndex, endsAtMs: v.nextDayMs, by } satisfies CapOverride));
+  event(wp, 'pace-cap-override', { value, paceDay: v.dayIndex, by, allowance: v.allowance });
+  log.info('pace', `cap for pace day ${v.dayIndex} raised to ${pct(value)}% by ${by} (allowance ${pct(v.allowance)}%)`);
+  return apply(wp, last, nowMs);
+}
+
 /** The ISO time unattended work may resume, while a pace hold is on; null otherwise. */
 export function holdUntil(wp: Workplace, nowMs = Date.now()): string | null {
   const row = wp.db.prepare('select value from settings where key = ?').get(KEY) as { value: string } | undefined;
@@ -75,7 +114,7 @@ export function bypassUntil(wp: Workplace, nowMs = Date.now()): string | null {
 
 /** Apply a reading: start a hold (park) when over today's allowance, end an expired one. */
 export function apply(wp: Workplace, r: Reading, nowMs = Date.now()): Verdict {
-  const v = evaluate(r, nowMs);
+  const v = effective(wp, evaluate(r, nowMs), r.utilization, nowMs);
   putSetting(wp, 'pace:last', JSON.stringify({ ...r, ...v, at: new Date(nowMs).toISOString() }));
   if (disabled(wp)) { lift(wp, v, 'pacing disabled by the owner'); return { ...v, over: false }; }
   const bypass = getSetting(wp, BYPASS);
@@ -86,6 +125,7 @@ export function apply(wp: Workplace, r: Reading, nowMs = Date.now()): Verdict {
   }
   if (bypassUntil(wp, nowMs)) { lift(wp, v, 'bypassed by the owner until the next pace day'); return { ...v, over: false }; }
   const held = holdUntil(wp, nowMs);
+  if (held && !v.over && capOverride(wp, nowMs)) { lift(wp, v, 'the cap was raised for today'); return v; }
   if (v.over && !held) {
     const until = new Date(v.nextDayMs).toISOString();
     expireDecisions(wp, 'Superseded by a newer pace-cap decision.');
@@ -176,6 +216,7 @@ function lift(wp: Workplace, v: Verdict | null, why: string): void {
 export interface PaceStatus {
   disabled: boolean; bypassUntil: string | null; holdUntil: string | null;
   utilization: number | null; capToday: number | null; paceDay: number | null;
+  capOverride: { value: number; paceDay: number } | null;
   lastReadingAt: string | null; lastProbeAt: string | null; lastOkAt: string | null; lastError: string | null; failures: number;
 }
 
@@ -188,11 +229,14 @@ export function status(wp: Workplace, nowMs = Date.now()): PaceStatus {
     try { return JSON.parse(getSetting(wp, 'pace:last') ?? 'null') as (Reading & { at?: string }) | null; } catch { return null; }
   };
   const last = readLast();
-  const v = last && Number.isFinite(last.resetsAtMs) ? evaluate(last, nowMs) : null;
+  const base = last && Number.isFinite(last.resetsAtMs) ? evaluate(last, nowMs) : null;
+  const v = base && last ? effective(wp, base, last.utilization, nowMs) : null;
+  const o = capOverride(wp, nowMs);
   const p = probeState(wp);
   return {
     disabled: disabled(wp), bypassUntil: bypassUntil(wp, nowMs), holdUntil: holdUntil(wp, nowMs),
     utilization: last?.utilization ?? null, capToday: v?.allowance ?? null, paceDay: v?.dayIndex ?? null,
+    capOverride: o ? { value: o.value, paceDay: o.paceDay } : null,
     lastReadingAt: last?.at ?? null, lastProbeAt: p.lastProbeAt ?? null, lastOkAt: p.lastOkAt ?? null,
     lastError: p.lastError ?? null, failures: p.failures ?? 0,
   };
