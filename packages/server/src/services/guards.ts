@@ -195,11 +195,22 @@ export function withoutTrunkMerges(command: string): string {
   return command.replace(TRUNK_MERGE, 'true').replace(MERGE_SAFE, 'true');
 }
 
+/**
+ * Editing a deploy/release script is ordinary reviewed work (18 Oct: a one-line fix to deploy-agent.sh
+ * could not be committed). The names inside git add/commit/diff/log/show/status/restore/blame
+ * arguments (quoted text included) are blanked before the deploy rule runs; running a script is not.
+ */
+const GIT_NON_EXEC = /\bgit\s+(?:-C\s+\S+\s+)?(?:add|commit|diff|log|show|status|restore|blame|rm|mv|stash)\b(?:"[^"]*"|'[^']*'|[^;&|\n"'])*/gi;
+const DEPLOY_WORDS = /release-iris|deploy-api|deploy-agent|deploy-web|deploy-workplace-relay|testflight\.sh|rollback-iris|ssh-window/gi;
+export function withoutScriptEdits(command: string): string {
+  return command.replace(GIT_NON_EXEC, m => m.replace(/"[^"]*"|'[^']*'/g, '""').replace(DEPLOY_WORDS, 'script'));
+}
+
 export function guardCommand(command: string, ctx: GuardContext): GuardDecision {
   if (PROTECTED_COMMAND_PATTERN.test(command)) {
     return { decision: 'deny', reason: `"${command.slice(0, 80)}": a protected folder; off limits to the Workplace even to read` };
   }
-  const judged = withoutTrunkMerges(command);
+  const judged = withoutScriptEdits(withoutTrunkMerges(command));
   for (const rule of FORBIDDEN_COMMANDS) {
     if (rule.pattern.test(judged)) return { decision: 'deny', reason: `"${command.slice(0, 80)}": ${rule.why}` };
   }

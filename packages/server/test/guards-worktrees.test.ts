@@ -48,6 +48,13 @@ test('commands never push, merge, rebase, release, deploy, leave the machine, or
   for (const c of allowed) assert.equal(guardCommand(c, ctx).decision, 'allow', c);
 });
 
+test('committing edits to deploy scripts is allowed, running them is not', () => {
+  const allowed = ['git add scripts/deploy-agent.sh && git commit -m "add module to deploy-agent.sh file list"', 'git diff scripts/deploy-api.sh', 'git commit -m "add module to the scp list in deploy-agent.sh"', 'git commit -am "fix release-iris.sh; deploy-web"', 'git log -p -- scripts/release-iris.sh'];
+  for (const c of allowed) assert.equal(guardCommand(c, ctx).decision, 'allow', c);
+  const denied = ['scripts/deploy-agent.sh', 'git add x && scripts/deploy-agent.sh', 'git commit -m "x" && ./scripts/deploy-api.sh', 'git add x; bash scripts/release-iris.sh 1', 'git commit -m "a;b" && scripts/deploy-web.sh'];
+  for (const c of denied) assert.equal(guardCommand(c, ctx).decision, 'deny', c);
+});
+
 test('host commands that drive the owner\'s real Mac are denied, unless an approved live-check window is open', () => {
   const denied = [
     'osascript -e \'tell app "Finder" to activate\'', 'afplay /System/Library/Sounds/Ping.aiff', 'say "hello"',
