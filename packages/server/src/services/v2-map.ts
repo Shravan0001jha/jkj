@@ -150,6 +150,7 @@ export function projectItem(wp: Workplace, w: WorkItem): Item {
     ...(w.rca ? { rca: { ...w.rca } } : {}),
     ...(w.docUrl ? { docUrl: w.docUrl } : {}),
     ...(w.docId ? { docId: w.docId } : {}),
+    ...(w.qaDoc?.url ? { qaDocUrl: w.qaDoc.url } : {}),
     ...(extra?.length ? { extraReviewers: extra.map(r => ({ id: r.id, files: [...r.files], ...(r.approvedAt ? { approvedAt: r.approvedAt } : {}) })) } : {}),
     legacy: { kind: w.kind, state: w.state, ...(w.charterId ? { charterId: w.charterId } : {}), ...(w.featureId ? { featureId: w.featureId } : {}) },
     createdAt: w.createdAt,

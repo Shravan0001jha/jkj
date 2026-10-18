@@ -94,6 +94,9 @@ function proof(wp: Workplace, rel = 'logs/unit.txt'): string {
 /** A QA doc whose cases cite proof; `tail` is the evidence line(s) of the report. */
 function qaText(wp: Workplace, tail: string[] = [], cases: string[] = []): string {
   return [
+    '## Users affected',
+    '- Affected: phone + Mac linked but offline — case(s): provider down',
+    '- Not affected: Windows desktop — no Windows code',
     '## Edge cases',
     `- PASS: empty input — unit test evidence: ${proof(wp)}`,
     '- PASS: provider down — killed the provider and checked the reply evidence: https://ci.example.com/runs/42',

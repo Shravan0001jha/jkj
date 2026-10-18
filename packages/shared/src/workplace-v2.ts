@@ -167,6 +167,8 @@ export interface Item {
   /** The story's Notion doc (W7, doc_write): one per story. */
   docUrl?: string;
   docId?: string;
+  /** QA's doc for approval 2, in Notion (owner, 18 Oct). */
+  qaDocUrl?: string;
   /** Reviewers added for real code in other teams' charters. */
   extraReviewers?: ExtraReviewer[];
   createdAt: string;

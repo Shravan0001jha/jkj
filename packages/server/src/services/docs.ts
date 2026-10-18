@@ -453,6 +453,9 @@ async function readBlocks(port: NotionPort, id: string, depth = 0): Promise<Bloc
   return blocks;
 }
 
+/** A child page or database listed on a page: its own page, never a section's content. */
+const isSubpage = (b: Block): boolean => b.type === 'child_page' || b.type === 'child_database';
+
 function blockPlain(b: Block): string {
   const p = (b[b.type] ?? {}) as { rich_text?: RichText[] };
   return plainText(p.rich_text);
@@ -613,7 +616,9 @@ export async function docWrite(wp: Workplace, by: string, spec: DocWriteSpec): P
  * Remove blocks before a rewrite. Owner comments on them are kept first (notion:pending:<docId>),
  * with the writer they belong to, so the next relay sweep still delivers them.
  */
-async function removeBlocks(wp: Workplace, port: NotionPort, pageId: string, blocks: Block[], owner: string): Promise<void> {
+async function removeBlocks(wp: Workplace, port: NotionPort, pageId: string, allBlocks: Block[], owner: string): Promise<void> {
+  // A child page (QA's doc, 18 Oct) is not part of anyone's section: deleting its block would archive it.
+  const blocks = allBlocks.filter(b => !isSubpage(b));
   const seen = seenSet(wp, pageId);
   const pending = pendingOf(wp, pageId);
   const before = pending.length;
@@ -652,45 +657,96 @@ export async function writeQaCasesPage(wp: Workplace, by: string, w: WorkItem, m
   return { id: page.id, url: page.url };
 }
 
+/* ---------- QA's doc for approval 2 (owner, 18 Oct) ---------- */
+
+export const qaDocTitle = (w: WorkItem): string => `QA: ${w.title}`.slice(0, 2000);
+
+/**
+ * QA's doc as a Notion page "QA: <title>": a child page of the story's doc when it has one (so the owner
+ * reads it beside the design, and his comments on it go to QA, not the developer), else its own page in
+ * the docs database (Type "QA report", Story id "<id> (QA doc)" so doc_write's lookup never finds it).
+ * With `pageId` that page's content is replaced; one that is gone is made again. Null when Notion is not
+ * set up; throws a Notion error to the caller, who keeps the local file.
+ */
+export async function writeQaDocPage(wp: Workplace, by: string, w: WorkItem, markdown: string, pageId?: string): Promise<{ id: string; url: string } | null> {
+  const port = notionPort(wp);
+  if (!port) return null;
+  return serialised(wp, `${w.id}:qa`, async () => {
+    const title = { title: plainRich(qaDocTitle(w)) };
+    let page: { id: string; url: string } | undefined;
+    if (pageId) {
+      // "title" is the title property's id on every page, a child page or a database page ("Name").
+      try { page = await port.updatePage(pageId, { properties: { title } }); }
+      catch (err) { if (!isGone(err)) throw err; log.warn('docs', `the QA doc of ${w.id} is gone from Notion; making a new one`); }
+      // The old content goes; owner comments on it are kept for QA first (removeBlocks).
+      if (page) await removeBlocks(wp, port, page.id, await port.listChildren(page.id), by);
+    }
+    if (!page && w.docId) {
+      try { page = await port.createPage({ parent: { page_id: w.docId }, properties: { title } }); }
+      catch (err) { if (!isGone(err)) throw err; log.warn('docs', `the doc of ${w.id} is gone from Notion; the QA doc gets its own page`); }
+    }
+    if (!page) {
+      const dbId = await ensureDocsDb(wp, port);
+      const props = { ...properties(wp, w, by, { type: 'QA report', status: 'Final' }, true), 'Name': title, 'Story id': { rich_text: plainRich(`${w.id} (QA doc)`) } };
+      page = await port.createPage({ parent: { database_id: dbId }, properties: props });
+    }
+    await appendAll(port, page.id, markdownToBlocks(markdown));
+    return { id: page.id, url: page.url };
+  });
+}
+
+/** QA's doc page as markdown (the text approval 2 validates). Throws a Notion error. */
+export async function readQaDocPage(wp: Workplace, pageId: string): Promise<string> {
+  const port = notionPort(wp);
+  if (!port) throw new Error(NOT_SET_UP);
+  return blocksToMarkdown((await readBlocks(port, pageId)).filter(b => !isSubpage(b)));
+}
+
 /** doc_read: the story's doc as markdown, at most 30k characters (and it says when it was cut). */
-export async function docRead(wp: Workplace, itemId: string): Promise<string> {
+export async function docRead(wp: Workplace, itemId: string, opts: { qa?: boolean } = {}): Promise<string> {
   const port = notionPort(wp);
   if (!port) return NOT_SET_UP;
   const w = rawGet(wp, itemId);
   if (!w) return `No item ${itemId}.`;
-  if (!w.docId) return `No doc on ${itemId} yet; write it with doc_write.`;
+  if (opts.qa && !w.qaDoc?.pageId) return `No QA doc in Notion on ${itemId}${w.qaDoc ? ' (Notion was down when it was filed; the next QA doc write retries)' : ''}.`;
+  if (!opts.qa && !w.docId) return `No doc on ${itemId} yet; write it with doc_write.`;
+  const pageId = opts.qa ? w.qaDoc!.pageId! : w.docId!;
+  const url = opts.qa ? w.qaDoc!.url : w.docUrl;
   try {
-    const md = blocksToMarkdown(await readBlocks(port, w.docId));
-    const head = `Doc of ${w.id}: ${w.docUrl ?? ''}\n\n`;
+    const md = blocksToMarkdown(await readBlocks(port, pageId));
+    const head = `${opts.qa ? 'QA doc' : 'Doc'} of ${w.id}: ${url ?? ''}\n\n`;
     if (md.length <= DOC_READ_MAX) return head + md;
-    return `${head}${md.slice(0, DOC_READ_MAX)}\n\n[cut at ${DOC_READ_MAX} characters of ${md.length}; read the rest in Notion: ${w.docUrl ?? w.docId}]`;
+    return `${head}${md.slice(0, DOC_READ_MAX)}\n\n[cut at ${DOC_READ_MAX} characters of ${md.length}; read the rest in Notion: ${url ?? pageId}]`;
   } catch (err) {
     return `Not read: ${errText(err)}`;
   }
 }
 
 /** doc_comment: a comment under "<Name> (<role>)", on the first block containing `quote`, or on the page. */
-export async function docComment(wp: Workplace, by: string, spec: { itemId: string; text: string; quote?: string }): Promise<string> {
+export async function docComment(wp: Workplace, by: string, spec: { itemId: string; text: string; quote?: string; qa?: boolean }): Promise<string> {
   const port = notionPort(wp);
   if (!port) return NOT_SET_UP;
   const w = rawGet(wp, spec.itemId);
   if (!w) return `Not commented: no item ${spec.itemId}.`;
-  if (!w.docId) return `Not commented: ${spec.itemId} has no doc yet; write it with doc_write.`;
+  if (spec.qa && !w.qaDoc?.pageId) return `Not commented: ${spec.itemId} has no QA doc in Notion.`;
+  if (!spec.qa && !w.docId) return `Not commented: ${spec.itemId} has no doc yet; write it with doc_write.`;
+  const target = spec.qa ? w.qaDoc!.pageId! : w.docId!;
+  const label = spec.qa ? 'the QA doc' : 'the doc';
   if (!spec.text.trim()) return 'Not commented: the comment is empty.';
   const emp = wp.org.employees.find(e => e.id === by);
   const name = emp ? `${emp.name} (${emp.roleId})` : nameOf(wp, by);
   try {
-    let parent: { page_id: string } | { block_id: string } = { page_id: w.docId };
+    let parent: { page_id: string } | { block_id: string } = { page_id: target };
     let note = '';
     const quote = spec.quote?.trim();
     if (quote) {
-      const blocks = await port.listChildren(w.docId);
+      const blocks = (await port.listChildren(target)).filter(b => !isSubpage(b));
       const hit = blocks.find(b => blockPlain(b).includes(quote)) ?? blocks.find(b => blockPlain(b).toLowerCase().includes(quote.toLowerCase()));
       if (hit?.id) parent = { block_id: hit.id };
       else note = ' The quote was not found in the doc, so the comment is on the page.';
     }
     await port.createComment({ parent, rich_text: richText(spec.text.trim()), display_name: { type: 'custom', custom: { name } } });
-    return `Commented on the doc of ${w.id} as ${name}.${note}`;
+    return `Commented on ${label} of ${w.id} as ${name}.${note}`;
   } catch (err) {
     return `Not commented: ${errText(err)}`;
   }
@@ -737,7 +793,7 @@ export async function relaySweep(wp: Workplace, opts: { deliver: Deliver; blockB
       const seen = seenSet(wp, docId);
       for (const p of pendingOf(wp, docId)) {
         if (!w || seen.has(p.comment.id)) continue;
-        relay(wp, w, docId, p.comment, p.on, opts.deliver, seen, p.to);
+        relay(wp, w, docId, p.comment, p.on, opts.deliver, seen, p.to, w.qaDoc?.pageId === docId);
         relayed++;
       }
       delSetting(wp, r.key);
@@ -757,7 +813,8 @@ export async function relaySweep(wp: Workplace, opts: { deliver: Deliver; blockB
           relayed++;
         }
         const listed = await port.listChildren(docId);
-        const blocks = listed.filter(b => b.id);
+        // A child page (QA's doc) is swept as its own page below: its comments are QA's to answer.
+        const blocks = listed.filter(b => b.id && !isSubpage(b));
         if (!blocks.length) continue;
         // A comment on a block goes to the writer of the section it is in.
         const writerOf = new Map<string, string | undefined>();
@@ -778,30 +835,75 @@ export async function relaySweep(wp: Workplace, opts: { deliver: Deliver; blockB
         log.warn('docs', `comment relay on ${w.id}: ${errText(err)}`);
       }
     }
+    // QA's docs (18 Oct): every comment on the page or its blocks goes to the QA who wrote it. The story is
+    // usually done by then (approval 2 marks it done), so recent QA docs are swept whatever the status.
+    for (const w of qaDocs(wp)) {
+      const pageId = w.qaDoc!.pageId!;
+      try {
+        const seen = seenSet(wp, pageId);
+        for (const c of await port.listComments(pageId)) {
+          if (seen.has(c.id) || !(await isOwnerComment(wp, port, c))) continue;
+          relay(wp, w, pageId, c, undefined, opts.deliver, seen, w.qaDoc!.by, true);
+          relayed++;
+        }
+        const blocks = (await port.listChildren(pageId)).filter(b => b.id && !isSubpage(b));
+        if (!blocks.length) continue;
+        let at = (cursors.get(pageId) ?? 0) % blocks.length;
+        for (let n = 0; n < Math.min(perDoc || 10, blocks.length); n++) {
+          const b = blocks[at]!;
+          for (const c of await port.listComments(b.id!)) {
+            if (seen.has(c.id) || !(await isOwnerComment(wp, port, c))) continue;
+            relay(wp, w, pageId, c, blockPlain(b), opts.deliver, seen, w.qaDoc!.by, true);
+            relayed++;
+          }
+          at = (at + 1) % blocks.length;
+        }
+        cursors.set(pageId, at);
+      } catch (err) {
+        log.warn('docs', `QA doc comment relay on ${w.id}: ${errText(err)}`);
+      }
+    }
   } finally {
     sweeping.delete(wp);
   }
   return relayed;
 }
 
-function findByDoc(wp: Workplace, docId: string): WorkItem | undefined {
-  const rows = wp.db.prepare(`select json from work where json like ?`).all(`%"docId":"${docId}"%`) as { json: string }[];
-  return rows.map(r => JSON.parse(r.json) as WorkItem).find(w => w.docId === docId);
+/** How long after its last write a QA doc's comments are still swept. */
+export const QA_DOC_SWEEP_DAYS = 14;
+
+/** Items whose QA doc is in Notion and was written in the last QA_DOC_SWEEP_DAYS days. */
+function qaDocs(wp: Workplace): WorkItem[] {
+  const since = new Date(Date.now() - QA_DOC_SWEEP_DAYS * 86_400_000).toISOString();
+  const rows = wp.db.prepare(`select json from work where json like '%"qaDoc":%'`).all() as { json: string }[];
+  return rows.map(r => JSON.parse(r.json) as WorkItem).filter(w => w.qaDoc?.pageId && w.qaDoc.at >= since && !w.mergedInto);
 }
 
-function relay(wp: Workplace, w: WorkItem, docId: string, c: NotionComment, on: string | undefined, deliver: Deliver, seen: Set<string>, writer?: string): void {
+function findByDoc(wp: Workplace, docId: string): WorkItem | undefined {
+  const rows = wp.db.prepare(`select json from work where json like ? or json like ?`).all(`%"docId":"${docId}"%`, `%"pageId":"${docId}"%`) as { json: string }[];
+  return rows.map(r => JSON.parse(r.json) as WorkItem).find(w => w.docId === docId || w.qaDoc?.pageId === docId);
+}
+
+function relay(wp: Workplace, w: WorkItem, docId: string, c: NotionComment, on: string | undefined, deliver: Deliver, seen: Set<string>, writer?: string, qa = false): void {
   const text = plainText(c.rich_text).trim();
   const snippet = on ? (on.length > 200 ? `${on.slice(0, 200)}…` : on) : undefined;
   // Seen first: the item comment is the durable record, and a failed delivery must not repeat it.
   seen.add(c.id);
   putSetting(wp, `notion:seen:${docId}`, JSON.stringify([...seen]));
   try {
-    trail.comment(wp, w.id, { by: 'owner', text: `On the doc${snippet ? ` (at "${snippet}")` : ''}: ${text || '(an empty comment)'}` });
+    trail.comment(wp, w.id, { by: 'owner', text: `On the ${qa ? 'QA doc' : 'doc'}${snippet ? ` (at "${snippet}")` : ''}: ${text || '(an empty comment)'}` });
   } catch (err) { log.warn('docs', `owner comment on ${w.id}: ${errText(err)}`); }
   // A block's comment to its section's writer; a page comment to the story's assignee.
   const to = writer ?? w.employeeId ?? getSetting(wp, `notion:owner:${docId}`) ?? chiefOfStaffId(wp);
   if (!to) return;
-  const prompt = [
+  const prompt = qa ? [
+    `The owner commented on your QA doc in Notion for "${w.title}" (${w.id})${snippet ? `, on the passage "${snippet}"` : ''}:`,
+    '',
+    `"${text}"`,
+    '',
+    `QA doc: ${w.qaDoc?.url ?? docId}`,
+    `Answer him in the QA doc with doc_comment (itemId ${w.id}, qa: true${snippet ? ', quote the passage' : ''}); read it with doc_read (qa: true). If he asks for a change, amend it with qa_doc_update while the story is done and unmerged, or give the new doc with your next review_approve.`,
+  ].join('\n') : [
     `The owner commented on your Notion doc for "${w.title}" (${w.id})${snippet ? `, on the passage "${snippet}"` : ''}:`,
     '',
     `"${text}"`,

@@ -15,7 +15,7 @@ interface Stored { block: Block; parentId: string; children: string[] }
 export class FakeNotion implements NotionPort {
   readonly calls: { op: string; args: unknown[] }[] = [];
   readonly databases = new Map<string, { parentPageId: string; body: Record<string, unknown> }>();
-  readonly pages = new Map<string, NotionPage & { parentDb: string; children: string[] }>();
+  readonly pages = new Map<string, NotionPage & { parentDb: string; parentPage?: string; children: string[] }>();
   readonly blocks = new Map<string, Stored>();
   readonly comments: NotionComment[] = [];
   /** Children of the root page that are not ours (child_database blocks the API lists). */
@@ -52,10 +52,21 @@ export class FakeNotion implements NotionPort {
 
   async createPage(body: Record<string, unknown>) {
     this.rec('createPage', body);
-    const db = (body['parent'] as { database_id: string }).database_id;
-    if (!this.databases.has(db)) throw new Error('Notion 404 object_not_found: database');
+    const parent = body['parent'] as { database_id?: string; page_id?: string };
     const id = this.id('page');
-    const page = { id, url: `https://www.notion.so/Doc-${id}`, parentDb: db, properties: body['properties'] as Record<string, unknown>, children: [] as string[] };
+    const properties = body['properties'] as Record<string, unknown>;
+    let db = '';
+    if (parent.page_id) {
+      // A child page: the API lists it on its parent as a child_page block whose id is the page's.
+      if (!this.pages.has(parent.page_id)) throw new Error('Notion 404 object_not_found: page');
+      const title = ((properties['title'] as { title: { text: { content: string } }[] } | undefined)?.title ?? []).map(t => t.text.content).join('');
+      this.blocks.set(id, { block: { object: 'block', id, type: 'child_page', child_page: { title } }, parentId: parent.page_id, children: [] });
+      this.pages.get(parent.page_id)!.children.push(id);
+    } else {
+      db = parent.database_id ?? '';
+      if (!this.databases.has(db)) throw new Error('Notion 404 object_not_found: database');
+    }
+    const page = { id, url: `https://www.notion.so/Doc-${id}`, parentDb: db, ...(parent.page_id ? { parentPage: parent.page_id } : {}), properties, children: [] as string[] };
     this.pages.set(id, page);
     if (Array.isArray(body['children'])) await this.appendBlocks(id, body['children'] as Block[]);
     return { id: page.id, url: page.url, properties: page.properties };
@@ -137,6 +148,9 @@ export class FakeNotion implements NotionPort {
     const list = this.childList(s.parentId);
     list.splice(list.indexOf(blockId), 1);
     this.blocks.delete(blockId);
+    // Deleting a child_page block archives the page (the API's behaviour).
+    const page = this.pages.get(blockId);
+    if (page) page.archived = true;
   }
 
   async createComment(body: CreateCommentBody): Promise<NotionComment> {

@@ -931,21 +931,24 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
     if (unread.length) throw new BadRequest(`Open the evidence first: since it last changed you have not read ${unread.join(' or ')}. Read each, cite the specific lines you checked in the QA doc, then approve.`);
   }
   // Owner's review flow step 2 (6 Oct): no QA approval without the edge-case doc and its report; each case cites its proof (10 Oct).
+  // Without the text, the story's QA doc already filed (its Notion page, else the file) is checked the same way (18 Oct).
+  if (!qaText?.trim()) qaText = await storedQaText(wp, w);
   const doc = qaDoc.require$(qaText, proofRoots(wp, w));
+  if (opts.requireReads && !fileOnlyQaDoc(wp, w)) qaDoc.requireUsers(qaText!);
   qaDocExtras(wp, w, doc, qaText!);
   // 11 Oct: approved stories sat unmerged for hours because the QA doc named no evidence. Through the tool,
   // approval 2 is the moment the evidence question is answered, so approval means ready to merge.
   if (opts.requireReads && !(pr.evidence === 'success' || qaDoc.evidenceNa(qaText) || liveCheckEvidence(wp, w, qaText))) {
     throw new BadRequest('Name the evidence before approving, or the merge will wait: a passing run_evidence on the head, OR "Evidence: live check <lc_id>" for a live check the developer recorded (record_live_check), OR, only for a change the robot suite cannot run (server-only, agent-svc, docs, tooling), "Evidence: n/a — <why>" plus a "Tests: <command> <counts>" line.');
   }
-  const qaPath = qaDoc.file(wp, itemId, { title: w.title, by, sha: pr.headSha, at: approval.at }, qaText!);
+  const filedDoc = await fileQaDoc(wp, itemId, by, pr.headSha, approval.at, qaText!);
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, qaApproval: approval, qaReviewer: by } }));
   if (changed) trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `QA for this story is now ${nameOf(wp, by)} (changed by the Chief of Staff)` });
-  trail.record(wp, { itemId, by, kind: 'note', text: `QA approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)} with a QA doc of ${doc.cases.length} edge cases (${qaPath})${approval.note ? `: ${approval.note}` : ''}` });
+  trail.record(wp, { itemId, by, kind: 'note', text: `QA approval by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)} with a QA doc of ${doc.cases.length} edge cases (${filedDoc.where})${approval.note ? `: ${approval.note}` : ''}`, ...(filedDoc.url ? { link: filedDoc.url } : {}) });
   try { await postStatuses(wp, itemId); } catch (err) { recordFailure(wp, 'status', itemId, Date.now(), errText(err)); }
   items.update(wp, itemId, { status: 'done', reviewerId: by, note: `Approved by ${nameOf(wp, pr.devApproval!.by)} (developer) and ${nameOf(wp, by)} (QA)` }, by, { checked: true });
   const auto = await autoMerge(wp, itemId);
-  return { stage: 'qa', message: `QA approval recorded (approval 2 of 2); the story is done. ${mergeTail(auto)}` };
+  return { stage: 'qa', message: `QA approval recorded (approval 2 of 2); the story is done. ${mergeTail(auto)}${filedDoc.url ? ` QA doc: ${filedDoc.url}` : ''}${filedDoc.note}` };
 }
 
 /** What the automatic merge did, in one sentence for the approver. */
@@ -1018,13 +1021,54 @@ export async function amendQaDoc(wp: Workplace, itemId: string, by: string, text
   if (w.status !== 'done' || !pr.qaApproval || !holds(pr.qaApproval, w)) throw new BadRequest(`This story is not done with a QA approval that holds (it is ${w.status}): while it is in review, give the doc with review_approve qaDoc.`);
   if (by !== pr.qaApproval.by) throw new BadRequest(`${nameOf(wp, pr.qaApproval.by)} gave approval 2 of 2, so only they amend its QA doc.`);
   const doc = qaDoc.require$(text, proofRoots(wp, w));
+  if (!fileOnlyQaDoc(wp, w)) qaDoc.requireUsers(text);
   qaDocExtras(wp, w, doc, text);
-  const path = qaDoc.file(wp, itemId, { title: w.title, by, sha: pr.headSha, at: now() }, text);
-  trail.record(wp, { itemId, by, kind: 'note', text: `QA doc amended by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}: ${doc.cases.length} edge cases (${path})` });
+  const filedDoc = await fileQaDoc(wp, itemId, by, pr.headSha, now(), text);
+  trail.record(wp, { itemId, by, kind: 'note', text: `QA doc amended by ${nameOf(wp, by)} on ${pr.headSha.slice(0, 8)}: ${doc.cases.length} edge cases (${filedDoc.where})`, ...(filedDoc.url ? { link: filedDoc.url } : {}) });
   // The merge gate runs again on the amended doc; a stop recorded for this head (the evidence) is lifted first.
   dropSetting(wp, AUTO_BLOCKED_PREFIX + itemId);
   const merge = await autoMerge(wp, itemId);
-  return { merge, message: `QA doc updated (${doc.cases.length} edge cases). ${mergeTail(merge)}` };
+  return { merge, message: `QA doc updated (${doc.cases.length} edge cases). ${mergeTail(merge)}${filedDoc.url ? ` QA doc: ${filedDoc.url}` : ''}${filedDoc.note}` };
+}
+
+/**
+ * File QA's doc (owner, 18 Oct): in Notion, where the owner reads and comments (docs.writeQaDocPage), and
+ * always in the local file, which the merge gate and the staging cycle read and which stands in when
+ * Notion is down (a warning, never a refused approval). A story whose QA doc was a file before the move
+ * (a file and no qaDoc record) keeps the file only: existing QA docs are not migrated.
+ */
+/** The story's QA doc predates Notion (a file, no qaDoc record): it stays a file, in the old format. */
+const fileOnlyQaDoc = (wp: Workplace, w: WorkItem): boolean => !w.qaDoc && qaDoc.filed(wp, w.id) !== undefined;
+
+async function fileQaDoc(wp: Workplace, itemId: string, by: string, sha: string, at: string, text: string): Promise<{ where: string; url?: string; note: string }> {
+  const cur = rawGet(wp, itemId)!;
+  const fileOnly = fileOnlyQaDoc(wp, cur);
+  const path = qaDoc.file(wp, itemId, { title: cur.title, by, sha, at }, text);
+  if (fileOnly) return { where: path, note: '' };
+  let page: { id: string; url: string } | null = null;
+  let note = '';
+  let failed = false;
+  try { page = await docs.writeQaDocPage(wp, by, cur, text, cur.qaDoc?.pageId); }
+  catch (err) {
+    failed = true;
+    note = ` Notion was not written (${errText(err)}); the QA doc is kept on the server and the next QA doc write retries Notion.`;
+    log.warn('github', `${itemId}: QA doc to Notion: ${errText(err)}; kept in ${path}`);
+  }
+  const latest = rawGet(wp, itemId)!;
+  const pageId = page?.id ?? latest.qaDoc?.pageId;
+  const url = page?.url ?? latest.qaDoc?.url;
+  work.saveQuiet(wp, { ...latest, qaDoc: { by, at, sha, ...(pageId ? { pageId } : {}), ...(url ? { url } : {}), ...(failed && pageId ? { stale: true } : {}) } });
+  return { where: page ? `${page.url}; cached in ${path}` : path, ...(url ? { url } : {}), note };
+}
+
+/** The story's QA doc as filed: its Notion page when that is current, else the local file (Notion down, or a pre-Notion doc). */
+async function storedQaText(wp: Workplace, w: WorkItem): Promise<string | undefined> {
+  const pageId = w.qaDoc?.pageId;
+  if (pageId && !w.qaDoc!.stale) {
+    try { return await docs.readQaDocPage(wp, pageId); }
+    catch (err) { log.warn('github', `${w.id}: reading the QA doc from Notion: ${errText(err)}; using the local copy`); }
+  }
+  return qaDoc.filed(wp, w.id);
 }
 
 const LIVE_CHECKS_KEPT = 20;

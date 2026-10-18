@@ -112,6 +112,9 @@ export function readItem(wp: Workplace, q: string): string {
   head.push(`${it.level[0]!.toUpperCase()}${it.level.slice(1)} · ${status} (since ${it.statusSince})${it.points ? ` · ${it.points} pts` : ''}`);
   head.push(`Assignee: ${who(wp, it.assigneeId)} · Reviewer: ${who(wp, it.reviewerId)}${it.level === 'epic' && it.ownerId ? ` · Owner: ${who(wp, it.ownerId)}` : ''}`);
   if (d.parent) head.push(`Parent: ${d.parent.title} [${d.parent.id}]`);
+  // The story's Notion pages: its doc and QA's doc (18 Oct: QA docs live in Notion).
+  const pages = [w.docUrl ? `doc ${w.docUrl}` : '', w.qaDoc?.url ? `QA doc ${w.qaDoc.url}` : ''].filter(Boolean);
+  if (pages.length) head.push(`Notion: ${pages.join(' · ')}`);
   if (d.progress) head.push(`Progress: ${d.progress.pct}% (${d.progress.storiesDone}/${d.progress.storiesTotal} stories)`);
   head.push('', 'Acceptance criteria:', ...(it.acceptance.length ? it.acceptance.map(a => `  - ${named(wp, a, 300)}`) : ['  none']));
   head.push('', 'Body:', it.body.trim() ? named(wp, it.body, BODY_MAX) : '  (empty)');

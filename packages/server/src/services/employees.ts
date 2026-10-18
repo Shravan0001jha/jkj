@@ -1363,14 +1363,14 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           return ok(`Review requested.${gh.message ? ` ${gh.message}` : ''}`);
         }),
       // The GitHub flow's two approvals (docs/HLD-github-flow.md D4): in local mode they answer "review as before".
-      tool('review_approve', 'Reviewers only: approve a story in review. Approval 1 of 2 is the developer approver\'s (a member of the author\'s team who is not the author, or the CTO); an extra reviewer (another team\'s lead named on the PR) approves their files; approval 2 of 2 is QA\'s (the one QA named on the story), only after the developer and every extra reviewer, and needs qaDoc: the edge cases where the change might break, each checked with "evidence: <screenshot/log path or URL>", and a report. QA\'s approval marks the story done, and the Workplace merges it once tests and evidence are green (or the doc says "Evidence: n/a — why" with a "Tests:" line). A commit that only merges the trunk keeps the approvals; any other new commit resets them. ' +
+      tool('review_approve', 'Reviewers only: approve a story in review. Approval 1 of 2 is the developer approver\'s (a member of the author\'s team who is not the author, or the CTO); an extra reviewer (another team\'s lead named on the PR) approves their files; approval 2 of 2 is QA\'s (the one QA named on the story), only after the developer and every extra reviewer, and needs qaDoc: the edge cases where the change might break, each checked with "evidence: <screenshot/log path or URL>", and a report. The QA doc goes to Notion as the page "QA: <story title>" under the story\'s doc (linked on the story; the owner reads and comments there, and his comments come to you); a story whose QA doc is already a file keeps the file. Without qaDoc, the story\'s QA doc already filed is checked the same way. QA\'s approval marks the story done, and the Workplace merges it once tests and evidence are green (or the doc says "Evidence: n/a — why" with a "Tests:" line). A commit that only merges the trunk keeps the approvals; any other new commit resets them. ' +
         'QA: open the evidence before approving (item_read the story, doc_read its doc, after their last change), and answer every blind case you wrote with qa_cases_write. ' +
         'A story with no pull request (non-code work, or work in another repo) is passed by its current reviewer with review_approve and a note saying what was checked; it is then done.',
-        { itemId: z.string(), note: z.string().optional(), qaDoc: z.string().optional().describe(`QA only, required for approval 2 of 2: ${qaDocFormat}`) },
+        { itemId: z.string(), note: z.string().optional(), qaDoc: z.string().optional().describe(`QA only, for approval 2 of 2 (written to Notion; omit it only to approve on the QA doc already filed on this story): ${qaDocFormat}`) },
         async ({ itemId, note, qaDoc }) => {
           try { return ok((await githubFlow.approve(wp, itemId, employeeId, note, qaDoc, { requireReads: true })).message); } catch (err) { return ok(`Not approved: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('qa_doc_update', 'QA only: amend the QA doc you filed with approval 2 of 2 while the story is done but not merged (a missing "Evidence: n/a" or "Tests:" line, a live check to cite). Same format and checks as at approval; the merge gate runs again at once.',
+      tool('qa_doc_update', 'QA only: amend the QA doc you filed with approval 2 of 2 while the story is done but not merged (a missing "Evidence: n/a" or "Tests:" line, a live check to cite). Same format and checks as at approval; the Notion QA page is rewritten and the merge gate runs again at once.',
         { itemId: z.string(), qaDoc: z.string().describe(qaDocFormat) },
         async ({ itemId, qaDoc }) => {
           try { return ok((await githubFlow.amendQaDoc(wp, itemId, employeeId, qaDoc)).message); } catch (err) { return ok(`Not updated: ${err instanceof Error ? err.message : String(err)}`); }
@@ -1656,16 +1656,16 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           status: z.enum(docs.DOC_STATUSES).optional().describe('Draft (default for a new doc), In review or Final.'),
         },
         async ({ itemId, type, title, section, markdown, status }) => ok(await docs.docWrite(wp, employeeId, { itemId, type, markdown, ...(title ? { title } : {}), ...(section ? { section } : {}), ...(status ? { status } : {}) }))),
-      tool('doc_read', 'Read a story\'s Notion doc as markdown (at most 30k characters; it says when it was cut).',
-        { itemId: z.string() },
-        async ({ itemId }) => {
-          const out = await docs.docRead(wp, itemId);
+      tool('doc_read', 'Read a story\'s Notion doc as markdown (at most 30k characters; it says when it was cut). qa: true reads its QA doc (the "QA: <title>" page) instead.',
+        { itemId: z.string(), qa: z.boolean().optional().describe('Read the story\'s QA doc instead of its doc.') },
+        async ({ itemId, qa }) => {
+          const out = await docs.docRead(wp, itemId, { ...(qa ? { qa } : {}) });
           if (out.startsWith('Doc of ')) markQaRead(wp, itemId, employeeId, 'doc');
           return ok(out);
         }),
-      tool('doc_comment', 'Comment on a story\'s Notion doc under your name. With `quote` (text copied from the doc) the comment is anchored to the first block containing it; otherwise it goes on the page. Answer the owner\'s doc comments this way.',
-        { itemId: z.string(), text: z.string(), quote: z.string().optional() },
-        async ({ itemId, text, quote }) => ok(await docs.docComment(wp, employeeId, { itemId, text, ...(quote ? { quote } : {}) }))),
+      tool('doc_comment', 'Comment on a story\'s Notion doc under your name. With `quote` (text copied from the doc) the comment is anchored to the first block containing it; otherwise it goes on the page. qa: true comments on its QA doc instead. Answer the owner\'s doc comments this way.',
+        { itemId: z.string(), text: z.string(), quote: z.string().optional(), qa: z.boolean().optional().describe('Comment on the story\'s QA doc instead of its doc.') },
+        async ({ itemId, text, quote, qa }) => ok(await docs.docComment(wp, employeeId, { itemId, text, ...(quote ? { quote } : {}), ...(qa ? { qa } : {}) }))),
       tool('propose_org_change', 'Propose a hire, split, merge, reassign or restructure with a reason. The owner approves it in the Inbox. `paramsJson` is a JSON object as a string (see the handbook for the shape of each kind).',
         // A z.record() here makes the MCP SDK fail to list ANY tool of this server; a JSON string does not.
         { kind: z.enum(['hire', 'retire', 'split', 'merge', 'reassign', 'restructure']), reason: z.string(), paramsJson: z.string() },

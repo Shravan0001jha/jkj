@@ -323,6 +323,13 @@ export interface WorkItem {
    * Internal: never projected, never shown to the assignee; approval 2 answers each title.
    */
   qaCases?: { markdown: string; titles: string[]; by: string; at: string; docId?: string; docUrl?: string };
+  /**
+   * QA's doc for approval 2 (owner, 18 Oct): a Notion page "QA: <title>" (a child of the story's doc, or
+   * its own Iris Docs page), with the local file as the cache. No pageId: Notion was down at the last
+   * write (the next write retries). `stale`: the last write reached only the file, so the page is older
+   * than it. Absent on stories whose QA doc predates Notion: those keep the file.
+   */
+  qaDoc?: { by: string; at: string; sha: string; pageId?: string; url?: string; stale?: boolean };
 }
 
 /** A developer's live check: what was run, on which commit, and the raw logs that show it. */

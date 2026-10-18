@@ -33,7 +33,7 @@ const CASE = /^\s*[-*]\s*(PASS|FAIL|N\/A)\s*:\s*(.+)$/i;
 export interface QaCase { verdict: 'PASS' | 'FAIL' | 'N/A'; text: string }
 export interface QaDoc { cases: QaCase[]; report: string }
 
-export const QA_DOC_FORMAT = '"## Edge cases" with one line per case ("- PASS: <case> — <how checked> evidence: <screenshot/log path or URL>", "- N/A: <case> — <why>"; every blind case you wrote with qa_cases_write gets its own line), then "## Report" (what was checked, what was not, residual risk, citing specific log lines). ' +
+export const QA_DOC_FORMAT = '"## Users affected" (from the user matrix, handbook §1: "- Affected: <row> — case(s): <which>" and "- Not affected: <row> — <why>"), then "## Edge cases" with one line per case ("- PASS: <case> — <how checked> evidence: <screenshot/log path or URL>", "- N/A: <case> — <why>"; every blind case you wrote with qa_cases_write gets its own line), then "## Report" (what was checked, what was not, residual risk, citing specific log lines). ' +
   'The merge needs evidence: a passing run_evidence on the head, or "Evidence: live check <lc_id> — <what the logs show>" for a live check the developer recorded (record_live_check), or, only when the change has no app surface the robot suite can run (server-only, agent-svc, docs, tooling), "Evidence: n/a — <why>" together with "Tests: <command> <counts>"';
 
 export const PROOF_NEEDED = 'Each case needs proof: add "evidence: <screenshot/log path or URL>"';
@@ -90,6 +90,19 @@ export function parse(text: string): QaDoc | { errors: string[] } {
   if (cases.length >= MIN_CASES && !cases.some(c => c.verdict === 'FAIL') && cases.filter(c => c.verdict === 'PASS').length < MIN_PASS) errors.push(`at least ${MIN_PASS} cases must be checked and PASS (N/A does not count)`);
   if (report !== undefined && report.length < MIN_REPORT) errors.push('the report is too short to say what was checked and what was not');
   return errors.length ? { errors } : { cases, report: report! };
+}
+
+const USER_ROW = /^\s*[-*]\s*(?:Not\s+)?Affected\s*:\s*\S/im;
+
+/**
+ * "## Users affected" (owner, 18 Oct: think in every user): the user-matrix rows the change touches and
+ * the ones it does not, one "- Affected: …" / "- Not affected: …" line each. Required of new QA docs
+ * (those filed in Notion); a story whose QA doc predates it keeps its file without one.
+ */
+export function requireUsers(text: string): void {
+  const m = /^##\s*Users affected\s*$([\s\S]*?)(?=^##\s|(?![\s\S]))/im.exec(text);
+  if (!m) throw new BadRequest('The QA doc needs its "## Users affected" section (before "## Edge cases"): one "- Affected: <user-matrix row> — case(s): <which>" or "- Not affected: <row> — <why>" line per row of the user matrix (handbook §1). Template: templates/qa-doc.md.');
+  if (!USER_ROW.test(m[1]!)) throw new BadRequest('"## Users affected" lists no rows: add "- Affected: <row> — case(s): <which>" and "- Not affected: <row> — <why>" lines from the user matrix (handbook §1).');
 }
 
 /**
