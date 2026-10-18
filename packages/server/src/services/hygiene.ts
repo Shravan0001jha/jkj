@@ -8,6 +8,7 @@ import * as stuck from './stuck.js';
 import * as coo from './coo.js';
 import * as dispatch from './dispatch.js';
 import * as floor from './floor.js';
+import * as waitReply from './wait-reply.js';
 import * as lifecycleWatch from './lifecycle-watch.js';
 import { closed, finished, label, openStartsAfter, trueStatus } from './lifecycle.js';
 import { githubMode } from './review-policy.js';
@@ -165,6 +166,11 @@ export function conditions(wp: Workplace): Condition[] {
   }
 
   for (const w of rows) {
+    // (c0) A wait the awaited person has already answered (18 Oct: stories sat Waiting a day after the reply).
+    if (w.status === 'waiting') {
+      const a = waitReply.answerTo(wp, w);
+      if (a) out.push({ key: `wait-answered:${w.id}`, rule: 'bad-block', w, what: `Waiting on ${nameOf(wp, w.waiting!.on)}, who already replied`, fix: `move it back to In progress (item_update ${w.id} status in-progress reason "<who> replied: …") and act on the reply`, since: a.at });
+    }
     // (c) Blocked must name a concrete blocker that is still open.
     if (w.status === 'blocked') {
       if ((!w.waitingOn || !w.blockedReason) && !w.startsAfter) {

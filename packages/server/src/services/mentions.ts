@@ -3,6 +3,7 @@ import type { Workplace } from './workplace.js';
 import * as employees from './employees.js';
 import * as coo from './coo.js';
 import { onRunEvent } from './runs.js';
+import { endOnReply } from './wait-reply.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -46,6 +47,7 @@ export function wireMentionReplies(wp: Workplace): () => void {
  */
 function handleComment(wp: Workplace, comment: Comment): void {
   if (comment.by === 'workplace') return;
+  endOnReply(wp, comment); // the awaited person answered: the wait ends (18 Oct)
   const row = wp.db.prepare('select json from work where id = ?').get(comment.itemId) as { json: string } | undefined;
   const title = row ? (JSON.parse(row.json) as { title: string }).title : comment.itemId;
   for (const id of comment.mentions) {
