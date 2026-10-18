@@ -11,7 +11,7 @@ import type { GitHubPort, PullRequest, StatusState, WorkflowJob, WorkflowRun } f
  * way an outage or a revoked token would.
  */
 
-export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly' | 'updateBranch' | 'fetchBranch' | 'dispatchWorkflow' | 'findWorkflowRun' | 'listArtifacts' | 'downloadArtifact' | 'runJobs';
+export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly' | 'updateBranch' | 'fetchBranch' | 'dispatchWorkflow' | 'findWorkflowRun' | 'listArtifacts' | 'downloadArtifact' | 'runJobs' | 'closePr' | 'fetchRemotes' | 'pushRef' | 'forcePush';
 
 /** A faked GitHub Actions run: what a dispatch started, and the files its artifacts hold. */
 export interface FakeRun { id: number; workflow: string; requestId: string; inputs: Record<string, string>; status: string; conclusion: string | null; artifacts: Record<string, Record<string, string>> }
@@ -39,6 +39,7 @@ export class FakeGitHub implements GitHubPort {
     execFileSync('git', ['clone', '-q', '--bare', trunkRepo, this.bare], { stdio: 'ignore' });
   }
 
+  clearFailures(): void { this.failures.clear(); }
   failNext(op: Op, n = 1, message?: string): void { this.failures.set(op, (this.failures.get(op) ?? 0) + n); if (message) this.failMessage.set(op, message); }
   private readonly failMessage = new Map<Op, string>();
 
@@ -61,9 +62,31 @@ export class FakeGitHub implements GitHubPort {
     return this.statuses.get(`${sha}:${context}`);
   }
 
-  async push(repoDir: string, branch: string): Promise<void> {
+  async closePr(n: number): Promise<void> {
+    this.enter('closePr', n);
+    const pr = this.prs.find(p => p.number === n);
+    if (!pr) throw new Error('fake GitHub: no such PR (404)');
+    pr.state = 'closed';
+  }
+
+  async fetchRemotes(repoDir: string): Promise<void> {
+    this.enter('fetchRemotes', repoDir);
+    execFileSync('git', ['-C', repoDir, 'fetch', '-q', this.bare, '+refs/heads/*:refs/remotes/github/*'], { stdio: 'pipe' });
+  }
+
+  async pushRef(repoDir: string, sha: string, ref: string): Promise<void> {
+    this.enter('pushRef', repoDir, sha, ref);
+    execFileSync('git', ['-C', repoDir, 'push', '-q', this.bare, `${sha}:${ref}`], { stdio: 'pipe' });
+  }
+
+  async forcePush(repoDir: string, branch: string, sha: string, expected: string): Promise<void> {
+    this.enter('forcePush', repoDir, branch, sha, expected);
+    execFileSync('git', ['-C', repoDir, 'push', '-q', `--force-with-lease=refs/heads/${branch}:${expected}`, this.bare, `${sha}:refs/heads/${branch}`], { stdio: 'pipe' });
+  }
+
+  async push(repoDir: string, branch: string, sha?: string): Promise<void> {
     this.enter('push', repoDir, branch);
-    execFileSync('git', ['-C', repoDir, 'push', '-q', this.bare, `refs/heads/${branch}:refs/heads/${branch}`], { stdio: 'pipe' });
+    execFileSync('git', ['-C', repoDir, 'push', '-q', this.bare, `${sha ?? `refs/heads/${branch}`}:refs/heads/${branch}`], { stdio: 'pipe' });
     for (const pr of this.prs) if (pr.head === branch && pr.state === 'open') pr.headSha = this.remoteSha(branch)!;
   }
 

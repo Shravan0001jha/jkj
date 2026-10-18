@@ -124,6 +124,9 @@ export function excludeLinked(path: string): void {
   appendFileSync(file, `${prefix}# Added by the Iris Workplace: untracked build/test dirs, never committed\n${missing.join('\n')}\n`);
 }
 
+/** The subject of the commit that saves uncommitted work before a switch; such a commit is never pushed. */
+export const AUTOSAVE_SUBJECT = 'WIP (auto-saved by the Workplace before switching to ';
+
 /** Regenerable build output, restored rather than auto-saved (globs, repo-relative). */
 export const BUILD_OUTPUT = ['services/agent-svc/dist-*/**', 'services/agent-svc/build-*/**', 'services/agent-svc/dist/**', 'services/agent-svc/build/**', 'desktop/release/**', 'desktop/dist/**'];
 
@@ -156,7 +159,7 @@ function switchTo(employee: Employee, path: string, branch: string, base: string
       // fails, which blocked the switch (8 Oct, Aditi). `diff --cached --quiet` exits 1 on changes.
       let staged = false;
       try { git(path, ['diff', '--cached', '--quiet']); } catch { staged = true; }
-      if (staged) git(path, ['commit', '-q', '--no-verify', '-m', `WIP (auto-saved by the Workplace before switching to ${workItemId ?? 'general'})`]);
+      if (staged) git(path, ['commit', '-q', '--no-verify', '-m', `${AUTOSAVE_SUBJECT}${workItemId ?? 'general'})`]);
       log.warn('worktrees', `${employee.id}: auto-saved uncommitted work on ${current} before switching to ${branch}`);
       if (!isClean(path, true)) fail(`uncommitted work on ${current} could not be auto-saved`);
     }

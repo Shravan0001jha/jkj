@@ -78,7 +78,7 @@ export function stage(w: WorkItem): Stage {
  * Null when the move is fine; local and shadow always return null.
  */
 export function doneProblem(wp: Workplace, w: WorkItem, by: string): string | null {
-  if (by === 'owner' || !w.pr || w.pr.merged || githubMode(wp) !== 'on') return null;
+  if (by === 'owner' || !w.pr || w.pr.merged || w.pr.closed || githubMode(wp) !== 'on') return null;
   const s = stage(w);
   if (s === 'approved') return null;
   return s === 'dev'

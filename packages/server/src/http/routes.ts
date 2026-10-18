@@ -35,6 +35,7 @@ import * as spendCaps from '../services/spend-caps.js';
 import * as floor from '../services/floor.js';
 import * as dispatch from '../services/dispatch.js';
 import * as githubFlow from '../services/github-flow.js';
+import * as board from '../services/board.js';
 import * as talk from '../services/talk.js';
 import * as talkStore from '../services/talk-store.js';
 import * as evidence from '../services/evidence.js';
@@ -530,6 +531,24 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const body = await readJson(req);
       githubFlow.setMode(wp, str(body['mode']), 'coo');
       json(res, 200, githubFlow.state(wp));
+    }),
+    // Board maintenance (owner, 18 Oct): the COO's loopback door to the same functions as Asha's tools.
+    r('POST', '/api/coo/board/:action', async (req, res, _url, [action]) => {
+      requireLocal(req);
+      const b = await readJson(req);
+      const by = 'coo';
+      const reason = str(b['reason'], '');
+      const id = str(b['itemId'], '');
+      switch (action) {
+        case 'pr-close': return json(res, 200, await board.closePr(wp, id, by, reason));
+        case 'close-no-code': return json(res, 200, board.closeNoCode(wp, id, by, reason));
+        case 'signoff-recut': return json(res, 200, board.recutSignoff(wp, str(b['sha'], ''), by, reason));
+        case 'github-resume': return json(res, 200, board.resumeGithub(wp, by, reason));
+        case 'status-repost': return json(res, 200, { posted: await board.repostStatus(wp, id, by, reason) });
+        case 'branch-reset': return json(res, 200, await board.resetBranch(wp, id, by, reason));
+        case 'map-assign': return json(res, 200, board.assignMap(wp, Array.isArray(b['paths']) ? (b['paths'] as unknown[]).map(String) : [], str(b['charterId'], ''), by, reason));
+        default: throw new NotFound(`No board action ${action}`);
+      }
     }),
     r('POST', '/api/coo/merge', async (req, res) => {
       requireLocal(req);

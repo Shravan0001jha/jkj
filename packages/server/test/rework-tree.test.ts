@@ -82,7 +82,8 @@ test('who can change a story: the assignee and anyone above them, nobody else', 
     assert.equal(items.update(wp, id, { status: 'ready', reason: 'back in the queue for now' }, 'dev').status, 'ready', 'their lead');
     assert.equal(items.update(wp, id, { status: 'backlog', reason: 'not this week' }, 'asha').status, 'backlog', 'Asha');
     const cto = story(wp, 'cto', 'Architecture review');
-    assert.throws(() => items.update(wp, cto, { status: 'backlog', reason: 'not now' }, 'asha'), /Forbidden: only Vikram or someone above them can change this story/, 'Asha cannot move the CTO\'s story');
+    assert.equal(items.update(wp, cto, { status: 'backlog', reason: 'not now' }, 'asha').status, 'backlog', 'Asha keeps the whole board, the CTO\'s story included (owner, 18 Oct)');
+    assert.throws(() => items.update(wp, cto, { status: 'ready', reason: 'not his to move' }, 'sameer'), /Forbidden: only Vikram or someone above them can change this story/, 'an engineer cannot');
     assert.equal(items.update(wp, cto, { status: 'backlog', reason: 'not now' }, 'coo').status, 'backlog', 'the COO can');
   } finally { tmp.cleanup(); }
 });

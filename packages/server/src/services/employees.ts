@@ -21,6 +21,7 @@ import { resolve as resolveOwner } from './ownership.js';
 import * as stall from './stall.js';
 import * as room from './room.js';
 import * as coo from './coo.js';
+import * as board from './board.js';
 import * as items from './items.js';
 import * as trail from './trail.js';
 import * as watch from './watch.js';
@@ -81,7 +82,7 @@ export function hitSessionBudget(subtype: string): boolean {
 
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'qa_doc_update', 'record_live_check', 'qa_cases_write', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence', 'request_mac', 'release_mac', 'lease_test_account', 'return_test_account', 'doc_write', 'doc_read', 'doc_comment'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'qa_doc_update', 'record_live_check', 'qa_cases_write', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence', 'request_mac', 'release_mac', 'lease_test_account', 'return_test_account', 'doc_write', 'doc_read', 'doc_comment', 'pr_close_detach', 'story_close_no_code', 'signoff_recut', 'github_resume', 'status_repost', 'branch_reset_to_local', 'map_assign'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -1666,6 +1667,42 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
       tool('doc_comment', 'Comment on a story\'s Notion doc under your name. With `quote` (text copied from the doc) the comment is anchored to the first block containing it; otherwise it goes on the page. qa: true comments on its QA doc instead. Answer the owner\'s doc comments this way.',
         { itemId: z.string(), text: z.string(), quote: z.string().optional(), qa: z.boolean().optional().describe('Comment on the story\'s QA doc instead of its doc.') },
         async ({ itemId, text, quote, qa }) => ok(await docs.docComment(wp, employeeId, { itemId, text, ...(quote ? { quote } : {}), ...(qa ? { qa } : {}) }))),
+      // Board maintenance (owner, 18 Oct): Chief of Staff only (and the COO/owner by API). Each needs a reason, which becomes the audit line on the story.
+      tool('pr_close_detach', 'Chief of Staff only: close a story\'s unmerged pull request on GitHub (a scratch PR on a no-code story, say) and detach it, so the story can be closed. Refused for a merged PR, a PR with both approvals, or your own story. A reason is required (it is the audit).',
+        { itemId: z.string(), reason: z.string() },
+        async ({ itemId, reason }) => {
+          try { const r = await board.closePr(wp, itemId, employeeId, reason); return ok(`Closed PR #${r.closed} and detached it from ${r.itemId}. Now mark the story done with story_close_no_code if it has no code.`); } catch (err) { return ok(`Not done: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('story_close_no_code', 'Chief of Staff only: mark a story with no code done (a staging batch sign-off, a process story), whatever its reviewer. Refused when it has an open pull request (close it first with pr_close_detach), when it is your own story, or without a reason.',
+        { itemId: z.string(), reason: z.string() },
+        async ({ itemId, reason }) => {
+          try { const r = board.closeNoCode(wp, itemId, employeeId, reason); return ok(`${r.itemId} is ${r.status}.`); } catch (err) { return ok(`Not done: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('signoff_recut', 'Chief of Staff only: move the pending staging batch sign-off to a newer trunk commit (it must be on origin/feat/iris-character and a descendant of the current sign-off head). Comments on the sign-off story.',
+        { sha: z.string(), reason: z.string() },
+        async ({ sha, reason }) => {
+          try { const r = board.recutSignoff(wp, sha, employeeId, reason); return ok(`Sign-off head ${r.from.slice(0, 9)} → ${r.to.slice(0, 9)} on ${r.storyId}.`); } catch (err) { return ok(`Not done: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('github_resume', 'Chief of Staff only: switch the GitHub flow back on after the Workplace fell back to local by itself (three GitHub failures). Refused when no automatic fallback happened. Give the reason you believe GitHub is healthy.',
+        { reason: z.string() },
+        async ({ reason }) => {
+          try { const s = board.resumeGithub(wp, employeeId, reason); return ok(`GitHub flow is ${s.mode}.`); } catch (err) { return ok(`Not done: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('status_repost', 'Chief of Staff only: post the workplace/review, workplace/tests and workplace/evidence statuses of a story\'s open PR again from the Workplace\'s own state (GitHub lost one, so the PR sits pending).',
+        { itemId: z.string(), reason: z.string() },
+        async ({ itemId, reason }) => {
+          try { const r = await board.repostStatus(wp, itemId, employeeId, reason); return ok(`Posted: ${r.join(', ')}.`); } catch (err) { return ok(`Not done: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('branch_reset_to_local', 'Chief of Staff only: put a story\'s branch on GitHub back at its owner\'s local tip when the remote has stray auto-saved WIP commits. Only when every file in those commits exists identically on the local tip or another branch; a backup ref backup/<branch>-<sha> is pushed first and the overwrite is force-with-lease.',
+        { itemId: z.string(), reason: z.string() },
+        async ({ itemId, reason }) => {
+          try { const r = await board.resetBranch(wp, itemId, employeeId, reason); return ok(`${r.branch} reset ${r.was.slice(0, 8)} → ${r.now.slice(0, 8)}; backup ${r.backup}.`); } catch (err) { return ok(`Not done: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
+      tool('map_assign', 'Chief of Staff only: assign files that no charter owns to a charter in the ownership map (map.yaml), so the person waiting can report_done. Exact repo-relative paths (a folder path covers what is under it); each must be unmapped; the org reloads at once.',
+        { paths: z.array(z.string()), charterId: z.string(), reason: z.string() },
+        async ({ paths, charterId, reason }) => {
+          try { const r = board.assignMap(wp, paths, charterId, employeeId, reason); return ok(`Mapped ${r.added.join(', ')} to ${charterId}; the org is reloaded.`); } catch (err) { return ok(`Not done: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
       tool('propose_org_change', 'Propose a hire, split, merge, reassign or restructure with a reason. The owner approves it in the Inbox. `paramsJson` is a JSON object as a string (see the handbook for the shape of each kind).',
         // A z.record() here makes the MCP SDK fail to list ANY tool of this server; a JSON string does not.
         { kind: z.enum(['hire', 'retire', 'split', 'merge', 'reassign', 'restructure']), reason: z.string(), paramsJson: z.string() },

@@ -434,6 +434,8 @@ export interface PrRecord {
   /** context → "sha|state|description" last posted, so an unchanged status is not posted again. */
   posted?: Record<string, string>;
   merged?: { at: string; sha: string; by: string };
+  /** Closed on GitHub without merging (board maintenance, 18 Oct): it never blocks "done". */
+  closed?: { at: string; by: string; reason: string };
   /** The developer approver the Workplace named (a member of the author's team, else the CTO). */
   devReviewer?: string;
   /** The one QA for this story (set at the developer approval); only they give approval 2 of 2. */

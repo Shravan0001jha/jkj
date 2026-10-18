@@ -16,7 +16,7 @@ import * as employees from './employees.js';
 import * as runs from './runs.js';
 import { now } from './store.js';
 import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
-import { branchFor, worktreePath } from './worktrees.js';
+import { AUTOSAVE_SUBJECT, branchFor, worktreePath } from './worktrees.js';
 import * as prePr from './pre-pr.js';
 import * as spendCaps from './spend-caps.js';
 import { dayOf } from './spend.js';
@@ -140,8 +140,26 @@ export function branchProblem(branch: string, expected: string): string | null {
   return null;
 }
 
-const git = (cwd: string, args: string[]): string => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-const revParse = (cwd: string, ref: string): string | null => { try { return git(cwd, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).trim() || null; } catch { return null; } };
+export const git = (cwd: string, args: string[]): string => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+export const revParse = (cwd: string, ref: string): string | null => { try { return git(cwd, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).trim() || null; } catch { return null; } };
+
+/**
+ * The commit of `branch` that goes to GitHub: its tip, less any WIP commits the auto-save before a story
+ * switch put on top (18 Oct, Kabir's emp/kabir/as_mvdgmpr4ueeu2: the push of the branch carried a stray
+ * "WIP (auto-saved ...)" commit to the remote). Unsaved work is not part of the review.
+ */
+export function pushableTip(repo: string, branch: string): string | null {
+  let tip = revParse(repo, `refs/heads/${branch}`);
+  for (let i = 0; tip && i < 50; i++) {
+    let subject = '';
+    try { subject = git(repo, ['log', '-1', '--format=%s', tip]).trim(); } catch { return tip; }
+    if (!subject.startsWith(AUTOSAVE_SUBJECT)) return tip;
+    const parents = git(repo, ['rev-list', '--parents', '-n', '1', tip]).trim().split(/\s+/).slice(1);
+    if (parents.length !== 1) return tip;
+    tip = parents[0]!;
+  }
+  return tip;
+}
 
 interface Ctx { w: WorkItem; emp: Employee; repo: string; base: string; branch: string; head: string }
 
@@ -155,7 +173,7 @@ function contextOf(wp: Workplace, w: WorkItem): Ctx | string {
   if ((emp.workspace.branch ?? 'main') !== base) return `${emp.name} does not work on ${base}`;
   const repo = emp.workspace.repo;
   const branch = branchFor(emp, w.id);
-  const head = revParse(repo, `refs/heads/${branch}`);
+  const head = pushableTip(repo, branch);
   if (!head) return `no branch ${branch}`;
   const own = git(repo, ['rev-list', '--count', `${base}..${head}`]).trim();
   if (own === '0') return `no commits on ${branch} past ${base}`;
@@ -163,7 +181,7 @@ function contextOf(wp: Workplace, w: WorkItem): Ctx | string {
 }
 
 /** Write the item's PR record from the current row (never a stale copy). */
-function savePr(wp: Workplace, id: string, change: (w: WorkItem) => Partial<WorkItem>): WorkItem {
+export function savePr(wp: Workplace, id: string, change: (w: WorkItem) => Partial<WorkItem>): WorkItem {
   const cur = rawGet(wp, id);
   if (!cur) throw new NotFound(`No item ${id}`);
   const next = { ...cur, ...change(cur) } as WorkItem;
@@ -172,7 +190,7 @@ function savePr(wp: Workplace, id: string, change: (w: WorkItem) => Partial<Work
   return next;
 }
 
-const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 300);
+export const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 300);
 
 /* ---------- moving to review: push and PR ---------- */
 
@@ -232,7 +250,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
 
   const port = gitHubPort(wp);
   try {
-    await port.push(ctx.repo, ctx.branch);
+    await port.push(ctx.repo, ctx.branch, ctx.head);
   } catch (err) {
     recordFailure(wp, 'push', itemId, Date.now(), errText(err));
     trail.record(wp, { itemId, by: 'workplace', kind: 'note', text: `Could not push ${ctx.branch} to GitHub: ${errText(err)}` });
@@ -240,7 +258,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   }
 
   const prev = rawGet(wp, itemId)!.pr;
-  const reuse = prev && !prev.merged && prev.branch === ctx.branch ? prev : undefined;
+  const reuse = prev && !prev.merged && !prev.closed && prev.branch === ctx.branch ? prev : undefined;
   let number = reuse?.number;
   let url = reuse?.url;
   if (!number) {
@@ -359,7 +377,7 @@ const clearExtra = (e: ExtraReviewer): ExtraReviewer => { const { approvedAt: _a
 
 /* ---------- trunk catch-up (rework W3) ---------- */
 
-const isAncestor = (repo: string, a: string, b: string): boolean => {
+export const isAncestor = (repo: string, a: string, b: string): boolean => {
   try { execFileSync('git', ['-C', repo, 'merge-base', '--is-ancestor', a, b], { stdio: 'ignore' }); return true; } catch { return false; }
 };
 
@@ -726,6 +744,23 @@ export function statusesFor(wp: Workplace, w: WorkItem): Status[] {
   return [review, tests, evidence];
 }
 
+/**
+ * A GitHub status POST that fails is tried again after a pause (18 Oct, PR #447: one GitHub 500 left
+ * workplace/review pending for good). Backoff delays in ms between attempts; tests shorten them.
+ */
+export const statusRetry = { delaysMs: [1000, 4000, 10000] };
+
+async function withRetry(op: () => Promise<void>, what: string): Promise<void> {
+  for (let i = 0; ; i++) {
+    try { return await op(); } catch (err) {
+      const wait = statusRetry.delaysMs[i];
+      if (wait === undefined) throw err;
+      log.warn('github', `${what} failed (${errText(err)}); retrying in ${wait} ms`);
+      await new Promise(r => setTimeout(r, wait));
+    }
+  }
+}
+
 /** Post what changed since the last post on this head. Throws a GitHub error to the caller. */
 async function postStatuses(wp: Workplace, itemId: string): Promise<void> {
   const w = rawGet(wp, itemId);
@@ -748,10 +783,19 @@ async function postStatuses(wp: Workplace, itemId: string): Promise<void> {
         s.targetUrl = fresh.url;
       }
     }
-    await port.setStatus(head, s);
+    await withRetry(() => port.setStatus(head, s), `status ${s.context}`);
     posted[s.context] = key;
     savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, posted: { ...(c.pr.posted ?? {}), [s.context]: key } } } : {}));
   }
+}
+
+/** Forget what was posted for this head and post every workplace/* status again (board maintenance). */
+export async function repostStatuses(wp: Workplace, itemId: string): Promise<Status[]> {
+  const w = rawGet(wp, itemId);
+  if (!w?.pr || w.pr.merged) throw new BadRequest(`${itemId} has no open pull request.`);
+  savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, posted: {} } } : {}));
+  await postStatuses(wp, itemId);
+  return statusesFor(wp, rawGet(wp, itemId)!);
 }
 
 /** A comment on the item's open PR (shadow/on): the evidence summary with its link. */
@@ -1271,6 +1315,9 @@ export async function syncHeads(wp: Workplace): Promise<string[]> {
       moved.push(w.id);
       continue;
     }
+    // A PR closed without a merge is not caught up with the trunk: GitHub refuses update-branch on it, which
+    // read as a conflict and sent the story back (18 Oct, as_mvdf2ivfmuhtz, PR #448 closed: twice).
+    if (w.pr.closed) continue;
     await catchUp(wp, w, ctx);
     // Mobile checks running on GitHub for this head (cloud migration, 17 Oct): follow the run.
     await followMobileCi(wp, w.id);
@@ -1296,6 +1343,13 @@ async function catchUp(wp: Workplace, w: WorkItem, ctx: Ctx): Promise<void> {
   if (getSetting(wp, key) === `${ctx.head}|${trunk}`) return;
   putSetting(wp, key, `${ctx.head}|${trunk}`);
   const port = gitHubPort(wp);
+  try {
+    const gh = await port.getPr(pr.number);
+    if (gh.state === 'closed' && !gh.merged) {
+      savePr(wp, w.id, c => (c.pr ? { pr: { ...c.pr, closed: { at: now(), by: 'github', reason: 'closed on GitHub without a merge' } } } : {}));
+      return;
+    }
+  } catch { /* GitHub unreachable: the update below reports it */ }
   let res: { updated: boolean; conflict?: boolean };
   try { res = await port.updateBranch(pr.number, pr.headSha); } catch (err) {
     recordFailure(wp, 'update branch', w.id, Date.now(), errText(err));
@@ -1386,13 +1440,22 @@ export async function merge(wp: Workplace, itemId: string, by: string): Promise<
       try { lifecycleWatch.onMerged(wp, itemId, by); } catch (err) { log.warn('github', `${itemId}: after merge: ${errText(err)}`); }
       return { mode: m, merged: true, synced: true };
     }
-    if (gh.state !== 'open') throw new Conflict(`PR #${pr.number} is closed on GitHub.`);
+    if (gh.state !== 'open') {
+      // Closed without a merge: remember it, so the story is not held from "done" by a PR that is gone.
+      savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, closed: { at: now(), by: 'github', reason: 'closed on GitHub without a merge' } } } : {}));
+      throw new Conflict(`PR #${pr.number} is closed on GitHub.`);
+    }
     if (gh.headSha !== pr.headSha) throw new Conflict(`GitHub's head for PR #${pr.number} (${gh.headSha.slice(0, 8)}) is not the reviewed commit (${pr.headSha.slice(0, 8)}).`);
     const res = await port.merge(pr.number, pr.headSha, `Merge ${pr.branch}: ${w.title} [${w.id}]`);
     if (!res.merged) throw new Conflict(`GitHub did not merge PR #${pr.number}.`);
     mergedSha = res.sha;
   } catch (err) {
-    if (!(err instanceof Conflict)) recordFailure(wp, 'merge', itemId, Date.now(), errText(err));
+    // A 405 is GitHub's "not mergeable": most often a required workplace/* status it never received.
+    // That is ours to repair (re-post), not an outage, so it does not count toward the fallback to local.
+    if (/\(405\)/.test(errText(err)) && /status/i.test(errText(err))) {
+      savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, posted: {} } } : {}));
+      try { await postStatuses(wp, itemId); } catch (e2) { recordFailure(wp, 'status', itemId, Date.now(), errText(e2)); }
+    } else if (!(err instanceof Conflict)) recordFailure(wp, 'merge', itemId, Date.now(), errText(err));
     throw err instanceof BadRequest ? err : new Error(`GitHub merge of PR #${pr.number} failed: ${errText(err)}`);
   }
   savePr(wp, itemId, c => ({ pr: { ...c.pr!, merged: { at: now(), sha: mergedSha ?? '', by } } }));

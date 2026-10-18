@@ -33,8 +33,16 @@ export interface WorkflowRun { id: number; url: string; status: string; conclusi
 export interface WorkflowJob { labels: string[]; startedAt: string | null; completedAt: string | null }
 
 export interface GitHubPort {
-  /** Push `refs/heads/<branch>` of `repoDir` to the same name on GitHub. Never forced. */
-  push(repoDir: string, branch: string): Promise<void>;
+  /** Push `refs/heads/<branch>` of `repoDir` (or, with `sha`, that commit) to the same name on GitHub. Never forced. */
+  push(repoDir: string, branch: string, sha?: string): Promise<void>;
+  /** Close a pull request without merging it. */
+  closePr(n: number): Promise<void>;
+  /** Fetch every branch of GitHub into `refs/remotes/github/*` of `repoDir`. */
+  fetchRemotes(repoDir: string): Promise<void>;
+  /** Push a commit to a new ref on GitHub (a backup); never forced. */
+  pushRef(repoDir: string, sha: string, ref: string): Promise<void>;
+  /** Move `refs/heads/<branch>` on GitHub to `sha` with force-with-lease: only if it is still `expectedRemoteSha`. */
+  forcePush(repoDir: string, branch: string, sha: string, expectedRemoteSha: string): Promise<void>;
   findOpenPr(branch: string): Promise<PullRequest | null>;
   openPr(pr: { title: string; body: string; head: string; base: string }): Promise<PullRequest>;
   getPr(n: number): Promise<PullRequest>;
@@ -180,8 +188,24 @@ export class RealGitHub implements GitHubPort {
     }
   }
 
-  async push(repoDir: string, branch: string): Promise<void> {
-    await this.git(repoDir, url => ['push', '--quiet', '--no-verify', url, `refs/heads/${branch}:refs/heads/${branch}`]);
+  async push(repoDir: string, branch: string, sha?: string): Promise<void> {
+    await this.git(repoDir, url => ['push', '--quiet', '--no-verify', url, `${sha ?? `refs/heads/${branch}`}:refs/heads/${branch}`]);
+  }
+
+  async closePr(n: number): Promise<void> {
+    await this.ok(this.o.pushApp, 'PATCH', `${this.repoPath}/pulls/${n}`, { state: 'closed' });
+  }
+
+  async fetchRemotes(repoDir: string): Promise<void> {
+    await this.git(repoDir, url => ['fetch', '--quiet', url, '+refs/heads/*:refs/remotes/github/*']);
+  }
+
+  async pushRef(repoDir: string, sha: string, ref: string): Promise<void> {
+    await this.git(repoDir, url => ['push', '--quiet', '--no-verify', url, `${sha}:${ref}`]);
+  }
+
+  async forcePush(repoDir: string, branch: string, sha: string, expectedRemoteSha: string): Promise<void> {
+    await this.git(repoDir, url => ['push', '--quiet', '--no-verify', `--force-with-lease=refs/heads/${branch}:${expectedRemoteSha}`, url, `${sha}:refs/heads/${branch}`]);
   }
 
   async pullFfOnly(repoDir: string, branch: string): Promise<void> {

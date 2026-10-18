@@ -259,12 +259,17 @@ function subjectOf(wp: Workplace, w: WorkItem): string | undefined {
  *   Staff routes only to a lead or the QA lead ("route to the charter lead; the lead assigns within the team"),
  *   or moves a story between members of its current team (dry run #16).
  */
+/** Owner, 18 Oct: the Chief of Staff keeps the whole board, every story except those assigned to the COO (the CTO's included). */
+export function cosOverBoard(wp: Workplace, actor: string, w: WorkItem): boolean {
+  return !!actor && actor === chiefOfStaffId(wp) && w.employeeId !== 'coo' && subjectOf(wp, w) !== 'coo';
+}
+
 export function checkActor(wp: Workplace, actor: string, prev: WorkItem, patch: UpdateItemRequest): void {
   if (EXEMPT.has(actor) || !wp.org.employees.some(e => e.id === actor)) return;
   const from = prev.status ?? 'ready';
   const reassigning = patch.assigneeId !== undefined && patch.assigneeId !== prev.employeeId;
   const subject = subjectOf(wp, prev);
-  const owns = !!subject && (subject === actor || isAbove(wp.org, actor, subject));
+  const owns = cosOverBoard(wp, actor, prev) || (!!subject && (subject === actor || isAbove(wp.org, actor, subject)));
   const reviewing = actor === prev.reviewerId && from === 'in-review' && !reassigning
     && (patch.status === undefined || patch.status === 'in-review' || patch.status === 'in-progress' || patch.status === 'done');
   if (!owns && !reviewing) throw new Forbidden(`Forbidden: only ${nameOf(wp, subject)} or someone above them can change this story`);
@@ -427,8 +432,9 @@ const TRANSITIONS: Record<ItemStatus, ItemStatus[]> = {
  * `converted`: the move is the server's own rewrite of a block on a teammate (LLD §19.6c), so the
  * transition table is not consulted (ready → in-review is allowed there); the other rules still hold.
  */
-function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus, req: UpdateItemRequest, by: string, next: WorkItem, converted = false): void {
-  if (!converted && from !== to && !TRANSITIONS[from].includes(to)) throw new BadRequest(`${levelOf(w)} ${w.id} cannot go from ${from} to ${to}`);
+function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus, req: UpdateItemRequest, by: string, next: WorkItem, converted = false, maintenance = false): void {
+  const cosPark = from === 'in-review' && to === 'parked' && cosOverBoard(wp, by, w);
+  if (!converted && !cosPark && from !== to && !TRANSITIONS[from].includes(to)) throw new BadRequest(`${levelOf(w)} ${w.id} cannot go from ${from} to ${to}`);
   const level = levelOf(w);
   if (to === 'in-review') {
     if (!next.reviewerId) throw new BadRequest('Name a reviewer before review: nothing sits in review with nobody reviewing.');
@@ -460,7 +466,9 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
   // nothing landed, so the owner or the COO may do it with a reason, whatever the status or the branch holds.
   const dropping = to === 'done' && (by === 'owner' || by === 'coo') && !!req.resolution && req.resolution !== 'done';
   if (dropping && !req.note?.trim()) throw new BadRequest(`Closing as ${req.resolution} needs a note: why.`);
-  if (to === 'done' && !dropping) {
+  if (to === 'done' && !dropping && maintenance) {
+    // Board maintenance (board.ts closeNoCode): the caller already checked who, why and that no PR is open.
+  } else if (to === 'done' && !dropping) {
     // GitHub flow `on` (docs/LLD-github-flow.md §3): a story with a PR is done by its two approvals. Local/shadow: null.
     const github = doneProblem(wp, next, by);
     if (github) throw new BadRequest(github);
@@ -471,7 +479,9 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
       const n = unlandedPatches(wp, next);
       if (n > 0) throw new BadRequest(`Not done yet: ${n} change${n === 1 ? '' : 's'} on this story's branch never reached the trunk. Land them through a pull request (report_done), or show they are already on the trunk, before closing.`);
     }
-    if (from === 'backlog' || from === 'ready') {
+    if (cosOverBoard(wp, by, w) && level !== 'epic') {
+      // The Chief of Staff closes any story but the COO's (owner, 18 Oct); a PR still needs its two approvals (doneProblem above).
+    } else if (from === 'backlog' || from === 'ready') {
       if (by !== 'owner') throw new BadRequest('Closing work that never started is the owner\'s call.');
     } else if (level === 'epic') {
       if (by !== 'owner' && by !== w.ownerId) throw new BadRequest('An epic is closed by the owner or its owner.');
@@ -544,7 +554,7 @@ function applyHandback(wp: Workplace, prev: WorkItem, next: WorkItem, byId: stri
  * `checked`: the caller already decided who may act (the review flow's approve and send-back), so the
  * tree check is skipped; the reason rule and the transition rules still hold.
  */
-export function update(wp: Workplace, id: string, given0: UpdateItemRequest, given: string, opts: { rewait?: boolean; checked?: boolean } = {}): Item {
+export function update(wp: Workplace, id: string, given0: UpdateItemRequest, given: string, opts: { rewait?: boolean; checked?: boolean; maintenance?: boolean } = {}): Item {
   let req = given0;
   const by = authorId(wp, given);
   const prev = requireRow(wp, id);
@@ -711,7 +721,7 @@ export function update(wp: Workplace, id: string, given0: UpdateItemRequest, giv
     if (to === 'parked') {
       next.parked = { reason: req.note?.trim() ?? '', resumeWhen: req.resumeWhen?.trim() ?? '', by, since: at };
     } else delete next.parked;
-    checkMove(wp, prev, from, to, req, by, next, converted);
+    checkMove(wp, prev, from, to, req, by, next, converted, opts.maintenance);
     next.status = to;
     if (to !== from) next.statusSince = at;
     if (to === 'done') next.resolution = req.resolution ?? (from === 'backlog' || from === 'ready' ? 'wont-do' : 'done');
