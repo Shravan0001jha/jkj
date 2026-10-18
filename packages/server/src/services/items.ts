@@ -264,6 +264,22 @@ export function cosOverBoard(wp: Workplace, actor: string, w: WorkItem): boolean
   return !!actor && actor === chiefOfStaffId(wp) && w.employeeId !== 'coo' && subjectOf(wp, w) !== 'coo';
 }
 
+/** Who filed the item: the `created` entry of its trail. */
+function filedBy(wp: Workplace, w: WorkItem): string | undefined {
+  return trail.activityFor(wp, w.id).find(a => a.kind === 'created')?.by;
+}
+
+/**
+ * Closing as won't-do / duplicate / can't-reproduce (owner, 7 Oct: the COO; 18 Oct: the Chief of Staff for a
+ * story or task, never an epic and never something the owner filed). It claims nothing landed, so it skips the
+ * transition table and the who-closes rules, from any status.
+ */
+export function mayDrop(wp: Workplace, by: string, w: WorkItem, resolution: string | undefined): boolean {
+  if (!resolution || resolution === 'done') return false;
+  if (by === 'owner' || by === 'coo') return true;
+  return cosOverBoard(wp, by, w) && levelOf(w) !== 'epic' && filedBy(wp, w) !== 'owner';
+}
+
 export function checkActor(wp: Workplace, actor: string, prev: WorkItem, patch: UpdateItemRequest): void {
   if (EXEMPT.has(actor) || !wp.org.employees.some(e => e.id === actor)) return;
   const from = prev.status ?? 'ready';
@@ -434,7 +450,8 @@ const TRANSITIONS: Record<ItemStatus, ItemStatus[]> = {
  */
 function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus, req: UpdateItemRequest, by: string, next: WorkItem, converted = false, maintenance = false): void {
   const cosPark = from === 'in-review' && to === 'parked' && cosOverBoard(wp, by, w);
-  if (!converted && !cosPark && from !== to && !TRANSITIONS[from].includes(to)) throw new BadRequest(`${levelOf(w)} ${w.id} cannot go from ${from} to ${to}`);
+  const dropMove = to === 'done' && from !== 'done' && (maintenance || mayDrop(wp, by, w, req.resolution));
+  if (!converted && !cosPark && !dropMove && from !== to && !TRANSITIONS[from].includes(to)) throw new BadRequest(`${levelOf(w)} ${w.id} cannot go from ${from} to ${to}`);
   const level = levelOf(w);
   if (to === 'in-review') {
     if (!next.reviewerId) throw new BadRequest('Name a reviewer before review: nothing sits in review with nobody reviewing.');
@@ -464,7 +481,7 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
   if (early) throw new BadRequest(early);
   // Owner, 7 Oct: the COO decides on his behalf. Closing as won't-do / duplicate / can't-reproduce claims
   // nothing landed, so the owner or the COO may do it with a reason, whatever the status or the branch holds.
-  const dropping = to === 'done' && (by === 'owner' || by === 'coo') && !!req.resolution && req.resolution !== 'done';
+  const dropping = to === 'done' && mayDrop(wp, by, w, req.resolution);
   if (dropping && !req.note?.trim()) throw new BadRequest(`Closing as ${req.resolution} needs a note: why.`);
   if (to === 'done' && !dropping && maintenance) {
     // Board maintenance (board.ts closeNoCode): the caller already checked who, why and that no PR is open.

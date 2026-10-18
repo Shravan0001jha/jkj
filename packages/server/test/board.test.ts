@@ -334,3 +334,28 @@ test('a PR closed on GitHub without a merge is not caught up with the trunk and 
     assert.equal(doneProblem(s.wp, rawGet(s.wp, s.storyId)!, 'asha'), null);
   } finally { await s.done(); }
 });
+
+/* ---------- closing never-started work as superseded ---------- */
+
+test('Asha closes never-started and parked stories as superseded with a reason, but not epics or the owner\'s own filings', async () => {
+  const s = setup('on');
+  try {
+    const epic = items.create(s.wp, { level: 'epic', title: 'Ops' }, 'owner');
+    const ready = items.create(s.wp, { level: 'story', title: 'Superseded one', parentId: epic.id, assigneeId: 'kabir' }, 'asha');
+    assert.throws(() => items.update(s.wp, ready.id, { status: 'done', reason: 'no resolution given' }, 'asha'), /owner/i, 'a plain done is still not hers');
+    assert.throws(() => items.update(s.wp, ready.id, { status: 'done', resolution: 'wont-do' }, 'asha'), /note|reason/i, 'a reason is needed');
+    const closed = items.update(s.wp, ready.id, { status: 'done', resolution: 'wont-do', reason: 'superseded by the canonical case table story' }, 'asha');
+    assert.equal(closed.status, 'done');
+    assert.equal(closed.resolution, 'wont-do');
+    // Parked: no code started, closed through the maintenance tool.
+    const parked = items.create(s.wp, { level: 'story', title: 'Parked one', parentId: epic.id, assigneeId: 'kabir' }, 'asha');
+    items.update(s.wp, parked.id, { status: 'parked', reason: 'waiting for the fixture', resumeWhen: 'the fixture lands' }, 'asha');
+    board.closeNoCode(s.wp, parked.id, 'asha', 'decided superseded by the owner inbox decision');
+    assert.equal(rawGet(s.wp, parked.id)!.status, 'done');
+    // Not an epic, not the owner's own filing.
+    assert.throws(() => items.update(s.wp, epic.id, { status: 'done', resolution: 'wont-do', reason: 'an epic is the owner\'s' }, 'asha'), /epic|owner/i);
+    const mine = items.create(s.wp, { level: 'story', title: 'Owner filed', parentId: epic.id, assigneeId: 'kabir' }, 'owner');
+    assert.throws(() => items.update(s.wp, mine.id, { status: 'done', resolution: 'wont-do', reason: 'the owner filed this' }, 'asha'), /owner/i);
+    assert.equal(items.update(s.wp, mine.id, { status: 'done', resolution: 'wont-do', reason: 'the COO may' }, 'coo').status, 'done');
+  } finally { await s.done(); }
+});
