@@ -551,7 +551,10 @@ function authorWorktree(wp: Workplace, emp: Employee): string { return worktreeP
 function coveringPrePr(wp: Workplace, ctx: Ctx, head: string, hint?: string): prePr.PrePrResult | null {
   const wt = authorWorktree(wp, ctx.emp);
   const exact = prePr.read(wt, head);
-  if (exact && exact.sha === head) return exact;
+  // A partial or fast run on the head (e.g. `--only`) is not a verdict: it must not shadow a full passing
+  // result the head carries over by trunk-only merges (19 Oct, as_mve1hwddw1h30).
+  const exactCounts = !!exact && exact.sha === head && (prePr.passes(exact, head) || !exact.ok);
+  if (exact && exact.sha === head && exactCounts) return exact;
   // Candidates: commits in the head's own history that have a result, nearest first (an author runs
   // pre-pr on many branches, so the newest files are often another story's).
   const withResult = new Set(prePr.shasWithResults(wt, 10_000));
@@ -562,9 +565,9 @@ function coveringPrePr(wp: Workplace, ctx: Ctx, head: string, hint?: string): pr
     if (!c || seen.has(c)) continue;
     seen.add(c);
     const r = prePr.read(wt, c);
-    if (r && r.sha === c && trunkOnly(ctx.repo, ctx.base, c, head)) return r;
+    if (r && r.sha === c && trunkOnly(ctx.repo, ctx.base, c, head) && (exact?.sha !== head || prePr.passes(r, c))) return r;
   }
-  return null;
+  return exact && exact.sha === head ? exact : null;
 }
 
 /**
@@ -598,7 +601,9 @@ async function recordTests(wp: Workplace, itemId: string, ctx: Ctx): Promise<voi
     // 19 Oct: a mobile-ios result (an old Mac or GitHub run, carried or not) never gates; a known failure
     // in it goes to the post-merge review story instead of being dropped.
     const valid = found && withoutDroppedAreas(found);
-    const iosFailures = found ? iosFailureText(found) : undefined;
+    // No detail in a result: the stored legacy failure line (an old Mac run) is what is known, and is kept.
+    const prevTests = rawGet(wp, itemId)?.pr?.tests;
+    const iosFailures = (found ? iosFailureText(found) : undefined) ?? (legacyIosGate(prevTests) ? `${prevTests!.summary}${prevTests!.details ? `\n${prevTests!.details}` : ''}` : undefined);
     const localSha = valid?.sha ?? sha;
     // Only a full run counts (pre-pr.ts passes); a fast or partial pass stays pending.
     let tests: NonNullable<PrRecord['tests']> = !valid

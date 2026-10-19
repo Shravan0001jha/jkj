@@ -111,6 +111,21 @@ test('class: a pre-pr result on the author\'s commit covers a head GitHub reache
   } finally { s.done(); }
 });
 
+test('class: a partial pre-pr run on the head does not shadow the full passing result it carries over by a trunk-only merge', async () => {
+  const s = setup();
+  try {
+    const sha = s.commit('services/agent-svc/phone.py', 'x = 1\n');
+    writePrePr(s.wt, sha, {});
+    work.reportDone(s.wp, s.storyId, evidence, 'kabir');
+    await (await flow.onReview(s.wp, s.storyId, 'kabir')).tests;
+    const head = trunkOnlyMove(s);
+    writePrePr(s.wt, head, { only: ['mobile-ios'], mode: 'full' });   // the author's later partial run
+    work.saveQuiet(s.wp, { ...rawGet(s.wp, s.storyId)!, pr: { ...pr(s), headSha: head, tests: { state: 'pending', sha: head, at: new Date().toISOString(), summary: 'Waiting' } } });
+    await flow.syncHeads(s.wp);
+    assert.equal(pr(s).tests?.state, 'success');
+  } finally { s.done(); }
+});
+
 test('a pending workplace/tests is never terminal: after an hour Asha is told, once, with what to do', async () => {
   const s = setup();
   try {
