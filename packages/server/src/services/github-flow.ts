@@ -549,8 +549,13 @@ function coveringPrePr(wp: Workplace, ctx: Ctx, head: string, hint?: string): pr
   const wt = authorWorktree(wp, ctx.emp);
   const exact = prePr.read(wt, head);
   if (exact && exact.sha === head) return exact;
+  // Candidates: commits in the head's own history that have a result, nearest first (an author runs
+  // pre-pr on many branches, so the newest files are often another story's).
+  const withResult = new Set(prePr.shasWithResults(wt, 10_000));
+  let history: string[] = [];
+  try { history = git(ctx.repo, ['rev-list', '-n', '500', head]).split('\n').map(x => x.trim()).filter(Boolean); } catch { /* unknown head */ }
   const seen = new Set<string>([head]);
-  for (const c of [hint, ...prePr.shasWithResults(wt, 6)]) {
+  for (const c of [hint, ...history.filter(h => withResult.has(h))]) {
     if (!c || seen.has(c)) continue;
     seen.add(c);
     const r = prePr.read(wt, c);
