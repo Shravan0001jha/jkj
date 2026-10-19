@@ -1,4 +1,4 @@
-import type { Employee, GitHubMode, PrApproval, WorkItem } from '@jkj/shared';
+import type { Employee, GitHubMode, PrApproval, PrExtraReviewer, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import { teamMembers, teamOf } from './org.js';
 
@@ -113,4 +113,46 @@ export function qaReviewer(employees: Employee[], w: WorkItem, exclude: string[]
   if (!pool.length) return undefined;
   const rank = (e: Employee) => (load[e.id] ?? 0) * 2 + (e.roleId === 'qa' ? 0 : 1);
   return pool.reduce((best, e) => (rank(e) < rank(best) ? e : best)).id;
+}
+
+/* ---------- who acts next (board bugs 2 and 3, 19 Oct): one rule for the gate and for the wake ---------- */
+
+/** The extra reviewers whose approval does not hold on this head and stay in review. The QA gate waits for them; review-wake wakes them. */
+export function pendingExtra(w: WorkItem): PrExtraReviewer[] {
+  const pr = w.pr;
+  if (!pr) return [];
+  return (pr.extraReviewers ?? []).filter(e => !(e.approvedAt && e.sha === pr.headSha && e.episode === (w.statusSince ?? '')));
+}
+
+/** The story's QA: the QA lock (pr.qaReviewer) once named; the board's reviewerId shows the same person in the QA stage. */
+export const qaOf = (w: WorkItem): string | undefined => w.pr?.qaReviewer;
+
+/** Whose turn it is on a story In review with an open PR: the developer approver (and any extra reviewer), then the extra reviewers, then QA. */
+export type ReviewTurn = 'dev' | 'extra' | 'qa';
+export function reviewTurn(w: WorkItem): ReviewTurn {
+  if (!approvalHolds(w, 'dev')) return 'dev';
+  return pendingExtra(w).length ? 'extra' : 'qa';
+}
+
+/**
+ * A change of the reviewer on a story whose QA is locked (board bug 2, 19 Oct, as_mv41lj93y5zzd: the board
+ * said Zoya, the gate said Nikhil). In the QA stage the reviewer IS the QA, so naming another reviewer
+ * moves the lock in the same write, or is refused; the two can never disagree. Who may move it: the owner,
+ * the COO, the Chief of Staff, the Workplace, or the current QA handing it on. The new QA is QA-capable and
+ * is not the developer approver (who can never give approval 2). Null: nothing to do with the QA.
+ */
+export function qaHandover(employees: Employee[], w: WorkItem, to: string, by: string, chiefOfStaff: string | undefined): { qa: string } | { refuse: string } | null {
+  const pr = w.pr;
+  const lock = pr?.qaReviewer;
+  if (!pr || pr.merged || pr.closed || !lock || !approvalHolds(w, 'dev')) return null;
+  if (to === lock) return null;
+  const name = (id: string): string => employees.find(e => e.id === id)?.name ?? id;
+  const deciders = new Set(['owner', 'coo', 'workplace', ...(chiefOfStaff ? [chiefOfStaff] : [])]);
+  if (!deciders.has(by) && by !== lock) {
+    return { refuse: `${name(lock)} is this story's QA, and one QA sees a story through: only ${name(lock)}, the Chief of Staff, the COO or the owner changes it (item_update reviewerId with a reason).` };
+  }
+  if (!isQa(employees.find(e => e.id === to))) return { refuse: `${name(to)} is not QA: the story has the developer approval, so its reviewer is its QA (${name(lock)}). Name someone in QA.` };
+  if (to === pr.devApproval?.by) return { refuse: `${name(to)} gave approval 1 of 2, so approval 2 of 2 must come from another person in QA.` };
+  if (to === w.employeeId) return { refuse: 'The author never reviews their own story.' };
+  return { qa: to };
 }

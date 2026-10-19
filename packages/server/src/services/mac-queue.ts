@@ -4,6 +4,7 @@ import * as coo from './coo.js';
 import * as employees from './employees.js';
 import * as runs from './runs.js';
 import * as trail from './trail.js';
+import { tell as tellOne } from './tell.js';
 import { newId, now } from './store.js';
 import { rawGet } from './v2-map.js';
 import { macHost, NO_MAC_REFUSAL } from './mac-host.js';
@@ -143,12 +144,7 @@ export function release(wp: Workplace, emp: string): { ended: MacRequest; was: '
 }
 
 /** The session the message goes to: the one on the story, else the person's open session. */
-function tell(wp: Workplace, emp: string, itemId: string, text: string): void {
-  try { trail.comment(wp, itemId, { by: 'workplace', text }); } catch (err) { log.warn('mac-queue', `comment on ${itemId}: ${err instanceof Error ? err.message : err}`); }
-  const s = employees.sessionsOf(emp).find(x => employees.isLive(x.agentId) && x.assignmentId === itemId) ?? employees.openSession(emp);
-  if (!s) return;
-  try { runs.sendMessage(s.agentId, text, [], { from: 'workplace' }); } catch (err) { log.warn('mac-queue', `message to ${emp}: ${err instanceof Error ? err.message : err}`); }
-}
+const tell = (wp: Workplace, emp: string, itemId: string, text: string): void => tellOne(wp, emp, itemId, text, 'mac-queue');
 
 const PROFILE_RULE = 'Use a throwaway --user-data-dir build (lease_test_account gives you one); never the owner\'s profile or /Applications/Iris.app.';
 

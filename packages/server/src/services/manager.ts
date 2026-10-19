@@ -172,7 +172,7 @@ const INTRO = 'Manager alerts: you own stall handling for the team. For each one
   'Unanswered alerts go to the COO after 15 minutes.';
 
 /** A digest or a hygiene report (hygiene.ts): its own text, and it may start a session although it is a notice. */
-const report = (r: AlertRecord): boolean => r.key.startsWith('digest:') || r.key.startsWith('hygiene:');
+const report = (r: AlertRecord): boolean => r.key.startsWith('digest:') || r.key.startsWith('hygiene:') || r.key.startsWith('board:');
 
 function compose(list: AlertRecord[]): string {
   const lines = list.map(r => report(r) ? r.text ?? r.body : `- ${r.notice ? '(FYI) ' : ''}${r.text ?? `${r.title}: ${r.body}`} [${r.itemId}]`);
@@ -418,6 +418,19 @@ export function digest(wp: Workplace, nowMs = Date.now()): string | null {
   write(wp, { key: `digest:${at}`, itemId: '', title: 'Manager digest', body: text, text, notice: true, at, state: 'queued', statusAt: '', seen });
   deliver(wp, nowMs);
   return text;
+}
+
+/**
+ * The Chief of Staff's board check (cos.ts, every 10 minutes; board bug 5, 19 Oct): its own text, queued like
+ * a digest (delivered between her turns, starting a short session when she has none), superseding a check
+ * still waiting for her. Returns whether it reached her now.
+ */
+export function board(wp: Workplace, text: string, nowMs = Date.now()): boolean {
+  const at = new Date(nowMs).toISOString();
+  for (const r of all(wp)) if (r.key.startsWith('board:') && r.state === 'queued') wp.db.prepare('delete from settings where key = ?').run(PREFIX + r.key);
+  write(wp, { key: `board:${at}`, itemId: '', title: 'Board check', body: text, text, notice: true, at, state: 'queued', statusAt: '' });
+  deliver(wp, nowMs);
+  return read(wp, `board:${at}`)?.state === 'delivered';
 }
 
 /** Drop records older than two days (keys carry the episode; old ones only dedupe what can no longer recur). */

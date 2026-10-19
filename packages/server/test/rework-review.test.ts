@@ -402,14 +402,14 @@ test('15b: the author can add an extra reviewer (request_review extraReviewers),
     const call = await toolsFor(s.wp, 'kabir', s.storyId);
     assert.match(await call('request_review', { assignmentId: s.storyId, extraReviewers: ['arjun'] }), /Arjun is in your team/);
     assert.match(await call('request_review', { assignmentId: s.storyId, extraReviewers: ['mira'] }), /Review requested/);
-    assert.deepEqual(pr(s).extraReviewers, [{ id: 'mira', files: [], requested: true }]);
+    assert.deepEqual(pr(s).extraReviewers?.map(({ askedAt: _a, ...e }) => e), [{ id: 'mira', files: [], requested: true }]);
     await flow.approve(s.wp, s.storyId, 'arjun');
     await assert.rejects(flow.approve(s.wp, s.storyId, 'nikhil', undefined, qaText(s.wp)), /Waiting for Mira/);
     assert.equal((await flow.approve(s.wp, s.storyId, 'mira')).stage, 'extra');
     // A new push keeps an author-requested reviewer (the diff does not name them).
     s.commit({ 'services/memory-svc/recall.py': 'x = 2\n' });
     await flow.syncHeads(s.wp);
-    assert.deepEqual(pr(s).extraReviewers, [{ id: 'mira', files: [], requested: true }], 'kept, and the approval reset by the new commit');
+    assert.deepEqual(pr(s).extraReviewers?.map(({ askedAt: _a, ...e }) => e), [{ id: 'mira', files: [], requested: true }], 'kept, and the approval reset by the new commit');
   } finally { await s.done(); }
 });
 
@@ -438,10 +438,10 @@ test('18: one QA per story: a second QA is refused while another is assigned; As
     await flow.approve(s.wp, s.storyId, 'arjun');
     assert.equal(pr(s).qaReviewer, 'nikhil');
     await assert.rejects(flow.approve(s.wp, s.storyId, 'zoya', undefined, qaText(s.wp)), /Nikhil is this story's QA/);
-    // The author cannot swap the QA by renaming the reviewer.
-    items.update(s.wp, s.storyId, { reviewerId: 'zoya', note: 'zoya is free' }, 'kabir');
+    // The author cannot swap the QA by renaming the reviewer: refused at the rename (board bug 2, 19 Oct),
+    // so the board never names a QA the gate refuses.
+    assert.throws(() => items.update(s.wp, s.storyId, { reviewerId: 'zoya', note: 'zoya is free' }, 'kabir'), /Nikhil is this story's QA/);
     await assert.rejects(flow.approve(s.wp, s.storyId, 'zoya', undefined, qaText(s.wp)), /Nikhil is this story's QA/);
-    items.update(s.wp, s.storyId, { reviewerId: 'nikhil', note: 'back to the named QA' }, 'kabir');
     items.update(s.wp, s.storyId, { reviewerId: 'zoya', note: 'Nikhil is out today; Zoya takes QA' }, 'asha');
     const r = await flow.approve(s.wp, s.storyId, 'zoya', undefined, qaText(s.wp));
     assert.equal(r.stage, 'qa');

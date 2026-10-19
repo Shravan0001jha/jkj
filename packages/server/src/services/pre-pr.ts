@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -23,6 +23,15 @@ export interface PrePrResult {
 }
 
 export const resultPath = (worktree: string, sha: string): string => join(worktree, '.workplace', 'pre-pr', `${sha}.json`);
+
+/** The commits with a result in `worktree`, newest file first (at most `max`). */
+export function shasWithResults(worktree: string, max = 20): string[] {
+  const dir = join(worktree, '.workplace', 'pre-pr');
+  let names: string[];
+  try { names = readdirSync(dir).filter(n => /^[0-9a-f]{40}\.json$/.test(n)); } catch { return []; }
+  const mtime = (n: string): number => { try { return statSync(join(dir, n)).mtimeMs; } catch { return 0; } };
+  return names.map(n => ({ n, t: mtime(n) })).sort((a, b) => b.t - a.t).slice(0, max).map(x => x.n.slice(0, 40));
+}
 
 /** The results for `sha` in `worktree`, or null when there are none (or they are unreadable). */
 export function read(worktree: string, sha: string): PrePrResult | null {

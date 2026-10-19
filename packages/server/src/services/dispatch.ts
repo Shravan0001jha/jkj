@@ -10,7 +10,7 @@ import * as manager from './manager.js';
 import * as reviewWake from './review-wake.js';
 import * as replyDelivery from './reply-delivery.js';
 import * as floor from './floor.js';
-import { epicOf, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
+import { chiefOfStaffId, epicOf, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { rowJson, rowsJson } from './store.js';
 import { log } from '../util/logger.js';
 
@@ -93,7 +93,11 @@ export function busyReason(wp: Workplace, employeeId: string, nowMs = Date.now()
  */
 export function queue(wp: Workplace, employeeId: string): WorkItem[] {
   const focus = items.getFocus(wp).epicIds;
-  const rows = rowsJson<WorkItem>(wp.db.prepare("select json from work where employee_id = ? and status in ('ready', 'backlog')").all(employeeId));
+  // Board bug 5 (19 Oct): an unassigned story is the Chief of Staff's to route (the tree check already says
+  // so: subjectOf), so it is in her queue; before, only stories assigned to her were, and a bug filed with
+  // its RCA ("the Chief of Staff routes it") sat unassigned for 7 hours with nobody told.
+  const routes = employeeId === chiefOfStaffId(wp);
+  const rows = rowsJson<WorkItem>(wp.db.prepare(`select json from work where (employee_id = ?${routes ? " or (employee_id is null and level in ('story', 'task'))" : ''}) and status in ('ready', 'backlog')`).all(employeeId));
   const out: { w: WorkItem; at: number }[] = [];
   for (const w of rows) {
     if (levelOf(w) === 'epic' || w.mergedInto) continue;
@@ -195,6 +199,8 @@ export function dispatch(wp: Workplace, employeeId: string, nowMs = Date.now()):
     if (live >= cap) return skipped(wp, employeeId, `concurrency cap (${cap}) reached`);
   }
   try {
+    // Unassigned (board bug 5): it becomes the Chief of Staff's, and her session routes it.
+    if (!next.employeeId) items.update(wp, next.id, { assigneeId: employeeId, note: 'system: unassigned, so the Chief of Staff routes it' }, 'workplace');
     employees.assign(wp, next.id);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

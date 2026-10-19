@@ -46,6 +46,8 @@ export function wireMentionReplies(wp: Workplace): () => void {
  * cooldown, probe, autonomous), with the item as the context; `@coo` goes to the COO bridge.
  */
 function handleComment(wp: Workplace, comment: Comment): void {
+  // The Workplace's own comments are records, never deliveries (board bug 3, 19 Oct: the extra-review @mentions
+  // were dead letters since extra reviewers began, 10 Oct). What asks someone to act is delivered by review-wake or tell.ts.
   if (comment.by === 'workplace') return;
   endOnReply(wp, comment); // the awaited person answered: the wait ends (18 Oct)
   const row = wp.db.prepare('select json from work where id = ?').get(comment.itemId) as { json: string } | undefined;

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Workplace } from './workplace.js';
 import type { Db } from './store.js';
 import * as trail from './trail.js';
+import { tell } from './tell.js';
 import * as coo from './coo.js';
 import { newId } from './store.js';
 import { underTest } from './test-guard.js';
@@ -312,7 +313,8 @@ export function expireLeases(wp: Workplace, nowMs = Date.now()): string[] {
     release(wp, a.id);
     freed.push(a.id);
     if (a.itemId) {
-      try { trail.comment(wp, a.itemId, { by: 'workplace', text: `@${a.leasedBy} Your lease of test account ${a.email} expired after 4 hours; its profile was removed. Call lease_test_account again if you still need one.` }); } catch { /* item gone */ }
+      // Told to them (tell.ts), not only @mentioned: a Workplace comment's mentions are never delivered (board bug 3, 19 Oct).
+      if (a.leasedBy) tell(wp, a.leasedBy, a.itemId, `@${a.leasedBy} Your lease of test account ${a.email} expired after 4 hours; its profile was removed. Call lease_test_account again if you still need one.`, 'test-accounts');
     }
   }
   return freed;

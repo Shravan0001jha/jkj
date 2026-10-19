@@ -12,7 +12,7 @@ import * as watch from './watch.js';
 import { now, rowsJson } from './store.js';
 import * as waits from './waits.js';
 import * as lifecycle from './lifecycle.js';
-import { doneProblem, earlyQaMoveProblem, githubMode } from './review-policy.js';
+import { doneProblem, earlyQaMoveProblem, githubMode, isQa as isQaPerson, qaHandover } from './review-policy.js';
 import { unlandedPatches } from './landing.js';
 import { authorId, chiefOfStaffId, epicOf, humanDuration, isAgent, isPerson, isWaitable, levelOf, nameOf, projectItem, qaLead, rawGet, stateFromStatus } from './v2-map.js';
 import { ctoId, isAbove, isTeamLead, leadOfCharter, managerOf, subtree, teamMembers, teamOf } from './org.js';
@@ -197,12 +197,8 @@ export function audit(wp: Workplace, itemId: string): AuditEntry[] {
   return out;
 }
 
-/** Whether someone reviews as QA: the QA lead or a member of the QA lead's team. */
-function isQa(wp: Workplace, id: string | undefined): boolean {
-  if (!id) return false;
-  const team = teamOf(wp.org, id);
-  return !!team && wp.org.employees.find(e => e.id === team)?.roleId === 'qa';
-}
+/** Whether someone reviews as QA: the one definition the review gate uses (review-policy isQa; board bug 2, 19 Oct). */
+const isQa = (wp: Workplace, id: string | undefined): boolean => !!id && isQaPerson(wp.org.employees.find(e => e.id === id));
 
 /**
  * The developer approver when the PR has not named one: an engineer's lead; for a lead (or anyone
@@ -611,7 +607,15 @@ export function update(wp: Workplace, id: string, given0: UpdateItemRequest, giv
     // Routed to a lead by the Chief of Staff (LLD W2 §5): the lead assigns it within the team. Any other reassignment ends that.
     if (routesToLead(wp, by, req.assigneeId)) next.routedAt = at; else delete next.routedAt;
   }
-  if (req.reviewerId !== undefined) { checkAssignee(wp, req.reviewerId); next.reviewerId = req.reviewerId; }
+  let qaMoved: { from: string; to: string } | undefined;
+  if (req.reviewerId !== undefined) {
+    checkAssignee(wp, req.reviewerId);
+    // Board bug 2 (19 Oct): in the QA stage the reviewer is the QA lock; both move together or not at all.
+    const h = req.reviewerId ? qaHandover(wp.org.employees, prev, req.reviewerId, by, chiefOfStaffId(wp)) : null;
+    if (h && 'refuse' in h) throw new BadRequest(h.refuse);
+    if (h) { qaMoved = { from: prev.pr!.qaReviewer!, to: h.qa }; next.pr = { ...prev.pr!, qaReviewer: h.qa }; }
+    next.reviewerId = req.reviewerId;
+  }
   if (req.ownerId !== undefined) { checkAssignee(wp, req.ownerId); next.ownerId = req.ownerId; }
   if (req.points !== undefined) { const p = checkPoints(req.points); if (p) next.points = p; else delete next.points; }
   if (typeof req.rank === 'number' && Number.isFinite(req.rank)) next.rank = req.rank;
@@ -770,6 +774,7 @@ export function update(wp: Workplace, id: string, given0: UpdateItemRequest, giv
   if (!held) delete next.holdReason;
   next.updatedAt = at;
   const saved = work.put(wp, prev, next, by, req.note);
+  if (qaMoved) trail.record(wp, { itemId: id, by, kind: 'note', text: `QA for this story is now ${nameOf(wp, qaMoved.to)} (was ${nameOf(wp, qaMoved.from)}), changed by ${nameOf(wp, by)}${req.note ? `: ${req.note}` : ''}` });
   if (held && !prev.hold) trail.record(wp, { itemId: id, by, kind: 'note', text: `Held in Backlog by ${nameOf(wp, by)}: the dispatcher will not start it` });
   if (line) trail.record(wp, { itemId: id, by, kind: 'note', text: line });
   // A new wait on a teammate tells the teammate (17 Oct: a doc sat Waiting on Asha for 5 h after she

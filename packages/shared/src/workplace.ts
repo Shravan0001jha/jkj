@@ -429,7 +429,8 @@ export interface PrRecord {
   qaApproval?: PrApproval;
   evidence: 'pending' | 'stale' | 'success' | 'failure';
   evidenceNote?: string;
-  tests?: { state: 'pending' | 'success' | 'failure' | 'error'; sha: string; at: string; summary: string; details?: string };
+  /** pendingSince: when it last became pending (kept across head moves while it stays pending); a pending status is never terminal (board bug 4, 19 Oct). */
+  tests?: { state: 'pending' | 'success' | 'failure' | 'error'; sha: string; at: string; summary: string; details?: string; pendingSince?: string };
   sendBack?: { by: string; at: string; note: string; disputedAt?: string };
   /** context → "sha|state|description" last posted, so an unchanged status is not posted again. */
   posted?: Record<string, string>;
@@ -479,6 +480,8 @@ export interface PrExtraReviewer extends ExtraReviewer {
   episode?: string;
   /** Added by the author (request_review extraReviewers), not by the diff. */
   requested?: boolean;
+  /** When they were last asked (added, or their approval reset by a new commit): review-wake wakes them once per ask (board bug 3, 19 Oct). */
+  askedAt?: string;
 }
 
 /* ---------- inbox ---------- */

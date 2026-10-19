@@ -202,10 +202,13 @@ export function conditions(wp: Workplace): Condition[] {
     }
   }
 
-  // (f) An unassigned Ready item at the top of the global queue.
-  const top = globalQueue(wp, rows)[0];
-  if (top && !top.employeeId) {
-    out.push({ key: `unrouted-top:${top.id}`, rule: 'unrouted-top', w: top, what: 'unassigned at the top of the Ready queue', fix: `${nameOf(wp, cos)} routes it (item_update ${top.id} assigneeId <the owning developer>)` });
+  // (f) An unassigned Ready item. Board bug 5 (19 Oct): only the top of the global queue was named, so the
+  // four below it were invisible for 7 hours; every one is a violation of its own.
+  const queueNow = globalQueue(wp, rows);
+  for (const w of queueNow) {
+    if (w.employeeId) continue;
+    const top = w === queueNow[0];
+    out.push({ key: `unrouted-top:${w.id}`, rule: 'unrouted-top', w, what: top ? 'unassigned at the top of the Ready queue' : 'unassigned in the Ready queue', fix: `${nameOf(wp, cos)} routes it (item_update ${w.id} assigneeId <the owning lead>)` });
   }
 
   // (g) The assignee is whoever actually works on it.

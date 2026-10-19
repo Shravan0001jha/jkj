@@ -129,7 +129,11 @@ test('the old engine keeps both views in step; report_done gets a default review
     assert.equal(a.level, 'story');
     assert.equal(a.parentId, epic.id);
     assert.equal(a.history[0]!.by, 'workplace', 'nothing is attributed to the owner that he did not do');
+    // Board bug 1 (19 Oct): a captured plan records the plan; it is not a status move (a session start is).
     work.attachPlan(wp, a.id, '1. do it', 'mira');
+    assert.equal(work.get(wp, a.id)!.state, 'planned');
+    assert.equal(work.get(wp, a.id)!.status, 'ready');
+    items.markStarted(wp, a.id, 'workplace');
     assert.equal(work.get(wp, a.id)!.status, 'in-progress');
     work.reportDone(wp, a.id, evidence, 'mira');
     const reviewed = work.get(wp, a.id)!;
@@ -325,7 +329,9 @@ test('an epic is in progress once any of its stories is, by either engine', () =
     const other = items.create(wp, { level: 'epic', title: 'Old-path epic' }, 'owner');
     const a = work.create(wp, { kind: 'assignment', title: 'Old path', body: 'x', employeeId: 'mira', featureId: other.id });
     work.attachPlan(wp, a.id, 'plan', 'mira');
-    assert.equal(items.require$(wp, other.id).status, 'in-progress');
+    work.transition(wp, a.id, { to: 'blocked', by: 'workplace', note: 'shut down', cause: 'workplace-shutdown' });
+    work.transition(wp, a.id, { to: 'building', by: 'workplace', note: 'resumed' });
+    assert.equal(items.require$(wp, other.id).status, 'in-progress', 'the old engine moving a story to In progress starts its epic');
   } finally {
     tmp.cleanup();
   }

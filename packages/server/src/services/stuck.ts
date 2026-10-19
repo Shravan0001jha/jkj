@@ -85,12 +85,13 @@ export function condition(wp: Workplace, w: WorkItem): Stuck | null {
     };
   }
   if (w.status === 'in-review' && w.reviewerId && isAgent(wp, w.reviewerId) && w.reviewerId !== who) {
-    const reviewer = w.reviewerId;
-    const wake = reviewWake.wakeOf(wp, w.id);
-    const seen = !!wake && wake.reviewerId === reviewer && wake.episode === reviewWake.episodeNow(w) && wake.state !== 'queued' && !!wake.agentId && employees.isLive(wake.agentId);
-    if (seen) return null;
+    // Who it waits on by the review gate's own rule (board bug 3, 19 Oct): with an extra reviewer pending
+    // it is them, not QA, who has to have seen the request.
+    const unseen = reviewWake.waitingOn(wp, w).find(x => !x.seen && isAgent(wp, x.id));
+    if (!unseen) return null;
+    const reviewer = unseen.id;
     const name = nameOf(wp, reviewer);
-    const role = w.pr && !w.pr.merged ? (stage(w) === 'dev' ? 'developer approver' : 'QA') : 'reviewer';
+    const role = unseen.role === 'extra' ? 'extra reviewer' : w.pr && !w.pr.merged ? (stage(w) === 'dev' ? 'developer approver' : 'QA') : 'reviewer';
     return {
       state: `in-review:${reviewer}:${episode}`, status: 'In review', expected: `${name} (${role})`, expectedId: reviewer,
       why: `${name} has no running or waiting session that has seen the review request`,

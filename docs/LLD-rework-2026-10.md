@@ -184,6 +184,8 @@ export interface StoryChain { developer?: string; devReviewer?: string; extraRev
    - `review_approve` by an extra reviewer sets `approvedAt` on their entry.
    - QA stage 2 is refused until the developer approval **and** every extra reviewer has approved: `Waiting for <names> to approve their files`.
 6. **One QA per story.** Once `pr.qaReviewer` is set, only that person can give approval 2. Asha can change it with `item_update` on `reviewerId` plus a reason.
+   - **One source of truth (board bug 2, 19 Oct).** In the QA stage (developer approval holds) the item's `reviewerId` and `pr.qaReviewer` move together in the same `item_update` (`review-policy.qaHandover`), by the owner, the COO, Asha, the Workplace or the current QA handing it on; anyone else is refused at the rename. The QA is never the developer approver: a lock left on the person who gives approval 1 is re-picked then.
+   - **Whose turn (board bug 3, 19 Oct).** `review-policy.reviewTurn`/`pendingExtra` decide both the QA gate and `review-wake`: every pending extra reviewer gets a review request once per ask (added, or their approval reset), QA is woken only when no extra reviewer is pending. A Workplace comment's @mentions are records, never deliveries.
 7. **QA proof (`qa-doc.ts`).** Every `PASS` or `FAIL` case line must contain `evidence:` followed by a path that exists (absolute, or relative to `~/iris-workplace/evidence/` or the worktree) or an `http(s)` URL. Otherwise: `Each case needs proof: add "evidence: <screenshot/log path or URL>"`.
    - An `N/A` line needs no proof.
    - A line `Evidence: n/a — <why>` is allowed only together with `Tests: <command> <counts>`.

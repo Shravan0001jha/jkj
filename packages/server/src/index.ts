@@ -219,7 +219,8 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   }, 30_000);
   // The Chief of Staff's routine: stalled work is resumed within budget or explained in the Inbox.
   // Its stall loop is off in v2 (the watcher owns stalls); the Room moderation stays.
-  const cosTimer = setInterval(() => { try { cos.tick(wp, Date.now(), { stalls: false }); } catch (err) { log.warn('cos', String(err)); } }, 5 * 60_000);
+  // Every 10 minutes (owner, 19 Oct): Room moderation and the board check (unrouted Ready stories, wrong statuses).
+  const cosTimer = setInterval(() => { try { cos.tick(wp, Date.now(), { stalls: false }); } catch (err) { log.warn('cos', String(err)); } }, cos.COS_TICK_MS);
   // Asha's rhythm (HLD D24): the 09:30 brief, the 10:00 stand-up, the Sunday review. Talk retention
   // (rework W4) rides the same tick, once per IST day: agent messages older than 3 days are deleted.
   const rhythmTimer = setInterval(() => {

@@ -764,7 +764,8 @@ The client shape is a projection, `Item` (19.8): `toItem(workItem)`.
 | old (assignment) | v2 | old (feature) | v2 |
 |---|---|---|---|
 | proposed | ready (backlog stays backlog) | stated, specced | ready |
-| planned, building | in-progress | decomposed, in-progress | in-progress |
+| planned | unchanged (recording a plan is not a status move; board bug 1, 19 Oct) | decomposed, in-progress | in-progress |
+| building | in-progress, except a status a person set (parked, waiting, ready, backlog) stays | | |
 | review | in-review | built, released | done |
 | done | done | | |
 | blocked | blocked (reason = the history note, waiting on `coo`) | | |

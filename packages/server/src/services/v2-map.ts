@@ -10,7 +10,7 @@ import { rowJson } from './store.js';
 
 export const levelOf = (w: Pick<WorkItem, 'kind' | 'level'>): ItemLevel => w.level ?? (w.kind === 'feature' ? 'epic' : 'story');
 
-/** Old → v2, applied whenever the old engine moves `state`. `current` keeps Backlog parked. */
+/** Old → v2, applied whenever the old engine moves `state`. `current` keeps Backlog parked, and keeps any status a person set (Parked, Waiting, Ready, Backlog) through a plan capture or a start move. */
 export function statusFromState(w: Pick<WorkItem, 'kind'>, state: WorkState, current?: ItemStatus): { status: ItemStatus; resolution?: 'done' | 'wont-do' } {
   if (w.kind === 'feature') {
     switch (state as FeatureState) {
@@ -21,7 +21,11 @@ export function statusFromState(w: Pick<WorkItem, 'kind'>, state: WorkState, cur
   }
   switch (state as AssignmentState) {
     case 'proposed': return { status: current === 'backlog' ? 'backlog' : current === 'in-progress' ? 'in-progress' : 'ready' };
-    case 'planned': case 'building': return { status: 'in-progress' };
+    // Board bug 1 (19 Oct, as_mve83mird4wvh): this map predates Waiting and Parked, and turned a captured
+    // "## Plan" into In progress over a park set 6 s earlier. Recording a plan is not a status move, and
+    // the start move (planned → building) never lifts a status a person set; markStarted starts work.
+    case 'planned': return { status: current ?? 'in-progress' };
+    case 'building': return { status: current === 'parked' || current === 'waiting' || current === 'ready' || current === 'backlog' ? current : 'in-progress' };
     case 'review': return { status: 'in-review' };
     case 'done': return { status: 'done', resolution: 'done' };
     case 'blocked': return { status: 'blocked' };

@@ -7,6 +7,13 @@ import * as employees from './employees.js';
 import * as proposals from './proposals.js';
 import * as room from './room.js';
 import { chiefOfStaff } from './features.js';
+import * as manager from './manager.js';
+import * as hygiene from './hygiene.js';
+import * as items from './items.js';
+import type { HygieneRule } from '@jkj/shared';
+import { levelOf, humanDuration, nameOf } from './v2-map.js';
+import { rowsJson } from './store.js';
+import { openStartsAfter } from './lifecycle.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -26,8 +33,56 @@ export interface TickResult {
   queued: string[];
 }
 
-export function tick(wp: Workplace, nowMs = Date.now(), opts: { stalls?: boolean } = {}): TickResult {
+/** How often the routine runs (owner, 19 Oct: every 10 minutes; index.ts). */
+export const COS_TICK_MS = 10 * 60_000;
+/** A story is unrouted news once it has waited this long (the routing dispatcher gets the first chance). */
+export const UNROUTED_AFTER_MS = 10 * 60_000;
+/** The hygiene rules that mean "this story's status is wrong": Asha fixes these (the COO's hourly report catches what she misses). */
+const WRONG_STATUS: HygieneRule[] = ['bad-block', 'bad-review', 'done-unmerged', 'wrong-assignee', 'no-session'];
+
+/**
+ * The board check (board bug 5, 19 Oct): Asha is told, every tick, the concrete stories that need her:
+ * Ready (or focus Backlog) stories nobody routed (unassigned, or hers to route) for 10 minutes, and stories
+ * whose status is wrong (the hygiene rules, the same ones the COO's hourly report uses). Each line says the
+ * fix. Before, this tick only moderated the Room, and no message she got ever listed an unassigned story.
+ * Returns the text sent, or null when the board needs nothing from her.
+ */
+export function boardCheck(wp: Workplace, nowMs = Date.now()): string | null {
+  const cos = chiefOfStaff(wp);
+  if (!cos || cos === 'workplace') return null;
+  const focus = items.getFocus(wp).epicIds;
+  const unrouted = rowsJson<WorkItem>(wp.db.prepare("select json from work where status in ('ready', 'backlog') and (employee_id is null or employee_id = ?)").all(cos))
+    .filter(w => levelOf(w) !== 'epic' && !w.mergedInto && !w.hold && !openStartsAfter(wp, w))
+    .filter(w => w.status === 'ready' || (w.featureId && focus.includes(w.featureId)))
+    // Hers to route: no reviewer (a story she authors for someone to check is her own work).
+    .filter(w => !w.employeeId || !w.reviewerId)
+    .filter(w => nowMs - Date.parse(w.statusSince ?? w.createdAt) >= UNROUTED_AFTER_MS)
+    .sort((a, b) => (a.statusSince ?? a.createdAt).localeCompare(b.statusSince ?? b.createdAt));
+  const wrong = hygiene.report(wp, nowMs).violations.filter(v => WRONG_STATUS.includes(v.rule));
+  if (!unrouted.length && !wrong.length) return null;
+  const age = (w: WorkItem): string => humanDuration(nowMs - Date.parse(w.statusSince ?? w.createdAt));
+  const text = [
+    `Board check (every ${COS_TICK_MS / 60_000} min): these need you now. Route or fix each one, and say why on the item; a story you keep unrouted needs its reason in a comment.`,
+    ...(unrouted.length ? [
+      `Unrouted (${unrouted.length}): route each to the lead whose charter owns its files (map.yaml): item_update <id> assigneeId <lead> reason "<why>".`,
+      ...unrouted.slice(0, 15).map(w => `- ${w.id} "${w.title}" — ${w.employeeId ? `with you to route` : 'nobody assigned'}, ${w.status === 'ready' ? 'Ready' : 'Backlog (focus)'} for ${age(w)}`),
+      ...(unrouted.length > 15 ? [`- … and ${unrouted.length - 15} more`] : []),
+    ] : []),
+    ...(wrong.length ? [
+      `Wrong status (${wrong.length}):`,
+      ...wrong.slice(0, 15).map(v => hygiene.line(wp, v)),
+    ] : []),
+  ].join('\n');
+  manager.board(wp, text, nowMs);
+  log.info('cos', `board check to ${nameOf(wp, cos)}: ${unrouted.length} unrouted, ${wrong.length} wrong status`);
+  return text;
+}
+
+export function tick(wp: Workplace, nowMs = Date.now(), opts: { stalls?: boolean; board?: boolean } = {}): TickResult {
   const result: TickResult = { resumed: [], noted: [], moderated: [], queued: [] };
+  if (opts.board !== false) {
+    try { boardCheck(wp, nowMs); } catch (err) { log.warn('cos', `board check: ${err instanceof Error ? err.message : err}`); }
+  }
   const day = spend.dayOf(new Date(nowMs));
   const cos = chiefOfStaff(wp) ?? 'workplace';
   let resumedThisTick = false;
