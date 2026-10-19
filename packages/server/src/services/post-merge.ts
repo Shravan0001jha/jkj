@@ -4,6 +4,7 @@ import * as items from './items.js';
 import * as trail from './trail.js';
 import { leadOfCharter } from './org.js';
 import { macHost } from './mac-host.js';
+import * as macWorker from './mac-worker.js';
 import { rawGet } from './v2-map.js';
 import { rowsJson } from './store.js';
 import * as work from './work.js';
@@ -49,7 +50,9 @@ function reviewBody(orig: WorkItem): string {
 export function file(wp: Workplace, id: string): string | null {
   const orig = rawGet(wp, id);
   if (!orig || !needsReview(orig) || orig.postMerge) return orig?.postMerge?.reviewId ?? null;
-  const lead = leadOfCharter(wp.org, IOS_CHARTER);
+  // The Mac worker (mac-worker.ts) holds it when it is in the org: it is the one that can run Xcode. Without
+  // it the iOS lead holds it, as before.
+  const lead = macWorker.inOrg(wp) ? macWorker.MAC_WORKER_ID : leadOfCharter(wp.org, IOS_CHARTER);
   const review = items.create(wp, {
     level: 'story',
     title: `${REVIEW_PREFIX}${orig.title}`,

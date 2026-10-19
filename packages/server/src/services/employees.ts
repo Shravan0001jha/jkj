@@ -21,6 +21,7 @@ import { resolve as resolveOwner } from './ownership.js';
 import * as stall from './stall.js';
 import * as room from './room.js';
 import * as coo from './coo.js';
+import * as macWorker from './mac-worker.js';
 import * as board from './board.js';
 import * as items from './items.js';
 import * as trail from './trail.js';
@@ -1146,6 +1147,9 @@ export function stateOf(wp: Workplace, employeeId: string): EmployeeState {
 export function stateWithReason(wp: Workplace, employeeId: string): { state: EmployeeState; reason?: string } {
   const e = employee(wp, employeeId);
   // The COO is never spawned; its card shows presence (the lead's heartbeat), not session state.
+  if (e.virtual && e.id === macWorker.MAC_WORKER_ID) {
+    return macWorker.presence(wp).online ? { state: 'online' } : { state: 'offline', reason: macWorker.OFFLINE_REASON };
+  }
   if (e.virtual) {
     const p = coo.presence(wp);
     return p.online ? { state: 'online' } : { state: 'offline', reason: 'messages wait; Asha handles routine' };

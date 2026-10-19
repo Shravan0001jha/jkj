@@ -1,7 +1,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WorkItem } from '@jkj/shared';
 import type { Workplace } from '../src/services/workplace.js';
@@ -12,7 +12,8 @@ import * as postMerge from '../src/services/post-merge.js';
 import * as lifecycle from '../src/services/lifecycle.js';
 import * as lifecycleWatch from '../src/services/lifecycle-watch.js';
 import { setMacHostForTest } from '../src/services/mac-host.js';
-import { employee } from '../src/services/employees.js';
+import { employee, stateWithReason } from '../src/services/employees.js';
+import * as macWorker from '../src/services/mac-worker.js';
 import { ensureWorktree } from '../src/services/worktrees.js';
 import { rawGet } from '../src/services/v2-map.js';
 import { testWorkplace } from './fakes/workplace.js';
@@ -127,5 +128,29 @@ test('control: an Android-only story merges as before and files no iPhone review
   try {
     assert.equal(item(s, s.storyId).postMerge, undefined);
     assert.equal(lifecycle.trueStatus(s.wp, item(s, s.storyId)), 'merged');
+  } finally { s.done(); }
+});
+
+test('with a Mac worker in the org, the review is assigned to it and its card is online only while its heartbeat is fresh', async () => {
+  const s = await mergedStory('mobile/ios/Iris/Ring.swift', 'struct Ring {}\n', ['mobile-ios']);
+  try {
+    // The worker joins the org like the COO: virtual, so the Workplace never spawns a session for it.
+    const coo = employee(s.wp, 'coo');
+    s.wp.org.employees.push({ ...coo, id: macWorker.MAC_WORKER_ID, name: 'Mac worker', roleId: 'mac-worker', reportsTo: 'coo', virtual: true });
+    const w = rawGet(s.wp, s.storyId)!;
+    const { postMerge: _filed, ...unfiled } = w;
+    work.put(s.wp, w, unfiled as WorkItem, 'workplace');
+    const reviewId = postMerge.file(s.wp, s.storyId)!;
+    assert.equal(rawGet(s.wp, reviewId)!.employeeId, macWorker.MAC_WORKER_ID, 'the Mac worker holds the iPhone review');
+
+    assert.equal(stateWithReason(s.wp, macWorker.MAC_WORKER_ID).state, 'offline', 'no heartbeat yet: offline');
+    macWorker.beat(s.wp);
+    assert.equal(stateWithReason(s.wp, macWorker.MAC_WORKER_ID).state, 'online', 'a fresh heartbeat: online');
+    const old = new Date(Date.now() - macWorker.ONLINE_MS - 60_000);
+    utimesSync(macWorker.heartbeatFile(s.wp), old, old);
+    const off = stateWithReason(s.wp, macWorker.MAC_WORKER_ID);
+    assert.equal(off.state, 'offline', 'a stale heartbeat, e.g. the lid closed: offline');
+    assert.match(off.reason ?? '', /iPhone reviews wait/);
+    assert.equal(stateWithReason(s.wp, 'coo').state, 'offline', 'the COO card still reads the COO heartbeat, not the worker one');
   } finally { s.done(); }
 });
