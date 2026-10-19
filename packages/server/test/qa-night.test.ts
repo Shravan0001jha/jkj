@@ -14,7 +14,7 @@ import * as runs from '../src/services/runs.js';
 import * as employees from '../src/services/employees.js';
 import * as health from '../src/services/health.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
-import { testWorkplace } from './fakes/workplace.js';
+import { dayClock, testWorkplace } from './fakes/workplace.js';
 import { tmpWorkplace } from './fakes/tmp-workplace.js';
 
 /** QA's night bugs (29 Sep): B5 tests in real repos, B3 the routine's self-deadlock, B4 dead sessions left open. */
@@ -69,7 +69,7 @@ test('B3: the routine never waits on its own notes or on the stall detector; one
     writeFileSync(join(tmp.dir, 'ops', 'workplace', 'claude-oauth.env'), 'CLAUDE_CODE_OAUTH_TOKEN=x\n');
     const a = work.create(wp, { kind: 'assignment', title: 'Composer', body: 'x', charterId: 'mobile' });
     work.attachPlan(wp, a.id, 'p', 'tara');
-    const day1 = Date.now() + 31 * 60_000;
+    const day1 = dayClock(80) + 31 * 60_000; // one IST day, whatever time it runs
 
     // Yesterday's note (as the old build left it) and the stall detector's item about a dead session: neither blocks a resume.
     const old = inbox.raise(wp, { kind: 'question', title: `Waiting: ${a.title}`, body: 'old', raisedBy: 'asha', context: { assignmentId: a.id, employeeId: 'tara', stalledSince: null, reason: 'x' } });

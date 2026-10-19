@@ -77,3 +77,18 @@ export function withTree(wp: Workplace): Workplace {
   for (const c of org.charters.values()) c.holderIds = org.employees.filter(e => e.charterIds.includes(c.id)).map(e => e.id);
   return wp;
 }
+
+/**
+ * A clock base for tests that tick forward by up to `spanMin` minutes and rely on "today" (IST, spend.dayOf)
+ * staying the same: caps, one-resume-per-day, one-note-per-day. Run inside the last `spanMin` minutes before
+ * IST midnight, a bare Date.now() + 31 min lands on tomorrow and the day-scoped rules legitimately reset
+ * (19 Oct 2026, 22:50-23:29 IST). Then the base moves forward to just after midnight, so the whole test is one day.
+ */
+export function dayClock(spanMin: number): number {
+  const now = Date.now();
+  const day = (ms: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(ms));
+  if (day(now) === day(now + spanMin * 60_000)) return now;
+  let t = now;
+  while (day(t) === day(now)) t += 60_000;
+  return t + 60_000;
+}

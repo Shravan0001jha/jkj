@@ -12,7 +12,7 @@ import * as cos from '../src/services/cos.js';
 import * as proposals from '../src/services/proposals.js';
 import { readEmployeeFile, writeEmployeeFile } from '../src/services/org.js';
 import { installFakeRuntime } from './fakes/fake-runtime.js';
-import { testWorkplace } from './fakes/workplace.js';
+import { dayClock, testWorkplace } from './fakes/workplace.js';
 
 /** The fix batch from the owner's first day on the iPhone app (27 Sep). */
 
@@ -114,7 +114,8 @@ test('4. stalled work is derived, counted, and the Chief of Staff resumes it onc
     work.attachPlan(wp, a.id, 'p', 'tara');
     const now = Date.now();
     assert.equal(stall.stalledSince(wp, work.get(wp, a.id)!, now + 10 * 60_000), undefined, 'ten minutes is not a stall');
-    const later = now + 31 * 60_000;
+    const base = dayClock(100); // the whole test is one IST day, whatever time it runs
+    const later = base + 31 * 60_000;
     assert.ok(stall.stalledSince(wp, work.get(wp, a.id)!, later), 'thirty-one minutes with no session is');
     assert.equal(stall.stalledAssignments(wp, later).length, 1);
 
@@ -147,8 +148,9 @@ test('4. stalled work is derived, counted, and the Chief of Staff resumes it onc
     // A cap-paused assignee: the reason is the cap, nothing is resumed.
     const b = work.create(wp, { kind: 'assignment', title: 'Doze', body: 'x', charterId: 'character' });
     work.attachPlan(wp, b.id, 'p', 'dev');
-    spend.record(wp, usage('dev', 1.5));
-    const r = cos.tick(wp, Date.now() + 31 * 60_000);
+    const capAt = base + 31 * 60_000;
+    spend.record(wp, { ...usage('dev', 1.5), at: new Date(capAt).toISOString() });
+    const r = cos.tick(wp, capAt);
     assert.equal(r.resumed.length, 0, JSON.stringify(r));
     assert.ok(r.noted.some(n => n.id === b.id && /spend cap reached \(employee:dev\)/.test(n.reason)), JSON.stringify(r));
 
@@ -156,7 +158,7 @@ test('4. stalled work is derived, counted, and the Chief of Staff resumes it onc
     const c = work.create(wp, { kind: 'assignment', title: 'Bubble', body: 'x', charterId: 'mobile' });
     work.attachPlan(wp, c.id, 'p', 'tara');
     proposals.propose(wp, { kind: 'split', reason: 'r', proposedBy: 'asha', params: { charterId: 'mobile', into: [{ id: 'mobile-ios', keys: ['ios'] }, { id: 'mobile-android', keys: ['android'] }] } });
-    const r2 = cos.tick(wp, Date.now() + 31 * 60_000);
+    const r2 = cos.tick(wp, capAt);
     assert.ok(r2.noted.some(n => n.id === c.id && /org-change proposal: split mobile/.test(n.reason)));
     // "Resume it now" from the Inbox starts it regardless.
     const note = inbox.list(wp, 'open').find(i => i.context['assignmentId'] === c.id)!;

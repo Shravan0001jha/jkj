@@ -14,7 +14,7 @@ import * as dispatch from '../src/services/dispatch.js';
 import * as manager from '../src/services/manager.js';
 import { rawGet } from '../src/services/v2-map.js';
 import { installFakeRuntime, type FakeRuntime } from './fakes/fake-runtime.js';
-import { testWorkplace } from './fakes/workplace.js';
+import { dayClock, testWorkplace } from './fakes/workplace.js';
 import { boot, tick as bootTick } from './fakes/boot.js';
 
 /**
@@ -47,8 +47,8 @@ function setup() {
   return { ...t, fake, epic, other, story, done: () => { fake.restore(); t.tmp.cleanup(); } };
 }
 
-const pause = (wp: Wp, employeeId: string) =>
-  wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`paused:${spend.dayOf()}:employee:${employeeId}`, new Date().toISOString());
+const pause = (wp: Wp, employeeId: string, at = Date.now()) =>
+  wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`paused:${spend.dayOf(new Date(at))}:employee:${employeeId}`, new Date(at).toISOString());
 
 test('busy-parked: the watcher keeps the story Ready, queued for Dev; it starts the moment Dev frees up', async () => {
   const { wp, fake, story, done } = setup();
@@ -218,8 +218,8 @@ test('idle with queued work is no longer alerted from the dispatcher (LLD-rework
   const { wp, fake, story, done } = setup();
   try {
     const s = story('Dance tempo', 'dev');
-    pause(wp, 'dev');
-    const t0 = Date.now();
+    const t0 = dayClock(60); // the sweeps below stay within one IST day, so the day's pause still holds
+    pause(wp, 'dev', t0);
     for (const m of [0, 5, 11, 20, 40]) assert.deepEqual(dispatch.sweep(wp, t0 + m * MIN).alerts, []);
     assert.equal(coo.listItems(wp).filter(i => /idle with/.test(i.title)).length, 0, 'not the COO');
     assert.equal(manager.list(wp).filter(r => /idle with/.test(r.title)).length, 0, 'not Asha');
@@ -232,7 +232,7 @@ test('idle with queued work is no longer alerted from the dispatcher (LLD-rework
     assert.equal(wp.db.prepare('select 1 from settings where key = ?').get('dispatch-idle:mira'), undefined);
 
     // The cap lifts: the story starts.
-    spend.liftPause(wp, 'employee:dev', spend.dayOf(), 'owner');
+    spend.liftPause(wp, 'employee:dev', spend.dayOf(new Date(t0)), 'owner');
     dispatch.sweep(wp, t0 + 42 * MIN);
     await tick();
     assert.equal(fake.sessions.length, 1);
