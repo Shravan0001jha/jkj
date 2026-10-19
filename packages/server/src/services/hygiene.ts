@@ -15,6 +15,7 @@ import { githubMode } from './review-policy.js';
 import { chiefOfStaffId, epicOf, humanDuration, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { rowsJson } from './store.js';
 import { log } from '../util/logger.js';
+import * as postMerge from './post-merge.js';
 import { branchFor, git } from './worktrees.js';
 
 /** Approved but not merged yet (its merge checks are pending): it WILL finish, so starting after it is fine (11 Oct, gap #18). */
@@ -295,6 +296,7 @@ export function sweep(wp: Workplace, nowMs = Date.now()): SweepResult {
   for (const w of rowsJson<WorkItem>(wp.db.prepare("select json from work where status != 'done' and json_extract(json, '$.pr.merged') is not null").all())) {
     try { lifecycleWatch.onMerged(wp, w.id); } catch (err) { log.warn('hygiene', `${w.id}: ${err instanceof Error ? err.message : err}`); }
   }
+  try { postMerge.sweep(wp); } catch (err) { log.warn('hygiene', `post-merge: ${err instanceof Error ? err.message : err}`); }
   const conds = conditions(wp);
   const prev = read<Record<string, string>>(wp, SEEN) ?? {};
   const iso = new Date(nowMs).toISOString();

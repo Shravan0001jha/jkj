@@ -9,6 +9,7 @@ import { tell } from './blocks.js';
 import { dependentsOf, finished, label, trueStatus } from './lifecycle.js';
 import { levelOf, nameOf, rawGet, stateFromStatus } from './v2-map.js';
 import { now } from './store.js';
+import * as postMerge from './post-merge.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -44,6 +45,13 @@ export function onMerged(wp: Workplace, id: string, by = 'workplace'): 'moved' |
   if (w.employeeId) {
     void employees.endSessionOn(wp, w.employeeId, id, 'merged')
       .catch(err => log.warn('lifecycle', `${id}: could not end ${w.employeeId}'s session: ${err instanceof Error ? err.message : err}`));
+  }
+  // A story that changed mobile/ios merged without a macOS run: it stays Merged until its post-merge
+  // iPhone review passes (post-merge.ts), so Asha is not asked to close it.
+  if (postMerge.needsReview(w)) {
+    postMerge.file(wp, id);
+    onFinished(wp, id);
+    return moved ? 'moved' : 'told';
   }
   manager.alert(wp, {
     key: `merged:${id}:${w.pr!.merged!.at}`, itemId: id, by: 'workplace',
@@ -88,6 +96,7 @@ export function onFinished(wp: Workplace, blockerId: string): string[] {
 export function onItem(wp: Workplace, id: string): void {
   const w = rawGet(wp, id);
   if (!w) return;
+  if (w.postMergeOf) postMerge.onReviewItem(wp, id);
   if (w.pr?.merged && w.status !== 'done') { onMerged(wp, id); return; }
   if (finished(w)) onFinished(wp, id);
 }

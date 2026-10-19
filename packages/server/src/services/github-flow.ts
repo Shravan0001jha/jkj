@@ -605,15 +605,21 @@ async function recordTests(wp: Workplace, itemId: string, ctx: Ctx): Promise<voi
     let failureText = `scripts/pre-pr.sh failed on ${sha.slice(0, 8)} (${tests.summary}). Fix it on your branch, commit, run scripts/pre-pr.sh again, then call report_done.`;
     // Cloud migration (17 Oct): the mobile areas a Linux pre-pr.sh could not build run on GitHub.
     if (valid && tests.state === 'success' && prePr.deferredAreas(valid).length) {
-      const gh = await mobileChecks(wp, itemId, sha, valid);
-      tests = gh.tests;
-      if (gh.failureText) failureText = gh.failureText;
+      const local = withoutDroppedAreas(valid);
+      if (local !== valid) tests = { ...tests, summary: `${tests.summary}; ${IOS_DEFERRED_NOTE}` };
+      if (prePr.deferredAreas(local).length) {
+        const gh = await mobileChecks(wp, itemId, sha, local);
+        tests = gh.tests;
+        if (gh.failureText) failureText = gh.failureText;
+      }
     }
     const prev = rawGet(wp, itemId)?.pr?.tests;
     // A pending status keeps its clock across re-reads and head moves (pendingTestsAlarm reads it).
     if (tests.state === 'pending') tests = { ...tests, pendingSince: prev?.state === 'pending' ? prev.pendingSince ?? prev.at : now() };
     const changed = !prev || prev.sha !== sha || prev.state !== tests.state || prev.summary !== tests.summary;
-    savePr(wp, itemId, c => (c.pr && c.pr.headSha === sha ? { pr: { ...c.pr, tests } } : {}));
+    let iosChange = !!valid?.areas.some(a => a.area === IOS_AREA);
+    if (!iosChange) { try { iosChange = quality.changes(ctx.repo, ctx.base, sha).some(f => f.startsWith('mobile/ios/')); } catch { /* unknown: the pre-pr areas decide */ } }
+    savePr(wp, itemId, c => (c.pr && c.pr.headSha === sha ? { pr: { ...c.pr, tests, iosChange } } : {}));
     // A sweep re-reads a pending result every minute: the trail says it once per change, not per minute.
     if (changed) {
       trail.record(wp, { itemId, by: 'workplace', kind: 'test', text: `Pre-PR checks ${tests.state === 'success' ? 'green' : tests.state} on ${sha.slice(0, 8)}: ${tests.summary}` });
@@ -630,6 +636,19 @@ async function recordTests(wp: Workplace, itemId: string, ctx: Ctx): Promise<voi
 /* ---------- mobile checks on GitHub (cloud migration, 17 Oct) ---------- */
 
 export const MOBILE_WORKFLOW = 'mobile-checks.yml';
+export const IOS_AREA = 'mobile-ios';
+export const IOS_DEFERRED_NOTE = 'iPhone build/tests: post-merge review on the Mac';
+
+/**
+ * Owner's final rule (19 Oct): no macOS run per story. The mobile-ios area is never requested on GitHub; a
+ * story that changes mobile/ios merges on the Linux checks and is verified after the merge on the owner's
+ * Mac (post-merge.ts). The area is also left out of the result, so its absence is not read as a missing answer.
+ */
+export function withoutDroppedAreas(local: prePr.PrePrResult): prePr.PrePrResult {
+  if (!local.areas.some(a => a.area === IOS_AREA)) return local;
+  return { ...local, areas: local.areas.filter(a => a.area !== IOS_AREA) };
+}
+
 export const MOBILE_ARTIFACT = 'mobile-checks-result';
 /** retryMs: a refused dispatch is tried again after this; lostMs: a dispatch whose run never appeared is redone after this. */
 export const mobileCiTiming = { retryMs: 5 * 60_000, lostMs: 30 * 60_000 };

@@ -259,6 +259,10 @@ export function platformRefusal(given: string | string[]): string | null {
   return null;
 }
 
+/** A release-gate story: its title starts "Release gate" (e.g. "Release gate: iPhone UI verification ..."). */
+export const isReleaseGate = (w: { title?: string }): boolean => /^\s*release[- ]gate\b/i.test(w.title ?? '');
+export const IOS_GATE_REFUSAL = 'iPhone runs (build, unit tests, UI/robot) happen once per release candidate at the release gate, never per story (owner rule, 19 Oct). Use android for this change; the iPhone side is deferred to the release gate. Only a "Release gate: ..." story can run ios.';
+
 export function request(wp: Workplace, spec: { itemId: string; by: string; platforms: string | string[]; features: string | string[]; androidApi?: string }): RequestResult {
   const no = (message: string): RequestResult => ({ ok: false, message });
   const refusal = platformRefusal(spec.platforms);
@@ -278,6 +282,7 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
   const caller = wp.org.employees.find(e => e.id === spec.by);
   const allowed = spec.by === w.employeeId || spec.by === w.reviewerId || isReviewerRole(caller) || isQa(caller) || spec.by === coo.COO_ID;
   if (!allowed) return no(`Only the story's author, its reviewers, a lead or QA run evidence on it; ask ${nameOf(wp, w.employeeId)} on the item.`);
+  if (!isReleaseGate(w) && (platforms.includes('ios') || platforms.includes('all'))) return no(IOS_GATE_REFUSAL);
   const ctx = storyOf(wp, w);
   if (typeof ctx === 'string') return no(ctx);
   // Checked now, against the runner the run will use, not minutes later by the runner itself.

@@ -266,7 +266,9 @@ export class GitHubRunner implements EvidenceRunner {
     const gh = this.port();
     try { await gh.push(r.repo, r.branch); } catch (err) { return plumbing(`could not push ${r.branch} to GitHub: ${errLine(err)}`); }
     const requestId = r.requestId ?? `ev-${Date.now()}`;
-    const inputs = { iris_ref: r.sha, build_ref: r.sha, platforms: r.platforms.join(','), features: r.features.join(','), target: 'staging', account_mode: 'new', windows_default_smoke: 'false', request_id: requestId };
+    const inputs = { iris_ref: r.sha, build_ref: r.sha, platforms: r.platforms.join(','), features: r.features.join(','), target: 'staging', account_mode: 'new', windows_default_smoke: 'false', request_id: requestId,
+      // iris-e2e refuses macOS platforms unless this is true; evidence.request only lets release-gate stories ask for ios.
+      release_gate: r.platforms.includes('ios') ? 'true' : 'false' };
     try { await gh.dispatchWorkflow(SUITE_WORKFLOW, inputs); } catch (err) { return plumbing(`could not start ${SUITE_WORKFLOW} on GitHub: ${errLine(err)}`); }
     say(`dispatched ${SUITE_WORKFLOW} for ${r.sha.slice(0, 8)} (${requestId})`);
     const end = Date.now() + this.timing.timeoutMs;

@@ -51,7 +51,7 @@ function setup(): Setup {
     git(wt, ['add', '-A']);
     git(wt, ['-c', 'user.email=k@iris.local', '-c', 'user.name=kabir', 'commit', '-q', '-m', `add ${file}`]);
     const sha = git(wt, ['rev-parse', 'HEAD']).trim();
-    writePrePr(wt, sha, { deferred: ['mobile-ios'] });
+    writePrePr(wt, sha, { deferred: ['mobile-android'] });
     return sha;
   };
   return { wp, gh, storyId: story.id, wt, commit, done: () => { gh.cleanup(); tmp.cleanup(); } };
@@ -72,7 +72,7 @@ const capOn = (wp: Workplace): void => void wp.db.prepare('insert or replace int
 test('as_mvdis9i3hqz29: capped mobile checks across two trunk-only moves dispatch for the current head once the cap lifts', async () => {
   const s = setup();
   try {
-    s.commit('mobile/ios/PhoneErrandRunner.swift', 'struct Runner {}\n');
+    s.commit('mobile/android/PhoneErrandRunner.kt', 'class Runner\n');
     capOn(s.wp);
     work.reportDone(s.wp, s.storyId, evidence, 'kabir');
     await (await flow.onReview(s.wp, s.storyId, 'kabir')).tests;
@@ -114,7 +114,7 @@ test('class: a pre-pr result on the author\'s commit covers a head GitHub reache
 test('a pending workplace/tests is never terminal: after an hour Asha is told, once, with what to do', async () => {
   const s = setup();
   try {
-    s.commit('mobile/ios/PhoneErrandRunner.swift', 'struct Runner {}\n');
+    s.commit('mobile/android/PhoneErrandRunner.kt', 'class Runner\n');
     // The author never ran pre-pr on the head: tests pend for want of a result.
     git(s.wt, ['-c', 'user.email=k@iris.local', '-c', 'user.name=kabir', 'commit', '-q', '--allow-empty', '-m', 'no pre-pr here']);
     work.reportDone(s.wp, s.storyId, evidence, 'kabir');

@@ -271,3 +271,24 @@ test('a finished run whose result cannot be applied is said on the story once, n
     assert.match(said[0]!.text, /actions\/runs\/900/);
   } finally { s.done(); }
 });
+
+test('mobile-ios is never dispatched pre-merge: a mobile-ios-only change goes green on the Linux checks with a post-merge note', async () => {
+  const s = setup('on');
+  try {
+    const head = s.commit('mobile/ios/Iris/Alarm.swift', 'struct Alarm {}\n', ['mobile-ios']);
+    await reviewed(s);
+    assert.equal(s.gh.count('dispatchWorkflow'), 0, 'no macOS runner is started');
+    assert.equal(pr(s).tests?.state, 'success');
+    assert.match(pr(s).tests!.summary, /post-merge review on the Mac/);
+    assert.equal(s.gh.status(head, 'workplace/tests')?.state, 'success');
+  } finally { s.done(); }
+});
+
+test('android and ios both deferred: only mobile-android is dispatched', async () => {
+  const s = setup('on');
+  try {
+    s.commit('mobile/android/app/Alarm.kt', 'class Alarm\n', ['mobile-android', 'mobile-ios']);
+    await reviewed(s);
+    assert.equal(s.gh.runs[0]!.inputs['areas'], 'mobile-android');
+  } finally { s.done(); }
+});

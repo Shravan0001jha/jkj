@@ -80,7 +80,7 @@ function setup(opts: { auto?: boolean } = {}): Setup {
     const s = items.create(wp, { level: 'story', title, parentId: epic.id, assigneeId: 'kabir' }, 'owner');
     return { id: s.id, wt: ensureWorktree(wp.config.workDir, kabir, s.id).path };
   };
-  const first = make('Recall the last song');
+  const first = make('Release gate: recall the last song');
   const st: Setup = {
     wp, runner, builder, staging, store, lock, deployer, repo, storyId: first.id, wt: first.wt,
     commit: (file, content, storyId = st.storyId) => {
@@ -103,6 +103,24 @@ function setup(opts: { auto?: boolean } = {}): Setup {
   };
   return st;
 }
+
+test('run_evidence refuses ios (and all) for an ordinary story; a "Release gate" story may run it', async () => {
+  const s = setup();
+  try {
+    const plain = s.story('Ring an alarm');
+    s.commit('mobile/ios/Iris/Api.swift', 'let x = 2\n', plain.id);
+    for (const platforms of ['ios', 'android,ios', 'all']) {
+      const r = evidence.request(s.wp, { itemId: plain.id, by: 'kabir', platforms, features: 'queries' });
+      assert.equal(r.ok, false, platforms);
+      assert.match(r.ok ? '' : r.message, /release gate/i);
+    }
+    assert.ok(evidence.request(s.wp, { itemId: plain.id, by: 'kabir', platforms: 'android', features: 'queries' }).ok, 'android is unaffected');
+    s.commit('mobile/ios/Iris/Api.swift', 'let x = 3\n');
+    assert.ok(evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'ios', features: 'queries' }).ok, 'release-gate story (control)');
+    assert.equal(evidence.isReleaseGate({ title: 'Release gate: iPhone UI verification' }), true);
+    assert.equal(evidence.isReleaseGate({ title: 'Fix the release gate banner' }), false);
+  } finally { await s.done(); }
+});
 
 const until = async (cond: () => boolean, what: string, ms = 5000): Promise<void> => {
   const end = Date.now() + ms;
@@ -157,7 +175,7 @@ test('at most two runs at once (slots 1 and 2); the third waits FIFO and takes t
   const s = setup();
   try {
     s.commit('services/agent-svc/a.py', 'a = 1\n');
-    const b = s.story('Second story'); s.commit('services/agent-svc/b.py', 'b = 1\n', b.id);
+    const b = s.story('Release gate: second story'); s.commit('services/agent-svc/b.py', 'b = 1\n', b.id);
     const c = s.story('Third story'); s.commit('services/agent-svc/c.py', 'c = 1\n', c.id);
     const r1 = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
     const r2 = evidence.request(s.wp, { itemId: b.id, by: 'kabir', platforms: 'ios', features: 'memory' });
@@ -618,7 +636,7 @@ test('shadow: the link is the evidence status target_url and a PR comment; the P
     await (await flow.onReview(s.wp, s.storyId, 'kabir')).tests;
     const pr = gh.prs[0]!;
     assert.doesNotMatch(pr.body, /127\.0\.0\.1|\/api\/items/, 'no loopback link in the PR body');
-    assert.match(pr.body, new RegExp(`${s.storyId}.*Recall the last song`));
+    assert.match(pr.body, new RegExp(`${s.storyId}.*[Rr]ecall the last song`));
     evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
     await evidence.settled(s.wp);
     const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;

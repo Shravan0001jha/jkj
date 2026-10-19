@@ -222,6 +222,10 @@ export interface WorkHistoryEntry {
 
 export interface WorkItem {
   id: string;
+  /** Set on a story that changed mobile/ios and merged: its post-merge review. It is Done only once that passes. */
+  postMerge?: PostMergeRecord;
+  /** Set on a post-merge review story: the merged story it verifies. */
+  postMergeOf?: string;
   kind: WorkKind;
   title: string;
   body: string;
@@ -418,7 +422,19 @@ export interface PrApproval {
   note?: string;
 }
 
+/** The post-merge iPhone review of a story that changed mobile/ios (owner, 19 Oct): see services/post-merge.ts. */
+export interface PostMergeRecord {
+  /** The linked "Post-merge iPhone review: ..." story. */
+  reviewId: string;
+  filedAt: string;
+  state: 'waiting' | 'passed' | 'failed';
+  /** The bug filed against the original when the review failed. */
+  bugId?: string;
+}
+
 export interface PrRecord {
+  /** The diff touches mobile/ios: no macOS runs pre-merge, so the story is verified on the Mac after the merge. */
+  iosChange?: boolean;
   number: number;
   url: string;
   branch: string;
