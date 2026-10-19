@@ -435,6 +435,8 @@ export interface PostMergeRecord {
 export interface PrRecord {
   /** The diff touches mobile/ios: no macOS runs pre-merge, so the story is verified on the Mac after the merge. */
   iosChange?: boolean;
+  /** The mobile-ios failures in the author's last result (old Mac/GitHub run): not a gate, copied into the post-merge review. */
+  iosKnownFailures?: string;
   number: number;
   url: string;
   branch: string;

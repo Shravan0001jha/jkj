@@ -34,7 +34,7 @@ const QA_DOC = '## Edge cases\n- PASS: empty input — unit test evidence: https
 
 interface S { wp: Workplace; gh: FakeGitHub; epicId: string; storyId: string; done(): void }
 
-async function mergedStory(file: string, content: string, deferred: string[]): Promise<S> {
+async function mergedStory(file: string, content: string, deferred: string[], iosFailed?: { failed: number; tail: string }, legacy = false): Promise<S> {
   const { wp, tmp } = testWorkplace();
   const kabir = employee(wp, 'kabir');
   wp.org.employees.push({ ...kabir, id: 'arjun', name: 'Arjun', roleId: 'engineer', level: 2, charterIds: ['memory'], reportsTo: 'kabir' });
@@ -49,10 +49,15 @@ async function mergedStory(file: string, content: string, deferred: string[]): P
   writeFileSync(join(wt, file), content);
   git(wt, ['add', '-A']);
   git(wt, ['-c', 'user.email=k@iris.local', '-c', 'user.name=kabir', 'commit', '-q', '-m', `add ${file}`]);
-  writePrePr(wt, git(wt, ['rev-parse', 'HEAD']).trim(), { deferred });
+  writePrePr(wt, git(wt, ['rev-parse', 'HEAD']).trim(), { deferred, ...(iosFailed ? { iosFailed } : {}) });
   work.reportDone(wp, story.id, { tests: { passed: 3, failed: 0, command: 'pytest' }, commits: ['abc'], liveVerified: [], notVerified: ['live'] }, 'kabir');
   const r = await flow.onReview(wp, story.id, 'kabir');
   await r.tests;
+  if (legacy) {
+    // The shape on the board: a failure stored on the PR from an old Mac run, never re-read.
+    const pr = rawGet(wp, story.id)!.pr!;
+    work.saveQuiet(wp, { ...rawGet(wp, story.id)!, pr: { ...pr, tests: { ...pr.tests!, state: 'failure', summary: 'mobile-ios lint ok · mobile-ios unit 245 passed, 7 failed — run by kabir on 1568199 (carried: trunk-only merge)' } } });
+  }
   for (const who of ['arjun', 'tara', 'rohan', 'priya']) { try { await flow.approve(wp, story.id, who); } catch { /* not this story's reviewer */ } }
   try { await flow.approve(wp, story.id, 'nikhil', undefined, QA_DOC); } catch { /* checked below */ }
   if (!rawGet(wp, story.id)!.pr!.merged) await flow.autoMerge(wp, story.id);
@@ -153,4 +158,53 @@ test('with a Mac worker in the org, the review is assigned to it and its card is
     assert.match(off.reason ?? '', /iPhone reviews wait/);
     assert.equal(stateWithReason(s.wp, 'coo').state, 'offline', 'the COO card still reads the COO heartbeat, not the worker one');
   } finally { s.done(); }
+});
+
+const FAILS = 'FAILED AlarmTests.testRing\nFAILED AlarmTests.testSnooze';
+
+test('a failing mobile-ios result does not gate the merge, and the known failures go into the review story', async () => {
+  setMacHostForTest(false);
+  const s = await mergedStory('mobile/ios/Iris/Alarm.swift', 'struct Alarm {}\n', [], { failed: 7, tail: FAILS });
+  try {
+    const orig = item(s, s.storyId);
+    assert.ok(orig.pr!.merged, 'merged despite the iOS failure');
+    assert.match(review(s).body, /7 failed/);
+    assert.match(review(s).body, /AlarmTests\.testRing/);
+    assert.match(review(s).body, /AlarmTests\.testSnooze/);
+  } finally { s.done(); }
+});
+
+test('a stored mobile-ios failure (old run, carried) is re-read, not a permanent blocker', async () => {
+  setMacHostForTest(false);
+  const s = await mergedStory('mobile/ios/Iris/Alarm.swift', 'struct Alarm {}\n', [], { failed: 7, tail: FAILS }, true);
+  try {
+    assert.ok(item(s, s.storyId).pr!.merged);
+    assert.match(review(s).body, /AlarmTests\.testRing/);
+  } finally { s.done(); }
+});
+
+test('control: a failing non-iOS area still blocks the merge', async () => {
+  setMacHostForTest(false);
+  const { wp, tmp } = testWorkplace();
+  try {
+    const kabir = employee(wp, 'kabir');
+    const gh = new FakeGitHub(kabir.workspace.repo); flow.useGitHub(wp, gh); flow.setMode(wp, 'on', 'coo');
+    const epic = items.create(wp, { level: 'epic', title: 'E' }, 'owner');
+    const story = items.create(wp, { level: 'story', title: 'x', parentId: epic.id, assigneeId: 'kabir' }, 'owner');
+    const wt = ensureWorktree(wp.config.workDir, kabir, story.id).path;
+    mkdirSync(join(wt, 'mobile/ios'), { recursive: true }); writeFileSync(join(wt, 'mobile/ios/A.swift'), 'a\n');
+    git(wt, ['add', '-A']); git(wt, ['-c', 'user.email=k@iris.local', '-c', 'user.name=kabir', 'commit', '-q', '-m', 'a']);
+    writePrePr(wt, git(wt, ['rev-parse', 'HEAD']).trim(), { ok: false, iosFailed: { failed: 7, tail: FAILS } });
+    work.reportDone(wp, story.id, { tests: { passed: 3, failed: 0, command: 'pytest' }, commits: ['abc'], liveVerified: [], notVerified: ['live'] }, 'kabir');
+    const r = await flow.onReview(wp, story.id, 'kabir'); await r.tests;
+    assert.equal(rawGet(wp, story.id)!.pr!.tests!.state, 'failure');
+    gh.cleanup();
+  } finally { tmp.cleanup(); }
+});
+
+test('audit: a failed iOS-only evidence run (old, unrefreshable) does not block; an Android failure still does', () => {
+  const base = { id: 'x', title: 'T', pr: { evidence: 'failure', headSha: 'h' }, evidenceRun: { sha: 'h', platforms: ['ios'], state: 'failure' } } as unknown as WorkItem;
+  assert.equal(flow.iosOnlyEvidenceFailure(base), true);
+  assert.equal(flow.iosOnlyEvidenceFailure({ ...base, evidenceRun: { ...base.evidenceRun!, platforms: ['android'] } }), false);
+  assert.equal(flow.iosOnlyEvidenceFailure({ ...base, title: 'Release gate: iPhone' }), false);
 });

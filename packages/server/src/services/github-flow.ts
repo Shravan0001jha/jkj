@@ -594,7 +594,11 @@ async function recordTests(wp: Workplace, itemId: string, ctx: Ctx): Promise<voi
     // Board bug 4 (19 Oct, PR #449): the author's result that covers this head, by one rule: for the head
     // itself, else for a commit the head reached only by trunk merges (GitHub's update-branch). A stored
     // "run commit" is only a hint: a refused dispatch once named a GitHub merge nobody ran pre-pr on.
-    const valid = coveringPrePr(wp, ctx, sha, ci && ci.sha === sha ? ci.runSha : undefined);
+    const found = coveringPrePr(wp, ctx, sha, ci && ci.sha === sha ? ci.runSha : undefined);
+    // 19 Oct: a mobile-ios result (an old Mac or GitHub run, carried or not) never gates; a known failure
+    // in it goes to the post-merge review story instead of being dropped.
+    const valid = found && withoutDroppedAreas(found);
+    const iosFailures = found ? iosFailureText(found) : undefined;
     const localSha = valid?.sha ?? sha;
     // Only a full run counts (pre-pr.ts passes); a fast or partial pass stays pending.
     let tests: NonNullable<PrRecord['tests']> = !valid
@@ -605,21 +609,20 @@ async function recordTests(wp: Workplace, itemId: string, ctx: Ctx): Promise<voi
     let failureText = `scripts/pre-pr.sh failed on ${sha.slice(0, 8)} (${tests.summary}). Fix it on your branch, commit, run scripts/pre-pr.sh again, then call report_done.`;
     // Cloud migration (17 Oct): the mobile areas a Linux pre-pr.sh could not build run on GitHub.
     if (valid && tests.state === 'success' && prePr.deferredAreas(valid).length) {
-      const local = withoutDroppedAreas(valid);
-      if (local !== valid) tests = { ...tests, summary: `${tests.summary}; ${IOS_DEFERRED_NOTE}` };
-      if (prePr.deferredAreas(local).length) {
-        const gh = await mobileChecks(wp, itemId, sha, local);
+      if (prePr.deferredAreas(valid).length) {
+        const gh = await mobileChecks(wp, itemId, sha, valid);
         tests = gh.tests;
         if (gh.failureText) failureText = gh.failureText;
       }
     }
+    if (found && valid !== found && tests.state !== 'pending') tests = { ...tests, summary: `${tests.summary}; ${IOS_DEFERRED_NOTE}` };
     const prev = rawGet(wp, itemId)?.pr?.tests;
     // A pending status keeps its clock across re-reads and head moves (pendingTestsAlarm reads it).
     if (tests.state === 'pending') tests = { ...tests, pendingSince: prev?.state === 'pending' ? prev.pendingSince ?? prev.at : now() };
     const changed = !prev || prev.sha !== sha || prev.state !== tests.state || prev.summary !== tests.summary;
-    let iosChange = !!valid?.areas.some(a => a.area === IOS_AREA);
+    let iosChange = !!found?.areas.some(a => a.area === IOS_AREA);
     if (!iosChange) { try { iosChange = quality.changes(ctx.repo, ctx.base, sha).some(f => f.startsWith('mobile/ios/')); } catch { /* unknown: the pre-pr areas decide */ } }
-    savePr(wp, itemId, c => (c.pr && c.pr.headSha === sha ? { pr: { ...c.pr, tests, iosChange } } : {}));
+    savePr(wp, itemId, c => (c.pr && c.pr.headSha === sha ? { pr: { ...c.pr, tests, iosChange, ...(iosFailures ? { iosKnownFailures: iosFailures } : {}) } } : {}));
     // A sweep re-reads a pending result every minute: the trail says it once per change, not per minute.
     if (changed) {
       trail.record(wp, { itemId, by: 'workplace', kind: 'test', text: `Pre-PR checks ${tests.state === 'success' ? 'green' : tests.state} on ${sha.slice(0, 8)}: ${tests.summary}` });
@@ -646,8 +649,20 @@ export const IOS_DEFERRED_NOTE = 'iPhone build/tests: post-merge review on the M
  */
 export function withoutDroppedAreas(local: prePr.PrePrResult): prePr.PrePrResult {
   if (!local.areas.some(a => a.area === IOS_AREA)) return local;
-  return { ...local, areas: local.areas.filter(a => a.area !== IOS_AREA) };
+  const areas = local.areas.filter(a => a.area !== IOS_AREA);
+  // ok is recomputed: an iOS failure alone must not keep the whole result red.
+  return { ...local, ok: local.ok || areas.every(a => a.checks.every(c => c.ok)), areas };
 }
+
+/** The failing mobile-ios checks of a result (counts and output tails), for the post-merge review story. */
+export function iosFailureText(r: prePr.PrePrResult): string | undefined {
+  const bad = r.areas.filter(a => a.area === IOS_AREA).flatMap(a => a.checks.filter(c => !c.ok && !c.deferred));
+  if (!bad.length) return undefined;
+  return bad.map(c => `mobile-ios ${c.name}: ${typeof c.failed === 'number' ? `${c.passed ?? 0} passed, ${c.failed} failed` : 'failed'} (exit ${c.exitCode ?? '?'}, from the result for ${r.sha.slice(0, 8)})\n${(c.tail ?? '').slice(-1500)}`).join('\n\n');
+}
+
+/** A stored workplace/tests failure that names mobile-ios from before the pathway: re-read it, nothing can refresh it otherwise. */
+export const legacyIosGate = (t?: { state: string; summary: string }): boolean => !!t && t.state === 'failure' && /\bmobile-ios\b/.test(t.summary) && !t.summary.includes(IOS_DEFERRED_NOTE);
 
 export const MOBILE_ARTIFACT = 'mobile-checks-result';
 /** retryMs: a refused dispatch is tried again after this; lostMs: a dispatch whose run never appeared is redone after this. */
@@ -1663,8 +1678,18 @@ const autoInFlight = new Set<string>();
  * its "Tests:" line, or cites a live check recorded on the head (dry run #5), or the change is the CTO's
  * docs-only one the COO approved (dry run #12).
  */
+/**
+ * A failed robot run on iOS alone (an old Mac/GitHub run from before 19 Oct): nothing can re-run it per story
+ * (run_evidence refuses ios outside release-gate stories), so it must not block forever; the post-merge review covers it.
+ */
+export function iosOnlyEvidenceFailure(w: WorkItem): boolean {
+  const run = w.evidenceRun;
+  return w.pr?.evidence === 'failure' && !!run && run.sha === w.pr.headSha && run.platforms.length > 0 && run.platforms.every(p => p === 'ios') && !/^\s*release[- ]gate\b/i.test(w.title);
+}
+
 export function evidenceOk(wp: Workplace, w: WorkItem): boolean {
   if (w.pr?.evidence === 'success' || cooDocsApproval(w)) return true;
+  if (iosOnlyEvidenceFailure(w)) return true;
   const filed = qaDoc.filed(wp, w.id);
   return qaDoc.evidenceNa(filed) || liveCheckEvidence(wp, w, filed);
 }
@@ -1725,7 +1750,7 @@ function blockAuto(wp: Workplace, w: WorkItem, why: string): void {
  * fast-forwarded). Any blocker alerts the COO once per head and is left for him; never forced, never throws.
  */
 /** workplace/tests is worth re-reading from the author's pre-pr.sh results: missing, pending, or for another commit (11 Oct: a docs PR whose pre-pr ran after its push sat unmerged). */
-const testsStale = (pr: { tests?: { state: string; sha: string }; headSha: string }): boolean => !pr.tests || pr.tests.state === 'pending' || pr.tests.sha !== pr.headSha;
+const testsStale = (pr: { tests?: { state: string; sha: string; summary: string }; headSha: string }): boolean => !pr.tests || pr.tests.state === 'pending' || pr.tests.sha !== pr.headSha || legacyIosGate(pr.tests);
 
 export async function autoMerge(wp: Workplace, itemId: string): Promise<AutoMergeOutcome> {
   if (mode(wp) !== 'on') return 'off';

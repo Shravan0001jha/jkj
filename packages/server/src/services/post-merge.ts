@@ -43,6 +43,7 @@ function reviewBody(orig: WorkItem): string {
     `Fail: close this story with resolution wont-do and a note saying what failed; a bug is filed against ${orig.id} and it stays Merged.`,
     '',
     `Waits Parked until a Mac is attached to the Workplace.`,
+    ...(orig.pr?.iosKnownFailures ? ['', `Known iPhone failures in the last result before the merge (check these exact tests first; they did not gate the merge):`, orig.pr.iosKnownFailures] : []),
   ].join('\n');
 }
 
