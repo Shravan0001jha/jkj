@@ -267,8 +267,10 @@ export class GitHubRunner implements EvidenceRunner {
     try { await gh.push(r.repo, r.branch); } catch (err) { return plumbing(`could not push ${r.branch} to GitHub: ${errLine(err)}`); }
     const requestId = r.requestId ?? `ev-${Date.now()}`;
     const inputs = { iris_ref: r.sha, build_ref: r.sha, platforms: r.platforms.join(','), features: r.features.join(','), target: 'staging', account_mode: 'new', windows_default_smoke: 'false', request_id: requestId,
-      // iris-e2e refuses macOS platforms unless this is true; evidence.request only lets release-gate stories ask for ios.
-      release_gate: r.platforms.includes('ios') ? 'true' : 'false' };
+      // iris-e2e refuses macOS platforms unless release_gate is true; evidence.request only lets release-gate stories ask
+      // for ios. Sent ONLY on iOS runs: GitHub rejects inputs a workflow doesn't declare (422), so a non-iOS run must
+      // not depend on the workflow having the input (it blocked every Android run on 19 Oct before the iris-e2e change).
+      ...(r.platforms.includes('ios') ? { release_gate: 'true' } : {}) };
     try { await gh.dispatchWorkflow(SUITE_WORKFLOW, inputs); } catch (err) { return plumbing(`could not start ${SUITE_WORKFLOW} on GitHub: ${errLine(err)}`); }
     say(`dispatched ${SUITE_WORKFLOW} for ${r.sha.slice(0, 8)} (${requestId})`);
     const end = Date.now() + this.timing.timeoutMs;

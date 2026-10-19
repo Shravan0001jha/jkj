@@ -68,7 +68,7 @@ test('GitHubRunner pushes the branch, dispatches suite.yml for the commit and un
     assert.equal(gh.remoteSha('emp/kabir/as_1'), sha, 'the commit is on GitHub before the dispatch');
     const run = gh.runs[0]!;
     assert.equal(run.workflow, 'suite.yml');
-    assert.deepEqual(run.inputs, { iris_ref: sha, build_ref: sha, platforms: 'android', features: 'queries', target: 'staging', account_mode: 'new', windows_default_smoke: 'false', request_id: 'as_1-run1', release_gate: 'false' });
+    assert.deepEqual(run.inputs, { iris_ref: sha, build_ref: sha, platforms: 'android', features: 'queries', target: 'staging', account_mode: 'new', windows_default_smoke: 'false', request_id: 'as_1-run1' }); // no release_gate on a non-iOS run: workflows that predate the input reject unknown inputs (422, 19 Oct)
     assert.equal(res.exitCode, 0);
     assert.match(res.stderrTail, /actions\/runs\/900/);
     assert.ok(existsSync(join(out, 'results.json')) && existsSync(join(out, 'shots', 'a.png')), 'the report sits where the local runner writes it');
