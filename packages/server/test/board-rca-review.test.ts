@@ -15,6 +15,7 @@ import * as reviewWake from '../src/services/review-wake.js';
 import { employee } from '../src/services/employees.js';
 import { ensureWorktree } from '../src/services/worktrees.js';
 import { rawGet } from '../src/services/v2-map.js';
+import { stage } from '../src/services/review-policy.js';
 import { testWorkplace } from './fakes/workplace.js';
 import { FakeGitHub } from './fakes/fake-github.js';
 import { writePrePr } from './fakes/pre-pr.js';
@@ -227,5 +228,47 @@ test('class: an extra reviewer the author asks for (request_review) is woken the
     flow.requestExtraReviewers(s.wp, s.storyId, 'kabir', ['mira']);
     await tick();
     assert.ok(told('mira').some(t => t.includes(s.storyId) && /review_approve/.test(t)), 'Mira is woken');
+  } finally { await s.done(); }
+});
+
+/* ---------- case 6: Done with an unmerged PR whose approvals do not hold (as_mvdis3x8bn3vj, PR #446) ---------- */
+
+test('as_mvdis3x8bn3vj: during an automatic fallback to local, a story with an open PR still cannot be marked done without approval 2', async () => {
+  const s = setup('kabir');
+  try {
+    flow.setMode(s.wp, 'on', 'coo');
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s, 'kabir');
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    // Three GitHub failures: the flow falls back to local (as at 16:10 UTC, 18 Oct).
+    for (let i = 0; i < 3; i++) flow.recordFailure(s.wp, 'merge', s.storyId, Date.now(), 'Repository rule violation');
+    assert.equal(flow.state(s.wp).mode, 'on', 'a repository rule refusing a merge is policy, not an outage');
+    for (let i = 0; i < 3; i++) flow.recordFailure(s.wp, 'push', s.storyId, Date.now(), 'GitHub 502');
+    assert.equal(flow.state(s.wp).mode, 'local');
+    assert.throws(() => items.update(s.wp, s.storyId, { status: 'done', note: 'QA approval 2/2 complete' }, 'nikhil'), /review_approve/);
+    // The old engine's transition route is held to the same gate.
+    assert.throws(() => work.transition(s.wp, s.storyId, { to: 'done', by: 'nikhil', note: 'verified' }), /review_approve/);
+    assert.equal(rawGet(s.wp, s.storyId)!.status, 'in-review');
+  } finally { await s.done(); }
+});
+
+test('class: a story already Done with an open PR whose approvals do not hold is put back In review by the sweep, its QA woken, a same-head developer approval kept', async () => {
+  const s = setup('kabir');
+  try {
+    flow.setMode(s.wp, 'on', 'coo');
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s, 'kabir');
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    freeAll(s.wp);
+    // What the live row holds: Done, PR open, no QA approval.
+    work.saveQuiet(s.wp, { ...rawGet(s.wp, s.storyId)!, status: 'done', resolution: 'done', statusSince: new Date().toISOString() });
+    await flow.syncHeads(s.wp);
+    await tick();
+    const w = rawGet(s.wp, s.storyId)!;
+    assert.equal(w.status, 'in-review');
+    assert.equal(w.reviewerId, 'nikhil');
+    assert.equal(stage(w), 'qa', 'the developer approval on the same head still holds');
+    assert.ok(told('nikhil').some(t => t.includes(s.storyId)), 'QA is asked for approval 2');
+    assert.equal((await flow.approve(s.wp, s.storyId, 'nikhil', undefined, qaText(s.wp))).stage, 'qa');
   } finally { await s.done(); }
 });

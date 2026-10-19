@@ -77,8 +77,21 @@ export function stage(w: WorkItem): Stage {
  * In mode `on`, a story with an open PR is done only once both approvals hold (the owner excepted).
  * Null when the move is fine; local and shadow always return null.
  */
+/**
+ * The PR gate applies: the flow is on, or it is local only because of an automatic fallback from on
+ * (case 6, 19 Oct, as_mvdis3x8bn3vj: three GitHub failures switched to local for 53 s, and in that window
+ * QA marked a story with an open PR done with no approval 2; it sat Done and unmerged for 9 hours).
+ */
+export function prGateOn(wp: Workplace): boolean {
+  const m = githubMode(wp);
+  if (m === 'on') return true;
+  if (m !== 'local') return false;
+  const row = wp.db.prepare("select value from settings where key = 'github:fallback'").get() as { value: string } | undefined;
+  try { return !!row && (JSON.parse(row.value) as { from?: string }).from === 'on'; } catch { return false; }
+}
+
 export function doneProblem(wp: Workplace, w: WorkItem, by: string): string | null {
-  if (by === 'owner' || !w.pr || w.pr.merged || w.pr.closed || githubMode(wp) !== 'on') return null;
+  if (by === 'owner' || !w.pr || w.pr.merged || w.pr.closed || !prGateOn(wp)) return null;
   const s = stage(w);
   if (s === 'approved') return null;
   return s === 'dev'

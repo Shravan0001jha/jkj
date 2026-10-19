@@ -5,6 +5,7 @@ import type { Workplace } from './workplace.js';
 import { newId, now, rowJson, rowsJson } from './store.js';
 import { route } from './ownership.js';
 import { BadRequest } from '../util/errors.js';
+import { doneProblem } from './review-policy.js';
 import { authorId, chiefOfStaffId, defaultReviewer, levelOf, statusFromState } from './v2-map.js';
 import * as trail from './trail.js';
 
@@ -181,6 +182,9 @@ export function transition(wp: Workplace, id: string, given: TransitionOptions):
     }
     if (opts.to === 'done') {
       if (!item.evidence) throw new BadRequest('Nothing is done without evidence.');
+      // The same PR gate as item_update (case 6, 19 Oct): the old engine's route never bypasses it.
+      const pr = doneProblem(wp, item, opts.by);
+      if (pr) throw new BadRequest(pr);
       if (opts.by === item.employeeId) throw new BadRequest('An assignee cannot verify its own work; report it for review instead.');
       patch.verifiedBy = opts.by;
     }

@@ -21,7 +21,7 @@ import { AUTOSAVE_SUBJECT, branchFor, worktreePath } from './worktrees.js';
 import * as prePr from './pre-pr.js';
 import * as spendCaps from './spend-caps.js';
 import { dayOf } from './spend.js';
-import { GITHUB_MODES, githubMode, holds, canApproveAsDeveloper, isCto, isQa, pendingExtra, qaOf, qaReviewer, writeGithubMode } from './review-policy.js';
+import { GITHUB_MODES, githubMode, holds, canApproveAsDeveloper, prGateOn, isCto, isQa, pendingExtra, qaOf, qaReviewer, writeGithubMode } from './review-policy.js';
 import { leadOfCharter, teamMembers, teamOf } from './org.js';
 import { resolve as resolveOwner } from './ownership.js';
 import { chiefOfStaffId } from './v2-map.js';
@@ -113,6 +113,9 @@ export function state(wp: Workplace, nowMs = Date.now()): { mode: GitHubMode; fa
  * five minutes switch the flow to `local` and alert the COO. A policy refusal is never counted.
  */
 export function recordFailure(wp: Workplace, op: string, itemId: string | undefined, nowMs = Date.now(), message = ''): void {
+  // A repository rule refusing a merge (405 "Repository rule violation") is GitHub's policy answer, not an
+  // outage: it never counts toward the fallback (case 6, 19 Oct: three of them switched the flow to local).
+  if (/Repository rule violation/i.test(message)) { log.warn('github', `${op} refused by a repository rule${itemId ? ` for ${itemId}` : ''}: ${message}`); return; }
   const recent = [...failures(wp).filter(t => t >= nowMs - FAILURE_WINDOW_MS), nowMs];
   putSetting(wp, FAILURES_KEY, JSON.stringify(recent.map(t => new Date(t).toISOString())));
   log.warn('github', `${op} failed${itemId ? ` for ${itemId}` : ''} (${recent.length} in 5 min)${message ? `: ${message}` : ''}`);
@@ -1363,6 +1366,7 @@ export async function syncHeads(wp: Workplace): Promise<string[]> {
     if (w.status === 'done') {
       // Approved, waiting to merge: only a trunk-only move of its head is picked up (onReview carries it).
       if (!w.pr || w.pr.merged) continue;
+      if (reopenUnapproved(wp, w)) { moved.push(w.id); continue; }
       const ctx = contextOf(wp, w);
       if (typeof ctx !== 'string' && ctx.head !== w.pr.headSha && (await onReview(wp, w.id, 'workplace')).carried) moved.push(w.id);
       continue;
@@ -1430,6 +1434,32 @@ export function pendingTestsAlarm(wp: Workplace, nowMs = Date.now()): string[] {
     out.push(w.id);
   }
   return out;
+}
+
+/**
+ * Done, with an open PR whose two approvals do not hold (case 6, 19 Oct, as_mvdis3x8bn3vj: marked done
+ * during a 53 s fallback to local, then Done and unmerged for 9 hours): the board says Done, GitHub says
+ * not merged and never will be. Put it back In review with its QA as the reviewer; a developer approval
+ * given on the same head is kept (nothing changed since it was given; only the improper Done broke its
+ * episode), so QA is woken for approval 2. Returns whether it reopened.
+ */
+function reopenUnapproved(wp: Workplace, w: WorkItem): boolean {
+  const pr = w.pr;
+  if (!pr || pr.merged || pr.closed || !prGateOn(wp) || (w.resolution ?? 'done') !== 'done' || w.closedAt) return false;
+  if (holds(pr.devApproval, w) && holds(pr.qaApproval, w)) return false;
+  const dev = pr.devApproval && pr.devApproval.sha === pr.headSha ? pr.devApproval : undefined;
+  const qa = pr.qaReviewer && pr.qaReviewer !== dev?.by && pr.qaReviewer !== w.employeeId ? pr.qaReviewer : undefined;
+  const reviewer = dev ? qa : pr.devReviewer ?? qa;
+  if (!reviewer) return false;
+  const why = `Done, but PR #${pr.number} is not merged and its approvals do not hold (${dev ? 'no QA approval' : 'no developer approval on its head'})`;
+  items.update(wp, w.id, { status: 'in-progress', note: `system: reopened by the Workplace: ${why}` }, 'workplace');
+  items.update(wp, w.id, { status: 'in-review', reviewerId: reviewer, note: `system: back to review for ${dev ? 'approval 2 of 2' : 'approval 1 of 2'}` }, 'workplace');
+  const back = rawGet(wp, w.id)!;
+  if (dev) savePr(wp, w.id, c => ({ pr: { ...c.pr!, devApproval: { ...dev, episode: back.statusSince ?? '' } } }));
+  trail.record(wp, { itemId: w.id, by: 'workplace', kind: 'note', text: `${why}: back In review with ${nameOf(wp, reviewer)}${dev ? `; ${nameOf(wp, dev.by)}'s developer approval on ${dev.sha.slice(0, 8)} still holds` : ''}` });
+  log.warn('github', `${w.id}: reopened to review: ${why}`);
+  reviewWake.onItem(wp, w.id);
+  return true;
 }
 
 const UPDATE_BRANCH_PREFIX = 'github:update-branch:';
