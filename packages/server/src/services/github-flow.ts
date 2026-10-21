@@ -1452,7 +1452,7 @@ export const TESTS_PENDING_ALERT_MS = 60 * 60_000;
 export function pendingTestsAlarm(wp: Workplace, nowMs = Date.now()): string[] {
   if (mode(wp) === 'local') return [];
   const out: string[] = [];
-  for (const w of rowsJson<WorkItem>(wp.db.prepare("select json from work where status in ('in-review', 'done') and json_extract(json, '$.pr.tests.state') = 'pending'").all())) {
+  for (const w of rowsJson<WorkItem>(wp.db.prepare("select json from work where status = 'in-review' and json_extract(json, '$.pr.tests.state') = 'pending'").all())) {
     const pr = w.pr;
     const t = pr?.tests;
     if (!pr || !t || pr.merged || pr.closed || t.sha !== pr.headSha) continue;

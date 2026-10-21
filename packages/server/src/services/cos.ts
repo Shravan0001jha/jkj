@@ -14,6 +14,7 @@ import type { HygieneRule } from '@jkj/shared';
 import { levelOf, humanDuration, nameOf } from './v2-map.js';
 import { rowsJson } from './store.js';
 import { openStartsAfter } from './lifecycle.js';
+import { unrouted as unroutedItems } from './unrouted.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -51,11 +52,12 @@ export function boardCheck(wp: Workplace, nowMs = Date.now()): string | null {
   const cos = chiefOfStaff(wp);
   if (!cos || cos === 'workplace') return null;
   const focus = items.getFocus(wp).epicIds;
-  const unrouted = rowsJson<WorkItem>(wp.db.prepare("select json from work where status in ('ready', 'backlog') and (employee_id is null or employee_id = ?)").all(cos))
-    .filter(w => levelOf(w) !== 'epic' && !w.mergedInto && !w.hold && !openStartsAfter(wp, w))
-    .filter(w => w.status === 'ready' || (w.featureId && focus.includes(w.featureId)))
-    // Hers to route: no reviewer (a story she authors for someone to check is her own work).
-    .filter(w => !w.employeeId || !w.reviewerId)
+  // The shared definition (unrouted.ts: no assignee, or one outside the org; startsAfter, focus, type, priority
+  // do not hide it), plus stories that are hers to route: assigned to her, no reviewer.
+  const mine = rowsJson<WorkItem>(wp.db.prepare("select json from work where status in ('ready', 'backlog') and employee_id = ?").all(cos))
+    .filter(w => levelOf(w) !== 'epic' && !w.mergedInto && !w.hold && !openStartsAfter(wp, w) && !w.reviewerId)
+    .filter(w => w.status === 'ready' || (w.featureId && focus.includes(w.featureId)));
+  const unrouted = [...unroutedItems(wp), ...mine]
     .filter(w => nowMs - Date.parse(w.statusSince ?? w.createdAt) >= UNROUTED_AFTER_MS)
     .sort((a, b) => (a.statusSince ?? a.createdAt).localeCompare(b.statusSince ?? b.createdAt));
   const wrong = hygiene.report(wp, nowMs).violations.filter(v => WRONG_STATUS.includes(v.rule));
@@ -65,7 +67,7 @@ export function boardCheck(wp: Workplace, nowMs = Date.now()): string | null {
     `Board check (every ${COS_TICK_MS / 60_000} min): these need you now. Route or fix each one, and say why on the item; a story you keep unrouted needs its reason in a comment.`,
     ...(unrouted.length ? [
       `Unrouted (${unrouted.length}): route each to the lead whose charter owns its files (map.yaml): item_update <id> assigneeId <lead> reason "<why>".`,
-      ...unrouted.slice(0, 15).map(w => `- ${w.id} "${w.title}" — ${w.employeeId ? `with you to route` : 'nobody assigned'}, ${w.status === 'ready' ? 'Ready' : 'Backlog (focus)'} for ${age(w)}`),
+      ...unrouted.slice(0, 15).map(w => `- ${w.id} "${w.title}" — ${w.employeeId ? `with you to route` : 'nobody assigned'}, ${w.status === 'backlog' ? 'Backlog (focus)' : w.status}${openStartsAfter(wp, w) ? ', starts after an unfinished story' : ''} for ${age(w)}`),
       ...(unrouted.length > 15 ? [`- … and ${unrouted.length - 15} more`] : []),
     ] : []),
     ...(wrong.length ? [

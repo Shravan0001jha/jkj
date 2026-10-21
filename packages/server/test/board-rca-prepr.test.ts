@@ -146,3 +146,16 @@ test('a pending workplace/tests is never terminal: after an hour Asha is told, o
     assert.deepEqual(flow.pendingTestsAlarm(s.wp, Date.now() + 62 * 60_000), [], 'once per pending episode');
   } finally { s.done(); }
 });
+
+test('a Done story\'s pre-merge pending workplace/tests is not alerted (21 Oct: three merged stories alerted for ten days)', async () => {
+  const s = setup();
+  try {
+    s.commit('mobile/android/PhoneErrandRunner.kt', 'class Runner\n');
+    git(s.wt, ['-c', 'user.email=k@iris.local', '-c', 'user.name=kabir', 'commit', '-q', '--allow-empty', '-m', 'no pre-pr here']);
+    work.reportDone(s.wp, s.storyId, evidence, 'kabir');
+    await (await flow.onReview(s.wp, s.storyId, 'kabir')).tests;
+    assert.equal(pr(s).tests?.state, 'pending');
+    work.saveQuiet(s.wp, { ...rawGet(s.wp, s.storyId)!, status: 'done', resolution: 'done' });
+    assert.deepEqual(flow.pendingTestsAlarm(s.wp, Date.now() + 90 * 60_000), []);
+  } finally { s.done(); }
+});

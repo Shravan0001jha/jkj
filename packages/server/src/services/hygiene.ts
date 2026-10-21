@@ -10,6 +10,7 @@ import * as dispatch from './dispatch.js';
 import * as floor from './floor.js';
 import * as waitReply from './wait-reply.js';
 import * as lifecycleWatch from './lifecycle-watch.js';
+import { unrouted as unroutedItems } from './unrouted.js';
 import { closed, finished, label, openStartsAfter, trueStatus } from './lifecycle.js';
 import { githubMode } from './review-policy.js';
 import { chiefOfStaffId, epicOf, humanDuration, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
@@ -186,8 +187,8 @@ export function conditions(wp: Workplace): Condition[] {
       }
     } else if (w.status === 'ready' && w.startsAfter) {
       const dep = rawGet(wp, w.startsAfter);
-      if (dep && closed(dep) && !finished(dep) && !awaitingMerge(dep)) {
-        out.push({ key: `bad-block:${w.id}`, rule: 'bad-block', w, what: `Starts after ${quote(dep.title)}, which closed as ${dep.resolution ?? 'done'} and will never finish`, fix: `clear startsAfter (item_update ${w.id} startsAfter "") or point it at the real dependency`, since: dep.statusSince ?? dep.updatedAt });
+      if (dep && (dep.status === 'parked' || (closed(dep) && !finished(dep) && !awaitingMerge(dep)))) {
+        out.push({ key: `bad-block:${w.id}`, rule: 'bad-block', w, what: `Starts after ${quote(dep.title)}, which ${dep.status === 'parked' ? 'is Parked' : `closed as ${dep.resolution ?? 'done'}`} and will not finish`, fix: `clear startsAfter (item_update ${w.id} startsAfter "") or point it at the real dependency`, since: dep.statusSince ?? dep.updatedAt });
       }
     }
     // (d) In review needs a reviewer, and in mode `on` a story needs its PR.
@@ -206,10 +207,9 @@ export function conditions(wp: Workplace): Condition[] {
   // (f) An unassigned Ready item. Board bug 5 (19 Oct): only the top of the global queue was named, so the
   // four below it were invisible for 7 hours; every one is a violation of its own.
   const queueNow = globalQueue(wp, rows);
-  for (const w of queueNow) {
-    if (w.employeeId) continue;
+  for (const w of unroutedItems(wp)) {
     const top = w === queueNow[0];
-    out.push({ key: `unrouted-top:${w.id}`, rule: 'unrouted-top', w, what: top ? 'unassigned at the top of the Ready queue' : 'unassigned in the Ready queue', fix: `${nameOf(wp, cos)} routes it (item_update ${w.id} assigneeId <the owning lead>)` });
+    out.push({ key: `unrouted-top:${w.id}`, rule: 'unrouted-top', w, what: top ? 'unassigned at the top of the Ready queue' : w.employeeId ? `assigned to ${w.employeeId}, who is not in the org` : `unassigned (${w.status})${openStartsAfter(wp, w) ? ', starts after an unfinished story' : ''}`, fix: `${nameOf(wp, cos)} routes it (item_update ${w.id} assigneeId <the owning lead>)` });
   }
 
   // (g) The assignee is whoever actually works on it.

@@ -3,6 +3,7 @@ import type { Workplace } from './workplace.js';
 import * as runs from './runs.js';
 import * as employees from './employees.js';
 import * as items from './items.js';
+import { isUnrouted, unrouted as unroutedItems } from './unrouted.js';
 import { openStartsAfter } from './lifecycle.js';
 import * as spend from './spend.js';
 import * as trail from './trail.js';
@@ -98,11 +99,14 @@ export function queue(wp: Workplace, employeeId: string): WorkItem[] {
   // its RCA ("the Chief of Staff routes it") sat unassigned for 7 hours with nobody told.
   const routes = employeeId === chiefOfStaffId(wp);
   const rows = rowsJson<WorkItem>(wp.db.prepare(`select json from work where (employee_id = ?${routes ? " or (employee_id is null and level in ('story', 'task'))" : ''}) and status in ('ready', 'backlog')`).all(employeeId));
+  // Same definition as the board check and hygiene (unrouted.ts): a story with an assignee outside the org is hers to route too.
+  if (routes) for (const w of unroutedItems(wp)) if ((w.status === 'ready' || w.status === 'backlog') && !rows.some(r => r.id === w.id)) rows.push(w);
   const out: { w: WorkItem; at: number }[] = [];
   for (const w of rows) {
     if (levelOf(w) === 'epic' || w.mergedInto) continue;
     if (w.status === 'backlog' && w.hold) continue;
-    if (openStartsAfter(wp, w)) continue; // starts after an item that has not finished
+    // Starts after an item that has not finished: not started, but still ROUTED when it has no owner (21 Oct).
+    if (openStartsAfter(wp, w) && !isUnrouted(wp, w, focus)) continue;
     const epic = epicOf(wp, w);
     const inFocus = epic ? focus.indexOf(epic.id) : -1;
     if (inFocus < 0 && w.status === 'backlog') continue; // Backlog outside the focus is parked: never auto-started
