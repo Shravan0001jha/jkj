@@ -420,6 +420,26 @@ test('reminder on android is accepted when the trunk plan.mjs runs it (the plan 
   } finally { await s.done(); }
 });
 
+test('plan.mjs is read from the story\'s own commit: a story that adds reminder to android is accepted while trunk\'s plan lacks it', async () => {
+  const s = setup();
+  try {
+    const per = (extra: string) => `export const PER = {\n  mac: { queries: 2 },\n  android: { queries: 3, memory: 4, files: 4, errand: 5${extra} },\n  ios: { queries: 2, memory: 2 },\n};\n`;
+    mkdirSync(join(s.repo, 'e2e/scripts'), { recursive: true });
+    writeFileSync(join(s.repo, 'e2e/scripts/plan.mjs'), per(''));
+    git(s.repo, ['add', '-A']);
+    git(s.repo, ['-c', 'user.email=t@iris.local', '-c', 'user.name=t', 'commit', '-q', '-m', 'plan']);
+    s.commit('e2e/scripts/plan.mjs', per(', reminder: 2'));
+    const r = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'reminder' });
+    assert.ok(r.ok, r.ok ? '' : r.message);
+    // A story that does not touch plan.mjs uses its head's plan (= the trunk's).
+    const b = s.story('Other plan story'); s.commit('services/agent-svc/b.py', 'b = 1\n', b.id);
+    const no = evidence.request(s.wp, { itemId: b.id, by: 'kabir', platforms: 'android', features: 'reminder' });
+    assert.equal(no.ok, false);
+    assert.match(no.ok ? '' : no.message, /android: queries, memory, files, errand\b/);
+    assert.ok(evidence.request(s.wp, { itemId: b.id, by: 'kabir', platforms: 'android', features: 'errand' }).ok);
+  } finally { await s.done(); }
+});
+
 /* ---------- the build cache ---------- */
 
 test('build cache: a story with no app change reuses the trunk build; an app change builds; the same app tree hits', async () => {

@@ -84,17 +84,19 @@ export function parsePlanPer(src: string): Record<string, string[]> | null {
   return out.android && out.ios ? out : null;
 }
 
-/** The phones' features from the trunk's plan.mjs at request time (what the suite really runs), or null (warned) so the caller falls back. */
-export function planFeatures(wp: Workplace, repo: string, trunk: string): Record<Platform, string[]> | null {
-  for (const ref of [`origin/${trunk}`, trunk]) {
+/**
+ * The phones' features from plan.mjs at the commit being tested (a story may change the plan itself,
+ * and the suite runs that commit), then the trunk's, or null (warned) so the caller falls back.
+ */
+export function planFeatures(wp: Workplace, repo: string, trunk: string, head?: string): Record<Platform, string[]> | null {
+  for (const ref of [...(head ? [head] : []), `origin/${trunk}`, trunk]) {
     let src: string;
     try { src = git(repo, ['show', `${ref}:${PLAN_PATH}`]); } catch { continue; }
     const per = parsePlanPer(src);
     if (per) return { android: per.android!, ios: per.ios! };
-    log.warn('evidence', `could not parse PER from ${ref}:${PLAN_PATH}; falling back to the runner's supported() / built-in list`);
-    return null;
+    log.warn('evidence', `could not parse PER from ${ref}:${PLAN_PATH}; trying the next source`);
   }
-  log.warn('evidence', `no ${PLAN_PATH} on ${trunk}; falling back to the runner's supported() / built-in list`);
+  log.warn('evidence', `no usable ${PLAN_PATH} at ${head ?? trunk} or on ${trunk}; falling back to the runner's supported() / built-in list`);
   return null;
 }
 
@@ -104,7 +106,7 @@ export function planFeatures(wp: Workplace, repo: string, trunk: string): Record
  * shared list.
  */
 export function phoneFeatures(wp: Workplace, repo: string, sha: string, trunk?: string): Record<Platform, string[]> | null {
-  const fromPlan = trunk ? planFeatures(wp, repo, trunk) : null;
+  const fromPlan = trunk ? planFeatures(wp, repo, trunk, sha) : null;
   if (fromPlan) return fromPlan;
   let src: string;
   try { src = git(repo, ['show', `${sha}:${wp.config.evidence.runnerInRepo}`]); }
