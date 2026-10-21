@@ -39,6 +39,7 @@ import * as board from '../services/board.js';
 import * as talk from '../services/talk.js';
 import * as talkStore from '../services/talk-store.js';
 import * as evidence from '../services/evidence.js';
+import * as stagingDiag from '../services/staging-diag.js';
 import * as hygiene from '../services/hygiene.js';
 import * as macQueue from '../services/mac-queue.js';
 import type { Telegram } from '../services/telegram.js';
@@ -581,6 +582,19 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
 
     // run_evidence (docs/LLD-evidence.md §5): the queue for the COO (loopback only), and the reports
     // for the owner and reviewers (same auth as every /api route, so the tunnel and the token work).
+    // staging_diag for the COO: the same whitelisted read-only queries the agents' tool runs (loopback only).
+    r('GET', '/api/staging/diag', async (req, res, url) => {
+      requireLocal(req);
+      const g = (k: string): string | undefined => url.searchParams.get(k) ?? undefined;
+      const kind = g('kind');
+      if (kind !== 'logs' && kind !== 'chat' && kind !== 'version') throw new BadRequest('kind is logs, chat or version.');
+      const result = await stagingDiag.stagingDiag({
+        kind, by: actorOf(req), start: g('start') === 'true',
+        ...(g('since') ? { since: g('since')! } : {}), ...(g('until') ? { until: g('until')! } : {}),
+        ...(g('filter') ? { filter: g('filter')! } : {}), ...(g('account') ? { account: g('account')! } : {}),
+      }, stagingDiag.realRunner(wp.config.evidence.stagingScript));
+      json(res, 200, result);
+    }),
     r('GET', '/api/coo/evidence', (req, res) => { requireLocal(req); json(res, 200, evidence.state(wp)); }),
     r('GET', '/api/coo/evidence/staging', (req, res) => { requireLocal(req); json(res, 200, evidence.stagingServer(wp)); }),
     r('POST', '/api/coo/evidence/staging', async (req, res) => { requireLocal(req); const body = await readJson(req); json(res, 200, evidence.recordStagingDeploy(wp, str(body['sha']), str(body['by']) || 'coo')); }),

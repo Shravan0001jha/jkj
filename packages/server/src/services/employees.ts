@@ -28,6 +28,7 @@ import * as trail from './trail.js';
 import * as watch from './watch.js';
 import * as statusAnswers from './status.js';
 import * as readTools from './read-tools.js';
+import * as stagingDiag from './staging-diag.js';
 // The owner's Inbox replies reach the asker durably (HLD D23, LLD §19.14); the module wires itself.
 import './reply-delivery.js';
 import { chiefOfStaffId, isWaitable, nameOf, rawGet } from './v2-map.js';
@@ -83,7 +84,7 @@ export function hitSessionBudget(subtype: string): boolean {
 
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'qa_doc_update', 'record_live_check', 'qa_cases_write', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence', 'request_mac', 'release_mac', 'lease_test_account', 'return_test_account', 'doc_write', 'doc_read', 'doc_comment', 'pr_close_detach', 'story_close_no_code', 'signoff_recut', 'github_resume', 'status_repost', 'branch_reset_to_local', 'map_assign'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'qa_doc_update', 'record_live_check', 'qa_cases_write', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence', 'request_mac', 'release_mac', 'lease_test_account', 'return_test_account', 'doc_write', 'doc_read', 'doc_comment', 'pr_close_detach', 'story_close_no_code', 'signoff_recut', 'github_resume', 'status_repost', 'branch_reset_to_local', 'map_assign', 'staging_diag'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -1650,6 +1651,14 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         'You never answer the owner\'s decisions: only he does. Use it to verify that a decision was filed or answered.',
         { itemId: z.string().optional(), state: z.enum(['open', 'answered', 'expired', 'all']).optional() },
         async ({ itemId, state }) => ok(readTools.readInbox(wp, { ...(itemId ? { itemId } : {}), ...(state ? { state } : {}) }))),
+      tool('staging_diag', 'Diagnose staging read-only, with no SSH: kind "logs" = journalctl of iris-api + iris-agent for an explicit window (since and until, ISO with a zone like 2026-10-21T10:00:00Z, at most 30 minutes; optional fixed-string filter; at most 300 lines), ' +
+        'kind "chat" = chat_messages and chat_jobs rows (50, newest first) of ONE test account (account: an address ending @e2e.irisforu.com; any other account is refused, real users\' chats are never readable), kind "version" = the deployed /opt/iris-api/VERSION. ' +
+        'If staging is stopped it says so; pass start: true to start it (it idles off by itself). Nothing else can be run.',
+        { kind: z.enum(['logs', 'chat', 'version']), since: z.string().optional(), until: z.string().optional(), filter: z.string().optional(), account: z.string().optional(), start: z.boolean().optional() },
+        async a => {
+          try { return ok((await stagingDiag.stagingDiag({ ...a, by: employeeId }, stagingDiag.realRunner(wp.config.evidence.stagingScript))).text); }
+          catch (err) { return ok(`Not run: ${err instanceof Error ? err.message : String(err)}`); }
+        }),
       /* ---------- Notion docs (LLD W7): big documents live in Notion, one per story ---------- */
       tool('doc_write', 'Write your section of the story\'s doc in Notion (the "Iris Docs" database): designs, RCAs, research, QA and release reports, incidents, decisions. One doc per story, one section per writer: your section is the heading "## <section> — <your name>" and what follows it. ' +
         'The first call on a story creates the doc (with the type\'s template headings); each later call of yours replaces only your own section, in place, and adds it if you have none. Other people\'s sections are never changed, so write only your own part (an RCA, a live verification, a QA report) and don\'t copy theirs in. ' +
