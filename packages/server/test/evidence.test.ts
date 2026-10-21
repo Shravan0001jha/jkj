@@ -401,6 +401,25 @@ test('features a platform does not support are refused before queueing, naming e
   } finally { await s.done(); }
 });
 
+test('reminder on android is accepted when the trunk plan.mjs runs it (the plan is the source of truth, not a Workplace copy)', async () => {
+  const s = setup();
+  try {
+    s.commit('services/agent-svc/a.py', 'a = 1\n');
+    const before = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'reminder' });
+    assert.equal(before.ok, false, 'no plan on trunk: the built-in fallback list refuses it');
+    const plan = "export const PER = {\n  mac: { queries: 2, reminder: 2 },\n  android: { queries: 3, memory: 4, files: 4, errand: 5, reminder: 2 },\n  ios: { queries: 2, memory: 2 },\n  'windows-default': { queries: 1 },\n};\n";
+    mkdirSync(join(s.repo, 'e2e/scripts'), { recursive: true });
+    writeFileSync(join(s.repo, 'e2e/scripts/plan.mjs'), plan);
+    git(s.repo, ['add', '-A']);
+    git(s.repo, ['-c', 'user.email=t@iris.local', '-c', 'user.name=t', 'commit', '-q', '-m', 'plan']);
+    const r = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'reminder' });
+    assert.ok(r.ok, r.ok ? '' : r.message);
+    const ios = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'ios', features: 'reminder' });
+    assert.equal(ios.ok, false, 'ios is not in the plan for reminder');
+    assert.match(ios.ok ? '' : ios.message, /ios: queries, memory\b/);
+  } finally { await s.done(); }
+});
+
 /* ---------- the build cache ---------- */
 
 test('build cache: a story with no app change reuses the trunk build; an app change builds; the same app tree hits', async () => {

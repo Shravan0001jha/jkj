@@ -69,12 +69,43 @@ export const PLATFORM_FEATURES: Readonly<Record<'android' | 'ios' | 'desktop' | 
   windows: ['queries', 'voice', 'memory', 'music', 'files', 'timer', 'apps', 'errand', 'update'],
 };
 
+/** Where the robot suite's plan lives in the Iris repo: the single source of truth for what each platform runs. */
+export const PLAN_PATH = 'e2e/scripts/plan.mjs';
+
+/** Parses the PER map of plan.mjs ({ platform: { feature: minutes } }) into platform -> feature names, or null. */
+export function parsePlanPer(src: string): Record<string, string[]> | null {
+  const start = /\bconst\s+PER\s*=\s*\{/.exec(src);
+  if (!start) return null;
+  const body = src.slice(start.index + start[0].length, src.indexOf('\n};', start.index));
+  const out: Record<string, string[]> = {};
+  for (const m of body.matchAll(/^\s*['"]?([a-z][\w-]*)['"]?\s*:\s*\{([^}]*)\}/gm)) {
+    out[m[1]!] = [...m[2]!.matchAll(/(?:^|[\s,{])['"]?([a-z][\w-]*)['"]?\s*:/g)].map(x => x[1]!);
+  }
+  return out.android && out.ios ? out : null;
+}
+
+/** The phones' features from the trunk's plan.mjs at request time (what the suite really runs), or null (warned) so the caller falls back. */
+export function planFeatures(wp: Workplace, repo: string, trunk: string): Record<Platform, string[]> | null {
+  for (const ref of [`origin/${trunk}`, trunk]) {
+    let src: string;
+    try { src = git(repo, ['show', `${ref}:${PLAN_PATH}`]); } catch { continue; }
+    const per = parsePlanPer(src);
+    if (per) return { android: per.android!, ios: per.ios! };
+    log.warn('evidence', `could not parse PER from ${ref}:${PLAN_PATH}; falling back to the runner's supported() / built-in list`);
+    return null;
+  }
+  log.warn('evidence', `no ${PLAN_PATH} on ${trunk}; falling back to the runner's supported() / built-in list`);
+  return null;
+}
+
 /**
  * The features each phone runs with the runner at `sha`: its own supported() line when it has one;
  * a runner without that line restricts nothing (it runs what it lists); no runner in the commit, the
  * shared list.
  */
-export function phoneFeatures(wp: Workplace, repo: string, sha: string): Record<Platform, string[]> | null {
+export function phoneFeatures(wp: Workplace, repo: string, sha: string, trunk?: string): Record<Platform, string[]> | null {
+  const fromPlan = trunk ? planFeatures(wp, repo, trunk) : null;
+  if (fromPlan) return fromPlan;
   let src: string;
   try { src = git(repo, ['show', `${sha}:${wp.config.evidence.runnerInRepo}`]); }
   catch { return { android: [...PLATFORM_FEATURES.android], ios: [...PLATFORM_FEATURES.ios] }; }
@@ -295,7 +326,7 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
 
   const plats = PHONES.filter(p => platforms.includes(p));
   // Refused before anything is queued: a feature none of these platforms runs would be dropped silently.
-  const byPlatform = phoneFeatures(wp, ctx.repo, ctx.head);
+  const byPlatform = phoneFeatures(wp, ctx.repo, ctx.head, ctx.trunk);
   const unsupported = byPlatform ? unsupportedRefusal(byPlatform, plats, features) : null;
   if (unsupported) return no(unsupported);
   const feats = [...new Set(features)];
