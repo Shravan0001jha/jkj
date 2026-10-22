@@ -603,11 +603,17 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
   if (server.touched !== !!job.server) { if (server.touched) job.server = true; else delete job.server; persist(wp, job); }
 
   let outcome: Outcome | undefined;
+  let preDeployed = false;
   // Queued before the daily GitHub cap was reached: it does not start the suite on GitHub now.
   const capped = onGitHub(wp) ? spendCaps.githubBlock(wp) : null;
   if (capped) outcome = errorOf(capped.message);
   else if (server.scripts.length) {
-    outcome = errorOf(`this story changes the deploy scripts (${server.scripts.join(', ')}), so its server code is not deployed to staging automatically; ask the COO to deploy it by hand`);
+    // The auto-deploy would run the story's own deploy scripts, so only the COO deploys it, by hand.
+    // Once staging is recorded as running exactly this head, the suite runs against it as deployed.
+    const st = stagingServer(wp);
+    const at = knownSha(st);
+    if (at && (at === sha || (at.length >= 7 && sha.startsWith(at)))) preDeployed = true;
+    else outcome = errorOf(`this story changes the deploy scripts (${server.scripts.join(', ')}); staging runs ${at ? at.slice(0, 8) : 'an unknown commit'}, your head is ${sha.slice(0, 8)}: ask the COO to hand-deploy ${sha}`);
   }
   if (!outcome) try {
     const checkout = checkoutFor(wp, ctx.repo, slot);
@@ -661,7 +667,9 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
     if (!outcome) {
       const suite = async (): Promise<Outcome> => {
         let srv: EvidenceServer;
-        if (job.server) {
+        if (preDeployed) {
+          srv = { sha, deployed: false };
+        } else if (job.server) {
           job.phase = 'deploying the server to staging'; persist(wp, job);
           const base = { sha, itemId: job.itemId, run: job.run! };
           setStagingServer(wp, { state: 'deploying', ...base, at: now() });

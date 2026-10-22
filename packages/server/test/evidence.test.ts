@@ -857,6 +857,39 @@ test('a story that changes the deploy scripts themselves is refused as an error;
   } finally { await s.done(); }
 });
 
+test('a deploy-script story whose head is what the COO hand-deployed to staging runs without auto-deploy', async () => {
+  const s = setup({ auto: true });
+  try {
+    s.commit('services/iris-api/app.py', 'x = 1\n');
+    const head = s.commit('scripts/deploy-target.sh', 'EIP=production\n');
+    evidence.recordStagingDeploy(s.wp, head, 'external:coo');
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    await until(() => s.runner.calls.length === 1, 'the run to start');
+    while (s.runner.pending.length) s.runner.finish();
+    await evidence.settled(s.wp);
+    assert.equal(s.deployer.calls.length, 0, 'nothing is auto-deployed');
+    const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
+    assert.notEqual(rec.state, 'error', rec.note);
+    assert.equal(rec.server?.sha, head);
+  } finally { await s.done(); }
+});
+
+test('a deploy-script story whose head differs from what staging runs is refused with both shas', async () => {
+  const s = setup({ auto: true });
+  try {
+    s.commit('services/iris-api/app.py', 'x = 1\n');
+    const head = s.commit('scripts/deploy-target.sh', 'EIP=production\n');
+    const other = 'a94dcb9c31a6ca5d2eeccd4f212ce066bf6e9aa5';
+    evidence.recordStagingDeploy(s.wp, other, 'external:coo');
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    await evidence.settled(s.wp);
+    assert.equal(s.runner.calls.length, 0);
+    const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
+    assert.equal(rec.state, 'error');
+    assert.ok((rec.note ?? '').includes(`staging runs ${other.slice(0, 8)}, your head is ${head.slice(0, 8)}: ask the COO to hand-deploy ${head}`), rec.note);
+  } finally { await s.done(); }
+});
+
 test('a deploy the Workplace did not run (the twice-daily batch) records what staging runs, so reports stop citing a stale commit', async () => {
   const { testWorkplace } = await import('./fakes/workplace.js');
   const evidence = await import('../src/services/evidence.js');
