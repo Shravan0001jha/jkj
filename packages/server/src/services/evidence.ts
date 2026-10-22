@@ -319,8 +319,13 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
   const ctx = storyOf(wp, w);
   if (typeof ctx === 'string') return no(ctx);
   // Checked now, against the runner the run will use, not minutes later by the runner itself.
-  const known = runnerFeatures(wp, ctx.repo, ctx.head);
-  if (features.some(f => f !== 'all' && !known.includes(f))) return no(featureRefusal(known));
+  // One source of truth: the plan.mjs PER at the story's commit (what GitHub runs). The runner's
+  // ALL_FEATURES / built-in list only gate when no plan can be read.
+  const plan = planFeatures(wp, ctx.repo, ctx.trunk, ctx.head);
+  if (!plan) {
+    const known = runnerFeatures(wp, ctx.repo, ctx.head);
+    if (features.some(f => f !== 'all' && !known.includes(f))) return no(featureRefusal(known));
+  }
 
   // The daily GitHub Actions cap (owner, 18 Oct): a run on GitHub is refused, not queued.
   const capped = onGitHub(wp) ? spendCaps.githubBlock(wp) : null;
@@ -328,7 +333,7 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
 
   const plats = PHONES.filter(p => platforms.includes(p));
   // Refused before anything is queued: a feature none of these platforms runs would be dropped silently.
-  const byPlatform = phoneFeatures(wp, ctx.repo, ctx.head, ctx.trunk);
+  const byPlatform = plan ?? phoneFeatures(wp, ctx.repo, ctx.head);
   const unsupported = byPlatform ? unsupportedRefusal(byPlatform, plats, features) : null;
   if (unsupported) return no(unsupported);
   const feats = [...new Set(features)];

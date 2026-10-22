@@ -354,7 +354,7 @@ test('features are checked at call time against the runner\'s list: "setup" and 
     const client = await toolClient(s.wp, 'kabir', s.storyId);
     const tools = await client.listTools();
     const desc = tools.tools.find(t => t.name === 'run_evidence')!.description!;
-    assert.match(desc, /queries, voice, memory, music, dance, files, timer, reminder, apps, errand/);
+    assert.match(desc, /plan\.mjs/);
     assert.match(desc, /setup always runs/i);
     assert.match(text(await client.callTool({ name: 'run_evidence', arguments: { platforms: 'android', features: 'setup' } })), /setup always runs/i);
     await client.close();
@@ -391,9 +391,7 @@ test('features a platform does not support are refused before queueing, naming e
     // Through the tool: the refusal, and the per-platform lists in its description.
     const client = await toolClient(s.wp, 'kabir', s.storyId);
     const desc = (await client.listTools()).tools.find(t => t.name === 'run_evidence')!.description!;
-    assert.match(desc, /android: queries, memory, files, errand/);
-    assert.match(desc, /ios: queries, memory, files, errand/);
-    assert.match(desc, /desktop[^.]*queries, voice, memory, music, dance, files, timer, reminder, apps, errand/i);
+    assert.match(desc, /plan\.mjs/);
     assert.match(desc, /windows[^.]*QA/i);
     assert.match(desc, /request_mac/);
     assert.match(text(await client.callTool({ name: 'run_evidence', arguments: { platforms: 'ios', features: 'voice' } })), /Not queued[\s\S]*request_mac/);
@@ -939,5 +937,30 @@ test('run_evidence androidApi "36" reaches the runner as the Android 16 emulator
     assert.match(reply, /queued \(position 1\)/);
     await until(() => s.runner.calls.length === 1, 'the run to start');
     assert.equal(s.runner.calls[0]!.androidApi, '36');
+  } finally { await s.done(); }
+});
+
+test('a feature the runner\'s ALL_FEATURES lacks (image) is accepted exactly when the story commit\'s plan.mjs lists it for the platform', async () => {
+  const s = setup();
+  try {
+    const per = (extra: string) => `export const PER = {\n  mac: { queries: 2 },\n  android: { queries: 3, memory: 4, files: 4, errand: 5${extra} },\n  ios: { queries: 2, memory: 2 },\n};\n`;
+    mkdirSync(join(s.repo, 'e2e/scripts'), { recursive: true });
+    writeFileSync(join(s.repo, 'e2e/scripts/plan.mjs'), per(''));
+    git(s.repo, ['add', '-A']);
+    git(s.repo, ['-c', 'user.email=t@iris.local', '-c', 'user.name=t', 'commit', '-q', '-m', 'plan']);
+    s.commit('e2e/scripts/local-run.sh', '#!/usr/bin/env bash\nALL_FEATURES=queries,memory,files,errand\n');
+    const no = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'image' });
+    assert.equal(no.ok, false, 'plan.mjs at the story commit does not list image');
+    assert.match(no.ok ? '' : no.message, /android: queries, memory, files, errand\b/);
+    s.commit('e2e/scripts/plan.mjs', per(', image: 3'));
+    const yes = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'image' });
+    assert.ok(yes.ok, yes.ok ? '' : yes.message);
+    const ios = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'ios', features: 'image' });
+    assert.equal(ios.ok, false, 'ios plan lacks image');
+    const client = await toolClient(s.wp, 'kabir', s.storyId);
+    const desc = (await client.listTools()).tools.find(t => t.name === 'run_evidence')!.description!;
+    assert.match(desc, /plan\.mjs/);
+    assert.doesNotMatch(desc, /queries, voice, memory, music/);
+    await client.close();
   } finally { await s.done(); }
 });
