@@ -257,3 +257,20 @@ test('#9 manager: a digest composed while Asha was busy is told from the state a
     assert.equal(manager.list(wp).filter(r => r.state === 'queued' && !r.resolved).length, 0, 'nothing left queued about it');
   } finally { await done(); }
 });
+
+test('hygiene (a): a coordination story Asha holds (she started it, or it has open sub-items) is not "not routed to a developer"; a plain Ready one still is', async () => {
+  const { wp, story, done } = setup();
+  try {
+    const plan = story('22 Oct plan', 'asha');
+    items.update(wp, plan.id, { status: 'in-progress', reason: 'test: Asha coordinates' }, 'asha');
+    const parent = story('Umbrella with sub-items', 'asha');
+    items.create(wp, { level: 'task', parentId: parent.id, title: 'sub step' }, 'owner');
+    const route = story('Needs a developer', 'asha');
+    const t0 = Date.now();
+    hygiene.sweep(wp, t0);
+    const r = hygiene.sweep(wp, t0 + 23 * MIN);
+    assert.equal(topIdle(r, plan.id), undefined, 'in progress with Asha: hers');
+    assert.equal(topIdle(r, parent.id), undefined, 'open children: coordination');
+    assert.match(topIdle(r, route.id)?.what ?? '', /routing queue, not routed/);
+  } finally { await done(); }
+});

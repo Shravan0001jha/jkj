@@ -10,7 +10,7 @@ import * as dispatch from './dispatch.js';
 import * as floor from './floor.js';
 import * as waitReply from './wait-reply.js';
 import * as lifecycleWatch from './lifecycle-watch.js';
-import { unrouted as unroutedItems } from './unrouted.js';
+import { isCoordination, unrouted as unroutedItems } from './unrouted.js';
 import { awaitingMerge, closed, finished, label, openStartsAfter, staleBlock, trueStatus } from './lifecycle.js';
 import { githubMode } from './review-policy.js';
 import { chiefOfStaffId, epicOf, humanDuration, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
@@ -158,7 +158,7 @@ export function conditions(wp: Workplace): Condition[] {
     if (e.id === cos) {
       const own = new Set(e.charterIds.filter(c => c !== COS_CHARTER));
       const isOwn = (w: WorkItem): boolean => !!w.charterId && own.has(w.charterId);
-      const route = q.find(w => !isOwn(w));
+      const route = q.find(w => !isOwn(w) && !isCoordination(wp, w));
       if (route) out.push({ key: `top-idle:${route.id}`, rule: 'top-idle', w: route, what: `top of ${e.name}'s routing queue, not routed to a developer`, fix: `${e.name} routes it: item_update ${route.id} assigneeId <the owning developer>` });
       topIdle(wp, e.id, e.name, q.filter(isOwn), noSession, out);
       continue;

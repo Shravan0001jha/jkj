@@ -34,3 +34,15 @@ export function unrouted(wp: Workplace): WorkItem[] {
     .filter(w => isUnrouted(wp, w, focus))
     .sort((a, b) => (a.statusSince ?? a.createdAt).localeCompare(b.statusSince ?? b.createdAt));
 }
+
+/**
+ * A coordination story is held by the person it is assigned to, not waiting to be routed: the Chief of Staff
+ * (or CTO) started it herself (In progress), or it has open sub-items she is steering. Hygiene (a) and any
+ * "routing queue" alert must not call it unrouted (22 Oct, as_mvicmq0k8gwoz: Asha's own plan story).
+ */
+export function isCoordination(wp: Workplace, w: WorkItem): boolean {
+  if (levelOf(w) !== 'story' || !knownAssignee(wp, w.employeeId)) return false;
+  if (w.status === 'in-progress') return true;
+  return rowsJson<WorkItem>(wp.db.prepare('select json from work where parent_id = ?').all(w.id))
+    .some(c => c.status !== 'done' && c.status !== 'parked');
+}
