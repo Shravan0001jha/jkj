@@ -507,6 +507,11 @@ function refreshExtraReviewers(wp: Workplace, w: WorkItem, ctx: Ctx): void {
 /** The extra reviewers whose approval does not hold on this head and stay in review (one rule, review-policy: the gate and the wake read it). */
 export { pendingExtra };
 
+/** Board maintenance (board.revokeApproval): the story's one QA seat, and the developer approver. */
+export const rawQaSeat = (wp: Workplace, itemId: string): string | undefined => rawGet(wp, itemId)?.pr?.qaReviewer;
+export function setQaSeat(wp: Workplace, itemId: string, qa: string): void { savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, qaReviewer: qa } } : {})); }
+export function setDevReviewer(wp: Workplace, itemId: string, dev: string): void { savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, devReviewer: dev } } : {})); }
+
 /** The author asks other leads to approve before QA (request_review extraReviewers). */
 export function requestExtraReviewers(wp: Workplace, itemId: string, by: string, ids: string[]): ExtraReviewer[] {
   const w = rawGet(wp, itemId);
@@ -1038,6 +1043,44 @@ function passWithoutPr(wp: Workplace, w: WorkItem, by: string, note: string | un
 export interface ApproveOptions {
   /** The review_approve tool: QA's approval also needs the evidence opened since it last changed (dry run #7). */
   requireReads?: boolean;
+}
+
+/**
+ * Read-only (23 Oct, Aditi probed review_approve "to see the approval state" and it recorded approval 1):
+ * where the review stands and what review_approve would do for `by`. Writes nothing.
+ */
+export function reviewState(wp: Workplace, itemId: string, by: string): string {
+  const w = rawGet(wp, itemId);
+  if (!w) throw new NotFound(`No item ${itemId}`);
+  const me = nameOf(wp, by);
+  if (noPullRequest(wp, w)) return `${w.title} [${itemId}] has no pull request (${w.status}). review_approve as ${me} ${by === w.reviewerId && w.status === 'in-review' ? 'would PASS it (done), and needs your note' : 'would be REFUSED: only its reviewer passes it'}.`;
+  const pr = w.pr;
+  if (!pr) return `${w.title} [${itemId}] has no pull request yet (${w.status}): nothing to approve.`;
+  const line = (label: string, a: PrApproval | undefined): string => `${label}: ${a ? `${nameOf(wp, a.by)} at ${a.at} on ${a.sha.slice(0, 8)}${holds(a, w) ? '' : ' (stale: a new commit or review ended it)'}` : 'none'}`;
+  const extras = (pr.extraReviewers ?? []).map(e => `${nameOf(wp, e.id)} ${e.approvedAt ? 'approved' : 'pending'}`);
+  const out = [
+    `${w.title} [${itemId}] · ${w.status} · PR #${pr.number} head ${pr.headSha.slice(0, 8)}${pr.merged ? ' · merged' : ''}`,
+    line('Developer approval (1 of 2)', pr.devApproval),
+    ...(extras.length ? [`Extra reviewers: ${extras.join(', ')}`] : []),
+    line('QA approval (2 of 2)', pr.qaApproval),
+    `QA for this story: ${pr.qaReviewer ? nameOf(wp, pr.qaReviewer) : 'not named yet'} · developer approver: ${pr.devReviewer ? nameOf(wp, pr.devReviewer) : 'not named'}`,
+  ];
+  let would: string;
+  if (w.status !== 'in-review') would = `REFUSED: the story is ${w.status}, not in review`;
+  else if (mode(wp) === 'local') would = 'REFUSED: the GitHub flow is local';
+  else if (by === w.employeeId) would = 'REFUSED: you are the author';
+  else if ((pr.extraReviewers ?? []).some(e => e.id === by) && pendingExtra(w).some(e => e.id === by)) would = 'RECORD your extra-reviewer approval of your files';
+  else if (!holds(pr.devApproval, w)) {
+    would = canApproveAsDeveloper(wp.org.employees, by, w.employeeId)
+      ? `RECORD developer approval (1 of 2)${isQa(employeeOf(wp, by)) && pr.qaReviewer === by ? ', which ENDS your role as this story\'s QA (the same person never gives both)' : ''}`
+      : 'REFUSED: you are not the developer approver (a member of the author\'s team, or the CTO)';
+  } else if (!isQa(employeeOf(wp, by))) would = 'REFUSED: approval 2 of 2 is QA\'s';
+  else if (by === pr.devApproval!.by) would = 'REFUSED: you gave approval 1 of 2';
+  else if (qaOf(w) && qaOf(w) !== by) would = `REFUSED: ${nameOf(wp, qaOf(w))} is this story's QA`;
+  else if (pendingExtra(w).length) would = 'REFUSED: extra reviewers have not approved yet';
+  else would = 'RECORD QA approval (2 of 2) if your QA doc passes its checks, and mark the story done';
+  out.push(`review_approve as ${me} would ${would}.`);
+  return out.join('\n');
 }
 
 export async function approve(wp: Workplace, itemId: string, by: string, note?: string, qaText?: string, opts: ApproveOptions = {}): Promise<ApproveResult> {

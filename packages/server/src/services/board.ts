@@ -6,7 +6,8 @@ import * as items from './items.js';
 import * as trail from './trail.js';
 import * as work from './work.js';
 import * as flow from './github-flow.js';
-import { approvalHolds, githubMode } from './review-policy.js';
+import { approvalHolds, githubMode, isQa } from './review-policy.js';
+import * as reviewWake from './review-wake.js';
 import { isChiefOfStaff } from './employees.js';
 import { nameOf, rawGet } from './v2-map.js';
 import { resolve as resolveOwner } from './ownership.js';
@@ -227,4 +228,54 @@ export function assignMap(wp: Workplace, paths: string[], charterId: string, by:
   }
   audit(wp, null, by, `Mapped ${keys.join(', ')} to charter ${charterId}: ${why}`);
   return { added: keys, mapEntries: org.map.length };
+}
+
+/* ---------- 7. revoke one misrecorded approval ---------- */
+
+/**
+ * Remove the approval `approver` gave on an in-review story (22 Oct, as_mvikpja0ct3k7: QA probed
+ * review_approve and it was recorded as approval 1, so she lost the QA seat). Developer approval: removed, and
+ * a QA approver gets the QA seat back (the one QA of the story); the developer approver is named again and woken.
+ * Extra reviewer: back to pending. Refused with both approvals (it merges), for a merged PR, and for the COO's story.
+ */
+export async function revokeApproval(wp: Workplace, itemId: string, approver: string, by: string, reason?: string): Promise<{ itemId: string; approver: string; removed: ('dev' | 'qa' | 'extra')[] }> {
+  requireMaintainer(wp, by);
+  const why = reasonOf(reason);
+  const w = item(wp, itemId);
+  if (w.employeeId === 'coo' && by !== 'coo' && by !== 'owner') throw new Forbidden('Forbidden: the COO\'s own story is the COO\'s to change.');
+  if (w.employeeId && w.employeeId === by) throw new Forbidden('You never change the approvals of your own story; ask Asha.');
+  const pr = w.pr;
+  if (!pr) throw new BadRequest(`${itemId} has no pull request, so it holds no recorded approval.`);
+  if (pr.merged) throw new BadRequest(`PR #${pr.number} is merged; an approval cannot be revoked.`);
+  if (approvalHolds(w, 'qa') || (pr.qaApproval && w.status === 'done')) throw new BadRequest(`PR #${pr.number} has both approvals: the Workplace merges it. Send it back (review_send_back) rather than revoking one.`);
+  const removed: ('dev' | 'qa' | 'extra')[] = [];
+  const name = nameOf(wp, approver);
+  work.saveQuiet(wp, (() => {
+    const cur = item(wp, itemId);
+    const p = { ...cur.pr! };
+    if (p.devApproval?.by === approver) { delete p.devApproval; removed.push('dev'); if (p.devReviewer === approver) delete p.devReviewer; }
+    if (p.qaApproval?.by === approver) { delete p.qaApproval; removed.push('qa'); }
+    if ((p.extraReviewers ?? []).some(e => e.id === approver && e.approvedAt)) {
+      p.extraReviewers = p.extraReviewers!.map(e => { if (e.id !== approver) return e; const { approvedAt: _a, sha: _s, episode: _e, ...rest } = e; return rest; });
+      removed.push('extra');
+    }
+    return { ...cur, pr: p } as WorkItem;
+  })());
+  if (!removed.length) throw new BadRequest(`${name} has no recorded approval on ${itemId}: nothing to revoke.`);
+  let note = '';
+  if (removed.includes('dev')) {
+    // Role eligibility: a QA whose approval 1 cost them the QA seat gets it back; approval 1 is the developer approver's again.
+    const e = wp.org.employees.find(x => x.id === approver);
+    if (isQa(e) && approver !== w.employeeId && flow.rawQaSeat(wp, itemId) !== approver) {
+      flow.setQaSeat(wp, itemId, approver);
+      note += ` ${name} is this story's QA again.`;
+    }
+    const dev = flow.devReviewer(wp, item(wp, itemId));
+    if (dev) { items.update(wp, itemId, { reviewerId: dev, note: 'system: a developer approval was revoked; the developer approver reviews again, then QA' }, 'workplace'); flow.setDevReviewer(wp, itemId, dev); }
+    reviewWake.onItem(wp, itemId);
+  }
+  const what = removed.map(r => r === 'dev' ? 'developer approval (1 of 2)' : r === 'qa' ? 'QA approval (2 of 2)' : 'extra-reviewer approval').join(' and ');
+  trail.comment(wp, itemId, { by, text: `Revoked ${name}'s ${what}: ${why}.${note}`, mentions: [approver] });
+  audit(wp, itemId, by, `Revoked ${name}'s ${what}: ${why}`);
+  return { itemId, approver, removed };
 }

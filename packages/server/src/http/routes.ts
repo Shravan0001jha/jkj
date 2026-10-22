@@ -547,6 +547,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const id = str(b['itemId'], '');
       switch (action) {
         case 'pr-close': return json(res, 200, await board.closePr(wp, id, by, reason));
+        case 'approval-revoke': return json(res, 200, await board.revokeApproval(wp, id, str(b['approver'], ''), by, reason));
         case 'close-no-code': return json(res, 200, board.closeNoCode(wp, id, by, reason));
         case 'signoff-recut': return json(res, 200, board.recutSignoff(wp, str(b['sha'], ''), by, reason));
         case 'github-resume': return json(res, 200, board.resumeGithub(wp, by, reason));
