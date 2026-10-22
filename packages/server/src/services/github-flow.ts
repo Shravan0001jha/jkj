@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Employee, LiveCheck, MobileCiRecord, PrExtraReviewer as ExtraReviewer, GitHubMode, PrApproval, PrRecord, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
@@ -1214,7 +1214,7 @@ export async function amendQaDoc(wp: Workplace, itemId: string, by: string, text
   if (!w) throw new NotFound(`No item ${itemId}`);
   const pr = w.pr;
   if (!pr) throw new BadRequest('This story has no pull request, so it has no QA doc to amend.');
-  if (pr.merged) throw new BadRequest(`PR #${pr.number} is already merged: the QA doc is final.`);
+  if (pr.merged) throw new BadRequest(`PR #${pr.number} is already merged: the QA doc is frozen at the commit that was checked and its body cannot be rewritten. To correct it, call qa_doc_update with \`amendment\` (a short text, no qaDoc): it is appended, dated and signed, under "## Corrections after merge".`);
   if (w.status !== 'done' || !pr.qaApproval || !holds(pr.qaApproval, w)) throw new BadRequest(`This story is not done with a QA approval that holds (it is ${w.status}): while it is in review, give the doc with review_approve qaDoc.`);
   if (by !== pr.qaApproval.by) throw new BadRequest(`${nameOf(wp, pr.qaApproval.by)} gave approval 2 of 2, so only they amend its QA doc.`);
   const doc = qaDoc.require$(text, proofRoots(wp, w));
@@ -1226,6 +1226,34 @@ export async function amendQaDoc(wp: Workplace, itemId: string, by: string, text
   dropSetting(wp, AUTO_BLOCKED_PREFIX + itemId);
   const merge = await autoMerge(wp, itemId);
   return { merge, message: `QA doc updated (${doc.cases.length} edge cases). ${mergeTail(merge)}${filedDoc.url ? ` QA doc: ${filedDoc.url}` : ''}${filedDoc.note}` };
+}
+
+/**
+ * A correction to a merged story's QA doc (23 Oct): append-only. The frozen body is never edited; a dated,
+ * signed entry goes under "## Corrections after merge" at the end of the Notion page (and the local copy).
+ * The author, the story's QA, the CTO, the Chief of Staff and the COO may amend.
+ */
+export async function amendQaDocAfterMerge(wp: Workplace, itemId: string, by: string, amendment: string): Promise<string> {
+  const w = rawGet(wp, itemId);
+  if (!w) throw new NotFound(`No item ${itemId}`);
+  if (!w.pr?.merged) throw new BadRequest('This story is not merged: while it is open, rewrite the QA doc with qa_doc_update qaDoc. An amendment is only for a merged story.');
+  const text = amendment.trim();
+  if (!text) throw new BadRequest('The amendment is empty: say what was wrong and what is right.');
+  const allowed = by === w.employeeId || by === w.pr.qaApproval?.by || by === w.pr.qaReviewer || by === 'coo' || isCto(employeeOf(wp, by)) || employees.isChiefOfStaff(wp, by);
+  if (!allowed) throw new BadRequest('Only the story\'s author, its QA, the CTO or the Chief of Staff amend its QA doc after merge.');
+  if (!w.qaDoc && qaDoc.filed(wp, itemId) === undefined) throw new BadRequest('This story has no QA doc to amend.');
+  const at = now();
+  const entry = `**${at.slice(0, 10)} — ${nameOf(wp, by)}** (${at.slice(11, 16)} UTC)\n\n${text}`;
+  let where = 'the local copy';
+  if (w.qaDoc?.pageId && !w.qaDoc.stale) {
+    try { await docs.appendQaCorrection(wp, w, entry); where = 'the Notion QA doc'; }
+    catch (err) { throw new BadRequest(`Notion was not written (${errText(err)}); nothing was changed. Try again.`); }
+  }
+  const path = join(qaDoc.dir(wp), `${itemId}.md`);
+  if (existsSync(path)) appendFileSync(path, `\n${readFileSync(path, 'utf8').includes('## Corrections after merge') ? '' : '## Corrections after merge\n\n'}${entry}\n`);
+  trail.record(wp, { itemId, by, kind: 'note', text: `QA doc corrected after merge by ${nameOf(wp, by)}: ${text.slice(0, 100)}`, ...(w.qaDoc?.url ? { link: w.qaDoc.url } : {}) });
+  log.info('github', `${itemId}: QA doc amendment by ${by} appended to ${where}`);
+  return `Correction added to ${where} under "Corrections after merge".${w.qaDoc?.url ? ` QA doc: ${w.qaDoc.url}` : ''}`;
 }
 
 /**

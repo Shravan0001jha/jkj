@@ -702,6 +702,35 @@ export async function readQaDocPage(wp: Workplace, pageId: string): Promise<stri
   return blocksToMarkdown((await readBlocks(port, pageId)).filter(b => !isSubpage(b)));
 }
 
+export const CORRECTIONS_HEADING = 'Corrections after merge';
+const POST_MERGE_COMMENTS_MAX = 15;
+const POST_MERGE_COMMENT_CHARS = 1200;
+const QA_DOC_MENTION = /\bQA[ -]doc\b|qa_doc_update|\bQA page\b/i;
+
+/** Append-only: a dated, signed entry under "## Corrections after merge" at the end of the QA page. Existing blocks are never touched. */
+export async function appendQaCorrection(wp: Workplace, w: WorkItem, entry: string): Promise<void> {
+  const port = notionPort(wp);
+  if (!port) throw new Error(NOT_SET_UP);
+  const pageId = w.qaDoc!.pageId!;
+  await serialised(wp, `${w.id}:qa`, async () => {
+    const children = await port.listChildren(pageId);
+    const has = children.some(b => b.type === 'heading_2' && blockPlain(b).trim() === CORRECTIONS_HEADING);
+    const blocks = markdownToBlocks(`${has ? '' : `## ${CORRECTIONS_HEADING}\n\n`}${entry}`);
+    await appendAll(port, pageId, blocks);
+  });
+}
+
+/** For doc_read qa: the story's comments posted after the merge, or about the QA doc, newest kept, each cut. */
+function postMergeComments(wp: Workplace, w: WorkItem): string {
+  const mergedAt = w.pr?.merged?.at;
+  if (!mergedAt) return '';
+  const hits = trail.comments(wp, w.id).filter(c => c.at > mergedAt || QA_DOC_MENTION.test(c.text));
+  if (!hits.length) return '';
+  const kept = hits.slice(-POST_MERGE_COMMENTS_MAX);
+  const lines = kept.map(c => `- ${c.at.slice(0, 16).replace('T', ' ')} ${nameOf(wp, c.by)}${c.at > mergedAt ? '' : ' (before merge)'}: ${c.text.length > POST_MERGE_COMMENT_CHARS ? `${c.text.slice(0, POST_MERGE_COMMENT_CHARS)} [cut]` : c.text}`);
+  return `\n\n---\nComments after merge — not part of the frozen doc (merged ${mergedAt.slice(0, 16).replace('T', ' ')}; comments on the story posted after it or mentioning the QA doc${hits.length > kept.length ? `; newest ${kept.length} of ${hits.length}` : ''}). Corrections go in with qa_doc_update amendment:\n${lines.join('\n')}`;
+}
+
 /** doc_read: the story's doc as markdown, at most 30k characters (and it says when it was cut). */
 export async function docRead(wp: Workplace, itemId: string, opts: { qa?: boolean } = {}): Promise<string> {
   const port = notionPort(wp);
@@ -715,8 +744,9 @@ export async function docRead(wp: Workplace, itemId: string, opts: { qa?: boolea
   try {
     const md = blocksToMarkdown(await readBlocks(port, pageId));
     const head = `${opts.qa ? 'QA doc' : 'Doc'} of ${w.id}: ${url ?? ''}\n\n`;
-    if (md.length <= DOC_READ_MAX) return head + md;
-    return `${head}${md.slice(0, DOC_READ_MAX)}\n\n[cut at ${DOC_READ_MAX} characters of ${md.length}; read the rest in Notion: ${url ?? pageId}]`;
+    const tail = opts.qa ? postMergeComments(wp, w) : '';
+    if (md.length <= DOC_READ_MAX) return head + md + tail;
+    return `${head}${md.slice(0, DOC_READ_MAX)}\n\n[cut at ${DOC_READ_MAX} characters of ${md.length}; read the rest in Notion: ${url ?? pageId}]${tail}`;
   } catch (err) {
     return `Not read: ${errText(err)}`;
   }

@@ -338,3 +338,91 @@ test('new QA docs need "## Users affected" through the tool; a file-QA story wit
     assert.match(await nikhil('review_approve', { itemId: old.storyId }), /QA approval recorded/);
   } finally { await old.done(); }
 });
+
+/* ---------- corrections after merge (23 Oct) ---------- */
+
+function markMerged(s: Setup, at: string): void {
+  const w = rawGet(s.wp, s.storyId)!;
+  work.saveQuiet(s.wp, { ...w, pr: { ...w.pr!, merged: { at, sha: w.pr!.headSha, by: 'workplace' } } });
+}
+
+async function mergedWithDoc(s: Setup): Promise<{ notion: FakeNotion; pageId: string }> {
+  const notion = new FakeNotion();
+  docs.setNotionPort(s.wp, notion);
+  await readyForQa(s);
+  await flow.approve(s.wp, s.storyId, 'nikhil', undefined, qaText(s.wp, NA));
+  const pageId = rawGet(s.wp, s.storyId)!.qaDoc!.pageId!;
+  markMerged(s, new Date().toISOString());
+  return { notion, pageId };
+}
+
+test('merged story: qa_doc_update with a body is refused and points to the amendment path; the page is untouched', async () => {
+  const s = setup('on');
+  try {
+    const { pageId } = await mergedWithDoc(s);
+    const nikhil = await toolsFor(s.wp, 'nikhil');
+    const out = await nikhil('qa_doc_update', { itemId: s.storyId, qaDoc: qaText(s.wp, NA) });
+    assert.match(out, /Not updated/);
+    assert.match(out, /amendment/);
+    assert.doesNotMatch(await docs.readQaDocPage(s.wp, pageId), /Corrections after merge/);
+  } finally { await s.done(); }
+});
+
+test('merged story: an amendment appends a dated, signed entry under "## Corrections after merge" and never touches the body', async () => {
+  const s = setup('on');
+  try {
+    const { pageId } = await mergedWithDoc(s);
+    const before = await docs.readQaDocPage(s.wp, pageId);
+    const nikhil = await toolsFor(s.wp, 'nikhil');
+    assert.match(await nikhil('qa_doc_update', { itemId: s.storyId, amendment: 'First correction: provider-down case needs the retry log.' }), /Correction added/);
+    assert.match(await nikhil('qa_doc_update', { itemId: s.storyId, amendment: 'Second correction.' }), /Correction added/);
+    const after = await docs.readQaDocPage(s.wp, pageId);
+    assert.ok(after.startsWith(before.trimEnd()), 'existing content is unchanged');
+    assert.equal(after.match(/## Corrections after merge/g)?.length, 1);
+    assert.match(after, /First correction[\s\S]*Second correction/);
+    assert.match(after, new RegExp(`${new Date().toISOString().slice(0, 10)}[^\\n]*Nikhil`));
+  } finally { await s.done(); }
+});
+
+test('amendments: the author, QA and the CTO may; someone else may not; an unmerged story or an empty text is refused', async () => {
+  const s = setup('on');
+  try {
+    await mergedWithDoc(s);
+    const kabir = await toolsFor(s.wp, 'kabir');
+    assert.match(await kabir('qa_doc_update', { itemId: s.storyId, amendment: 'Author note.' }), /Correction added/);
+    const cto = await toolsFor(s.wp, 'cto');
+    assert.match(await cto('qa_doc_update', { itemId: s.storyId, amendment: 'CTO note.' }), /Correction added/);
+    const zoya = await toolsFor(s.wp, 'zoya');
+    assert.match(await zoya('qa_doc_update', { itemId: s.storyId, amendment: 'Stranger note.' }), /Not updated/);
+    const nikhil = await toolsFor(s.wp, 'nikhil');
+    assert.match(await nikhil('qa_doc_update', { itemId: s.storyId, amendment: '   ' }), /Not updated/);
+    const w = rawGet(s.wp, s.storyId)!;
+    const { merged: _m, ...open } = w.pr!;
+    work.saveQuiet(s.wp, { ...w, pr: open });
+    assert.match(await nikhil('qa_doc_update', { itemId: s.storyId, amendment: 'Too early.' }), /Not updated/);
+  } finally { await s.done(); }
+});
+
+test('doc_read qa: true shows the comments after merge and QA-doc comments, labelled, bounded; earlier plain comments stay out', async () => {
+  const s = setup('on');
+  docs.setNotionPort(s.wp, new FakeNotion());
+  try {
+    await readyForQa(s);
+    trail.comment(s.wp, s.storyId, { by: 'kabir', text: 'Before merge, unrelated chatter.' });
+    await flow.approve(s.wp, s.storyId, 'nikhil', undefined, qaText(s.wp, NA));
+    trail.comment(s.wp, s.storyId, { by: 'kabir', text: 'The QA doc misses the retry case (before merge).' });
+    markMerged(s, new Date(Date.now() - 1000).toISOString());
+    await new Promise(r => setTimeout(r, 5));
+    for (let i = 0; i < 14; i++) trail.comment(s.wp, s.storyId, { by: 'nikhil', text: `post-merge note ${i} ${'x'.repeat(1000)}` });
+    const nikhil = await toolsFor(s.wp, 'nikhil');
+    const out = await nikhil('doc_read', { itemId: s.storyId, qa: true });
+    assert.match(out, /PASS: empty input/);
+    assert.match(out, /Comments after merge — not part of the frozen doc/);
+    assert.match(out, /post-merge note 13/);
+    assert.match(out, /misses the retry case/);
+    assert.doesNotMatch(out, /unrelated chatter/);
+    assert.ok(out.length < 60000);
+    // not for the story doc itself
+    assert.doesNotMatch(await nikhil('doc_read', { itemId: s.storyId }), /Comments after merge/);
+  } finally { await s.done(); }
+});

@@ -1376,9 +1376,13 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         async ({ itemId, note, qaDoc }) => {
           try { return ok((await githubFlow.approve(wp, itemId, employeeId, note, qaDoc, { requireReads: true })).message); } catch (err) { return ok(`Not approved: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('qa_doc_update', 'QA only: amend the QA doc you filed with approval 2 of 2 while the story is done but not merged (a missing "Evidence: n/a" or "Tests:" line, a live check to cite). Same format and checks as at approval; the Notion QA page is rewritten and the merge gate runs again at once.',
-        { itemId: z.string(), qaDoc: z.string().describe(qaDocFormat) },
-        async ({ itemId, qaDoc }) => {
+      tool('qa_doc_update', 'Two modes. (1) Before merge, QA only: pass qaDoc to amend the QA doc you filed with approval 2 of 2 while the story is done but not merged (a missing "Evidence: n/a" or "Tests:" line, a live check to cite). Same format and checks as at approval; the Notion QA page is rewritten and the merge gate runs again at once. (2) After merge the doc is frozen (it records what was checked at that commit) and cannot be rewritten; pass `amendment` (a short text, not a whole doc) instead: it is appended, dated and signed, under "## Corrections after merge" at the end of the QA page, and the existing content is never edited. The story\'s author, its QA, the CTO or the Chief of Staff may amend. doc_read qa: true shows these and the story comments made after merge.',
+        { itemId: z.string(), qaDoc: z.string().describe(qaDocFormat).optional(), amendment: z.string().describe('After merge only: the correction to append (what was wrong, what is right, the proof).').optional() },
+        async ({ itemId, qaDoc, amendment }) => {
+          if (amendment !== undefined) {
+            try { return ok(await githubFlow.amendQaDocAfterMerge(wp, itemId, employeeId, amendment)); } catch (err) { return ok(`Not updated: ${err instanceof Error ? err.message : String(err)}`); }
+          }
+          if (!qaDoc) return ok('Not updated: give qaDoc (the whole amended doc, before merge) or amendment (a correction to append, after merge).');
           try { return ok((await githubFlow.amendQaDoc(wp, itemId, employeeId, qaDoc)).message); } catch (err) { return ok(`Not updated: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('record_live_check', 'Developers: record a live check of your story (a Mac-queue run, real audio, the desktop app) with the raw logs or screenshots that show it, never retyped text. It is recorded on your branch head; QA cites it in the QA doc as "Evidence: live check <id>", which then counts as the merge evidence for that commit.',
@@ -1671,7 +1675,7 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
           status: z.enum(docs.DOC_STATUSES).optional().describe('Draft (default for a new doc), In review or Final.'),
         },
         async ({ itemId, type, title, section, markdown, status }) => ok(await docs.docWrite(wp, employeeId, { itemId, type, markdown, ...(title ? { title } : {}), ...(section ? { section } : {}), ...(status ? { status } : {}) }))),
-      tool('doc_read', 'Read a story\'s Notion doc as markdown (at most 30k characters; it says when it was cut). qa: true reads its QA doc (the "QA: <title>" page) instead.',
+      tool('doc_read', 'Read a story\'s Notion doc as markdown (at most 30k characters; it says when it was cut). qa: true reads its QA doc (the "QA: <title>" page) instead, followed, once the story is merged, by the story comments posted after the merge or about the QA doc, labelled as not part of the frozen doc.',
         { itemId: z.string(), qa: z.boolean().optional().describe('Read the story\'s QA doc instead of its doc.') },
         async ({ itemId, qa }) => {
           const out = await docs.docRead(wp, itemId, { ...(qa ? { qa } : {}) });
