@@ -165,7 +165,7 @@ test('startsAfter: shown with the blocker status, never dispatched early; on its
     assert.equal(bi.startsAfter?.done, true);
     assert.equal(items.require$(wp, c.id).status, 'ready', 'the blocked dependent flipped to Ready');
     assert.ok(trail.activityFor(wp, b.id).some(x => /"Schema" is Done.*told Tara/.test(x.text ?? '')));
-    assert.ok(trail.activityFor(wp, c.id).some(x => /moved to Ready; told Mira/.test(x.text ?? '')));
+    assert.ok(trail.activityFor(wp, c.id).some(x => /unblocked: .* is Done; told Mira/.test(x.text ?? '')));
     assert.deepEqual(lifecycleWatch.onFinished(wp, a.id), [], 'once');
   } finally { await done(); }
 });
@@ -249,9 +249,11 @@ test('(c) Blocked without a concrete blocker, or blocked on a closed item, at on
     items.update(wp, dep.id, { status: 'done', resolution: 'wont-do', reason: 'test: moved' }, 'owner');
     const r = hygiene.sweep(wp, Date.now());
     const c = r.violations.filter(v => v.rule === 'bad-block');
-    assert.deepEqual(c.map(v => v.itemId).sort(), [bare.id, s.id].sort());
-    assert.match(c.find(v => v.itemId === bare.id)!.what, /no waitingOn/);
-    assert.match(c.find(v => v.itemId === s.id)!.what, /Blocked on "Abandoned", which is Done \(wont-do\)/);
+    // The sweep now releases a block on a closed item itself (22 Oct); the judged form is still reported by the shared predicate.
+    assert.deepEqual(c.map(v => v.itemId), [bare.id]);
+    assert.match(c[0]!.what, /no waitingOn/);
+    assert.equal(items.require$(wp, s.id).status, 'ready');
+    assert.ok(trail.activityFor(wp, s.id).some(x => /unblocked: .* is Done/.test(x.text ?? '')));
   } finally { await done(); }
 });
 

@@ -6,9 +6,9 @@ import * as trail from './trail.js';
 import * as manager from './manager.js';
 import * as employees from './employees.js';
 import { tell } from './blocks.js';
-import { dependentsOf, finished, label, trueStatus } from './lifecycle.js';
+import { closed, dependentsOf, finished, label, staleBlock, trueStatus } from './lifecycle.js';
 import { levelOf, nameOf, rawGet, stateFromStatus } from './v2-map.js';
-import { now } from './store.js';
+import { now, rowsJson } from './store.js';
 import * as postMerge from './post-merge.js';
 import { log } from '../util/logger.js';
 
@@ -63,6 +63,34 @@ export function onMerged(wp: Workplace, id: string, by = 'workplace'): 'moved' |
   return moved ? 'moved' : 'told';
 }
 
+/**
+ * A Blocked item whose every blocker is closed (lifecycle.staleBlock) goes back to work: Ready, or In progress
+ * once it has a PR; the stale startsAfter is cleared; "unblocked: <id> is Done" is the comment; its assignee is woken.
+ * Idempotent (after the move it is no longer Blocked). Returns whether it moved.
+ */
+export function releaseBlocked(wp: Workplace, id: string): boolean {
+  const w = rawGet(wp, id);
+  const blocker = w && staleBlock(wp, w);
+  if (!w || !blocker) return false;
+  const state = label(trueStatus(wp, blocker));
+  const to = w.pr && w.employeeId ? 'in-progress' : 'ready';
+  try {
+    items.update(wp, id, { status: to, ...(w.startsAfter && closed(rawGet(wp, w.startsAfter)) ? { startsAfter: '' } : {}), note: `unblocked: ${blocker.id} is ${state}` }, 'workplace');
+  } catch (err) {
+    log.warn('lifecycle', `${id}: could not unblock: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
+  const how = w.employeeId ? tell(wp, w.employeeId,
+    `Unblocked: "${blocker.title}" [${blocker.id}] is ${state}. Your ${noun(w)} ${id} "${w.title}" is back to ${to === 'ready' ? 'Ready' : 'In progress'}: carry on with it.`) : null;
+  trail.record(wp, { itemId: id, by: 'workplace', kind: 'note', text: `unblocked: ${blocker.id} is ${state}${w.employeeId ? `; ${how ? 'told' : 'could not reach'} ${nameOf(wp, w.employeeId)}` : ''}` });
+  return true;
+}
+
+/** Sweep: release every Blocked item that is stale. Returns the ids moved. */
+export function releaseStale(wp: Workplace): string[] {
+  return rowsJson<WorkItem>(wp.db.prepare("select json from work where status = 'blocked'").all()).filter(w => releaseBlocked(wp, w.id)).map(w => w.id);
+}
+
 /** The blocker finished: its dependents flip to Ready and their assignees hear. Returns the ids flipped or told. */
 export function onFinished(wp: Workplace, blockerId: string): string[] {
   const blocker = rawGet(wp, blockerId);
@@ -70,10 +98,12 @@ export function onFinished(wp: Workplace, blockerId: string): string[] {
   const state = label(trueStatus(wp, blocker!));
   const out: string[] = [];
   for (const d of dependentsOf(wp, blockerId)) {
+    // A Blocked dependent moves by the shared stale-block rule, every time (not once per pair: a re-block must release too).
+    if (d.status === 'blocked') { if (releaseBlocked(wp, d.id)) out.push(d.id); continue; }
     const key = DEP_KEY(d.id, blockerId);
     if (wp.db.prepare('select 1 from settings where key = ?').get(key)) continue;
     wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(key, now());
-    const flip = d.status === 'blocked' || (d.status === 'backlog' && !d.hold && d.startsAfter === blockerId);
+    const flip = (d.status === 'backlog' && !d.hold && d.startsAfter === blockerId);
     if (flip) {
       try {
         items.update(wp, d.id, { status: 'ready', note: `system: "${blocker!.title}" is ${state}: ready to start` }, 'workplace');
@@ -99,6 +129,8 @@ export function onItem(wp: Workplace, id: string): void {
   if (w.postMergeOf) postMerge.onReviewItem(wp, id);
   if (w.pr?.merged && w.status !== 'done') { onMerged(wp, id); return; }
   if (finished(w)) onFinished(wp, id);
+  // A block pointed at an item that is already closed raises no event of the blocker's: judge it when it is saved.
+  releaseBlocked(wp, id);
 }
 
 /** Wire it to item changes. Returns stop(). */

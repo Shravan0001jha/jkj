@@ -26,6 +26,26 @@ export function finished(w: WorkItem | undefined): boolean {
 /** Closed in any way (Done, Won't do, Duplicate, Can't reproduce): nothing more will come of it. */
 export const closed = (w: WorkItem | undefined): boolean => !!w && w.status === 'done';
 
+/** Done with a PR that has not merged yet: the code has not landed, so whoever waits on it still waits. */
+export const awaitingMerge = (w: WorkItem): boolean => !!w.pr && !w.pr.merged && (w.resolution ?? 'done') === 'done';
+
+/**
+ * ONE definition of a stale block (owner, 22 Oct: a story sat Blocked on a Done item, twice; the lifecycle
+ * released only on the blocker's own "finished" event, once per pair, and hygiene (c) judged it by a looser test).
+ * Shared by the release itself (lifecycle-watch), hygiene rule (c) and so the Chief of Staff's board check.
+ * Returns the closed blocker when `w` is Blocked, points at items only (waitingOn an item id, and/or startsAfter),
+ * and every one of them is closed with nothing left to wait for. A block that also waits on a person, the owner,
+ * the COO, a release or an open item is not stale.
+ */
+export function staleBlock(wp: Workplace, w: WorkItem): WorkItem | undefined {
+  if (w.status !== 'blocked') return undefined;
+  if (w.waitingOn && !rawGet(wp, w.waitingOn)) return undefined;
+  const ids = [...new Set([w.waitingOn, w.startsAfter].filter((x): x is string => !!x))];
+  const deps = ids.map(id => rawGet(wp, id));
+  if (!deps.length || deps.some(d => !d || !closed(d) || awaitingMerge(d))) return undefined;
+  return deps[0];
+}
+
 /** The open dependency, or undefined when there is none or it has finished. */
 export function openStartsAfter(wp: Workplace, w: WorkItem): WorkItem | undefined {
   if (!w.startsAfter) return undefined;

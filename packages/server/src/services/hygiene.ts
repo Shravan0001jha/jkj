@@ -11,7 +11,7 @@ import * as floor from './floor.js';
 import * as waitReply from './wait-reply.js';
 import * as lifecycleWatch from './lifecycle-watch.js';
 import { unrouted as unroutedItems } from './unrouted.js';
-import { closed, finished, label, openStartsAfter, trueStatus } from './lifecycle.js';
+import { awaitingMerge, closed, finished, label, openStartsAfter, staleBlock, trueStatus } from './lifecycle.js';
 import { githubMode } from './review-policy.js';
 import { chiefOfStaffId, epicOf, humanDuration, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { rowsJson } from './store.js';
@@ -20,7 +20,6 @@ import * as postMerge from './post-merge.js';
 import { branchFor, git } from './worktrees.js';
 
 /** Approved but not merged yet (its merge checks are pending): it WILL finish, so starting after it is fine (11 Oct, gap #18). */
-const awaitingMerge = (w: WorkItem): boolean => !!w.pr && !w.pr.merged && (w.resolution ?? 'done') === 'done';
 
 /** Commits on the story's branch ahead of its trunk; true when it can't tell (keep the rule strict). */
 function hasCommits(wp: Workplace, w: WorkItem): boolean {
@@ -179,9 +178,8 @@ export function conditions(wp: Workplace): Condition[] {
         const missing = [!w.waitingOn ? 'waitingOn' : '', !w.blockedReason ? 'blockedReason' : ''].filter(Boolean).join(' and ');
         out.push({ key: `bad-block:${w.id}`, rule: 'bad-block', w, what: `Blocked without a concrete blocker (no ${missing})`, fix: `say what it waits on and why (item_update ${w.id} waitingOn <person|item|owner|coo|release> blockedReason <why>, or startsAfter <item>), or unblock it`, since: w.blockedSince ?? w.statusSince ?? w.updatedAt });
       } else {
-        const onId = w.waitingOn && rawGet(wp, w.waitingOn) ? w.waitingOn : w.startsAfter;
-        const on = onId ? rawGet(wp, onId) : undefined;
-        if (on && closed(on)) {
+        const on = staleBlock(wp, w);
+        if (on) {
           out.push({ key: `bad-block:${w.id}`, rule: 'bad-block', w, what: `Blocked on ${quote(on.title)}, which is ${label(trueStatus(wp, on))}${on.resolution && on.resolution !== 'done' ? ` (${on.resolution})` : ''}`, fix: `unblock it (item_update ${w.id} status in-progress), or point it at what it really waits on`, since: on.statusSince ?? on.updatedAt });
         }
       }
@@ -296,6 +294,8 @@ export function sweep(wp: Workplace, nowMs = Date.now()): SweepResult {
   for (const w of rowsJson<WorkItem>(wp.db.prepare("select json from work where status != 'done' and json_extract(json, '$.pr.merged') is not null").all())) {
     try { lifecycleWatch.onMerged(wp, w.id); } catch (err) { log.warn('hygiene', `${w.id}: ${err instanceof Error ? err.message : err}`); }
   }
+  // The safety net under the event-driven release: any Blocked item whose blockers are all closed moves on now.
+  try { lifecycleWatch.releaseStale(wp); } catch (err) { log.warn('hygiene', `release stale blocks: ${err instanceof Error ? err.message : err}`); }
   try { postMerge.sweep(wp); } catch (err) { log.warn('hygiene', `post-merge: ${err instanceof Error ? err.message : err}`); }
   const conds = conditions(wp);
   const prev = read<Record<string, string>>(wp, SEEN) ?? {};
