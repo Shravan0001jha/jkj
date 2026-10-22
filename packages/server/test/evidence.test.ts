@@ -440,6 +440,26 @@ test('plan.mjs is read from the story\'s own commit: a story that adds reminder 
   } finally { await s.done(); }
 });
 
+test('iris-e2e plan.mjs (what GitHub runs) is the source; the story\'s copy wins only when its commit changes it', async () => {
+  const s = setup();
+  try {
+    const per = (extra: string) => `export const PER = {\n  mac: { queries: 2 },\n  android: { queries: 3, memory: 4, files: 4, errand: 5${extra} },\n  ios: { queries: 2, memory: 2 },\n};\n`;
+    mkdirSync(join(s.repo, 'e2e/scripts'), { recursive: true });
+    writeFileSync(join(s.repo, 'e2e/scripts/plan.mjs'), per(', reminder: 2'));
+    git(s.repo, ['add', '-A']);
+    git(s.repo, ['-c', 'user.email=t@iris.local', '-c', 'user.name=t', 'commit', '-q', '-m', 'plan']);
+    s.commit('services/agent-svc/a.py', 'a = 1\n');
+    evidence.setE2ePlanFetcher(() => per(', timer: 3'));
+    const timer = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'timer' });
+    assert.ok(timer.ok, timer.ok ? '' : timer.message);
+    const rem = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'reminder' });
+    assert.equal(rem.ok, false, 'iris copy lists reminder but GitHub does not run it');
+    // A story whose commit changes plan.mjs is honoured.
+    const b = s.story('Plan story'); s.commit('e2e/scripts/plan.mjs', per(', reminder: 2, voice: 1'), b.id);
+    assert.ok(evidence.request(s.wp, { itemId: b.id, by: 'kabir', platforms: 'android', features: 'voice' }).ok);
+  } finally { evidence.setE2ePlanFetcher(null); await s.done(); }
+});
+
 /* ---------- the build cache ---------- */
 
 test('build cache: a story with no app change reuses the trunk build; an app change builds; the same app tree hits', async () => {

@@ -84,16 +84,53 @@ export function parsePlanPer(src: string): Record<string, string[]> | null {
   return out.android && out.ios ? out : null;
 }
 
+/** How long the iris-e2e plan.mjs stays cached (ms). */
+export const E2E_PLAN_TTL_MS = 5 * 60 * 1000;
+type PlanFetcher = (wp: Workplace) => string;
+let e2ePlanCache: { src: string; at: number } | null = null;
+let e2ePlanFetcher: PlanFetcher | null = null;
+/** Test seam: replaces the GitHub fetch (null restores the real one) and clears the cache. */
+export function setE2ePlanFetcher(f: PlanFetcher | null): void { e2ePlanFetcher = f; e2ePlanCache = null; }
+
+/** scripts/plan.mjs of the workflow repo (iris-e2e) at its default branch, via the contents API; the plan GitHub actually runs. */
+function fetchE2ePlanFromGitHub(wp: Workplace): string {
+  const g = wp.config.github;
+  const token = execFileSync(existsSync(g.python) ? g.python : 'python3', [g.tokenScript, g.pushApp === 'iris-workplace' ? 'workplace' : g.pushApp], { timeout: 20_000, encoding: 'utf8' }).trim();
+  return execFileSync('curl', ['-sf', '--max-time', '15', '-H', `Authorization: Bearer ${token}`, '-H', 'Accept: application/vnd.github.raw', `https://api.github.com/repos/${g.org}/${g.workflowRepo}/contents/scripts/plan.mjs`], { encoding: 'utf8', timeout: 20_000, maxBuffer: 1024 * 1024 });
+}
+
+/** The iris-e2e plan.mjs text, cached a few minutes; null (warned) when unreachable. Not fetched under test unless a fetcher is set. */
+function e2ePlanSource(wp: Workplace): string | null {
+  if (e2ePlanCache && Date.now() - e2ePlanCache.at < E2E_PLAN_TTL_MS) return e2ePlanCache.src;
+  const f = e2ePlanFetcher ?? (underTest() ? null : fetchE2ePlanFromGitHub);
+  if (!f) return null;
+  try { const src = f(wp); e2ePlanCache = { src, at: Date.now() }; return src; }
+  catch (err) { log.warn('evidence', `could not fetch ${wp.config.github.workflowRepo}/scripts/plan.mjs from GitHub (${(err as Error).message.slice(0, 120)}); falling back to the iris repo copy`); return e2ePlanCache?.src ?? null; }
+}
+
 /**
- * The phones' features from plan.mjs at the commit being tested (a story may change the plan itself,
- * and the suite runs that commit), then the trunk's, or null (warned) so the caller falls back.
+ * The phones' features from plan.mjs. ONE source of truth per question "what does GitHub run":
+ *   1. the story's own e2e/scripts/plan.mjs when its commit changes it versus the trunk (that copy is
+ *      what the story ships; once synced it becomes the source);
+ *   2. otherwise iris-e2e's scripts/plan.mjs at its default branch (what suite.yml actually runs), cached;
+ *   3. otherwise the iris repo's copy at the story's commit, then the trunk's (logged warning);
+ *   4. otherwise null, so the caller falls back to the runner's supported() / built-in list.
  */
 export function planFeatures(wp: Workplace, repo: string, trunk: string, head?: string): Record<Platform, string[]> | null {
-  for (const ref of [...(head ? [head] : []), `origin/${trunk}`, trunk]) {
-    let src: string;
-    try { src = git(repo, ['show', `${ref}:${PLAN_PATH}`]); } catch { continue; }
-    const per = parsePlanPer(src);
-    if (per) return { android: per.android!, ios: per.ios! };
+  const show = (ref: string): string | null => { try { return git(repo, ['show', `${ref}:${PLAN_PATH}`]); } catch { return null; } };
+  const per = (src: string | null): Record<Platform, string[]> | null => {
+    const p = src ? parsePlanPer(src) : null;
+    return p ? { android: p.android!, ios: p.ios! } : null;
+  };
+  const trunkSrc = show(`origin/${trunk}`) ?? show(trunk);
+  const headSrc = head ? show(head) : null;
+  if (headSrc !== null && trunkSrc !== null && headSrc !== trunkSrc) { const r = per(headSrc); if (r) return r; }
+  const e2e = per(e2ePlanSource(wp));
+  if (e2e) return e2e;
+  for (const [ref, src] of [[head, headSrc], [trunk, trunkSrc]] as const) {
+    if (src === null) continue;
+    const r = per(src);
+    if (r) { log.warn('evidence', `using the iris repo copy of ${PLAN_PATH} (${ref}); the iris-e2e plan was unavailable`); return r; }
     log.warn('evidence', `could not parse PER from ${ref}:${PLAN_PATH}; trying the next source`);
   }
   log.warn('evidence', `no usable ${PLAN_PATH} at ${head ?? trunk} or on ${trunk}; falling back to the runner's supported() / built-in list`);
