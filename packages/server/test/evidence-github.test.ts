@@ -210,3 +210,56 @@ test('the GitHub runner is the default where evidence.runOn is github', () => {
 });
 
 void readFileSync;
+
+/** release_gate is sent only when suite.yml declares it: GitHub 422s the whole dispatch on an undeclared input (as_mvkd0o3qcikao, 23 Oct). */
+async function dispatchedInputs(gh: FakeGitHub, repo: string, sha: string, platforms: string[], runner = new GitHubRunner(() => gh, { pollMs: 5, timeoutMs: 10_000 })): Promise<Record<string, string>> {
+  const out = join(mkdtempSync(join(tmpdir(), 'iris-ev-out-')), 'run');
+  await Promise.all([runner.run({ ...request(repo, sha, out), platforms }), finishWhenDispatched(gh, 'success', { 'suite-report-900': report('PASS') })]);
+  return gh.runs[gh.runs.length - 1]!.inputs;
+}
+
+test('an iOS run omits release_gate when suite.yml does not declare it', async () => {
+  const { repo, sha, cleanup } = repoWithBranch();
+  try {
+    const gh = new FakeGitHub(repo);
+    const inputs = await dispatchedInputs(gh, repo, sha, ['ios']);
+    assert.equal('release_gate' in inputs, false);
+    assert.equal(inputs['platforms'], 'ios');
+  } finally { cleanup(); }
+});
+
+test('an iOS run sends release_gate when suite.yml declares it', async () => {
+  const { repo, sha, cleanup } = repoWithBranch();
+  try {
+    const gh = new FakeGitHub(repo);
+    gh.declaredInputs.push('release_gate');
+    assert.equal((await dispatchedInputs(gh, repo, sha, ['ios']))['release_gate'], 'true');
+  } finally { cleanup(); }
+});
+
+test('a failed inputs fetch sends no optional inputs when nothing was ever fetched', async () => {
+  const { repo, sha, cleanup } = repoWithBranch();
+  try {
+    const gh = new FakeGitHub(repo);
+    gh.declaredInputs.push('release_gate');
+    gh.failNext('workflowInputs', 5);
+    const inputs = await dispatchedInputs(gh, repo, sha, ['ios']);
+    assert.equal('release_gate' in inputs, false);
+    assert.equal(inputs['request_id'], 'as_1-run1', 'the base inputs still go');
+  } finally { cleanup(); }
+});
+
+test('a failed inputs fetch falls back to the last successful list; a fresh fetch is cached', async () => {
+  const { repo, sha, cleanup } = repoWithBranch();
+  try {
+    const gh = new FakeGitHub(repo);
+    gh.declaredInputs.push('release_gate');
+    const runner = new GitHubRunner(() => gh, { pollMs: 5, timeoutMs: 10_000 });
+    assert.equal((await dispatchedInputs(gh, repo, sha, ['ios'], runner))['release_gate'], 'true');
+    assert.equal((await dispatchedInputs(gh, repo, sha, ['ios'], runner))['release_gate'], 'true');
+    assert.equal(gh.calls.filter(c => c.op === 'workflowInputs').length, 1, 'cached for a few minutes');
+    (runner as unknown as { declared: { at: number } }).declared.at = 0; // cache expired
+    gh.failNext('workflowInputs', 5);
+    assert.equal((await dispatchedInputs(gh, repo, sha, ['ios'], runner))['release_gate'], 'true', 'last good list');
+  } finally { cleanup(); }
+});

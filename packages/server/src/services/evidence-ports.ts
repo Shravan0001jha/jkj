@@ -1,3 +1,4 @@
+import { log } from '../util/logger.js';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -449,6 +450,33 @@ export class GitHubRunner implements EvidenceRunner {
   readonly buildsApps = true;
   constructor(private readonly port: () => GitHubPort, private readonly timing: { pollMs: number; timeoutMs: number } = { pollMs: 30_000, timeoutMs: 120 * 60_000 }) {}
 
+  private declared: { at: number; names: string[] } | null = null;
+  private lastGood: string[] | null = null;
+
+  /** `optional` filtered to the inputs suite.yml declares: fetched (cached 5 min), else the last good list, else none (warned). */
+  private async onlyDeclared(gh: GitHubPort, optional: Record<string, string>, say: (line: string) => void): Promise<Record<string, string>> {
+    let names: string[] | null = null;
+    if (this.declared && Date.now() - this.declared.at < 5 * 60_000) names = this.declared.names;
+    else {
+      try {
+        if (!gh.workflowInputs) throw new Error('the GitHub port cannot read workflow inputs');
+        names = await gh.workflowInputs(SUITE_WORKFLOW);
+        this.declared = { at: Date.now(), names };
+        this.lastGood = names;
+      } catch (err) {
+        names = this.lastGood;
+        const why = `could not read ${SUITE_WORKFLOW}'s declared inputs (${errLine(err)}); ${names ? 'using the last known list' : 'sending without optional inputs'}`;
+        log.warn('evidence', why);
+        say(why);
+      }
+    }
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(optional)) {
+      if (names?.includes(k)) out[k] = v; else say(`${SUITE_WORKFLOW} does not declare ${k}; not sending it`);
+    }
+    return out;
+  }
+
   async run(r: RunnerRequest): Promise<RunnerOutcome> {
     const say = (line: string): void => { try { mkdirSync(dirname(r.log), { recursive: true }); appendFileSync(r.log, `[github] ${line}\n`); } catch { /* best effort */ } };
     const plumbing = (why: string): RunnerOutcome => { say(why); return { exitCode: 2, stderrTail: why, runner: `github:${SUITE_WORKFLOW}` }; };
@@ -456,11 +484,12 @@ export class GitHubRunner implements EvidenceRunner {
     const gh = this.port();
     try { await gh.push(r.repo, r.branch); } catch (err) { return plumbing(`could not push ${r.branch} to GitHub: ${errLine(err)}`); }
     const requestId = r.requestId ?? `ev-${Date.now()}`;
+    const optional: Record<string, string> = {};
+    // iris-e2e refuses macOS platforms unless release_gate is true; evidence.request only lets release-gate stories ask for ios.
+    if (r.platforms.includes('ios')) optional['release_gate'] = 'true';
     const inputs = { iris_ref: r.sha, build_ref: r.sha, platforms: r.platforms.join(','), features: r.features.join(','), target: 'staging', account_mode: 'new', windows_default_smoke: 'false', request_id: requestId,
-      // iris-e2e refuses macOS platforms unless release_gate is true; evidence.request only lets release-gate stories ask
-      // for ios. Sent ONLY on iOS runs: GitHub rejects inputs a workflow doesn't declare (422), so a non-iOS run must
-      // not depend on the workflow having the input (it blocked every Android run on 19 Oct before the iris-e2e change).
-      ...(r.platforms.includes('ios') ? { release_gate: 'true' } : {}) };
+      // GitHub rejects the whole dispatch (422) for any input the workflow doesn't declare, so an optional one is sent only if suite.yml declares it.
+      ...(Object.keys(optional).length ? await this.onlyDeclared(gh, optional, say) : {}) };
     try { await gh.dispatchWorkflow(SUITE_WORKFLOW, inputs); } catch (err) { return plumbing(`could not start ${SUITE_WORKFLOW} on GitHub: ${errLine(err)}`); }
     say(`dispatched ${SUITE_WORKFLOW} for ${r.sha.slice(0, 8)} (${requestId})`);
     const end = Date.now() + this.timing.timeoutMs;

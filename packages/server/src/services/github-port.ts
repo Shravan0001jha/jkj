@@ -3,9 +3,19 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { parse as parseYaml } from 'yaml';
 import { log } from '../util/logger.js';
 
 const run = promisify(execFile);
+
+/** The `on.workflow_dispatch.inputs` names of a workflow file's YAML; throws when it is not parseable YAML. */
+export function dispatchInputNames(yamlText: string): string[] {
+  const doc = parseYaml(yamlText) as Record<string, unknown> | null;
+  const on = (doc?.['on'] ?? doc?.['true']) as unknown; // YAML 1.1 parsers read the key `on` as boolean true
+  const wd = on && typeof on === 'object' ? (on as Record<string, unknown>)['workflow_dispatch'] : null;
+  const inputs = wd && typeof wd === 'object' ? (wd as Record<string, unknown>)['inputs'] : null;
+  return inputs && typeof inputs === 'object' ? Object.keys(inputs) : [];
+}
 
 /**
  * GitHub, behind an interface (docs/LLD-github-flow.md §2), so the flow is tested against a fake
@@ -68,6 +78,8 @@ export interface GitHubPort {
    * GitHub, not on the server). Dispatch a workflow with string inputs on the workflow repo's ref.
    */
   dispatchWorkflow(workflow: string, inputs: Record<string, string>): Promise<void>;
+  /** The workflow_dispatch input names the workflow file declares on the ref a dispatch uses (GitHub 422s any other input). Optional: a port without it declares none. */
+  workflowInputs?(workflow: string): Promise<string[]>;
   /** The run a dispatch started, found by the request id its run-name carries; null while it has not appeared. */
   findWorkflowRun(workflow: string, requestId: string): Promise<WorkflowRun | null>;
   /** A run's jobs (runner labels, start and end), to price its minutes. Optional: a port without it is not estimated. */
@@ -267,6 +279,13 @@ export class RealGitHub implements GitHubPort {
 
   async dispatchWorkflow(workflow: string, inputs: Record<string, string>): Promise<void> {
     await this.ok(this.o.pushApp, 'POST', `${this.workflowPath}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, { ref: this.o.workflowRef ?? 'main', inputs }, [204]);
+  }
+
+  async workflowInputs(workflow: string): Promise<string[]> {
+    const ref = this.o.workflowRef ? `?ref=${encodeURIComponent(this.o.workflowRef)}` : '';
+    const data = await this.ok(this.o.pushApp, 'GET', `${this.workflowPath}/contents/.github/workflows/${encodeURIComponent(workflow)}${ref}`) as { content?: string; encoding?: string };
+    if (typeof data?.content !== 'string' || data.encoding !== 'base64') throw new Error(`GitHub contents of ${workflow} came back without base64 content`);
+    return dispatchInputNames(Buffer.from(data.content, 'base64').toString('utf8'));
   }
 
   async findWorkflowRun(workflow: string, requestId: string): Promise<WorkflowRun | null> {

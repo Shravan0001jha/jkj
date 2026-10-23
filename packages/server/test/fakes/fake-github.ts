@@ -11,7 +11,7 @@ import type { GitHubPort, PullRequest, StatusState, WorkflowJob, WorkflowRun } f
  * way an outage or a revoked token would.
  */
 
-export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly' | 'updateBranch' | 'behindBy' | 'fetchBranch' | 'dispatchWorkflow' | 'findWorkflowRun' | 'listArtifacts' | 'downloadArtifact' | 'runJobs' | 'closePr' | 'fetchRemotes' | 'pushRef' | 'forcePush';
+export type Op = 'push' | 'findOpenPr' | 'openPr' | 'getPr' | 'setStatus' | 'comment' | 'merge' | 'deleteBranch' | 'pullFfOnly' | 'updateBranch' | 'behindBy' | 'fetchBranch' | 'dispatchWorkflow' | 'workflowInputs' | 'findWorkflowRun' | 'listArtifacts' | 'downloadArtifact' | 'runJobs' | 'closePr' | 'fetchRemotes' | 'pushRef' | 'forcePush';
 
 /** A faked GitHub Actions run: what a dispatch started, and the files its artifacts hold. */
 export interface FakeRun { id: number; workflow: string; requestId: string; inputs: Record<string, string>; status: string; conclusion: string | null; artifacts: Record<string, Record<string, string>> }
@@ -184,6 +184,14 @@ export class FakeGitHub implements GitHubPort {
   async pullFfOnly(repoDir: string, branch: string): Promise<void> {
     this.enter('pullFfOnly', repoDir, branch);
     execFileSync('git', ['-C', repoDir, 'pull', '-q', '--ff-only', this.bare, branch], { stdio: 'pipe' });
+  }
+
+  /** The workflow_dispatch inputs the faked suite.yml declares (the live one declares no release_gate). */
+  declaredInputs: string[] = ['iris_ref', 'build_ref', 'platforms', 'features', 'target', 'account_mode', 'windows_default_smoke', 'request_id'];
+
+  async workflowInputs(workflow: string): Promise<string[]> {
+    this.enter('workflowInputs', workflow);
+    return [...this.declaredInputs];
   }
 
   async dispatchWorkflow(workflow: string, inputs: Record<string, string>): Promise<void> {
