@@ -182,6 +182,18 @@ export function idleMs(agentId: string, now = Date.now()): number | null {
   return now - new Date(last).getTime();
 }
 
+/**
+ * How long since this run last showed a sign of life: its newest log entry or SDK message (a streaming
+ * thinking token, a tool_progress tick, a result). Unlike `idleMs` (log entries only) a long tool call
+ * or a long think keeps this fresh, so only a run that is truly silent has a large value.
+ */
+export function livenessMs(agentId: string, now = Date.now()): number | null {
+  const run = runs.get(agentId);
+  if (!run) return null;
+  const stamps = [run.entries.at(-1)?.at, run.lastSdk?.at, run.agent.startedAt].filter((x): x is string => !!x).map(x => new Date(x).getTime());
+  return now - Math.max(...stamps);
+}
+
 /** The last N tool entries, for loop detection. */
 export function lastTools(agentId: string, n: number): { label: string; text: string }[] {
   const run = runs.get(agentId);

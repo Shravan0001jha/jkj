@@ -181,6 +181,31 @@ export function closeStale(wp: Workplace, nowMs = Date.now()): string[] {
   return closed;
 }
 
+/**
+ * A run that says it is "running" but has shown no sign of life (no log entry, no SDK message, not even a
+ * tool_progress tick) for this long is dead: its process hung or went away without an error or done event.
+ * 23 Oct: a run in that state keeps the person "working" for ever (the dispatcher skips anyone mid-turn),
+ * and health.handleStalls tries each run only once and swallows a failed end. Twice the stall threshold,
+ * and on the SDK liveness signal rather than log entries, so a genuinely long live turn is never touched.
+ */
+export const DEAD_RUN_MS = 20 * 60_000;
+
+/** Close sessions whose run is "running" with no sign of life for DEAD_RUN_MS; their person goes idle and is dispatched again. */
+export function closeDeadRuns(wp: Workplace, nowMs = Date.now()): string[] {
+  const closed: string[] = [];
+  for (const s of allSessions()) {
+    const a = runs.getRunAgent(s.agentId);
+    if (!a || a.status !== 'running' || a.approval || runs.backgroundTasks(s.agentId) > 0) continue;
+    const quiet = runs.livenessMs(s.agentId, nowMs);
+    if (quiet === null || quiet < DEAD_RUN_MS) continue;
+    log.warn('employees', `${s.employeeId}: ${s.agentId} is "running" but silent for ${Math.round(quiet / 60_000)} min (no output, no SDK message); closing it so ${s.employeeId} is idle and can be started again`);
+    close(wp, s.agentId, `dead run (running, silent for ${Math.round(quiet / 60_000)} min)`, { redeliver: true });
+    if (sessionsOf(s.employeeId).length === 0) setState(wp, s.employeeId, 'idle');
+    closed.push(s.agentId);
+  }
+  return closed;
+}
+
 export function sessionsOf(employeeId: string): Session[] {
   return [...sessions.values()].filter(s => s.employeeId === employeeId);
 }
