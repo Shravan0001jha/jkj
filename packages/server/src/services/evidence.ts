@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import type { EvidenceRunRecord, EvidenceServer, EvidenceState, StagingServerState, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { AppBuilder, EvidenceRunner, Platform, RunnerOutcome, ServerDeployer, Staging, StagingLock } from './evidence-ports.js';
-import { BUILDER_VERSION, BuildError, GitHubRunner, killGroupIfOurs, RealBuilder, RealRunner, RealServerDeployer, RealStaging, RealStagingLock, stagingKnowsEvidenceKey } from './evidence-ports.js';
+import { BUILDER_VERSION, BuildError, GitHubRunner, killGroupIfOurs, RealBuilder, RealRunner, RealServerDeployer, RealStaging, RealStagingLock, stagingKnowsEvidenceKey, type LockMemory } from './evidence-ports.js';
 import * as work from './work.js';
 import * as trail from './trail.js';
 import * as coo from './coo.js';
@@ -183,6 +183,15 @@ const ports = new WeakMap<Workplace, Partial<EvidencePorts>>();
 /** Tests (and the real gate) hand the service their own runner, builder or staging. */
 export function useEvidencePorts(wp: Workplace, p: Partial<EvidencePorts>): void { ports.set(wp, { ...(ports.get(wp) ?? {}), ...p }); }
 
+/** The lock's last-written values live in settings, so a restart still recognises its own leftover keys. */
+function lockMemoryOf(wp: Workplace): LockMemory {
+  const key = (k: string): string => `evidence:lock-last-${k}`;
+  return {
+    get: k => (wp.db.prepare('select value from settings where key = ?').get(key(k)) as { value: string } | undefined)?.value ?? null,
+    set: (k, v) => { if (v === null) wp.db.prepare('delete from settings where key = ?').run(key(k)); else wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(key(k), v); },
+  };
+}
+
 function portsOf(wp: Workplace): EvidencePorts {
   const p = ports.get(wp) ?? {};
   const cfg = wp.config.evidence;
@@ -191,7 +200,7 @@ function portsOf(wp: Workplace): EvidencePorts {
   p.builder ??= new RealBuilder(cfg);
   p.staging ??= new RealStaging(cfg, join(cfg.dir, '_logs', 'staging.log'));
   // Tests never touch staging or SSM: without a fake, the lock does nothing.
-  p.lock ??= underTest() ? { hold: async () => undefined, release: async () => undefined } : new RealStagingLock(cfg);
+  p.lock ??= underTest() ? { hold: async () => undefined, release: async () => undefined } : new RealStagingLock(cfg, undefined, undefined, undefined, lockMemoryOf(wp));
   // Nor deploy to it.
   p.deployer ??= underTest() ? { deploy: async () => { throw new Error('no staging deploys under test'); } } : new RealServerDeployer(cfg, undefined, async () => (p.lock instanceof RealStagingLock ? p.lock.currentNonce() : null), (fn) => (p.lock?.aroundLegacyDeploy ? p.lock.aroundLegacyDeploy(fn) : fn()));
   ports.set(wp, p);
@@ -879,6 +888,7 @@ export function startEvidence(wp: Workplace): () => void {
     }
     e.queue.push(job.id);
   }
+  if (!e.queue.length && !e.active.size) portsOf(wp).lock.reapLeftovers?.().catch(err => log.warn('evidence', `lock leftovers: ${errText(err)}`));
   if (e.queue.length) log.info('evidence', `boot: ${e.queue.length} evidence run(s) queued again`);
   schedulePump(wp);
   return () => stopAll(wp);
