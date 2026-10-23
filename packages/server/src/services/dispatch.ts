@@ -11,6 +11,7 @@ import * as manager from './manager.js';
 import * as reviewWake from './review-wake.js';
 import * as replyDelivery from './reply-delivery.js';
 import * as floor from './floor.js';
+import * as halt from './halt.js';
 import { chiefOfStaffId, epicOf, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { rowJson, rowsJson } from './store.js';
 import { log } from '../util/logger.js';
@@ -156,7 +157,9 @@ function resumeOrphan(wp: Workplace, employeeId: string, nowMs: number): Dispatc
       if (idle !== null && idle < wp.config.dispatchTalkGraceMinutes * MIN) return null;
     }
   }
-  const key = `orphan-resumed:${wip.id}`;
+  // Per story AND person: a resume of the previous assignee (reassigned seconds later, 23 Oct: Tara, then Anika)
+  // must not use up the new assignee's turn, or they sit "working" on an idle session for the full 3 h.
+  const key = `orphan-resumed:${wip.id}:${employeeId}`;
   const last = wp.db.prepare('select value from settings where key = ?').get(key) as { value: string } | undefined;
   if (last && nowMs - Date.parse(last.value) < ORPHAN_RESUME_H * 3_600_000) return null;
   if (!spend.canSpend(wp, employeeId, spend.dayOf(new Date(nowMs))).ok) return null;
@@ -179,6 +182,9 @@ export function dispatch(wp: Workplace, employeeId: string, nowMs = Date.now()):
   if (floor.paused(wp)) return { action: 'skipped', reason: floor.describe(wp) };
   // Weekly pace hold (park, not kill): nothing new starts, a review into an open session included.
   if (floor.paceHeld(wp, nowMs)) return { action: 'skipped', reason: 'parked by the weekly pace cap until the next pace day' };
+  // An auth outage holds starts too (the shared predicate): a session would only fail to start.
+  const halted = halt.cannotRun(wp, nowMs);
+  if (halted) return { action: 'skipped', reason: halted.reason };
   const resumed = resumeOrphan(wp, employeeId, nowMs);
   if (resumed) return resumed;
   const busy = busyReason(wp, employeeId, nowMs);
@@ -271,11 +277,14 @@ export function idleAlerts(wp: Workplace, _nowMs = Date.now()): string[] {
  * lands in the session on the person's work.
  */
 export function sweep(wp: Workplace, nowMs = Date.now()): { reviews: string[]; started: DispatchResult[]; alerts: string[] } {
+  // A run that claims to be running but is dead keeps its person "working" and the dispatcher away: close it
+  // first (housekeeping, also while paused; it starts nothing), so the pass below sees them idle.
+  try { for (const id of employees.closeDeadRuns(wp, nowMs)) log.info('dispatch', `closed dead run ${id}`); } catch (err) { log.warn('dispatch', `dead runs: ${err instanceof Error ? err.message : err}`); }
   const replies = (): void => {
     try { replyDelivery.sweep(wp, nowMs); } catch (err) { log.warn('dispatch', `inbox replies: ${err instanceof Error ? err.message : err}`); }
   };
   // Paused: no review wakes, no starts, and no "idle with queued work" alerts for an idleness that is the switch.
-  if (floor.paused(wp) || floor.paceHeld(wp, nowMs)) { replies(); return { reviews: [], started: [], alerts: [] }; }
+  if (halt.cannotRun(wp, nowMs)) { replies(); return { reviews: [], started: [], alerts: [] }; }
   const reviews = wakeStaleReviews(wp);
   const started: DispatchResult[] = [];
   for (const id of agents(wp)) {

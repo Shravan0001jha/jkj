@@ -10,6 +10,7 @@ import * as watch from '../src/services/watch.js';
 import * as coo from '../src/services/coo.js';
 import * as spend from '../src/services/spend.js';
 import * as reviewWake from '../src/services/review-wake.js';
+import * as floor from '../src/services/floor.js';
 import * as dispatch from '../src/services/dispatch.js';
 import * as manager from '../src/services/manager.js';
 import { rawGet } from '../src/services/v2-map.js';
@@ -388,12 +389,103 @@ test('a throttled orphan resume never falls through to starting new work: the In
     const a = story('Activity line (B9)', 'mira');
     items.update(wp, a.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
     // Resumed once already within the throttle window, so resumeOrphan returns null.
-    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`orphan-resumed:${a.id}`, new Date().toISOString());
+    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`orphan-resumed:${a.id}:mira`, new Date().toISOString());
     const b = story('Lower-ranked story', 'mira');
     const r = dispatch.dispatch(wp, 'mira', Date.now() + 60_000);
     assert.notEqual(r.action, 'story', 'nothing new starts');
     assert.equal(of(fake, 'mira').length, 0, 'no session for the lower-ranked story');
     assert.notEqual(items.require$(wp, b.id).status, 'in-progress');
+  } finally {
+    done();
+  }
+});
+
+/* ---------- stale "working" with no live run (23 Oct: Anika, Dev) ---------- */
+
+test('a person left "working" on a dead run is reset and started on their own In-progress story (23 Oct)', async () => {
+  const { wp, fake, story, done } = setup();
+  try {
+    const a = story('Ring flow step 14', 'mira');
+    employees.assign(wp, a.id);
+    await tick();
+    const first = employees.openSession('mira')!;
+    assert.equal(employees.stateWithReason(wp, 'mira').state, 'working');
+    // The run never answers: no output, no SDK message, 25 minutes on.
+    const later = Date.now() + 25 * MIN;
+    const r = dispatch.sweep(wp, later);
+    await tick();
+    assert.ok(fake.sessions[0]!.closed, 'the dead run is closed');
+    assert.equal(r.started.length, 1);
+    assert.equal(r.started[0]!.itemId, a.id);
+    const second = employees.openSession('mira')!;
+    assert.notEqual(second.agentId, first.agentId, 'a fresh session is on the story');
+    assert.equal(second.assignmentId, a.id);
+  } finally {
+    done();
+  }
+});
+
+test('a genuinely live run is never closed: a quiet log but a ticking SDK stream is alive (control)', async () => {
+  const { wp, fake, story, done } = setup();
+  try {
+    const a = story('Long build', 'mira');
+    employees.assign(wp, a.id);
+    await tick();
+    const open = employees.openSession('mira')!;
+    // Control: the same run, silent past the limit, is closed.
+    assert.deepEqual(employees.closeDeadRuns(wp, Date.now() + 25 * MIN), [open.agentId]);
+    employees.assign(wp, a.id);
+    await tick();
+    const live = employees.openSession('mira')!;
+    // A tool_progress tick is the run's heartbeat: 19 minutes after it, still alive.
+    fake.last().events.onSdkMessage?.('system', 'tool_progress');
+    assert.deepEqual(employees.closeDeadRuns(wp, Date.now() + 19 * MIN), []);
+    assert.equal(employees.openSession('mira')!.agentId, live.agentId);
+    // And a run waiting on an approval or between turns is not a "running" run at all.
+    assert.equal(fake.sessions.at(-1)!.closed, false);
+  } finally {
+    done();
+  }
+});
+
+test('a halted floor resets the dead run but starts nobody', async () => {
+  const { wp, fake, story, done } = setup();
+  try {
+    const a = story('Paused work', 'mira');
+    employees.assign(wp, a.id);
+    await tick();
+    floor.setPaused(wp, true, 'test halt', 'owner');
+    const r = dispatch.sweep(wp, Date.now() + 25 * MIN);
+    await tick();
+    assert.ok(fake.sessions[0]!.closed);
+    assert.equal(r.started.length, 0);
+    assert.equal(employees.openSession('mira'), undefined);
+    assert.equal(fake.sessions.length, 1, 'no new session while the floor is paused');
+    assert.notEqual(employees.stateWithReason(wp, 'mira').state, 'working');
+  } finally {
+    done();
+  }
+});
+
+test('an idle session and a story another person already used the orphan resume on: the new assignee is still started (Anika, 23 Oct)', async () => {
+  const { wp, fake, story, done } = setup();
+  try {
+    const a = story('Remote-notification handler', 'mira');
+    items.update(wp, a.id, { status: 'in-progress', reason: 'test: moved' }, 'mira');
+    // Mira sits in a finished review session (waiting, bound to no story)...
+    employees.spawn(wp, 'mira', { prompt: 'Review request: something else' });
+    await tick();
+    fake.last().say('Reviewed.');
+    fake.last().result();
+    await tick();
+    assert.equal(runs.getRunAgent(employees.openSession('mira')!.agentId)!.status, 'waiting');
+    // ...and the previous assignee's resume 40 s earlier consumed the story's throttle.
+    wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(`orphan-resumed:${a.id}:tara`, new Date().toISOString());
+    const r = dispatch.dispatch(wp, 'mira', Date.now() + 60_000);
+    await tick();
+    assert.equal(r.action, 'story');
+    assert.equal(r.itemId, a.id);
+    assert.ok(told(fake, 'mira').some(t => t.includes(a.id) && /assignment/i.test(t)), 'the story was handed to her session');
   } finally {
     done();
   }
