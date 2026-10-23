@@ -8,6 +8,7 @@ import * as proposals from './proposals.js';
 import * as room from './room.js';
 import { chiefOfStaff } from './features.js';
 import * as manager from './manager.js';
+import * as halt from './halt.js';
 import * as hygiene from './hygiene.js';
 import * as items from './items.js';
 import type { HygieneRule } from '@jkj/shared';
@@ -62,8 +63,10 @@ export function boardCheck(wp: Workplace, nowMs = Date.now()): string | null {
     .sort((a, b) => (a.statusSince ?? a.createdAt).localeCompare(b.statusSince ?? b.createdAt));
   const wrong = hygiene.report(wp, nowMs).violations.filter(v => WRONG_STATUS.includes(v.rule));
   if (!unrouted.length && !wrong.length) return null;
+  const h = halt.cannotRun(wp, nowMs);
   const age = (w: WorkItem): string => humanDuration(nowMs - Date.parse(w.statusSince ?? w.createdAt));
   const text = [
+    ...(h ? [halt.line(h)] : []),
     `Board check (every ${COS_TICK_MS / 60_000} min): these need you now. Route or fix each one, and say why on the item; a story you keep unrouted needs its reason in a comment.`,
     ...(unrouted.length ? [
       `Unrouted (${unrouted.length}): route each to the lead whose charter owns its files (map.yaml): item_update <id> assigneeId <lead> reason "<why>".`,

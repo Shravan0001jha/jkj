@@ -53,6 +53,8 @@ export function onMerged(wp: Workplace, id: string, by = 'workplace'): 'moved' |
     onFinished(wp, id);
     return moved ? 'moved' : 'told';
   }
+  // Awaiting its Mac check (owner rule, 23 Oct): already placed in the Mac verification queue, nothing for Asha to close.
+  if (w.awaitingMac && !w.awaitingMac.closedAt) { onFinished(wp, id); return moved ? 'moved' : 'told'; }
   manager.alert(wp, {
     key: `merged:${id}:${w.pr!.merged!.at}`, itemId: id, by: 'workplace',
     title: `Merged: ${w.title}`,
@@ -127,6 +129,12 @@ export function onItem(wp: Workplace, id: string): void {
   const w = rawGet(wp, id);
   if (!w) return;
   if (w.postMergeOf) postMerge.onReviewItem(wp, id);
+  // Moved to awaiting-mac: its author's session on it is over (the work is done on staging).
+  if (w.awaitingMac && !w.awaitingMac.closedAt && !w.closedAt && w.employeeId) {
+    const emp = w.employeeId;
+    void employees.endSessionOn(wp, emp, id, 'awaiting-mac')
+      .catch(err => log.warn('lifecycle', `${id}: could not end ${emp}'s session: ${err instanceof Error ? err.message : err}`));
+  }
   if (w.pr?.merged && w.status !== 'done') { onMerged(wp, id); return; }
   if (finished(w)) onFinished(wp, id);
   // A block pointed at an item that is already closed raises no event of the blocker's: judge it when it is saved.

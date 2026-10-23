@@ -8,7 +8,7 @@ import type { TalkAttachment } from './talk.js';
  * package outside @jkj/shared. See docs/LLD-workplace.md §2 and §14.
  */
 import type { Agent, PermissionMode } from './types.js';
-import type { ExtraReviewer, ItemLevel, ItemResolution, ItemStatus, Points } from './workplace-v2.js';
+import type { AwaitingMac, ExtraReviewer, ItemLevel, ItemResolution, ItemStatus, Points } from './workplace-v2.js';
 
 /* ---------- organisation ---------- */
 
@@ -226,6 +226,8 @@ export interface WorkItem {
   postMerge?: PostMergeRecord;
   /** Set on a post-merge review story: the merged story it verifies. */
   postMergeOf?: string;
+  /** Done on staging, awaiting the Mac check (workplace-v2 AwaitingMac). */
+  awaitingMac?: AwaitingMac;
   kind: WorkKind;
   title: string;
   body: string;

@@ -209,3 +209,26 @@ test('GET /api/agents/:id/log?view=chat collapses tool activity; the default (no
     await b.stop();
   }
 });
+
+test('the Mac verification queue: adopt, list, close (pass with evidence) over HTTP; refused through the tunnel', async () => {
+  const b = await boot();
+  try {
+    const epic = await call<{ item: { id: string } }>(b.base, 'POST', '/api/items', { level: 'epic', title: 'E' });
+    const s = await call<{ item: { id: string } }>(b.base, 'POST', '/api/items', { level: 'story', title: 'Mac-slot live check of X', parentId: epic.body.item.id });
+    const id = s.body.item.id;
+    assert.equal((await call(b.base, 'POST', '/api/coo/awaiting-mac/adopt', { itemIds: [id], note: 'x'.repeat(30) }, { 'x-via-tunnel': '1' })).status, 400);
+    assert.equal((await call<{ items: unknown[] }>(b.base, 'GET', '/api/coo/awaiting-mac')).body.items.length, 0, 'the tunnelled adopt moved nothing');
+    assert.equal((await call(b.base, 'POST', '/api/coo/awaiting-mac/adopt', { itemIds: [] })).status, 400);
+    const adopt = await call<{ moved: string[]; failed: unknown[] }>(b.base, 'POST', '/api/coo/awaiting-mac/adopt', { itemIds: [id, 'as_nope'], note: 'Run the Mac-slot live check of X: wake word fires after sleep.' });
+    assert.deepEqual(adopt.body.moved, [id]);
+    assert.equal(adopt.body.failed.length, 1);
+    const q = await call<{ items: { id: string; note: string }[] }>(b.base, 'GET', '/api/coo/awaiting-mac');
+    assert.deepEqual(q.body.items.map(i => i.id), [id]);
+    assert.equal((await call(b.base, 'POST', '/api/coo/awaiting-mac/close', { itemId: id, result: 'pass', note: '' })).status, 400);
+    const closed = await call<{ trueStatus: string }>(b.base, 'POST', '/api/coo/awaiting-mac/close', { itemId: id, result: 'pass', note: 'Mac slot 14:10 UTC: wake word fired after sleep, wake.log:41' });
+    assert.equal(closed.body.trueStatus, 'done');
+    assert.deepEqual((await call<{ items: unknown[] }>(b.base, 'GET', '/api/coo/awaiting-mac')).body.items, []);
+  } finally {
+    await b.stop();
+  }
+});

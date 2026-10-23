@@ -15,6 +15,23 @@ export type ItemLevel = 'epic' | 'story' | 'task';
  */
 export type ItemStatus = 'backlog' | 'ready' | 'in-progress' | 'in-review' | 'waiting' | 'parked' | 'blocked' | 'done';
 export type ItemResolution = 'done' | 'wont-do' | 'duplicate' | 'cant-reproduce';
+/**
+ * "Done on staging, awaiting Mac check" (owner rule, 23 Oct): the code is merged and on staging, everything a
+ * Linux/phone check can verify is verified, and what remains needs a Mac. Stored as status done + this record
+ * (no closedAt), like Merged, so it counts as done for flow, hygiene and epic progress; trueStatus shows it
+ * apart. Set by item_update status awaiting-mac with a note; closed from the Mac verification queue.
+ */
+export interface AwaitingMac {
+  /** Exactly what the Mac check must confirm. */
+  note: string;
+  by: string;
+  since: string;
+  /** Set when the Mac check passed (the story is then closed) with the evidence given. */
+  closedAt?: string;
+  evidence?: string;
+}
+/** The status a request may name besides the stored ones (it stores as done + awaitingMac). */
+export type ItemRequestStatus = ItemStatus | 'awaiting-mac';
 /** The Jira type (docs/HLD-jira-lifecycle.md §1): a bug is a story-level item. */
 export type ItemType = 'epic' | 'story' | 'task' | 'bug' | 'rca';
 /** A story-level type: a `bug` unlocks code once its RCA is posted; an `rca` story is done when the RCA is posted (no code). */
@@ -23,10 +40,10 @@ export type StoryType = 'bug' | 'rca';
  * The true status the board shows (docs/HLD-jira-lifecycle.md §1), computed on every read from the
  * stored status, the hold, the PR's stage and merge, and any open `startsAfter`.
  */
-export type TrueStatus = 'backlog' | 'on-hold' | 'ready' | 'in-progress' | 'in-review' | 'qa' | 'approved' | 'merged' | 'done' | 'blocked' | 'waiting' | 'parked';
+export type TrueStatus = 'backlog' | 'on-hold' | 'ready' | 'in-progress' | 'in-review' | 'qa' | 'approved' | 'merged' | 'awaiting-mac' | 'done' | 'blocked' | 'waiting' | 'parked';
 export const TRUE_STATUS_LABEL: Record<TrueStatus, string> = {
   backlog: 'Backlog', 'on-hold': 'On hold', ready: 'Ready', 'in-progress': 'In progress', 'in-review': 'In review',
-  qa: 'QA', approved: 'Approved', merged: 'Merged', done: 'Done', blocked: 'Blocked',
+  qa: 'QA', approved: 'Approved', merged: 'Merged', 'awaiting-mac': 'Done on staging — awaiting Mac check', done: 'Done', blocked: 'Blocked',
   waiting: 'Waiting on', parked: 'Parked',
 };
 
@@ -83,6 +100,8 @@ export interface HygieneReport {
   at: string;
   /** The floor is paused: the monitor is silent. */
   paused: boolean;
+  /** While the floor cannot run work (pace hold, floor pause, Claude auth outage): the one line that replaces the per-story no-session / stall flags. */
+  pausedLine?: string;
   /** Open items (and Done with an unmerged PR) without a violation, in percent. */
   cleanPct: number;
   open: number;
@@ -157,6 +176,8 @@ export interface Item {
   holdReason?: string;
   /** Merged and closed by Asha (Merged → Done). */
   closedAt?: string;
+  /** Done on staging, the Mac check still to do (trueStatus awaiting-mac): what the Mac must confirm. */
+  awaitingMac?: AwaitingMac;
   pr?: ItemPr;
   /** Waiting: on whom (an employee id, 'owner' or 'coo'), why, since when. */
   waiting?: ItemWaiting;
@@ -251,6 +272,8 @@ export interface EpicProgress {
   storiesTotal: number;
   /** 0..100: points when any story is pointed, else stories. */
   pct: number;
+  /** Of storiesDone, how many are only done on staging and still await their Mac check. */
+  storiesAwaitingMac?: number;
 }
 
 export interface PlanFlag {
@@ -311,6 +334,8 @@ export interface PlanResponse {
   counts: Record<ItemStatus, number>;
   /** `?view=board`: stories and tasks grouped by status, rank order. */
   board?: Record<ItemStatus, Item[]>;
+  /** The Mac verification queue (stories done on staging, awaiting the Mac check), oldest first. */
+  awaitingMac?: { id: string; title: string; note: string; by: string; since: string; assigneeId?: string; parentId?: string }[];
 }
 
 export interface Comment {
@@ -472,7 +497,7 @@ export interface UpdateItemRequest {
   parentId?: string;
   targetDate?: string | null;
   acceptance?: string[];
-  status?: ItemStatus;
+  status?: ItemRequestStatus;
   resolution?: ItemResolution;
   blockedReason?: string;
   /**

@@ -7,7 +7,7 @@ import * as items from './items.js';
 import * as waits from './waits.js';
 import * as coo from './coo.js';
 import * as manager from './manager.js';
-import * as floor from './floor.js';
+import * as halt from './halt.js';
 import { isAgent, levelOf, nameOf, rawGet, statusFromState } from './v2-map.js';
 import { log } from '../util/logger.js';
 
@@ -87,7 +87,7 @@ export function check(wp: Workplace, id: string, nowMs = Date.now()): { rule: St
   const w = rawGet(wp, id);
   if (!w) return null;
   // "Pause all": nothing is parked, queued or moved while the floor is paused (LLD-rework W2 §7).
-  if (floor.paused(wp) || floor.paceHeld(wp, nowMs)) return null;
+  if (halt.cannotRun(wp, nowMs)) return null;
   const ev = evaluate(wp, w, nowMs);
   if (!ev?.stalled) return null;
   const episode = `${ev.rule}:${ev.since}`;

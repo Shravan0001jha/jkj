@@ -68,6 +68,7 @@ export function trueStatus(wp: Workplace, w: WorkItem): TrueStatus {
       return s === 'dev' ? 'in-review' : s;
     }
     case 'done': {
+      if (w.awaitingMac && !w.awaitingMac.closedAt && !w.closedAt && (w.resolution ?? 'done') === 'done') return 'awaiting-mac';
       if ((w.resolution ?? 'done') !== 'done' || !w.pr) return 'done';
       if (w.pr.merged) return w.closedAt ? 'done' : 'merged';
       return githubMode(wp) !== 'local' && approvalHolds(w, 'qa') ? 'approved' : 'done';
@@ -149,6 +150,7 @@ export function decorate(wp: Workplace, w: WorkItem, item: Item): Item {
   }
   if (w.hold && w.status === 'backlog' && w.holdReason) item.holdReason = w.holdReason;
   if (w.closedAt) item.closedAt = w.closedAt;
+  if (w.awaitingMac) item.awaitingMac = w.awaitingMac;
   const pr = prOf(w);
   if (pr) item.pr = pr;
   return item;

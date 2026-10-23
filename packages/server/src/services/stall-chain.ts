@@ -4,8 +4,7 @@ import * as runs from './runs.js';
 import * as employees from './employees.js';
 import * as trail from './trail.js';
 import * as coo from './coo.js';
-import * as floor from './floor.js';
-import * as pace from './pace.js';
+import * as halt from './halt.js';
 import { inQuietHours } from './push.js';
 import { superFocusActive } from './focus.js';
 import { managerOf, teamOf } from './org.js';
@@ -137,7 +136,7 @@ function tellEmployee(wp: Workplace, target: string, w: WorkItem, text: string):
 export function sweep(wp: Workplace, nowMs = Date.now()): SweepResult {
   const result: SweepResult = { told: [], rung: [] };
   // Stopping the clock: a paused floor or a pace hold is a deliberate stop, and the clock starts again after it.
-  if (floor.paused(wp) || pace.holdUntil(wp, nowMs)) {
+  if (halt.cannotRun(wp, nowMs)) {
     for (const id of records(wp)) drop(wp, id);
     return result;
   }

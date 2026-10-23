@@ -111,7 +111,8 @@ export function progress(wp: Workplace, epicId: string): EpicProgress {
   const pointsTotal = stories.reduce((n, s) => n + (s.points ?? 0), 0);
   const pointsDone = done.reduce((n, s) => n + (s.points ?? 0), 0);
   const pct = pointsTotal > 0 ? Math.round((pointsDone / pointsTotal) * 100) : stories.length ? Math.round((done.length / stories.length) * 100) : 0;
-  return { pointsDone, pointsTotal, storiesDone: done.length, storiesTotal: stories.length, pct };
+  const awaiting = done.filter(awaitingOpen).length;
+  return { pointsDone, pointsTotal, storiesDone: done.length, storiesTotal: stories.length, pct, ...(awaiting ? { storiesAwaitingMac: awaiting } : {}) };
 }
 
 export function detail(wp: Workplace, id: string): ItemDetail {
@@ -279,6 +280,8 @@ export function mayDrop(wp: Workplace, by: string, w: WorkItem, resolution: stri
 export function checkActor(wp: Workplace, actor: string, prev: WorkItem, patch: UpdateItemRequest): void {
   if (EXEMPT.has(actor) || !wp.org.employees.some(e => e.id === actor)) return;
   const from = prev.status ?? 'ready';
+  // The CTO closes a story from the Mac verification queue (owner rule, 23 Oct) though he is not above its assignee.
+  if (awaitingOpen(prev) && actor === ctoId(wp.org) && (patch.status === 'done' || patch.status === 'in-progress')) return;
   const reassigning = patch.assigneeId !== undefined && patch.assigneeId !== prev.employeeId;
   const subject = subjectOf(wp, prev);
   const owns = cosOverBoard(wp, actor, prev) || (!!subject && (subject === actor || isAbove(wp.org, actor, subject)));
@@ -507,6 +510,99 @@ function checkMove(wp: Workplace, w: WorkItem, from: ItemStatus, to: ItemStatus,
   if (from === 'done' && !req.note?.trim()) throw new BadRequest('A reopen needs a note: what was wrong with "done"?');
 }
 
+/* ---------- done on staging, awaiting Mac check (owner rule, 23 Oct) ---------- */
+
+export const AWAITING_NOTE_MIN = 20;
+/** True while the story waits for its Mac check (stored as done + awaitingMac, no closedAt). */
+export const awaitingOpen = (w: WorkItem): boolean => w.status === 'done' && !!w.awaitingMac && !w.awaitingMac.closedAt && !w.closedAt;
+
+/**
+ * Move a story to awaiting-mac: its code is merged and on staging, everything checkable without a Mac is checked,
+ * and the note names exactly what the Mac check must confirm. Stored as status done + `awaitingMac`, so it counts
+ * as done for flow, hygiene and epic progress, and shows apart (trueStatus awaiting-mac). `adopt` (COO/owner, the
+ * one-shot adopt of existing parked Mac-check stories) accepts any open status.
+ */
+function toAwaitingMac(wp: Workplace, prev: WorkItem, next: WorkItem, note: string | undefined, by: string, adopt: boolean, at: string): WorkItem {
+  const level = levelOf(prev);
+  const from = prev.status ?? 'ready';
+  if (level === 'epic') throw new BadRequest('An epic is not awaiting a Mac check; its stories are.');
+  if (prev.closedAt) throw new BadRequest(`${prev.id} is already closed.`);
+  if (awaitingOpen(prev)) throw new BadRequest(`${prev.id} is already awaiting its Mac check.`);
+  const why = note?.trim() ?? '';
+  if (why.length < AWAITING_NOTE_MIN) throw new BadRequest(`awaiting-mac needs a note (at least ${AWAITING_NOTE_MIN} characters) naming exactly what the Mac check must confirm.`);
+  if (prev.pr?.iosChange) throw new BadRequest('An iPhone change is verified by its post-merge iPhone review (a Mac worker story filed on the merge), not by awaiting-mac.');
+  if (from === 'done' && !(prev.pr?.merged || adopt)) throw new BadRequest(`${prev.id} is closed; only a merged story (Merged) or an open one can wait for a Mac check.`);
+  if (!adopt && !['in-progress', 'in-review', 'done'].includes(from)) throw new BadRequest(`${level} ${prev.id} cannot go from ${from} to awaiting-mac: only work that is done on staging waits for a Mac check.`);
+  if (prev.pr && !prev.pr.merged) throw new BadRequest(`PR #${prev.pr.number} is not merged: awaiting-mac is for code that is merged and on staging.`);
+  if (!adopt && !prev.pr && from !== 'done' && by !== 'owner' && by !== 'coo' && githubMode(wp) === 'on') {
+    const n = unlandedPatches(wp, prev);
+    if (n > 0) throw new BadRequest(`Not done on staging: ${n} change${n === 1 ? '' : 's'} on this story's branch never reached the trunk. Land them through a pull request first.`);
+  }
+  if (adopt && by !== 'owner' && by !== 'coo') throw new Forbidden('Forbidden: only the owner or the COO adopts stories into the Mac queue.');
+  next.status = 'done';
+  next.resolution = 'done';
+  next.statusSince = at;
+  next.updatedAt = at;
+  next.awaitingMac = { note: why, by, since: at };
+  for (const k of ['blockedReason', 'waitingOn', 'blockedSince', 'blockedRecommendation', 'handoff', 'hold', 'holdReason', 'queuedFor', 'waiting', 'parked'] as const) delete next[k];
+  const state = stateFromStatus(prev, 'done', 'done');
+  if (state !== prev.state) { next.history = [...prev.history, { at, from: prev.state, to: state, by, note: 'Done on staging, awaiting Mac check' }]; next.state = state; }
+  const saved = work.put(wp, prev, next, by, `Done on staging, awaiting Mac check: ${why}`);
+  trail.record(wp, { itemId: prev.id, by, kind: 'note', text: `Done on staging, awaiting Mac check. The Mac check must confirm: ${why}` });
+  return saved;
+}
+
+export interface AwaitingEntry { id: string; title: string; note: string; by: string; since: string; assigneeId?: string; parentId?: string }
+
+/** The Mac verification queue: stories done on staging that wait for a Mac check, oldest first. */
+export function awaitingQueue(wp: Workplace): AwaitingEntry[] {
+  return rowsJson<WorkItem>(wp.db.prepare("select json from work where status = 'done' and json_extract(json, '$.awaitingMac') is not null").all())
+    .filter(awaitingOpen)
+    .map(w => ({ id: w.id, title: w.title, note: w.awaitingMac!.note, by: w.awaitingMac!.by, since: w.awaitingMac!.since, ...(w.employeeId ? { assigneeId: w.employeeId } : {}), ...(w.parentId ? { parentId: w.parentId } : {}) }))
+    .sort((a, b) => a.since.localeCompare(b.since) || a.id.localeCompare(b.id));
+}
+
+/** COO/owner one-shot: move an existing story (parked, merged, whatever is open) to awaiting-mac. */
+export function adoptAwaitingMac(wp: Workplace, id: string, note: string, by: string): Item {
+  const prev = requireRow(wp, id);
+  const next: WorkItem = { ...prev };
+  return toItem(wp, toAwaitingMac(wp, prev, next, note, by, true, now()));
+}
+
+/**
+ * Out of awaiting-mac: pass (done, with the evidence) or fail (back to In progress, and a bug filed like a send-back).
+ * Only the owner, the COO or the CTO close it: the assignee and Asha cannot verify what needs the Mac.
+ * A merged PR is final (a merged story never reopens: the merge watcher re-closes it), so a failed Mac check on a
+ * story with a merged PR files the bug and leaves the story Merged; without a merged PR it goes back to In progress.
+ */
+function closeAwaiting(wp: Workplace, prev: WorkItem, next: WorkItem, result: 'pass' | 'fail', note: string | undefined, by: string, at: string): WorkItem {
+  if (by !== 'owner' && by !== 'coo' && by !== 'workplace' && by !== ctoId(wp.org)) throw new Forbidden('Forbidden: only the COO, the CTO or the owner closes a story from the Mac verification queue.');
+  const text = note?.trim() ?? '';
+  if (text.length < 10) throw new BadRequest(result === 'pass' ? 'Closing from the Mac queue needs evidence: say what you ran on the Mac and saw (log lines, a slot id).' : 'A failed Mac check needs a note saying what failed.');
+  next.updatedAt = at;
+  if (result === 'pass') {
+    next.closedAt = at; next.closedBy = by; next.statusSince = at;
+    next.awaitingMac = { ...prev.awaitingMac!, closedAt: at, evidence: text };
+    const saved = work.put(wp, prev, next, by, `Mac check passed: ${text}`);
+    trail.record(wp, { itemId: prev.id, by, kind: 'note', text: `Mac check passed, closed by ${nameOf(wp, by)}: ${text}` });
+    return saved;
+  }
+  const bug = create(wp, {
+    level: 'story', type: 'bug', ...(prev.parentId ? { parentId: prev.parentId } : {}), ...(prev.employeeId ? { assigneeId: prev.employeeId } : {}),
+    title: `Mac check failed: ${prev.title}`,
+    body: `The Mac check of ${prev.id} "${prev.title}" failed.\n\nIt had to confirm: ${prev.awaitingMac!.note}\n\nWhat failed: ${text}`,
+  }, 'workplace', { reason: `The Mac check of ${prev.id} failed` });
+  delete next.awaitingMac;
+  if (!prev.pr?.merged) {
+    next.status = 'in-progress'; delete next.resolution; next.statusSince = at;
+    const state = stateFromStatus(prev, 'in-progress');
+    if (state !== prev.state) { next.history = [...prev.history, { at, from: prev.state, to: state, by, note: 'Mac check failed' }]; next.state = state; }
+  }
+  const saved = work.put(wp, prev, next, by, `Mac check failed: ${text}`);
+  trail.record(wp, { itemId: prev.id, by, kind: 'note', text: `Mac check FAILED (${nameOf(wp, by)}): ${text}. Bug filed: ${bug.id}.${prev.pr?.merged ? ' The PR is merged, so this story stays Merged; the fix goes through the bug.' : ' Back to In progress.'}` });
+  return saved;
+}
+
 /** A dependency must be another existing story or task, and must not loop back to this item. */
 function checkStartsAfter(wp: Workplace, id: string | undefined, depId: string): void {
   if (id && depId === id) throw new BadRequest('An item cannot start after itself: name the item it waits on.');
@@ -579,7 +675,7 @@ export function update(wp: Workplace, id: string, given0: UpdateItemRequest, giv
   }
   // `note` is the alias of `reason` (rework, Oct 2026); everything below reads `note`.
   if (req.note === undefined && req.reason !== undefined) req = { ...req, note: req.reason };
-  if (req.status && !ITEM_STATUSES.includes(req.status)) throw new BadRequest(`Unknown status ${req.status}`);
+  if (req.status && req.status !== 'awaiting-mac' && !ITEM_STATUSES.includes(req.status)) throw new BadRequest(`Unknown status ${req.status}`);
   const start = prev.status ?? 'ready';
   // The tree decides who may change it, and every status or assignee change says why.
   if (!opts.checked) checkActor(wp, by, prev, req);
@@ -671,6 +767,11 @@ export function update(wp: Workplace, id: string, given0: UpdateItemRequest, giv
   if (req.status === 'waiting' && req.kind && req.waitingOn && level !== 'epic'
     && waits.classify(wp, { assigneeId: next.employeeId, waitingOn: req.waitingOn, kind: req.kind }) !== 'block') {
     req = { ...req, status: 'blocked', blockedReason: req.blockedReason ?? req.note ?? '' };
+  }
+  // Done on staging, awaiting Mac check (owner rule, 23 Oct): into it, and out of it.
+  if (req.status === 'awaiting-mac') return toItem(wp, toAwaitingMac(wp, prev, next, req.note, by, false, at));
+  if (awaitingOpen(prev) && (req.status === 'done' || req.status === 'in-progress') && !(req.status === 'done' && req.resolution && req.resolution !== 'done')) {
+    return toItem(wp, closeAwaiting(wp, prev, next, req.status === 'done' ? 'pass' : 'fail', req.note, by, at));
   }
   // Merged → Done (docs/HLD-jira-lifecycle.md §1): Asha (or the owner, the COO, the reviewer) closes a merged story.
   if (req.status === 'done' && from === 'done' && prev.pr?.merged && !prev.closedAt) {
@@ -998,6 +1099,7 @@ export function plan(wp: Workplace, view?: 'board', nowMs = Date.now()): PlanRes
     mine: work$.filter(w => w.employeeId === 'owner' && w.status !== 'done').map(w => toItem(wp, w, nowMs)),
     focus,
     counts,
+    awaitingMac: awaitingQueue(wp),
   };
   if (view === 'board') {
     const board = Object.fromEntries(ITEM_STATUSES.map(s => [s, [] as Item[]])) as Record<ItemStatus, Item[]>;

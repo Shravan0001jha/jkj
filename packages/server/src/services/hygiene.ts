@@ -8,6 +8,7 @@ import * as stuck from './stuck.js';
 import * as coo from './coo.js';
 import * as dispatch from './dispatch.js';
 import * as floor from './floor.js';
+import * as halt from './halt.js';
 import * as waitReply from './wait-reply.js';
 import * as lifecycleWatch from './lifecycle-watch.js';
 import { isCoordination, unrouted as unroutedItems } from './unrouted.js';
@@ -134,14 +135,17 @@ function topIdle(wp: Workplace, id: string, name: string, q: WorkItem[], noSessi
 }
 
 /** Every condition that holds now, before the "for how long" thresholds. */
-export function conditions(wp: Workplace): Condition[] {
+export function conditions(wp: Workplace, nowMs = Date.now()): Condition[] {
   const rows = openRows(wp);
+  // 23 Oct: while the floor cannot run work (pace hold, floor pause, Claude auth outage) "nobody is on it" is the
+  // expected state of every In-progress story, not a violation. One shared predicate (halt.ts) decides.
+  const halted = halt.cannotRun(wp, nowMs) !== null;
   const out: Condition[] = [];
   const cos = chiefOfStaffId(wp);
   const noSession = new Set<string>();
 
   // (b) In progress with no live session: the stuck watchdog's rule.
-  for (const w of rows) {
+  for (const w of halted ? [] : rows) {
     if (w.status !== 'in-progress') continue;
     const c = stuck.condition(wp, w);
     if (!c || !c.state.startsWith('in-progress:')) continue;
@@ -152,7 +156,7 @@ export function conditions(wp: Workplace): Condition[] {
   // (a) The top of a person's queue nobody is on. Asha's queue is mostly a routing queue: its top is to
   // be routed. Work she holds in a charter of her own (product-and-business), not the routing charter,
   // is routed already: it is her own queue, judged like anyone's (dry run 10 Oct, #10).
-  for (const e of wp.org.employees) {
+  for (const e of halted ? [] : wp.org.employees) {
     if (e.virtual || !isAgent(wp, e.id)) continue;
     const q = personQueue(wp, e.id, rows);
     if (e.id === cos) {
@@ -244,14 +248,15 @@ function judge(conds: Condition[], seen: Record<string, string>, nowMs: number):
 /** What the apps show: the current violations and how clean the board is (GET /api/hygiene). */
 export function report(wp: Workplace, nowMs = Date.now()): HygieneReport {
   const paused = floor.paused(wp);
-  const violations = judge(conditions(wp), read<Record<string, string>>(wp, SEEN) ?? {}, nowMs);
+  const violations = judge(conditions(wp, nowMs), read<Record<string, string>>(wp, SEEN) ?? {}, nowMs);
   const population = openRows(wp).filter(w => w.status !== 'done' || (w.pr && !w.pr.merged));
   const bad = new Set(violations.map(v => v.itemId));
   const clean = population.filter(w => !bad.has(w.id)).length;
   const counts = Object.fromEntries(HYGIENE_RULES.map(r => [r, 0])) as Record<HygieneRule, number>;
   for (const v of violations) counts[v.rule] += 1;
+  const h = halt.cannotRun(wp, nowMs);
   return {
-    at: new Date(nowMs).toISOString(), paused,
+    at: new Date(nowMs).toISOString(), paused, ...(h ? { pausedLine: halt.line(h) } : {}),
     cleanPct: population.length ? Math.round((clean / population.length) * 100) : 100,
     open: population.length, clean, counts, violations,
   };
@@ -297,7 +302,7 @@ export function sweep(wp: Workplace, nowMs = Date.now()): SweepResult {
   // The safety net under the event-driven release: any Blocked item whose blockers are all closed moves on now.
   try { lifecycleWatch.releaseStale(wp); } catch (err) { log.warn('hygiene', `release stale blocks: ${err instanceof Error ? err.message : err}`); }
   try { postMerge.sweep(wp); } catch (err) { log.warn('hygiene', `post-merge: ${err instanceof Error ? err.message : err}`); }
-  const conds = conditions(wp);
+  const conds = conditions(wp, nowMs);
   const prev = read<Record<string, string>>(wp, SEEN) ?? {};
   const iso = new Date(nowMs).toISOString();
   const seen = Object.fromEntries(conds.map(c => [c.key, prev[c.key] ?? iso]));

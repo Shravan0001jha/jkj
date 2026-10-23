@@ -33,6 +33,7 @@ import * as statusAnswers from '../services/status.js';
 import * as pace from '../services/pace.js';
 import * as spendCaps from '../services/spend-caps.js';
 import * as floor from '../services/floor.js';
+import * as awaitingMac from '../services/awaiting-mac.js';
 import * as dispatch from '../services/dispatch.js';
 import * as githubFlow from '../services/github-flow.js';
 import * as board from '../services/board.js';
@@ -492,6 +493,26 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       requireLocal(req);
       const org = wp.reloadOrg();
       json(res, 200, { employees: org.employees.length, charters: org.charters.size, mapEntries: org.map.length });
+    }),
+    // The Mac verification queue (owner rule, 23 Oct): stories done on staging that only wait for a Mac check.
+    // The COO closes them here when a Mac session is open: result pass (with evidence) or fail (back to In progress + a bug).
+    r('GET', '/api/coo/awaiting-mac', (req, res) => { requireLocal(req); json(res, 200, { items: awaitingMac.list(wp) }); }),
+    r('POST', '/api/coo/awaiting-mac/close', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      if (typeof body['itemId'] !== 'string') throw new BadRequest('itemId must be a string.');
+      const result = body['result'];
+      if (result !== 'pass' && result !== 'fail') throw new BadRequest('result must be pass or fail.');
+      json(res, 200, awaitingMac.close(wp, body['itemId'], { result, note: typeof body['note'] === 'string' ? body['note'] : '' }, 'coo'));
+    }),
+    // One-shot adopt of existing parked/merged Mac-check stories (the COO runs it): { itemIds: [...], note: "what the Mac must confirm" }.
+    r('POST', '/api/coo/awaiting-mac/adopt', async (req, res) => {
+      requireLocal(req);
+      const body = await readJson(req);
+      const ids = body['itemIds'];
+      if (!Array.isArray(ids) || !ids.length || ids.some(i => typeof i !== 'string')) throw new BadRequest('itemIds must be a non-empty list of item ids.');
+      if (typeof body['note'] !== 'string') throw new BadRequest('note must be a string naming what the Mac check must confirm.');
+      json(res, 200, awaitingMac.adopt(wp, ids as string[], body['note']));
     }),
     r('GET', '/api/coo/floor', (req, res) => { requireLocal(req); json(res, 200, floor.state(wp)); }),
     r('POST', '/api/coo/floor', async (req, res) => {

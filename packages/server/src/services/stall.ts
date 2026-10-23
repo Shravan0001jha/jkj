@@ -2,6 +2,7 @@ import type { WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import * as runs from './runs.js';
 import * as work from './work.js';
+import * as halt from './halt.js';
 import * as employees from './employees.js';
 
 /**
@@ -48,6 +49,7 @@ export function annotate(wp: Workplace, items: WorkItem[], nowMs = Date.now()): 
 }
 
 export function stalledAssignments(wp: Workplace, nowMs = Date.now()): WorkItem[] {
+  if (halt.cannotRun(wp, nowMs)) return [];   // 23 Oct: the floor cannot run work (pace hold, pause, auth outage): nothing is stalled
   return annotate(wp, work.list(wp, { kind: 'assignment' }), nowMs)
     .filter(a => a.stalledSince)
     .sort((a, b) => a.stalledSince!.localeCompare(b.stalledSince!));
