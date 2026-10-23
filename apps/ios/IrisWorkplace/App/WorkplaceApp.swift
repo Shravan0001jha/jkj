@@ -9,7 +9,7 @@ struct WorkplaceApp: App {
 
     init() {
         let notifier = LocalNotifier()
-        let m = AppModel(notifier: notifier)
+        let m = AppModel(notifier: notifier, cache: DiskCache.appDefault())
         _model = State(initialValue: m)
     }
 
