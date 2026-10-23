@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { test } from 'node:test';
-import { DEPLOY_LOCK_PARAM, OLD_LOCK_PARAM, PROVISIONAL_PREFIX, RealStagingLock, STAGING_LOCK_PARAM, StagingBusyError, type LockBounds, type SsmPort } from '../src/services/evidence-ports.js';
+import { DEFAULT_LOCK_BOUNDS, DEPLOY_LOCK_PARAM, OLD_LOCK_PARAM, PROVISIONAL_PREFIX, RealStagingLock, STAGING_LOCK_PARAM, StagingBusyError, type LockBounds, type SsmPort } from '../src/services/evidence-ports.js';
 
 /** In-memory SSM: every method is atomic (no await between check and set), as a conditional create is. */
 class FakeSsm implements SsmPort {
@@ -241,4 +241,44 @@ test('nonce-aware staging.sh (#543 landed): the legacy key is not written, not r
   assert.ok(s2.m.has(OLD_LOCK_PARAM));
   await l2.setNonceAware(true);
   assert.equal(s2.m.has(OLD_LOCK_PARAM), false);
+});
+
+const memory = () => { const m = new Map<string, string>(); return { get: (k: string) => m.get(k) ?? null, set: (k: string, v: string | null) => { if (v === null) m.delete(k); else m.set(k, v); }, m }; };
+const mkMem = (ssm: SsmPort, mem: ReturnType<typeof memory>, aware: boolean) => { const l = new RealStagingLock({ stagingUrl: 'http://127.0.0.1:9' } as never, 'ap-south-1', ssm, bounds({ tries: 1 }), mem as never); void l.setNonceAware(aware); return l; };
+
+test('restart with our own leftover legacy + evidence keys: acquire proceeds (not "busy (deploy)")', async () => {
+  const ssm = new FakeSsm(); const mem = memory();
+  const before = mkMem(ssm, mem, false);
+  await before.acquire(UNTIL); // the previous process: holds both keys, then dies without releasing
+  const legacy = ssm.m.get(OLD_LOCK_PARAM)!, ev = ssm.m.get(STAGING_LOCK_PARAM)!;
+  assert.ok(legacy && ev);
+  const after = mkMem(ssm, mem, false); // the new process, same settings memory
+  await after.acquire(UNTIL + 5000);
+  assert.equal(ssm.m.get(OLD_LOCK_PARAM), String(Math.floor((UNTIL + 5000) / 1000)));
+  assert.notEqual(ssm.m.get(STAGING_LOCK_PARAM), ev);
+});
+
+test('a foreign legacy value (a real deploy from the old staging.sh) is still honoured', async () => {
+  const ssm = new FakeSsm(); const mem = memory();
+  const before = mkMem(ssm, mem, false);
+  await before.acquire(UNTIL); await before.release();
+  ssm.m.set(OLD_LOCK_PARAM, sec(900)); // not what we wrote
+  await assert.rejects(mkMem(ssm, mem, false).acquire(UNTIL), (e: unknown) => e instanceof StagingBusyError && e.holder === 'old');
+});
+
+test('startup with nothing running reaps only keys equal to our own last writes', async () => {
+  const ssm = new FakeSsm(); const mem = memory();
+  await mkMem(ssm, mem, false).acquire(UNTIL);
+  await mkMem(ssm, mem, false).reapLeftovers();
+  assert.equal(ssm.m.has(OLD_LOCK_PARAM), false); assert.equal(ssm.m.has(STAGING_LOCK_PARAM), false);
+  const s2 = new FakeSsm(); const m2 = memory();
+  await mkMem(s2, m2, false).acquire(UNTIL);
+  s2.m.set(OLD_LOCK_PARAM, sec(900)); // a deploy's, written after ours
+  await mkMem(s2, m2, false).reapLeftovers();
+  assert.equal(s2.m.get(OLD_LOCK_PARAM), sec(900), 'a foreign legacy value is left alone');
+});
+
+test('the default bound outlasts a real deploy (6-10 min): at least 12 min of waiting', () => {
+  const b = DEFAULT_LOCK_BOUNDS;
+  assert.ok((b.tries - 1) * b.baseMs >= 12 * 60_000);
 });

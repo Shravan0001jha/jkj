@@ -106,6 +106,8 @@ export interface StagingLock {
   acquire?(untilMs: number): Promise<void>;
   /** Whether trunk's staging.sh understands the evidence key + STAGING_DEPLOY_FOR_EVIDENCE (#543). Until it does the legacy key is kept too. */
   setNonceAware?(aware: boolean): Promise<void>;
+  /** Boot with no runs to resume: remove our own leftover keys. */
+  reapLeftovers?(): Promise<void>;
   /** Runs `fn` (the in-run deploy) with the legacy key released, restoring it in a finally. A no-op wrapper once nonce-aware. */
   aroundLegacyDeploy?<T>(fn: () => Promise<T>): Promise<T>;
   hold(untilMs: number): Promise<void>;
@@ -159,9 +161,9 @@ export class StagingBusyError extends Error {
   }
 }
 
-/** Backoff bound: 6 tries, jittered ~30-90 s apart (about 6 minutes of waiting, 10 at the outside). */
+/** Backoff bound: 10 tries, 80-100 s apart: 12-15 min of waiting, longer than a real deploy (6-10 min). */
 export interface LockBounds { tries: number; baseMs: number; jitterMs: number; sleep: (ms: number) => Promise<void>; now: () => number }
-export const DEFAULT_LOCK_BOUNDS: LockBounds = { tries: 6, baseMs: 30_000, jitterMs: 60_000, sleep: ms => new Promise(r => setTimeout(r, ms)), now: () => Date.now() };
+export const DEFAULT_LOCK_BOUNDS: LockBounds = { tries: 10, baseMs: 80_000, jitterMs: 20_000, sleep: ms => new Promise(r => setTimeout(r, ms)), now: () => Date.now() };
 
 /**
  * Value format of the evidence key: `p:<epoch s>:<nonce>` when created (provisional, before the other keys are checked),
@@ -180,6 +182,10 @@ const liveEpoch = (v: string | null, nowMs: number): number => {
   const n = Number(m[1]);
   return n * 1000 > nowMs ? n : 0;
 };
+
+/** The last values this Workplace wrote, kept across restarts: a value equal to ours is our own leftover, not a deploy's. */
+export interface LockMemory { get(k: 'legacy' | 'evidence'): string | null; set(k: 'legacy' | 'evidence', v: string | null): void }
+const memoryMemory = (): LockMemory => { const m = new Map<string, string>(); return { get: k => m.get(k) ?? null, set: (k, v) => { if (v === null) m.delete(k); else m.set(k, v); } }; };
 
 export class RealStagingLock implements StagingLock {
   private held = false;
@@ -200,6 +206,7 @@ export class RealStagingLock implements StagingLock {
     private readonly region = 'ap-south-1',
     private readonly ssm: SsmPort = new AwsCliSsm(region),
     private readonly bounds: LockBounds = DEFAULT_LOCK_BOUNDS,
+    private readonly memory: LockMemory = memoryMemory(),
   ) {}
 
   /** The latest expiry (epoch s) across all three keys, 0 when none is live: "is staging in use at all". */
@@ -214,21 +221,29 @@ export class RealStagingLock implements StagingLock {
     const now = this.bounds.now();
     const nonce = this.held ? this.nonce : newNonce();
     const prov = `${PROVISIONAL_PREFIX}${until}:${nonce}`;
+    const prior = this.memory.get('evidence');
+    this.memory.set('evidence', prov);
     if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, prov))) {
       const cur = await this.ssm.get(STAGING_LOCK_PARAM);
-      if (cur !== null && liveEpoch(cur, now)) throw new StagingBusyError('evidence');
+      // Our own leftover from a previous process (a restart) is reclaimed, not waited on.
+      const ours = cur !== null && cur === prior;
+      if (cur !== null && !ours && liveEpoch(cur, now)) throw new StagingBusyError('evidence');
       // Expired (a crashed run): reclaim by delete + conditional create, so two reclaimers still resolve to one.
       if (cur !== null) await this.ssm.delete(STAGING_LOCK_PARAM);
       if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, prov))) throw new StagingBusyError('evidence');
     }
     const [d, o] = await Promise.all([this.ssm.get(DEPLOY_LOCK_PARAM), this.ssm.get(OLD_LOCK_PARAM)]);
-    const holder = liveEpoch(d, now) ? 'deploy' : liveEpoch(o, now) ? 'old' : null;
+    // A legacy value equal to our own last write is ours (old staging.sh writes that key too, with other values): overwritten below.
+    const oursLegacy = o !== null && o === this.memory.get('legacy');
+    const holder = liveEpoch(d, now) ? 'deploy' : !oursLegacy && liveEpoch(o, now) ? 'old' : null;
+    if (oursLegacy && !holder && !this.legacy) { await this.ssm.delete(OLD_LOCK_PARAM).catch(() => undefined); this.memory.set('legacy', null); }
     if (holder) { await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined); throw new StagingBusyError(holder); }
     // Nobody else holds staging: confirm (extend to the full TTL). From here on this run is established and never yields.
     // ORDER MATTERS: promote p:<epoch> -> bare <epoch> and read it back BEFORE the run starts any work (acquire() resolves
     // only after this). Starting first would advertise a live suite as provisional, and a deploy may legitimately stomp a
     // provisional hold. A failed or mis-read promotion deletes our key and the run does not start.
     const bare = `${until}:${nonce}`;
+    this.memory.set('evidence', bare);
     try {
       await this.ssm.put(STAGING_LOCK_PARAM, bare);
       const back = await this.ssm.get(STAGING_LOCK_PARAM);
@@ -245,6 +260,7 @@ export class RealStagingLock implements StagingLock {
 
   private async writeLegacy(until: number): Promise<void> {
     if (!this.legacy || this.paused) return;
+    this.memory.set('legacy', String(until));
     await this.ssm.put(OLD_LOCK_PARAM, String(until));
     this.legacyOn = true;
   }
@@ -289,6 +305,7 @@ export class RealStagingLock implements StagingLock {
   /** Refresh NEVER yields: it only extends our own key, whatever the deploy key says (evidence beats deploy once running). */
   private async refresh(untilMs: number): Promise<void> {
     const until = Math.floor(untilMs / 1000);
+    this.memory.set('evidence', `${until}:${this.nonce}`);
     await this.ssm.put(STAGING_LOCK_PARAM, `${until}:${this.nonce}`);
     this.lastUntil = until;
     await this.writeLegacy(until);
@@ -304,6 +321,19 @@ export class RealStagingLock implements StagingLock {
     if (param.status === 'rejected') {
       if (param.reason instanceof StagingBusyError) throw param.reason;
       throw new Error(`staging lock not written: ${String(param.reason).split('\n')[0]!.slice(0, 200)}`);
+    }
+  }
+
+  /**
+   * Startup with nothing running: delete the keys a previous process left behind, but only values equal to our own last
+   * writes (a legacy value we did not write may be a real deploy's).
+   */
+  async reapLeftovers(): Promise<void> {
+    if (this.held) return;
+    for (const [k, name] of [['legacy', OLD_LOCK_PARAM], ['evidence', STAGING_LOCK_PARAM]] as const) {
+      const mine = this.memory.get(k);
+      if (mine === null) continue;
+      try { if ((await this.ssm.get(name)) === mine) await this.ssm.delete(name); this.memory.set(k, null); } catch { /* next boot */ }
     }
   }
 

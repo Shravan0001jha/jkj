@@ -788,32 +788,41 @@ test('a cloud-agent change deploys too; an app-only story never deploys and its 
   } finally { await s.done(); }
 });
 
-test('server-touching runs are serialised; an app-only run still takes the free slot meanwhile', async () => {
+test('a server-touching run runs ALONE: it waits for active app-only runs, and nothing starts while it runs', async () => {
   const s = setup();
   try {
     const aHead = s.commit('services/iris-api/a.py', 'a = 1\n');
     const b = s.story('Second server story'); const bHead = s.commit('services/iris-api/b.py', 'b = 1\n', b.id);
     const c = s.story('App-only story'); s.commit('services/agent-svc/c.py', 'c = 1\n', c.id);
-    assert.ok(evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' }).ok);
-    assert.ok(evidence.request(s.wp, { itemId: b.id, by: 'kabir', platforms: 'android', features: 'memory' }).ok);
+    const d = s.story('Another app-only'); s.commit('services/agent-svc/d.py', 'd = 1\n', d.id);
+    // c (app-only) is running first
     assert.ok(evidence.request(s.wp, { itemId: c.id, by: 'kabir', platforms: 'android', features: 'files' }).ok);
-    await until(() => s.runner.calls.length === 2, 'two runs');
-    await new Promise(r => setTimeout(r, 30));
-    assert.deepEqual(s.runner.calls.map(x => x.features[0]).sort(), ['files', 'queries'], 'the second server story waits; the app-only one runs');
-    assert.deepEqual(s.deployer.heads, [aHead], 'one deploy so far');
-    assert.deepEqual(evidence.state(s.wp).queued.map(j => j.itemId), [b.id]);
+    await until(() => s.runner.calls.length === 1, 'the app-only run');
+    // server a arrives, then app-only d behind it: a must not be starved by d, and must not start under c
+    assert.ok(evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' }).ok);
+    { const r = evidence.request(s.wp, { itemId: d.id, by: 'kabir', platforms: 'android', features: 'errand' }); assert.ok(r.ok, JSON.stringify(r)); }
+    assert.ok(evidence.request(s.wp, { itemId: b.id, by: 'kabir', platforms: 'android', features: 'memory' }).ok);
+    await new Promise(r => setTimeout(r, 40));
+    assert.equal(s.runner.calls.length, 1, 'the server run waits for the active app-only run; the app-only run behind it is not admitted');
+    assert.deepEqual(s.deployer.heads, [], 'no deploy under a running suite');
 
-    const first = s.runner.pending.find(p => p.request.features[0] === 'queries')!;
-    first.release();
-    await until(() => s.runner.calls.length === 3, 'the second server story');
-    assert.deepEqual(s.deployer.heads, [aHead, bHead], 'redeployed for the next server story');
-    assert.equal(s.deployer.runsBefore[1], 2, 'its deploy came after the first server run finished');
+    s.runner.pending.find(p => p.request.features[0] === 'files')!.release();
+    await until(() => s.runner.calls.length === 2, 'the server run, now alone');
+    assert.deepEqual(s.deployer.heads, [aHead]);
+    await new Promise(r => setTimeout(r, 40));
+    assert.equal(s.runner.calls.length, 2, 'nothing starts while the server run runs');
+    assert.deepEqual(evidence.state(s.wp).queued.map(j => j.itemId), [d.id, b.id]);
+
+    s.runner.pending.find(p => p.request.features[0] === 'queries')!.release();
+    await until(() => s.runner.calls.length === 3, 'next in order');
+    assert.equal(s.runner.calls[2]!.features[0], 'errand', 'queue order otherwise unchanged: the app-only run before the second server story');
+    await new Promise(r => setTimeout(r, 40));
+    assert.equal(s.runner.calls.length, 3, 'the second server story waits for it');
+    s.runner.pending.find(p => p.request.features[0] === 'errand')!.release();
+    await until(() => s.runner.calls.length === 4, 'the second server story');
+    assert.deepEqual(s.deployer.heads, [aHead, bHead]);
     while (s.runner.pending.length) s.runner.finish();
     await evidence.settled(s.wp);
-    const appOnly = rawGet(s.wp, c.id)!.evidenceRun!.server!;
-    assert.equal(appOnly.deployed, false);
-    assert.equal(appOnly.changedTo, bHead, 'the app-only run notes that staging was redeployed under it');
-    assert.ok(comments(s.wp, c.id).some(t => t.includes(`staging was redeployed to ${short(bHead)} during the run`)));
     assert.equal(evidence.state(s.wp).staging.sha, bHead, 'staging is left as the last server run left it');
   } finally { await s.done(); }
 });
