@@ -973,3 +973,42 @@ test('a feature the runner\'s ALL_FEATURES lacks (image) is accepted exactly whe
     await client.close();
   } finally { await s.done(); }
 });
+
+/* ---------- the COO's hold and cancel (23 Oct) ---------- */
+
+test('COO hold: "all" starts nothing new while a run in flight finishes; "server" keeps server runs off staging while app-only runs go on; cancel drops a queued twin', async () => {
+  const s = setup();
+  try {
+    s.commit('services/agent-svc/a.py', 'a = 1\n');
+    const srv = s.story('Server story'); s.commit('services/iris-api/s.py', 's = 1\n', srv.id);
+    const app = s.story('App-only story'); s.commit('services/agent-svc/c.py', 'c = 1\n', app.id);
+    assert.ok(evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' }).ok);
+    await until(() => s.runner.calls.length === 1, 'the first run');
+
+    evidence.setEvidenceHold(s.wp, { allMinutes: 30, by: 'coo', note: 'owner test deploy' });
+    const sv = evidence.request(s.wp, { itemId: srv.id, by: 'kabir', platforms: 'android', features: 'memory' });
+    const ap = evidence.request(s.wp, { itemId: app.id, by: 'kabir', platforms: 'android', features: 'files' });
+    assert.ok(sv.ok && ap.ok);
+    s.runner.finish();
+    await new Promise(r => setTimeout(r, 40));
+    assert.equal(s.runner.calls.length, 1, 'the run in flight finished; nothing new started under the hold');
+    assert.equal(evidence.state(s.wp).queued.length, 2, 'the queue keeps both, in order');
+
+    evidence.setEvidenceHold(s.wp, { allMinutes: 0, serverMinutes: 60, by: 'coo' });
+    await until(() => s.runner.calls.length === 2, 'the app-only run behind the held server run');
+    assert.equal(s.runner.calls[1]!.features[0], 'files');
+    assert.deepEqual(s.deployer.heads, [], 'the held server run never deployed');
+    assert.deepEqual(evidence.state(s.wp).queued.map(j => j.itemId), [srv.id], 'the server run keeps its place');
+
+    assert.throws(() => evidence.cancelQueued(s.wp, 'ev_nope', 'coo', 'x'), /not queued/);
+    const c = evidence.cancelQueued(s.wp, sv.job.id, 'coo', 'twin of a run that already passed');
+    assert.equal(c.state, 'done');
+    assert.equal(c.cancelled?.by, 'coo');
+    assert.equal(c.result, undefined, 'a cancelled run has no result: it is not evidence either way');
+    assert.equal(evidence.state(s.wp).queued.length, 0);
+    assert.throws(() => evidence.cancelQueued(s.wp, sv.job.id, 'coo', 'again'), /not queued \(it is done\)/);
+
+    assert.equal(evidence.setEvidenceHold(s.wp, { serverMinutes: 0, by: 'coo' }), null, 'clearing both parts removes the hold');
+    assert.equal(evidence.evidenceHold(s.wp), null);
+  } finally { evidence.setEvidenceHold(s.wp, { allMinutes: 0, serverMinutes: 0, by: 'coo' }); await s.done(); }
+});

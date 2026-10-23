@@ -622,6 +622,17 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     r('GET', '/api/coo/evidence/staging', (req, res) => { requireLocal(req); json(res, 200, evidence.stagingServer(wp)); }),
     r('GET', '/api/coo/evidence/deferred', (req, res) => { requireLocal(req); json(res, 200, deferred.allowlist(wp)); }),
     r('POST', '/api/coo/evidence/deferred', async (req, res) => { requireLocal(req); const body = await readJson(req); json(res, 200, deferred.allow(wp, { case: str(body['case']), storyId: str(body['storyId']), reason: str(body['reason']) }, str(body['by']) || 'coo')); }),
+    r('GET', '/api/coo/evidence/hold', (req, res) => { requireLocal(req); json(res, 200, { hold: evidence.evidenceHold(wp) }); }),
+    r('POST', '/api/coo/evidence/hold', async (req, res) => {
+      requireLocal(req); const body = await readJson(req);
+      const mins = (k: string): number | undefined => (typeof body[k] === 'number' ? (body[k] as number) : undefined);
+      json(res, 200, { hold: evidence.setEvidenceHold(wp, { allMinutes: mins('allMinutes'), serverMinutes: mins('serverMinutes'), by: typeof body['by'] === 'string' && body['by'] ? body['by'] : 'coo', ...(typeof body['note'] === 'string' ? { note: body['note'] } : {}) }) });
+    }),
+    r('POST', '/api/coo/evidence/cancel', async (req, res) => {
+      requireLocal(req); const body = await readJson(req);
+      if (typeof body['why'] !== 'string' || !body['why']) throw new BadRequest('cancel needs {jobId, why}');
+      json(res, 200, evidence.cancelQueued(wp, str(body['jobId']), typeof body['by'] === 'string' && body['by'] ? body['by'] : 'coo', body['why']));
+    }),
     r('POST', '/api/coo/evidence/rescore', async (req, res) => { requireLocal(req); const body = await readJson(req); json(res, 200, await evidence.rescore(wp, str(body['itemId']), str(body['by']) || 'coo', str(body['run']) || undefined)); }),
     r('POST', '/api/coo/evidence/staging', async (req, res) => { requireLocal(req); const body = await readJson(req); json(res, 200, evidence.recordStagingDeploy(wp, str(body['sha']), str(body['by']) || 'coo')); }),
     r('GET', '/api/evidence/:item/:run(?:/(.*))?', (_req, res, _url, [item, run, rest]) => {

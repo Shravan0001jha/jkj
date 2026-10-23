@@ -177,6 +177,8 @@ export interface EvidenceJob {
   delivered?: 'session' | 'item';
   /** The commit changes the server (iris-api, cloud-agent): it deploys to staging, one such run at a time. */
   server?: boolean;
+  /** Dropped from the queue by the COO before it started (a stale twin, or staging reserved): never run, no result. */
+  cancelled?: { by: string; why: string; at: string };
 }
 
 /* ---------- the ports ---------- */
@@ -422,9 +424,63 @@ export function slotHeldOutside(slot: number, dirs: string[] = [process.env['TMP
   return false;
 }
 
+/* ---------- the COO's hold and cancel (23 Oct: the owner's test build kept losing staging to the queue) ---------- */
+
+const HOLD_KEY = 'evidence:hold';
+/** A COO hold on new starts. Runs already going finish; the queue keeps its order and staging stays held. */
+export interface EvidenceHold {
+  /** Epoch ms: no run starts before this (the COO deploys something by hand in the gap). */
+  allUntil?: number;
+  /** Epoch ms: no server-touching run starts before this, so what the COO deployed stays on staging; app-only runs go on. */
+  serverUntil?: number;
+  by: string;
+  note?: string;
+}
+
+export function evidenceHold(wp: Workplace): EvidenceHold | null {
+  const row = wp.db.prepare('select value from settings where key = ?').get(HOLD_KEY) as { value: string } | undefined;
+  if (!row) return null;
+  try { return JSON.parse(row.value) as EvidenceHold; } catch { return null; }
+}
+
+/** Sets (minutes from now; 0 clears that part) and re-pumps when each part ends. */
+export function setEvidenceHold(wp: Workplace, spec: { allMinutes?: number; serverMinutes?: number; by: string; note?: string }): EvidenceHold | null {
+  const at = Date.now();
+  const cur = evidenceHold(wp);
+  const until = (m: number | undefined, prev: number | undefined): number | undefined => (m === undefined ? prev : m > 0 ? at + m * 60_000 : undefined);
+  const next: EvidenceHold = { by: spec.by, ...(spec.note ? { note: spec.note } : {}) };
+  const all = until(spec.allMinutes, cur?.allUntil); if (all && all > at) next.allUntil = all;
+  const server = until(spec.serverMinutes, cur?.serverUntil); if (server && server > at) next.serverUntil = server;
+  if (!next.allUntil && !next.serverUntil) wp.db.prepare('delete from settings where key = ?').run(HOLD_KEY);
+  else wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(HOLD_KEY, JSON.stringify(next));
+  for (const t of [next.allUntil, next.serverUntil]) if (t) setTimeout(() => schedulePump(wp), t - at + 1_000).unref?.();
+  log.info('evidence', `hold by ${spec.by}: all until ${next.allUntil ? new Date(next.allUntil).toISOString() : '-'}, server until ${next.serverUntil ? new Date(next.serverUntil).toISOString() : '-'}${spec.note ? ` (${spec.note})` : ''}`);
+  schedulePump(wp);
+  return next.allUntil || next.serverUntil ? next : null;
+}
+
+/** Drops a queued run (never one in flight); the item gets a note and the caller can ask again. */
+export function cancelQueued(wp: Workplace, jobId: string, by: string, why: string): EvidenceJob {
+  const e = engine(wp);
+  const i = e.queue.indexOf(jobId);
+  const job = e.jobs.get(jobId);
+  if (i < 0 || !job || job.state !== 'queued') throw new BadRequest(`${jobId} is not queued${job ? ` (it is ${job.state})` : ''}; only a queued run can be cancelled`);
+  e.queue.splice(i, 1);
+  const done: EvidenceJob = { ...job, state: 'done', finishedAt: now(), cancelled: { by, why, at: now() } };
+  persist(wp, done);
+  try { trail.comment(wp, job.itemId, { by: 'workplace', text: `Queued evidence run ${jobId} (${job.platforms.join(',')} / ${job.features.join(',')}) was cancelled by ${by}: ${why}` }); } catch { /* item gone */ }
+  log.info('evidence', `${jobId}: cancelled by ${by} (${why})`);
+  keepStagingInUse(wp);
+  return done;
+}
+
 function pump(wp: Workplace): void {
   const e = engine(wp);
   if (e.stopped) { keepStagingInUse(wp); return; }
+  const h = evidenceHold(wp);
+  const t = Date.now();
+  if (h?.allUntil && h.allUntil > t) { keepStagingInUse(wp); return; }
+  const serverHeld = !!(h?.serverUntil && h.serverUntil > t);
   for (let slot = 1; slot <= wp.config.evidence.slots && e.queue.length; slot++) {
     if (e.active.has(slot)) continue;
     // A slot someone runs by hand (scripts/local-run.sh --slot N, outside this queue) holds its lock;
@@ -436,7 +492,8 @@ function pump(wp: Workplace): void {
     let at = -1;
     if (![...e.active.values()].some(a => a.job.server)) {
       for (let i = 0; i < e.queue.length; i++) {
-        if (e.jobs.get(e.queue[i]!)?.server) { if (e.active.size === 0) at = i; break; }
+        // Held server runs keep their place; app-only runs behind them go on against what the COO deployed.
+        if (e.jobs.get(e.queue[i]!)?.server) { if (serverHeld) continue; if (e.active.size === 0) at = i; break; }
         at = i; break;
       }
     }
