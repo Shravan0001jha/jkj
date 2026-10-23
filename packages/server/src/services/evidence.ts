@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import type { EvidenceRunRecord, EvidenceServer, EvidenceState, StagingServerState, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { AppBuilder, EvidenceRunner, Platform, RunnerOutcome, ServerDeployer, Staging, StagingLock } from './evidence-ports.js';
-import { BUILDER_VERSION, BuildError, GitHubRunner, killGroupIfOurs, RealBuilder, RealRunner, RealServerDeployer, RealStaging, RealStagingLock, stagingKnowsEvidenceKey, type LockMemory } from './evidence-ports.js';
+import { BUILDER_VERSION, BuildError, GitHubRunner, killGroupIfOurs, RealBuilder, RealRunner, RealServerDeployer, RealStaging, RealStagingLock, stagingTextKnowsEvidenceKey, trunkTooling, type LockMemory } from './evidence-ports.js';
 import * as work from './work.js';
 import * as trail from './trail.js';
 import * as coo from './coo.js';
@@ -643,7 +643,8 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
     const checkout = checkoutFor(wp, ctx.repo, slot);
     prepareCheckout(ctx.repo, checkout, sha);
     // Evidence yields to a deploy only here, at acquire; once running the refresher never backs off.
-    await p.lock.setNonceAware?.(stagingKnowsEvidenceKey(checkout));
+    // Judged on trunk's staging.sh: the one the in-run deploy will run.
+    await p.lock.setNonceAware?.(stagingTextKnowsEvidenceKey((await trunkTooling(ctx.repo, ctx.trunk).catch(() => ({} as Record<string, string>)))['scripts/staging.sh']));
     await p.lock.acquire?.(Date.now() + LOCK_FOR_MS);
     const stagingUp = p.staging.ensureUp().then(() => null, (err: unknown) => errText(err));
 
@@ -701,7 +702,7 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
           const base = { sha, itemId: job.itemId, run: job.run! };
           setStagingServer(wp, { state: 'deploying', ...base, at: now() });
           try {
-            await p.deployer.deploy({ repo: ctx.repo, checkout, sha, log: join(logs, 'deploy.log'), onSpawn });
+            await p.deployer.deploy({ repo: ctx.repo, checkout, sha, trunk: ctx.trunk, log: join(logs, 'deploy.log'), onSpawn });
           } catch (err) {
             const why = `staging deploy of ${sha.slice(0, 8)} failed: ${errText(err)}`;
             setStagingServer(wp, { state: 'failed', ...base, at: now(), note: why });
