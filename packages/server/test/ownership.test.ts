@@ -143,3 +143,37 @@ test('each lint code fires on the fault it names', () => {
     wp.cleanup();
   }
 });
+
+test('a test file with no entry of its own follows the file it tests, when that file is mapped more specifically', () => {
+  const m: MapEntry[] = [
+    entry('path', 'iris:scripts', 'desktop-mac'),
+    entry('path', 'iris:scripts/check-required-env.sh', 'server'),
+    entry('path', 'iris:scripts/staging.sh', 'server'),
+    entry('path', 'iris:scripts/test_pinned.py', 'qa-release'),
+    entry('path', 'iris:scripts/pinned.sh', 'server'),
+    entry('path', 'iris:scripts/staging-lock-cases.json', 'server'),
+    entry('path', 'iris:scripts/dup.sh', 'a'),
+    entry('path', 'iris:scripts/dup.py', 'b'),
+    entry('path', 'iris:e2e', 'qa-release'),
+    entry('path', 'iris:e2e/scripts/plan.mjs', 'mobile-ios'),
+    entry('path', 'iris:apps/Foo.kt', 'a'),
+    entry('path', 'iris:apps/Bar.swift', 'b'),
+    entry('path', 'iris:apps', 'c'),
+  ];
+  const table: [string, string][] = [
+    ['iris:scripts/test_check_required_env.py', 'server'],
+    ['iris:scripts/test_staging.py', 'server'],
+    ['iris:scripts/test_staging_lock_cases.py', 'server'],
+    ['iris:scripts/test_dup.py', 'desktop-mac'],       // ambiguous: two candidates
+    ['iris:scripts/test_pinned.py', 'qa-release'],   // its own exact entry wins
+    ['iris:scripts/test_nothing.py', 'desktop-mac'],  // no subject: unchanged
+    ['iris:e2e/scripts/plan.test.mjs', 'mobile-ios'],
+    ['iris:e2e/scripts/other.test.mjs', 'qa-release'],
+    ['iris:apps/FooTest.kt', 'a'],
+    ['iris:apps/BarTests.swift', 'b'],
+    ['iris:apps/BazTests.swift', 'c'],
+  ];
+  for (const [path, want] of table) assert.equal(resolve(m, { kind: 'path', key: path })?.primary, want, path);
+  // A subject no more specific than the test's own default changes nothing.
+  assert.equal(resolve([entry('path', 'iris:scripts', 'x')], { kind: 'path', key: 'iris:scripts/test_a.py' })?.primary, 'x');
+});

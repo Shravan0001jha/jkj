@@ -23,6 +23,38 @@ export function normalisePath(key: string): string {
   return key.replace(/\/+$/, '');
 }
 
+const normStem = (n: string): string => n.toLowerCase().replace(/-/g, '_');
+
+/**
+ * The stem a test file tests, or null when it is not a test file (pure). test_<stem>.<ext>, <stem>.test.<ext>,
+ * <Stem>Test.<ext>, <Stem>Tests.<ext>; compared later without case, "-" vs "_" and extension.
+ */
+export function testedStem(file: string): string | null {
+  let m: RegExpExecArray | null;
+  if ((m = /^test_(.+)\.[^.]+$/.exec(file))) return normStem(m[1]!);
+  if ((m = /^(.+)\.test\.[^.]+$/.exec(file))) return normStem(m[1]!);
+  if ((m = /^(.+?)Tests?\.[^.]+$/.exec(file))) return normStem(m[1]!);
+  return null;
+}
+
+/** The one mapped file in the test's own directory that it tests; null when none or more than one (pure). */
+export function subjectOfTest(map: MapEntry[], path: string): MapEntry | null {
+  const i = path.lastIndexOf('/');
+  const dir = path.slice(0, i + 1);
+  const stem = testedStem(path.slice(i + 1));
+  if (!stem) return null;
+  const found = new Map<string, MapEntry>();
+  for (const e of map) {
+    if (e.kind !== 'path') continue;
+    const key = normalisePath(e.key);
+    if (!key.startsWith(dir) || key === path) continue;
+    const name = key.slice(dir.length);
+    if (!name || name.includes('/')) continue;
+    if (normStem(name.replace(/\.[^.]+$/, '')) === stem) found.set(key, e);
+  }
+  return found.size === 1 ? [...found.values()][0]! : null;
+}
+
 export function resolve(
   map: MapEntry[],
   thing: OwnedThing,
@@ -40,6 +72,11 @@ export function resolve(
         if (!best || key.length > normalisePath(best.key).length) best = entry;
       }
     }
+    if (best && normalisePath(best.key) === path) return owner(best);
+    // A test with no entry of its own follows the file it tests, when that file is mapped more specifically than the test's default.
+    const bestLen = best ? normalisePath(best.key).length : -1;
+    const sub = subjectOfTest(map, path);
+    if (sub && normalisePath(sub.key).length > bestLen) return owner(sub);
     return best ? owner(best) : null;
   }
 
