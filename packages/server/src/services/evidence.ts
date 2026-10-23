@@ -425,9 +425,16 @@ function pump(wp: Workplace): void {
     // A slot someone runs by hand (scripts/local-run.sh --slot N, outside this queue) holds its lock;
     // starting there fails in seconds (Mira, 7 Oct: four runs died on Nikhil's manual ios-uitests run).
     if (portsOf(wp).runner instanceof RealRunner && slotHeldOutside(slot)) { setTimeout(() => schedulePump(wp), 30_000).unref?.(); continue; }
-    // The first queued job that may start: a server-touching one waits while another holds staging.
-    const serverBusy = [...e.active.values()].some(a => a.job.server);
-    const at = e.queue.findIndex(id => !(serverBusy && e.jobs.get(id)?.server));
+    // A server-touching job restarts staging's iris-api and cloud-agent, so it runs ALONE: it starts only when nothing else
+    // is active, and nothing starts while it runs. A server job at the queue head also stops later jobs being admitted,
+    // so a stream of app-only jobs cannot starve it; app-only jobs queued before it still go first, in order.
+    let at = -1;
+    if (![...e.active.values()].some(a => a.job.server)) {
+      for (let i = 0; i < e.queue.length; i++) {
+        if (e.jobs.get(e.queue[i]!)?.server) { if (e.active.size === 0) at = i; break; }
+        at = i; break;
+      }
+    }
     if (at < 0) break;
     const job = e.jobs.get(e.queue.splice(at, 1)[0]!);
     if (!job) { slot--; continue; }
