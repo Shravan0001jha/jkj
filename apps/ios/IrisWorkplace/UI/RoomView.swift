@@ -388,7 +388,7 @@ struct RoomMessageRow: View {
         let body = MessageBody(text: message.text, details: message.details, foldLines: Self.foldLines, detailsIsFull: message.truncated == true)
         return HStack(alignment: .top, spacing: 8) {
             if isOwner { Spacer(minLength: 40) }
-            if !isOwner { InitialsAvatar(name: senderName, tint: message.by == "workplace" ? .secondary : .accentColor) }
+            if !isOwner { InitialsAvatar(name: senderName, size: 34, tint: message.by == "workplace" ? .secondary : .accentColor, vivid: message.by != "workplace") }
             VStack(alignment: isOwner ? .trailing : .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(senderName).font(.caption.weight(.semibold)).foregroundStyle(isOwner ? Color.accentColor : .primary)

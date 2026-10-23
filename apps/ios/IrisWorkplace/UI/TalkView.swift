@@ -177,7 +177,7 @@ struct TalkListRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
-                InitialsAvatar(name: card.employee.name, size: 44, tint: card.employee.virtual == true ? .indigo : .accentColor)
+                InitialsAvatar(name: card.employee.name, size: 54, tint: card.employee.virtual == true ? .indigo : .accentColor, vivid: true)
                 PresenceDot(online: online).offset(x: 1, y: 1)
             }
             VStack(alignment: .leading, spacing: 3) {
@@ -218,9 +218,9 @@ struct TalkListRow: View {
 struct DaySeparator: View {
     let text: String
     var body: some View {
-        Text(text).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-            .padding(.horizontal, 10).padding(.vertical, 3)
-            .background(Color(.tertiarySystemFill), in: Capsule())
+        Text(text).font(.caption.weight(.semibold)).foregroundStyle(.primary.opacity(0.8))
+            .padding(.horizontal, 12).padding(.vertical, 4)
+            .background(.ultraThinMaterial, in: Capsule())
             .frame(maxWidth: .infinity).padding(.vertical, 8)
     }
 }

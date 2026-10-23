@@ -411,6 +411,7 @@ struct ChatThreadView<Header: View, Footer: View, Trailing: View>: View {
                     }
                     .padding(.horizontal, 10)
                 }
+                .background(ChatWallpaper())
                 .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: items.count) { _, _ in withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) } }
@@ -454,9 +455,21 @@ struct ChatRowView: View {
         }
     }
 
+    /// Group conversations (a named sender): the sender's avatar sits beside the last bubble of their run.
+    @ViewBuilder private func sideAvatar(mine: Bool) -> some View {
+        if !mine, let s = row.item.sender {
+            Group {
+                if row.groupContinues { Color.clear } else { InitialsAvatar(name: s, size: 32, vivid: true) }
+            }
+            .frame(width: 32, height: 32)
+            .padding(.trailing, 6)
+        }
+    }
+
     private func bubble(mine: Bool, text: String, details: String?) -> some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .bottom, spacing: 0) {
             if mine { Spacer(minLength: 0) }
+            sideAvatar(mine: mine)
             // Trailing-aligned stack: the bubble is as wide as its widest line (never the full
             // 80%), and the time sits at its bottom-right.
             VStack(alignment: .trailing, spacing: 3) {
@@ -482,8 +495,8 @@ struct ChatRowView: View {
                 .font(.caption2).foregroundStyle(mine ? Color.white.opacity(0.75) : Color.secondary)
             }
             .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
-            .background(mine ? Color.accentColor : Color(.secondarySystemBackground),
-                        in: UnevenRoundedRectangle(cornerRadii: corners(mine: mine), style: .continuous))
+            .background(ChatPalette.bubble(mine: mine), in: UnevenRoundedRectangle(cornerRadii: corners(mine: mine), style: .continuous))
+            .shadow(color: .black.opacity(mine ? 0.10 : 0.07), radius: 1.5, x: 0, y: 1)
             .contentShape(.contextMenuPreview, UnevenRoundedRectangle(cornerRadii: corners(mine: mine), style: .continuous))
             // Tap anywhere on a long bubble to unfold it; links inside still open on their own.
             .onTapGesture { if MessageBody(text: text, details: details).isLong { withAnimation(.snappy) { expanded.toggle() } } }
@@ -512,7 +525,9 @@ struct ChatRowView: View {
             Button { if !steps.isEmpty { withAnimation(.snappy) { showSteps.toggle() } } } label: {
                 HStack(spacing: 6) {
                     Rectangle().fill(Color(.separator)).frame(height: 0.5)
-                    Text(text).font(.caption2).foregroundStyle(error ? Color.red : Color.secondary).lineLimit(1).layoutPriority(1)
+                    Text(text).font(.caption2.weight(.medium)).foregroundStyle(error ? Color.red : Color.secondary).lineLimit(1).layoutPriority(1)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(.ultraThinMaterial, in: Capsule())
                     if !steps.isEmpty { Image(systemName: showSteps ? "chevron.up" : "chevron.down").font(.system(size: 8)).foregroundStyle(.tertiary) }
                     Rectangle().fill(Color(.separator)).frame(height: 0.5)
                 }
@@ -548,7 +563,8 @@ struct TypingBubble: View {
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 11)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(ChatPalette.bubble(mine: false), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: .black.opacity(0.07), radius: 1.5, x: 0, y: 1)
             Spacer(minLength: 0)
         }
         .onReceive(timer) { _ in phase = (phase + 1) % 3 }
@@ -688,7 +704,7 @@ struct ChatTitle: View {
     var body: some View {
         HStack(spacing: 8) {
             ZStack(alignment: .bottomTrailing) {
-                InitialsAvatar(name: name, size: 32, tint: tint)
+                InitialsAvatar(name: name, size: 38, tint: tint, vivid: true)
                 PresenceDot(online: online).offset(x: 1, y: 1)
             }
             VStack(alignment: .leading, spacing: 0) {
@@ -698,5 +714,56 @@ struct ChatTitle: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("chat.title")
+    }
+}
+
+
+// MARK: - Look (owner, 23 Oct: "Telegram looks sleek")
+
+/// Bubble fills: the owner's in an accent gradient, everyone else's a crisp card that reads on the wallpaper.
+enum ChatPalette {
+    static func bubble(mine: Bool) -> AnyShapeStyle {
+        if mine {
+            return AnyShapeStyle(LinearGradient(colors: [Color.accentColor.opacity(0.92), Color.accentColor],
+                                                startPoint: .top, endPoint: .bottom))
+        }
+        return AnyShapeStyle(Color(uiColor: UIColor { $0.userInterfaceStyle == .dark
+            ? UIColor(white: 0.17, alpha: 1) : UIColor.white }))
+    }
+}
+
+/// The chat background: a soft gradient with a faint pattern of small symbols, like Telegram's
+/// wallpapers. Light and dark versions; drawn once with Canvas, so it costs nothing while scrolling.
+struct ChatWallpaper: View {
+    @Environment(\.colorScheme) private var scheme
+    private static let symbols = ["bubble.left", "sparkles", "star", "paperplane", "heart", "bolt", "leaf", "moon", "cloud", "music.note"]
+
+    var body: some View {
+        let dark = scheme == .dark
+        ZStack {
+            LinearGradient(colors: dark
+                           ? [Color(red: 0.07, green: 0.10, blue: 0.16), Color(red: 0.05, green: 0.13, blue: 0.15)]
+                           : [Color(red: 0.84, green: 0.90, blue: 0.80), Color(red: 0.74, green: 0.86, blue: 0.84)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Canvas { ctx, size in
+                let step: CGFloat = 58
+                var row = 0
+                var y: CGFloat = 12
+                while y < size.height + step {
+                    var x: CGFloat = row.isMultiple(of: 2) ? 10 : 10 + step / 2
+                    var col = 0
+                    while x < size.width + step {
+                        let name = Self.symbols[(row * 3 + col) % Self.symbols.count]
+                        var sym = ctx.resolve(Image(systemName: name))
+                        sym.shading = .color(dark ? .white.opacity(0.06) : .black.opacity(0.06))
+                        ctx.draw(sym, in: CGRect(x: x, y: y, width: 18, height: 18))
+                        x += step; col += 1
+                    }
+                    y += step * 0.8; row += 1
+                }
+            }
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
     }
 }

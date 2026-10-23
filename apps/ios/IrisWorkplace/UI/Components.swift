@@ -27,6 +27,9 @@ struct InitialsAvatar: View {
     let name: String
     var size: CGFloat = 26
     var tint: Color = .accentColor
+    /// Telegram-style: a bright gradient picked from the name (stable per person) with white initials.
+    /// Chat surfaces use it; the rest of the app keeps the quiet tinted circle.
+    var vivid: Bool = false
 
     private var initials: String {
         let parts = name.split(separator: " ")
@@ -35,12 +38,41 @@ struct InitialsAvatar: View {
     }
 
     var body: some View {
-        Circle()
-            .fill(tint.opacity(0.18))
-            .overlay(Text(initials).font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(tint))
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
+        if vivid {
+            let (top, bottom) = AvatarPalette.colors(for: name)
+            Circle()
+                .fill(LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom))
+                .overlay(Text(initials).font(.system(size: size * 0.4, weight: .semibold, design: .rounded)).foregroundStyle(.white))
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        } else {
+            Circle()
+                .fill(tint.opacity(0.18))
+                .overlay(Text(initials).font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(tint))
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        }
     }
+}
+
+/// Seven Telegram-like avatar gradients; a name always maps to the same one.
+enum AvatarPalette {
+    static let pairs: [(Color, Color)] = [
+        (Color(red: 1.00, green: 0.53, blue: 0.37), Color(red: 0.95, green: 0.33, blue: 0.29)),   // red
+        (Color(red: 1.00, green: 0.73, blue: 0.33), Color(red: 0.96, green: 0.56, blue: 0.21)),   // orange
+        (Color(red: 0.73, green: 0.55, blue: 1.00), Color(red: 0.55, green: 0.38, blue: 0.93)),   // violet
+        (Color(red: 0.55, green: 0.85, blue: 0.40), Color(red: 0.33, green: 0.70, blue: 0.27)),   // green
+        (Color(red: 0.42, green: 0.85, blue: 0.90), Color(red: 0.22, green: 0.69, blue: 0.80)),   // cyan
+        (Color(red: 0.45, green: 0.70, blue: 1.00), Color(red: 0.27, green: 0.52, blue: 0.93)),   // blue
+        (Color(red: 1.00, green: 0.55, blue: 0.75), Color(red: 0.93, green: 0.35, blue: 0.58)),   // pink
+    ]
+    /// Stable across launches (no Swift `hashValue`, which is seeded per run).
+    static func index(for name: String) -> Int {
+        var h: UInt32 = 2166136261
+        for b in name.lowercased().utf8 { h = (h ^ UInt32(b)) &* 16777619 }
+        return Int(h % UInt32(pairs.count))
+    }
+    static func colors(for name: String) -> (Color, Color) { pairs[index(for: name)] }
 }
 
 /// Online (filled) / offline (hollow) — shape as well as colour, like every other state in this app.
