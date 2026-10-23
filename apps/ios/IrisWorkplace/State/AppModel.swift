@@ -116,6 +116,8 @@ final class AppModel {
     private let offlineProbeInterval: TimeInterval
     private let pathMonitor: PathMonitoring?
     let deviceAuth: DeviceAuth
+    /// The phone's copy of the main lists (DiskCache): shown at connect, refreshed by `loadAll()`.
+    let cache: DiskCache?
     private var connectTask: Task<Void, Never>?
     private var offlineTask: Task<Void, Never>?
 
@@ -138,7 +140,8 @@ final class AppModel {
          env: [String: String] = ProcessInfo.processInfo.environment,
          offlineProbeInterval: TimeInterval = 15,
          pathMonitor: PathMonitoring? = NetworkMonitor(),
-         deviceAuth: DeviceAuth = LocalDeviceAuth()) {
+         deviceAuth: DeviceAuth = LocalDeviceAuth(),
+         cache: DiskCache? = nil) {
         self.relayTokens = relayTokens
         self.lanTokens = lanTokens
         self.defaults = defaults
@@ -151,6 +154,11 @@ final class AppModel {
         self.offlineProbeInterval = offlineProbeInterval
         self.pathMonitor = pathMonitor
         self.deviceAuth = deviceAuth
+        self.cache = cache
+        office.cache = cache
+        inbox.cache = cache
+        plan.cache = cache
+        rooms.cache = cache
         pathMonitor?.onChange = { [weak self] satisfied in self?.networkChanged(satisfied: satisfied) }
         pathMonitor?.start()
         alerts.suppressLocal = { [weak self] in self?.pushRegistered ?? false }
@@ -325,6 +333,7 @@ final class AppModel {
         }
         pushRegistered = false
         stopConnections()
+        cache?.clearAll()   // nothing from this session stays on the phone
         relayTokens.clear()
         syncCredential()
         health = nil
@@ -429,6 +438,9 @@ final class AppModel {
         connection = .connecting
         let rest = RestClient(config: config, tokens: tokens, session: urlSession)
         self.rest = rest
+        // Stale-while-revalidate: the last good lists show now, before the health probe and the
+        // loads below make their round trips through the relay; `loadAll()` replaces them.
+        hydrateFromCache()
         let socket = SocketClient(socketURL: config.socketURL, token: token, makeTransport: makeTransport)
         socket.onEvent = { [weak self] e in self?.handle(e) }
         socket.onState = { [weak self] s in self?.socketState(s) }
@@ -486,6 +498,16 @@ final class AppModel {
                 if case .unauthorized = self.connection { return }
             }
         }
+    }
+
+    /// Fill the list stores from this Workplace's cached copy (only stores that are still empty).
+    func hydrateFromCache() {
+        guard let cache else { return }
+        cache.setScope(config)
+        office.hydrate()
+        inbox.hydrate()
+        plan.hydrate()
+        rooms.hydrate()
     }
 
     func loadAll() async {

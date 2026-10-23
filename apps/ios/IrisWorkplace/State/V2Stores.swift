@@ -16,6 +16,17 @@ final class PlanStore {
     private(set) var loaded = false
     /// A story or task moved: its epic's progress and flags are now stale. The app reloads.
     var onStale: (() -> Void)?
+    /// The phone's last good copy (DiskCache); nil in tests that do not want one.
+    var cache: DiskCache?
+    /// True while `plan` is the cached copy and the fresh load has not landed yet.
+    private(set) var fromCache = false
+
+    /// Show the cached Plan at once; the fresh load replaces it.
+    func hydrate() {
+        guard plan == nil, let cached = cache?.load(PlanResponse.self, key: .plan) else { return }
+        plan = cached
+        fromCache = true
+    }
 
     func load(_ rest: RestClient) async {
         loading = true
@@ -24,6 +35,8 @@ final class PlanStore {
             plan = try await rest.plan()
             error = nil
             loaded = true
+            fromCache = false
+            if let plan { cache?.save(plan, as: .plan) }
         } catch {
             if let m = error.userMessage { self.error = m }
         }
@@ -285,12 +298,24 @@ final class RoomsStore {
     private(set) var details: [String: RoomDetail] = [:]
     private(set) var error: String?
     private(set) var loaded = false
+    /// The phone's last good copy of the room LIST (not any room's messages); nil in tests.
+    var cache: DiskCache?
+    private(set) var fromCache = false
+
+    /// Show the cached room list at once; the fresh load replaces it.
+    func hydrate() {
+        guard rooms.isEmpty, let cached = cache?.load([Room].self, key: .rooms) else { return }
+        rooms = cached
+        fromCache = true
+    }
 
     func load(_ rest: RestClient) async {
         do {
             rooms = try await rest.rooms()
             error = nil
             loaded = true
+            fromCache = false
+            cache?.save(rooms, as: .rooms)
         } catch {
             if let m = error.userMessage { self.error = m }
         }

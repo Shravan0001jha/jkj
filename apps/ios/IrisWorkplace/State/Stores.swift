@@ -13,6 +13,17 @@ final class OfficeStore {
     private(set) var error: String?
     private(set) var loading = false
     private(set) var loadedAt: Date?
+    /// The phone's last good copy (DiskCache); nil in tests that do not want one.
+    var cache: DiskCache?
+    /// True while `data` is the cached copy and the fresh load has not landed yet.
+    private(set) var fromCache = false
+
+    /// Show the cached Office at once; the fresh load replaces it.
+    func hydrate() {
+        guard data == nil, let cached = cache?.load(OfficeResponse.self, key: .office) else { return }
+        data = cached
+        fromCache = true
+    }
 
     func load(_ rest: RestClient) async {
         loading = true
@@ -21,6 +32,8 @@ final class OfficeStore {
             data = try await rest.office()
             error = nil
             loadedAt = Date()
+            fromCache = false
+            if let data { cache?.save(data, as: .office) }
         } catch {
             if let m = error.userMessage { self.error = m }
         }
@@ -91,6 +104,18 @@ final class InboxStore {
 
     var open: [InboxItem] { items.filter { $0.state == .open } }
     var closed: [InboxItem] { items.filter { $0.state != .open } }
+    /// The phone's last good copy (DiskCache); nil in tests that do not want one.
+    var cache: DiskCache?
+    /// True while `items` is the cached copy. `loaded` stays false until the server answers, so
+    /// screens that load when `!loaded` still fetch, and housekeeping never runs on a cached list.
+    private(set) var fromCache = false
+
+    /// Show the cached Inbox at once; the fresh load replaces it.
+    func hydrate() {
+        guard items.isEmpty, let cached = cache?.load([InboxItem].self, key: .inbox) else { return }
+        items = Self.sorted(cached)
+        fromCache = true
+    }
 
     func load(_ rest: RestClient) async {
         loading = true
@@ -99,6 +124,8 @@ final class InboxStore {
             items = Self.sorted(try await rest.inbox())
             error = nil
             loaded = true
+            fromCache = false
+            cache?.save(items, as: .inbox)
         } catch {
             if let m = error.userMessage { self.error = m }
         }
