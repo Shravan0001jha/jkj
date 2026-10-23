@@ -206,7 +206,18 @@ export class RealStagingLock implements StagingLock {
     const holder = liveEpoch(d, now) ? 'deploy' : liveEpoch(o, now) ? 'old' : null;
     if (holder) { await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined); throw new StagingBusyError(holder); }
     // Nobody else holds staging: confirm (extend to the full TTL). From here on this run is established and never yields.
-    await this.ssm.put(STAGING_LOCK_PARAM, String(until));
+    // ORDER MATTERS: promote p:<epoch> -> bare <epoch> and read it back BEFORE the run starts any work (acquire() resolves
+    // only after this). Starting first would advertise a live suite as provisional, and a deploy may legitimately stomp a
+    // provisional hold. A failed or mis-read promotion deletes our key and the run does not start.
+    const bare = String(until);
+    try {
+      await this.ssm.put(STAGING_LOCK_PARAM, bare);
+      const back = await this.ssm.get(STAGING_LOCK_PARAM);
+      if (back !== bare) throw new Error(`read back ${back === null ? 'nothing' : JSON.stringify(back)}`);
+    } catch (err) {
+      await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined);
+      throw new Error(`staging lock not confirmed, run not started: ${String(err).split('\n')[0]!.slice(0, 200)}`);
+    }
     this.held = true;
   }
 

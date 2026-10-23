@@ -161,3 +161,24 @@ test('race x50: two evidence starters and a deploy starter from a standing start
     assert.equal(ssm.m.has(STAGING_LOCK_PARAM) || ssm.m.has(DEPLOY_LOCK_PARAM), false, 'all keys cleaned');
   }
 });
+
+test('order: promote -> confirm (read back) -> acquire resolves; a failed or mis-read promote never starts and leaves no key', async () => {
+  const ssm = new FakeSsm();
+  const lock = mk(ssm);
+  const order: string[] = [];
+  const bare = String(Math.floor(UNTIL / 1000));
+  await lock.acquire(UNTIL).then(() => order.push('start'));
+  assert.deepEqual(ssm.log.filter(l => l.includes(STAGING_LOCK_PARAM)), [`create ${STAGING_LOCK_PARAM}`, `put ${STAGING_LOCK_PARAM}`], 'create (p:), then promote');
+  assert.equal(ssm.m.get(STAGING_LOCK_PARAM), bare);
+  assert.deepEqual(order, ['start']);
+
+  for (const mode of ['put-fails', 'reads-back-wrong']) {
+    const s = new FakeSsm();
+    if (mode === 'put-fails') s.put = async () => { throw new Error('boom'); };
+    else { const g = s.get.bind(s); s.get = async n => (n === STAGING_LOCK_PARAM && s.m.get(n) === bare ? 'p:' + bare : g(n)); }
+    let started = false;
+    await assert.rejects(mk(s).acquire(UNTIL).then(() => { started = true; }), /not confirmed, run not started/, mode);
+    assert.equal(started, false);
+    assert.equal(s.m.has(STAGING_LOCK_PARAM), false, `${mode}: own key deleted`);
+  }
+});
