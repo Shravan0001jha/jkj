@@ -86,6 +86,8 @@ export interface ServerDeployRequest {
   /** The checkout, at `sha`. */
   checkout: string;
   sha: string;
+  /** The trunk branch whose deploy tooling is used (default TRUNK_BRANCH). */
+  trunk?: string;
   log: string;
   onSpawn?: (pid: number) => void;
 }
@@ -360,9 +362,74 @@ export const BUILDER_VERSION = 'b1';
 const ENV_ALLOW = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TERM',
   'AWS_PROFILE', 'AWS_REGION', 'AWS_DEFAULT_REGION', 'AWS_CONFIG_FILE', 'AWS_SHARED_CREDENTIALS_FILE', 'JAVA_HOME'];
 
-/** Does this checkout's scripts/staging.sh know the evidence key (#543)? */
-export function stagingKnowsEvidenceKey(checkout: string): boolean {
-  try { return readFileSync(join(checkout, 'scripts', 'staging.sh'), 'utf8').includes('STAGING_DEPLOY_FOR_EVIDENCE'); } catch { return false; }
+/** Does this staging.sh text know the evidence key (#543)? */
+export const stagingTextKnowsEvidenceKey = (text: string | undefined): boolean => !!text && text.includes('STAGING_DEPLOY_FOR_EVIDENCE');
+
+export const TRUNK_BRANCH = 'feat/iris-character';
+
+/**
+ * DEPLOY TOOLING: the files a staging deploy needs from TRUNK, not from the story (23 Oct, the a3172431 deadlock: a story
+ * cut before a tooling change carried the old lock logic). They are overlaid from origin/<trunk> over the story checkout
+ * for the deploy and restored after, together, so trunk's staging.sh never runs against the story's helpers.
+ * A trailing "/" means every file in that directory.
+ */
+export const DEPLOY_TOOLING_PATHS: readonly string[] = [
+  'scripts/staging.sh',                // the lock (two keys), ssh refcount, flock, DNS and waits: the thing that deadlocked
+  'scripts/deploy-target.sh',          // sourced by deploy-api/agent: picks the box (STAGING_HOST) = where the deploy goes
+  'scripts/check-required-env.sh',     // sourced by deploy-api/agent: the env gate, part of the deploy procedure
+  'scripts/env-required/',             // the manifests (production.names, staging.names) that gate reads
+  'scripts/staging-lock-cases.json',   // the lock contract staging.sh and its tests are written against
+];
+/** PAYLOAD: what ships; always the story's own. Listed so a new scripts/ dependency of staging.sh must be classified. */
+export const DEPLOY_PAYLOAD_PATHS: readonly string[] = ['scripts/deploy-api.sh', 'scripts/deploy-agent.sh'];
+
+/** The `scripts/...` files a shell script text refers to outside comment lines (sourced, run or read). */
+export function scriptsReferenced(text: string): string[] {
+  const out = new Set<string>();
+  for (const line of text.split('\n')) {
+    if (/^\s*#/.test(line)) continue;
+    for (const m of line.matchAll(/(?:^|[\s"'=(])\.?\/?(scripts\/[A-Za-z0-9_.\/-]*[A-Za-z0-9_])/g)) out.add(m[1]!);
+  }
+  return [...out].sort();
+}
+/** Is `path` covered by DEPLOY_TOOLING_PATHS or DEPLOY_PAYLOAD_PATHS? */
+export const classifyDeployPath = (path: string): 'tooling' | 'payload' | null =>
+  DEPLOY_TOOLING_PATHS.some(t => t.endsWith('/') ? path.startsWith(t) : path === t) ? 'tooling' : DEPLOY_PAYLOAD_PATHS.includes(path) ? 'payload' : null;
+
+/** Fetch, then read DEPLOY_TOOLING_PATHS from origin/<trunk>: path -> content. A path trunk lacks is left out. Throws without staging.sh. */
+export async function trunkTooling(repo: string, trunk: string = TRUNK_BRANCH): Promise<Record<string, string>> {
+  const git = (args: string[]): Promise<string> => new Promise((resolve, reject) =>
+    execFile('git', ['-C', repo, ...args], { timeout: 60_000, maxBuffer: 8 << 20 }, (err, out) => err ? reject(err) : resolve(String(out))));
+  await git(['fetch', '--quiet', 'origin', trunk]).catch(err => log.warn('evidence', `git fetch origin ${trunk} failed, using the last fetched trunk: ${String(err).split('\n')[0]}`));
+  const ref = `origin/${trunk}`;
+  const files: string[] = [];
+  for (const t of DEPLOY_TOOLING_PATHS) {
+    if (t.endsWith('/')) files.push(...(await git(['ls-tree', '-r', '--name-only', ref, '--', t]).catch(() => '')).split('\n').filter(Boolean));
+    else files.push(t);
+  }
+  const out: Record<string, string> = {};
+  for (const f of files) { try { out[f] = await git(['show', `${ref}:${f}`]); } catch { /* absent on trunk */ } }
+  if (out['scripts/staging.sh'] === undefined) throw new Error(`no scripts/staging.sh on ${ref}`);
+  return out;
+}
+
+/** Overlays `files` over `checkout`; the returned function puts every file back exactly as it was (absent stays absent). */
+function overlay(checkout: string, files: Record<string, string>): () => void {
+  const saved: Array<{ abs: string; prior: Buffer | null }> = [];
+  const restore = (): void => {
+    for (const { abs, prior } of saved.reverse()) { try { if (prior === null) rmSync(abs, { force: true }); else writeFileSync(abs, prior); } catch (err) { log.warn('evidence', `could not restore ${abs}: ${String(err)}`); } }
+  };
+  try {
+    for (const [rel, content] of Object.entries(files)) {
+      const abs = join(checkout, rel);
+      let prior: Buffer | null = null;
+      try { prior = readFileSync(abs); } catch { /* absent */ }
+      saved.push({ abs, prior });
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, content, { mode: 0o755 });
+    }
+  } catch (err) { restore(); throw err; }
+  return restore;
 }
 
 export function childEnvFor(extra: Record<string, string>, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
@@ -774,20 +841,30 @@ export class RealServerDeployer implements ServerDeployer {
    * `evidenceKeyValue` gives the nonce of the in-use-evidence value while this process holds it. The deploy runs INSIDE
    * the evidence run, whose own established key would otherwise make staging.sh wait forever: the nonce (only) is passed as
    * STAGING_DEPLOY_FOR_EVIDENCE and staging.sh skips waiting on the evidence key only when its nonce matches.
+   * `tooling` reads trunk's DEPLOY_TOOLING_PATHS. The server-owned checkout is overlaid in place (staging.sh does
+   * `cd "$(dirname "$0")/.."`, so it must live in the checkout's scripts/) and restored in a finally.
    */
-  constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 25 * 60_000, private readonly evidenceKeyValue: () => Promise<string | null> = async () => null, private readonly around?: <T>(fn: () => Promise<T>) => Promise<T>) {}
+  constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 25 * 60_000, private readonly evidenceKeyValue: () => Promise<string | null> = async () => null, private readonly around?: <T>(fn: () => Promise<T>) => Promise<T>, private readonly tooling: (repo: string, trunk: string) => Promise<Record<string, string>> = trunkTooling) {}
 
   async deploy(r: ServerDeployRequest): Promise<void> {
     const script = join(r.checkout, 'scripts', 'staging.sh');
-    if (!existsSync(script)) throw new Error(`there is no scripts/staging.sh at ${r.sha.slice(0, 8)} to deploy with`);
+    let files: Record<string, string>;
+    try { files = await this.tooling(r.repo, r.trunk ?? TRUNK_BRANCH); }
+    catch (err) { throw new Error(`cannot read trunk's scripts/staging.sh to deploy ${r.sha.slice(0, 8)} with: ${String(err).split('\n')[0]!.slice(0, 200)}`); }
     // deploy-api.sh and deploy-agent.sh run their tests with ../../.venv first.
     linkUntracked(r.repo, r.checkout);
     const held = await this.evidenceKeyValue().catch(() => null);
     const env = childEnvFor({ STAGING_HOST: new URL(this.cfg.stagingUrl).host, ...(held ? { STAGING_DEPLOY_FOR_EVIDENCE: held } : {}) });
-    // Until the checkout's staging.sh knows STAGING_DEPLOY_FOR_EVIDENCE, release the legacy key around the deploy (see RealStagingLock).
-    const aware = stagingKnowsEvidenceKey(r.checkout);
+    // Judged on the staging.sh that RUNS (trunk's): until it knows STAGING_DEPLOY_FOR_EVIDENCE, release the legacy key around the deploy (see RealStagingLock).
+    const aware = stagingTextKnowsEvidenceKey(files['scripts/staging.sh']);
     const run = (): ReturnType<typeof runLogged> => runLogged('bash', [script, 'deploy'], { cwd: r.checkout, env, logFile: r.log, timeoutMs: this.timeoutMs, ...(r.onSpawn ? { onSpawn: r.onSpawn } : {}) });
-    const ran = aware || !this.around ? await run() : await this.around(run);
+    mkdirSync(dirname(r.log), { recursive: true });
+    const sha = (t: string): string => createHash('sha256').update(t).digest('hex').slice(0, 12);
+    appendFileSync(r.log, `\ndeploy tooling from trunk: staging.sh sha256 ${sha(files['scripts/staging.sh']!)}; ${Object.keys(files).map(f => `${f}=${sha(files[f]!)}`).join(' ')} (story's own deploy-api.sh/deploy-agent.sh and services ship)\n`);
+    const restore = overlay(r.checkout, files);
+    let ran: Awaited<ReturnType<typeof run>>;
+    try { ran = aware || !this.around ? await run() : await this.around(run); }
+    finally { restore(); }
     if (ran.code !== 0) {
       const lines = ran.tail.split('\n').map(l => l.trim()).filter(Boolean);
       const why = [...lines].reverse().find(l => /❌|error|fail|refus|not running/i.test(l)) ?? lines.at(-1) ?? '';
