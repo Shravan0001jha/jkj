@@ -1,5 +1,5 @@
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { GitHubPort } from './github-port.js';
@@ -159,16 +159,18 @@ export interface LockBounds { tries: number; baseMs: number; jitterMs: number; s
 export const DEFAULT_LOCK_BOUNDS: LockBounds = { tries: 6, baseMs: 30_000, jitterMs: 60_000, sleep: ms => new Promise(r => setTimeout(r, ms)), now: () => Date.now() };
 
 /**
- * Value format of the evidence key: `p:<epoch s>` when created (provisional, before the other keys are checked), the bare
- * `<epoch s>` once the check passed and the run starts (established); refresh writes bare epochs only. Readers treat a
- * value that parses as neither as established (fail-safe toward waiting).
+ * Value format of the evidence key: `p:<epoch s>:<nonce>` when created (provisional, before the other keys are checked),
+ * `<epoch s>:<nonce>` once the check passed and the run starts (established); refresh rewrites `<new epoch>:<same nonce>`.
+ * The nonce (16 hex chars, random, once per run) identifies the holder to the in-run deploy. Deploy and legacy keys stay
+ * bare epochs. Anything matching none of the shapes reads as established (fail-safe toward waiting).
  */
 export const PROVISIONAL_PREFIX = 'p:';
+export const newNonce = (): string => randomBytes(8).toString('hex');
 
 /** Expiry epoch (s) of a lock value if still live; unparseable counts as live (established). 0 = free or expired. */
 const liveEpoch = (v: string | null, nowMs: number): number => {
   if (v === null) return 0;
-  const m = /^(?:p:)?(\d+)$/.exec(v.trim());
+  const m = /^(?:p:)?(\d+)(?::[0-9a-f]+)?$/.exec(v.trim());
   if (!m) return Number.MAX_SAFE_INTEGER;
   const n = Number(m[1]);
   return n * 1000 > nowMs ? n : 0;
@@ -176,6 +178,7 @@ const liveEpoch = (v: string | null, nowMs: number): number => {
 
 export class RealStagingLock implements StagingLock {
   private held = false;
+  private nonce = '';
   private inflight: Promise<void> | null = null;
   constructor(
     private readonly cfg: EvidenceConfig,
@@ -194,7 +197,8 @@ export class RealStagingLock implements StagingLock {
   /** One attempt: create own key, then look at the deploy and old keys; yield (delete own) to either. */
   private async tryOnce(until: number): Promise<void> {
     const now = this.bounds.now();
-    const prov = PROVISIONAL_PREFIX + until;
+    const nonce = this.held ? this.nonce : newNonce();
+    const prov = `${PROVISIONAL_PREFIX}${until}:${nonce}`;
     if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, prov))) {
       const cur = await this.ssm.get(STAGING_LOCK_PARAM);
       if (cur !== null && liveEpoch(cur, now)) throw new StagingBusyError('evidence');
@@ -209,7 +213,7 @@ export class RealStagingLock implements StagingLock {
     // ORDER MATTERS: promote p:<epoch> -> bare <epoch> and read it back BEFORE the run starts any work (acquire() resolves
     // only after this). Starting first would advertise a live suite as provisional, and a deploy may legitimately stomp a
     // provisional hold. A failed or mis-read promotion deletes our key and the run does not start.
-    const bare = String(until);
+    const bare = `${until}:${nonce}`;
     try {
       await this.ssm.put(STAGING_LOCK_PARAM, bare);
       const back = await this.ssm.get(STAGING_LOCK_PARAM);
@@ -218,6 +222,7 @@ export class RealStagingLock implements StagingLock {
       await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined);
       throw new Error(`staging lock not confirmed, run not started: ${String(err).split('\n')[0]!.slice(0, 200)}`);
     }
+    this.nonce = nonce;
     this.held = true;
   }
 
@@ -244,7 +249,7 @@ export class RealStagingLock implements StagingLock {
 
   /** Refresh NEVER yields: it only extends our own key, whatever the deploy key says (evidence beats deploy once running). */
   private async refresh(untilMs: number): Promise<void> {
-    await this.ssm.put(STAGING_LOCK_PARAM, String(Math.floor(untilMs / 1000)));
+    await this.ssm.put(STAGING_LOCK_PARAM, `${Math.floor(untilMs / 1000)}:${this.nonce}`);
   }
 
   async hold(untilMs: number): Promise<void> {
@@ -260,10 +265,8 @@ export class RealStagingLock implements StagingLock {
     }
   }
 
-  /** The exact current value of our own key while held (for the in-run deploy), else null. */
-  async currentValue(): Promise<string | null> {
-    return this.held ? this.ssm.get(STAGING_LOCK_PARAM) : null;
-  }
+  /** The run's nonce while the evidence key is held (for the in-run deploy), else null. */
+  currentNonce(): string | null { return this.held ? this.nonce : null; }
 
   async release(): Promise<void> {
     this.held = false;
@@ -662,9 +665,9 @@ export class RealStaging implements Staging {
  */
 export class RealServerDeployer implements ServerDeployer {
   /**
-   * `evidenceKeyValue` gives the exact current value of in-use-evidence while this process holds it. The deploy runs INSIDE
-   * the evidence run, whose own established key would otherwise make staging.sh wait forever: it is passed as
-   * STAGING_DEPLOY_FOR_EVIDENCE and staging.sh skips waiting on the evidence key only when it equals that value.
+   * `evidenceKeyValue` gives the nonce of the in-use-evidence value while this process holds it. The deploy runs INSIDE
+   * the evidence run, whose own established key would otherwise make staging.sh wait forever: the nonce (only) is passed as
+   * STAGING_DEPLOY_FOR_EVIDENCE and staging.sh skips waiting on the evidence key only when its nonce matches.
    */
   constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 25 * 60_000, private readonly evidenceKeyValue: () => Promise<string | null> = async () => null) {}
 

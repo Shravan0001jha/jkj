@@ -38,7 +38,7 @@ const row = (n: string): Row => { const r = table.cases.find(c => c.name === n);
 const SETUP: Record<string, (ssm: FakeSsm) => void> = {
   both_free: () => undefined,
   deploy_held: ssm => { ssm.m.set(keyName.deploy, sec(600)); },
-  evidence_established: ssm => { ssm.m.set(keyName.evidence, sec(1500)); },
+  evidence_established: ssm => { ssm.m.set(keyName.evidence, sec(1500) + ':aaaaaaaaaaaaaaaa'); },
   old_key_held: ssm => { ssm.m.set(keyName.old, sec(600)); },
   holder_expired: ssm => { ssm.m.set(keyName.deploy, sec(-600)); ssm.m.set(keyName.old, sec(-600)); },
   // deploy arrives in the instant between evidence's provisional create and its confirm check
@@ -54,7 +54,7 @@ for (const name of ['both_free', 'deploy_held', 'evidence_established', 'conflic
     const lock = mk(ssm, bounds({ tries: 1 }));
     if (ev.acquires) {
       await lock.acquire(UNTIL);
-      assert.equal(ssm.m.get(STAGING_LOCK_PARAM), String(Math.floor(UNTIL / 1000)), 'established at the full TTL');
+      assert.match(ssm.m.get(STAGING_LOCK_PARAM)!, new RegExp(`^${Math.floor(UNTIL / 1000)}:[0-9a-f]{16}$`), 'established at the full TTL, with the run nonce');
     } else {
       await assert.rejects(lock.acquire(UNTIL), StagingBusyError);
       if (ev.action === 'back_off_and_retry') assert.equal(ssm.m.has(STAGING_LOCK_PARAM), false, 'own key deleted on back-off');
@@ -76,16 +76,18 @@ test('value format: provisional p:<epoch> before the check, bare epoch once runn
   ssm.get = async n => { if (n === DEPLOY_LOCK_PARAM) seen.push(ssm.m.get(STAGING_LOCK_PARAM) ?? ''); return g(n); };
   const lock = mk(ssm);
   await lock.acquire(UNTIL);
-  const bare = String(Math.floor(UNTIL / 1000));
+  const nonce = lock.currentNonce()!;
+  const bare = `${Math.floor(UNTIL / 1000)}:${nonce}`;
+  assert.match(nonce, /^[0-9a-f]{16}$/);
   assert.deepEqual(seen, [PROVISIONAL_PREFIX + bare], 'provisional while the others are checked');
   assert.equal(ssm.m.get(STAGING_LOCK_PARAM), bare, 'established after');
   await lock.hold(UNTIL + 1000).catch(() => undefined);
-  assert.equal(ssm.m.get(STAGING_LOCK_PARAM), String(Math.floor((UNTIL + 1000) / 1000)));
-  for (const v of ['garbage', 'p:', '12x']) {
+  assert.equal(ssm.m.get(STAGING_LOCK_PARAM), `${Math.floor((UNTIL + 1000) / 1000)}:${lock.currentNonce()}`, 'refresh rewrites new expiry, same nonce');
+  for (const v of ['garbage', 'p:', '12x', '12:XYZ', 'p:12:']) {
     const s2 = new FakeSsm(); s2.m.set(DEPLOY_LOCK_PARAM, v);
     await assert.rejects(mk(s2, bounds({ tries: 1 })).acquire(UNTIL), StagingBusyError, `${v} treated as held`);
   }
-  const s3 = new FakeSsm(); s3.m.set(STAGING_LOCK_PARAM, 'p:' + sec(600));
+  const s3 = new FakeSsm(); s3.m.set(STAGING_LOCK_PARAM, 'p:' + sec(600) + ':abcd1234abcd1234');
   await assert.rejects(mk(s3, bounds({ tries: 1 })).acquire(UNTIL), /another evidence run/, 'a live provisional evidence key is held too');
 });
 
@@ -112,10 +114,10 @@ test('conflict during refresh: a deploy key appearing mid-run never makes eviden
   ssm.m.set(DEPLOY_LOCK_PARAM, sec(900));
   ssm.log.length = 0;
   await lock.hold(UNTIL + 600_000).catch(() => undefined); // the touch of an unreachable staging may fail; the key is what counts
-  assert.equal(ssm.m.get(STAGING_LOCK_PARAM), String(Math.floor((UNTIL + 600_000) / 1000)));
+  assert.equal(ssm.m.get(STAGING_LOCK_PARAM), `${Math.floor((UNTIL + 600_000) / 1000)}:${lock.currentNonce()}`);
   assert.deepEqual(ssm.log, [`put ${STAGING_LOCK_PARAM}`], 'only a refresh of its own key');
   // and a deploy arriving now loses: it would see the evidence key held
-  assert.ok(Number(ssm.m.get(STAGING_LOCK_PARAM)) * 1000 > NOW);
+  assert.ok(Number(ssm.m.get(STAGING_LOCK_PARAM)!.split(':')[0]) * 1000 > NOW);
 });
 
 test('release deletes only the evidence key; latestExpiry reads all three', async () => {
@@ -166,16 +168,16 @@ test('order: promote -> confirm (read back) -> acquire resolves; a failed or mis
   const ssm = new FakeSsm();
   const lock = mk(ssm);
   const order: string[] = [];
-  const bare = String(Math.floor(UNTIL / 1000));
   await lock.acquire(UNTIL).then(() => order.push('start'));
   assert.deepEqual(ssm.log.filter(l => l.includes(STAGING_LOCK_PARAM)), [`create ${STAGING_LOCK_PARAM}`, `put ${STAGING_LOCK_PARAM}`], 'create (p:), then promote');
+  const bare = `${Math.floor(UNTIL / 1000)}:${lock.currentNonce()}`;
   assert.equal(ssm.m.get(STAGING_LOCK_PARAM), bare);
   assert.deepEqual(order, ['start']);
 
   for (const mode of ['put-fails', 'reads-back-wrong']) {
     const s = new FakeSsm();
     if (mode === 'put-fails') s.put = async () => { throw new Error('boom'); };
-    else { const g = s.get.bind(s); s.get = async n => (n === STAGING_LOCK_PARAM && s.m.get(n) === bare ? 'p:' + bare : g(n)); }
+    else { const g = s.get.bind(s); s.get = async n => { const v = await g(n); return n === STAGING_LOCK_PARAM && v && !v.startsWith('p:') ? 'p:' + v : v; }; }
     let started = false;
     await assert.rejects(mk(s).acquire(UNTIL).then(() => { started = true; }), /not confirmed, run not started/, mode);
     assert.equal(started, false);
@@ -183,12 +185,15 @@ test('order: promote -> confirm (read back) -> acquire resolves; a failed or mis
   }
 });
 
-test('currentValue: the exact bare epoch of the held evidence key (what the in-run deploy is told), null when not held', async () => {
+test('currentNonce: the run nonce while held (what the in-run deploy is told), null when not held; new run, new nonce', async () => {
   const ssm = new FakeSsm();
   const lock = mk(ssm);
-  assert.equal(await lock.currentValue(), null);
+  assert.equal(lock.currentNonce(), null);
   await lock.acquire(UNTIL);
-  assert.equal(await lock.currentValue(), String(Math.floor(UNTIL / 1000)));
+  const n1 = lock.currentNonce()!;
+  assert.ok(ssm.m.get(STAGING_LOCK_PARAM)!.endsWith(`:${n1}`));
   await lock.release();
-  assert.equal(await lock.currentValue(), null);
+  assert.equal(lock.currentNonce(), null);
+  await lock.acquire(UNTIL);
+  assert.notEqual(lock.currentNonce(), n1);
 });
