@@ -733,7 +733,7 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
 
   // Evidence belongs to one commit: a branch that moved during the run makes it stale, never success.
   const headNow = revParse(ctx.repo, `refs/heads/${ctx.branch}`);
-  if (outcome.state !== 'error' && headNow !== sha) {
+  if (outcome.state !== 'error' && headNow !== sha && !(headNow && githubFlow.evidenceCovers(ctx.repo, ctx.trunk, sha, headNow))) {
     outcome = { ...outcome, state: 'stale', note: `${ctx.branch} moved to ${headNow ? headNow.slice(0, 8) : 'nothing'} during the run` };
   }
   // The build and runner logs go next to the report, so the report route serves them too.
@@ -788,6 +788,9 @@ const NEXT: Record<EvidenceState, string> = {
   stale: 'Your branch moved during the run, so this evidence is stale: call run_evidence again on the new commit.',
   error: 'That is the test plumbing, not your change: the COO has it, so carry on and call run_evidence again later.',
 };
+/** The run's commit covers the PR head: the same, or only trunk catch-ups since (handbook 5.11). */
+const coversPr = (wp: Workplace, itemId: string, sha: string): boolean => { const w = rawGet(wp, itemId); return !!w && githubFlow.runCoversHead(wp, w, sha); };
+
 const WORD: Record<EvidenceState, string> = { success: 'PASS', failure: 'FAIL', stale: 'STALE', error: 'ERROR' };
 
 /** The one summary the caller, the item and the COO see. */
@@ -831,7 +834,7 @@ async function finish(wp: Workplace, job: EvidenceJob, outcome: Outcome, started
     } catch (err) { log.warn('evidence', `${job.id}: not recorded on the item: ${errText(err)}`); }
     // shadow/on: the PR's workplace/evidence status, only for the commit that was tested.
     const pr = rawGet(wp, job.itemId)?.pr;
-    if (githubFlow.mode(wp) !== 'local' && pr && !pr.merged && pr.headSha === rec.sha && rec.state !== 'error') {
+    if (githubFlow.mode(wp) !== 'local' && pr && !pr.merged && rec.state !== 'error' && coversPr(wp, job.itemId, rec.sha)) {
       try { await githubFlow.setEvidence(wp, job.itemId, rec.state, `${rec.passed} passed, ${rec.failed} failed${rec.deferred?.length ? `, ${rec.deferred.length} deferred (${rec.deferred.map(d => `${d.case} → ${d.storyId}`).join(', ')})` : ''} on ${rec.platforms.join('+')} (run_evidence)`); }
       catch (err) { log.warn('evidence', `${job.id}: setEvidence: ${errText(err)}`); }
       try { await githubFlow.prComment(wp, job.itemId, text); }
@@ -998,7 +1001,7 @@ export async function rescore(wp: Workplace, itemId: string, by: string, runId?:
   trail.comment(wp, itemId, { by: 'workplace', text });
   linkDeferred(wp, itemId, w.title, next);
   const pr = cur.pr;
-  if (githubFlow.mode(wp) !== 'local' && pr && !pr.merged && pr.headSha === rec.sha) {
+  if (githubFlow.mode(wp) !== 'local' && pr && !pr.merged && coversPr(wp, itemId, rec.sha)) {
     try { await githubFlow.setEvidence(wp, itemId, 'success', `${next.passed} passed, ${next.failed} failed${next.deferred?.length ? `, ${next.deferred.length} deferred (${next.deferred.map(d => `${d.case} → ${d.storyId}`).join(', ')})` : ''} on ${next.platforms.join('+')} (re-scored)`); }
     catch (err) { log.warn('evidence', `${itemId}: re-score setEvidence: ${errText(err)}`); }
     try { await githubFlow.prComment(wp, itemId, text); } catch (err) { log.warn('evidence', `${itemId}: re-score PR comment: ${errText(err)}`); }

@@ -531,6 +531,53 @@ test('22: a head moving through a trunk-only merge keeps both approvals, the tes
   } finally { await s.done(); }
 });
 
+function runOn(s: Setup, sha: string): void {
+  work.saveQuiet(s.wp, { ...rawGet(s.wp, s.storyId)!, evidenceRun: { run: 'r', sha, state: 'success', platforms: ['android'], features: ['queries'], passed: 14, failed: 0, failures: [], durationS: 60, report: '/r', by: 'kabir', at: new Date().toISOString() } });
+}
+function trunkMovesAndMergesIn(s: Setup, name = 'other.py'): void {
+  writeFileSync(join(s.trunkRepo, 'services', 'agent-svc', name), 'y = 2\n');
+  git(s.trunkRepo, ['add', '-A']);
+  git(s.trunkRepo, ['-c', 'user.email=t@iris.local', '-c', 'user.name=t', 'commit', '-q', '-m', 'trunk moves']);
+  git(s.wt, ['-c', 'user.email=k@iris.local', '-c', 'user.name=k', 'merge', '-q', '--no-edit', TRUNK]);
+}
+
+test('22c: a passing evidence run on S covers a head that only trunk catch-ups moved past S (handbook 5.11)', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    const runSha = pr(s).headSha;
+    runOn(s, runSha);
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    // The run finished while the record was not marked (head moved during the run): the record says pending.
+    work.saveQuiet(s.wp, { ...rawGet(s.wp, s.storyId)!, pr: { ...pr(s), evidence: 'pending' } });
+    trunkMovesAndMergesIn(s, 'a.py');
+    trunkMovesAndMergesIn(s, 'b.py');
+    await flow.syncHeads(s.wp);
+    assert.notEqual(pr(s).headSha, runSha);
+    assert.equal(flow.effectiveEvidence(s.wp, rawGet(s.wp, s.storyId)!), 'success');
+    assert.equal(flow.evidenceOk(s.wp, rawGet(s.wp, s.storyId)!), true, 'the merge gate agrees');
+    const qa = await flow.approve(s.wp, s.storyId, 'nikhil', undefined, qaText(s.wp));
+    assert.equal(qa.stage, 'qa', 'approval 2 is allowed');
+  } finally { await s.done(); }
+});
+
+test('22d: a head moved by the author\'s own commit leaves the run on S stale', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    const runSha = pr(s).headSha;
+    runOn(s, runSha);
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    s.commit({ 'services/memory-svc/recall.py': 'x = 2\n' });
+    await flow.syncHeads(s.wp);
+    assert.notEqual(pr(s).headSha, runSha);
+    assert.notEqual(flow.effectiveEvidence(s.wp, rawGet(s.wp, s.storyId)!), 'success');
+    assert.equal(flow.evidenceOk(s.wp, rawGet(s.wp, s.storyId)!), false);
+  } finally { await s.done(); }
+});
+
 test('23: a head moving through a real commit (or a merge that slips in a change) resets them', async () => {
   const s = setup('shadow');
   try {

@@ -325,7 +325,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
     // Evidence is run before submitting (handbook step 4, then 5): a finished run on this very head
     // carries over to a new PR record, or to a head the PR has just moved to.
     const ev = cur.evidenceRun;
-    if (ev && ev.sha === ctx.head && (ev.state === 'success' || ev.state === 'failure') && (!reuse || (moved && !carried))) {
+    if (ev && evidenceCovers(ctx.repo, ctx.base, ev.sha, ctx.head) && (ev.state === 'success' || ev.state === 'failure') && (!reuse || (moved && !carried) || (moved && carried && record.evidence !== 'success' && record.evidence !== 'failure'))) {
       record.evidence = ev.state;
       tookOver = true;
       record.evidenceNote = `${ev.passed} passed, ${ev.failed} failed${ev.deferred?.length ? `, ${ev.deferred.length} deferred (${ev.deferred.map(d => `${d.case} → ${d.storyId}`).join(', ')})` : ''} on ${ev.platforms.join('+')} (run_evidence)`;
@@ -393,6 +393,33 @@ const asked = (e: ExtraReviewer): ExtraReviewer => (e.askedAt ? e : { ...e, aske
 export const isAncestor = (repo: string, a: string, b: string): boolean => {
   try { execFileSync('git', ['-C', repo, 'merge-base', '--is-ancestor', a, b], { stdio: 'ignore' }); return true; } catch { return false; }
 };
+
+/**
+ * ONE predicate for "evidence from run sha S covers head H" (handbook 5.11): S is H, or H differs from S only
+ * by trunk-only catch-up merges (the same trunkOnly the approvals, tests and mobile CI carry by).
+ */
+export function evidenceCovers(repo: string, base: string, runSha: string, head: string): boolean {
+  return runSha === head || trunkOnly(repo, base, runSha, head);
+}
+
+/** Run sha S covers this story's PR head (S is the head, or only trunk catch-ups lie between). */
+export function runCoversHead(wp: Workplace, w: WorkItem, runSha: string): boolean {
+  const head = w.pr?.headSha;
+  if (!head) return false;
+  if (runSha === head) return true;
+  const ctx = contextOf(wp, w);
+  return typeof ctx !== 'string' && evidenceCovers(ctx.repo, ctx.base, runSha, head);
+}
+
+/** The evidence state that holds for the PR's head: the recorded one, or a finished run that covers the head by 5.11. */
+export function effectiveEvidence(wp: Workplace, w: WorkItem): PrRecord['evidence'] | undefined {
+  const pr = w.pr;
+  if (!pr) return undefined;
+  if (pr.evidence === 'success' || pr.evidence === 'failure') return pr.evidence;
+  const run = w.evidenceRun;
+  if (run && (run.state === 'success' || run.state === 'failure') && run.sha !== pr.headSha && runCoversHead(wp, w, run.sha)) return run.state;
+  return pr.evidence;
+}
 
 /**
  * True when `to` differs from `from` only by merges of the trunk: `from` is an ancestor of `to`, there is
@@ -859,7 +886,7 @@ export function statusesFor(wp: Workplace, w: WorkItem): Status[] {
     : pr.evidence === 'stale' ? { context: CONTEXTS.evidence, state: 'pending', description: 'Stale: a new commit needs run_evidence again' }
     : { context: CONTEXTS.evidence, state: 'pending', description: 'Waiting for run_evidence on this commit' };
   // The shared report of the run behind this status (the global link), when there is one.
-  const share = w.evidenceRun?.sha === pr.headSha && w.evidenceRun.state === pr.evidence ? w.evidenceRun.share : undefined;
+  const share = w.evidenceRun && w.evidenceRun.state === effectiveEvidence(wp, w) ? w.evidenceRun.share : undefined;
   if (share && (pr.evidence === 'success' || pr.evidence === 'failure')) evidence.targetUrl = share.url;
   return [review, tests, evidence];
 }
@@ -1136,7 +1163,7 @@ export async function approve(wp: Workplace, itemId: string, by: string, note?: 
   qaDocExtras(wp, w, doc, qaText!);
   // 11 Oct: approved stories sat unmerged for hours because the QA doc named no evidence. Through the tool,
   // approval 2 is the moment the evidence question is answered, so approval means ready to merge.
-  if (opts.requireReads && !(pr.evidence === 'success' || qaDoc.evidenceNa(qaText) || liveCheckEvidence(wp, w, qaText))) {
+  if (opts.requireReads && !(effectiveEvidence(wp, w) === 'success' || qaDoc.evidenceNa(qaText) || liveCheckEvidence(wp, w, qaText))) {
     throw new BadRequest('Name the evidence before approving, or the merge will wait: a passing run_evidence on the head, OR "Evidence: live check <lc_id>" for a live check the developer recorded (record_live_check), OR, only for a change the robot suite cannot run (server-only, agent-svc, docs, tooling), "Evidence: n/a — <why>" plus a "Tests: <command> <counts>" line.');
   }
   const filedDoc = await fileQaDoc(wp, itemId, by, pr.headSha, approval.at, qaText!);
@@ -1764,7 +1791,7 @@ export function iosOnlyEvidenceFailure(w: WorkItem): boolean {
 }
 
 export function evidenceOk(wp: Workplace, w: WorkItem): boolean {
-  if (w.pr?.evidence === 'success' || cooDocsApproval(w)) return true;
+  if (effectiveEvidence(wp, w) === 'success' || cooDocsApproval(w)) return true;
   if (iosOnlyEvidenceFailure(w)) return true;
   const filed = qaDoc.filed(wp, w.id);
   return qaDoc.evidenceNa(filed) || liveCheckEvidence(wp, w, filed);
