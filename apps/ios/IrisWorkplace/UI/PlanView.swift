@@ -79,34 +79,16 @@ struct PlanView: View {
                 if query.isFiltering || query.sort != .plan {
                     Section { activeFilters }
                 }
-                ForEach(plan.areas) { a in
-                    let shown = query.openEpics(a.epics)
-                    Section {
-                        if a.epics.isEmpty {
-                            Button { creating = .init(level: .epic, areaId: a.area.id) } label: {
-                                Label("No epics yet — add one", systemImage: "plus.circle").font(.subheadline)
-                            }
-                        }
-                        else if shown.isEmpty {
-                            Text(a.epics.allSatisfy(\.isFinished) ? "Every epic here is done" : "No epics match the filter").font(.caption).foregroundStyle(.tertiary)
-                        }
-                        ForEach(shown) { card in epicRow(card) }
-                            .onMove(perform: query.allowsReorder ? { from, to in
-                                guard let rest = model.rest else { return }
-                                Task { do { try await store.move(rest, areaId: a.area.id, shown: shown, from: from, to: to) } catch { if let m = error.userMessage { actionError = m } } }
-                            } : nil)
-                    } header: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(a.area.title).font(.title3.weight(.bold)).foregroundStyle(.primary).textCase(nil)
-                            if let d = a.area.description, !d.isEmpty { Text(d).font(.caption).foregroundStyle(.secondary).textCase(nil).lineLimit(1) }
-                        }
-                    }
-                }
+                // Owner, 23 Oct: topics (areas) that have an open epic come first; topics with none
+                // (empty, or every epic finished) sink below them, after the unfiled epics.
+                let split = PlanArea.splitByOpenEpics(plan.areas)
+                ForEach(split.withEpics) { a in areaSection(a) }
                 if !query.openEpics(plan.unfiled).isEmpty {
                     Section {
                         ForEach(query.openEpics(plan.unfiled)) { card in epicRow(card) }
                     } header: { SectionHeader(text: "No area yet") }
                 }
+                ForEach(split.withoutEpics) { a in areaSection(a) }
                 let finished = query.finishedEpics(plan)
                 if !finished.isEmpty {
                     Section {
@@ -147,6 +129,31 @@ struct PlanView: View {
             }
             if let e = store.error, store.plan != nil {
                 Section { ErrorRow(message: e) { Task { await reload() } } }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func areaSection(_ a: PlanArea) -> some View {
+        let shown = query.openEpics(a.epics)
+        Section {
+            if a.epics.isEmpty {
+                Button { creating = .init(level: .epic, areaId: a.area.id) } label: {
+                    Label("No epics yet — add one", systemImage: "plus.circle").font(.subheadline)
+                }
+            }
+            else if shown.isEmpty {
+                Text(a.epics.allSatisfy(\.isFinished) ? "Every epic here is done" : "No epics match the filter").font(.caption).foregroundStyle(.tertiary)
+            }
+            ForEach(shown) { card in epicRow(card) }
+                .onMove(perform: query.allowsReorder ? { from, to in
+                    guard let rest = model.rest else { return }
+                    Task { do { try await store.move(rest, areaId: a.area.id, shown: shown, from: from, to: to) } catch { if let m = error.userMessage { actionError = m } } }
+                } : nil)
+        } header: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(a.area.title).font(.title3.weight(.bold)).foregroundStyle(.primary).textCase(nil)
+                if let d = a.area.description, !d.isEmpty { Text(d).font(.caption).foregroundStyle(.secondary).textCase(nil).lineLimit(1) }
             }
         }
     }
@@ -489,5 +496,14 @@ struct NewItemView: View {
         } catch {
             if let m = error.userMessage { self.error = m }
         }
+    }
+}
+
+extension PlanArea {
+    /// The Plan's topic order (owner, 23 Oct): areas with at least one open epic first, then areas with
+    /// none (no epics yet, or every epic finished). Stable: each group keeps the server's order.
+    static func splitByOpenEpics(_ areas: [PlanArea]) -> (withEpics: [PlanArea], withoutEpics: [PlanArea]) {
+        let hasOpen: (PlanArea) -> Bool = { $0.epics.contains { !$0.isFinished } }
+        return (areas.filter(hasOpen), areas.filter { !hasOpen($0) })
     }
 }
