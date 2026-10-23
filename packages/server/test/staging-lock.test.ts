@@ -24,11 +24,11 @@ const UNTIL = NOW + 25 * 60_000;
 /** The shared case table lives on Iris trunk (scripts/staging-lock-cases.json); read live, never copied. Missing = fail clearly. */
 interface Side { action: string; acquires: boolean | null }
 interface Row { name: string; evidence: Side }
-function loadTable(): { cases: Row[]; evidence_provisional_max_s?: number } {
+function loadTable(): { cases: Row[] } {
   let txt: string;
   try { txt = execFileSync('git', ['-C', `${homedir()}/claude-dev`, 'show', 'origin/feat/iris-character:scripts/staging-lock-cases.json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
   catch (e) { throw new Error(`scripts/staging-lock-cases.json is missing on origin/feat/iris-character (git fetch origin feat/iris-character in ~/claude-dev): ${String(e).slice(0, 200)}`); }
-  return JSON.parse(txt) as { cases: Row[]; evidence_provisional_max_s?: number };
+  return JSON.parse(txt) as { cases: Row[] };
 }
 const table = loadTable();
 const keyName = { deploy: DEPLOY_LOCK_PARAM, evidence: STAGING_LOCK_PARAM, old: OLD_LOCK_PARAM };
