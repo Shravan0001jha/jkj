@@ -1,4 +1,5 @@
 import { after, test } from 'node:test';
+import { QA_MATRIX_DIMENSIONS } from '../src/services/qa-matrix.js';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -95,8 +96,7 @@ function proof(wp: Workplace, rel = 'logs/unit.txt'): string {
 function qaText(wp: Workplace, tail: string[] = [], cases: string[] = []): string {
   return [
     '## Users affected',
-    '- Affected: phone + Mac linked but offline — case(s): provider down',
-    '- Not affected: Windows desktop — no Windows code',
+    ...QA_MATRIX_DIMENSIONS.map(d => d === 'Mac state' ? `- ${d}: Affected: linked but offline — case(s): provider down` : `- ${d}: Not affected: no change to this`),
     '## Edge cases',
     `- PASS: empty input — unit test evidence: ${proof(wp)}`,
     '- PASS: provider down — killed the provider and checked the reply evidence: https://ci.example.com/runs/42',

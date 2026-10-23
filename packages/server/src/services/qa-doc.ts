@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from 
 import { isAbsolute, join } from 'node:path';
 import type { Workplace } from './workplace.js';
 import { BadRequest } from '../util/errors.js';
+import { missingDimensions } from './qa-matrix.js';
 
 /**
  * The QA doc that goes with QA's approval (owner's review flow, 6 Oct, step 2): QA first lists
@@ -33,7 +34,7 @@ const CASE = /^\s*[-*]\s*(PASS|FAIL|N\/A)\s*:\s*(.+)$/i;
 export interface QaCase { verdict: 'PASS' | 'FAIL' | 'N/A'; text: string }
 export interface QaDoc { cases: QaCase[]; report: string }
 
-export const QA_DOC_FORMAT = '"## Users affected" (from the user matrix, handbook §1: "- Affected: <row> — case(s): <which>" and "- Not affected: <row> — <why>"), then "## Edge cases" with one line per case ("- PASS: <case> — <how checked> evidence: <screenshot/log path or URL>", "- N/A: <case> — <why>"; every blind case you wrote with qa_cases_write gets its own line), then "## Report" (what was checked, what was not, residual risk, citing specific log lines). ' +
+export const QA_DOC_FORMAT = '"## Users affected" (one line per user-matrix dimension, handbook §1: "- Platform: Affected: <rows> — case(s): <which>" or "- Platform: Not affected: <why>"; dimensions: Platform, Mac state, Account age, Plan, Permissions, Region/time/language, Network), then "## Edge cases" with one line per case ("- PASS: <case> — <how checked> evidence: <screenshot/log path or URL>", "- N/A: <case> — <why>"; every blind case you wrote with qa_cases_write gets its own line), then "## Report" (what was checked, what was not, residual risk, citing specific log lines). ' +
   'The merge needs evidence: a passing run_evidence on the head, or "Evidence: live check <lc_id> — <what the logs show>" for a live check the developer recorded (record_live_check), or, only when the change has no app surface the robot suite can run (server-only, agent-svc, docs, tooling), "Evidence: n/a — <why>" together with "Tests: <command> <counts>"';
 
 export const PROOF_NEEDED = 'Each case needs proof: add "evidence: <screenshot/log path or URL>"';
@@ -92,8 +93,6 @@ export function parse(text: string): QaDoc | { errors: string[] } {
   return errors.length ? { errors } : { cases, report: report! };
 }
 
-const USER_ROW = /^\s*[-*]\s*(?:Not\s+)?Affected\s*:\s*\S/im;
-
 /**
  * "## Users affected" (owner, 18 Oct: think in every user): the user-matrix rows the change touches and
  * the ones it does not, one "- Affected: …" / "- Not affected: …" line each. Required of new QA docs
@@ -101,8 +100,9 @@ const USER_ROW = /^\s*[-*]\s*(?:Not\s+)?Affected\s*:\s*\S/im;
  */
 export function requireUsers(text: string): void {
   const m = /^##\s*Users affected\s*$([\s\S]*?)(?=^##\s|(?![\s\S]))/im.exec(text);
-  if (!m) throw new BadRequest('The QA doc needs its "## Users affected" section (before "## Edge cases"): one "- Affected: <user-matrix row> — case(s): <which>" or "- Not affected: <row> — <why>" line per row of the user matrix (handbook §1). Template: templates/qa-doc.md.');
-  if (!USER_ROW.test(m[1]!)) throw new BadRequest('"## Users affected" lists no rows: add "- Affected: <row> — case(s): <which>" and "- Not affected: <row> — <why>" lines from the user matrix (handbook §1).');
+  if (!m) throw new BadRequest('The QA doc needs its "## Users affected" section (before "## Edge cases"): one line per user-matrix dimension, "- <dimension>: Affected: <rows> — case(s): <which>" or "- <dimension>: Not affected: <why>" (handbook §1). Template: templates/qa-doc.md.');
+  const missing = missingDimensions(m[1]!);
+  if (missing.length) throw new BadRequest(`"## Users affected" must answer every user-matrix dimension with "- <dimension>: Affected: <rows> — case(s): <which>" or "- <dimension>: Not affected: <why>". Missing or unanswered: ${missing.join(', ')}. Template: templates/qa-doc.md.`);
 }
 
 /**
