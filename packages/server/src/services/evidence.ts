@@ -138,7 +138,10 @@ export const featureRefusal = (allowed: readonly string[]): string =>
   `Features must be from ${allowed.join(', ')} (or all); setup always runs, so don't name it, and call run_evidence again with those.`;
 const DESKTOP = new Set(['mac', 'macos', 'osx', 'desktop']);
 const WINDOWS = new Set(['windows', 'win', 'windows-default']);
-const FEATURE = /^[a-z][a-z0-9-]{0,31}$/;
+/** Syntax only: lowercase name, digits, '-', '_' and ':' (a case inside a feature, e.g. image:make). Whether the
+ * name is REAL is decided later against plan.mjs PER at the story's own commit; this regex must never be the
+ * thing that rejects a name a branch's plan defines (23 Oct: image:make refused here before the plan was read). */
+export const FEATURE = /^[a-z][a-z0-9_:-]{0,47}$/;
 const JOB_KEY = 'evidence:job:';
 const KEEP_FINISHED = 30;
 const MAX_ATTEMPTS = 2;
