@@ -18,7 +18,7 @@ class FakeSsm implements SsmPort {
 const NOW = 1_800_000_000_000;
 const sec = (off: number) => String(Math.floor(NOW / 1000) + off);
 const bounds = (over: Partial<LockBounds> = {}): LockBounds => ({ tries: 3, baseMs: 1, jitterMs: 1, sleep: async () => undefined, now: () => NOW, ...over });
-const mk = (ssm: SsmPort, b = bounds()) => new RealStagingLock({ stagingUrl: 'http://127.0.0.1:9' } as never, 'ap-south-1', ssm, b);
+const mk = (ssm: SsmPort, b = bounds()) => { const l = new RealStagingLock({ stagingUrl: 'http://127.0.0.1:9' } as never, 'ap-south-1', ssm, b); void l.setNonceAware(true); return l; };
 const UNTIL = NOW + 25 * 60_000;
 
 /** The shared case table lives on Iris trunk (scripts/staging-lock-cases.json); read live, never copied. Missing = fail clearly. */
@@ -196,4 +196,49 @@ test('currentNonce: the run nonce while held (what the in-run deploy is told), n
   assert.equal(lock.currentNonce(), null);
   await lock.acquire(UNTIL);
   assert.notEqual(lock.currentNonce(), n1);
+});
+
+test('migration (staging.sh without the evidence key): legacy key held with the same expiry, refreshed, deleted on release', async () => {
+  const ssm = new FakeSsm();
+  const lock = mk(ssm);
+  await lock.setNonceAware(false);
+  await lock.acquire(UNTIL);
+  assert.equal(ssm.m.get(OLD_LOCK_PARAM), String(Math.floor(UNTIL / 1000)));
+  await lock.hold(UNTIL + 60_000).catch(() => undefined);
+  assert.equal(ssm.m.get(OLD_LOCK_PARAM), String(Math.floor((UNTIL + 60_000) / 1000)));
+  await lock.release();
+  assert.equal(ssm.m.has(OLD_LOCK_PARAM), false);
+  assert.equal(ssm.m.has(STAGING_LOCK_PARAM), false);
+});
+
+test('migration: the legacy key is released around the in-run deploy and restored in a finally, even when the deploy throws; refresh during it does not bring it back', async () => {
+  const ssm = new FakeSsm();
+  const lock = mk(ssm);
+  await lock.setNonceAware(false);
+  await lock.acquire(UNTIL);
+  let during: { legacy: boolean; evidence: boolean } | undefined;
+  await assert.rejects(lock.aroundLegacyDeploy(async () => {
+    await lock.hold(UNTIL + 1000).catch(() => undefined);
+    during = { legacy: ssm.m.has(OLD_LOCK_PARAM), evidence: ssm.m.has(STAGING_LOCK_PARAM) };
+    throw new Error('deploy failed');
+  }), /deploy failed/);
+  assert.deepEqual(during, { legacy: false, evidence: true });
+  assert.equal(ssm.m.get(OLD_LOCK_PARAM), String(Math.floor((UNTIL + 1000) / 1000)), 'restored with the latest expiry');
+});
+
+test('nonce-aware staging.sh (#543 landed): the legacy key is not written, not released around the deploy, and dropped if already held', async () => {
+  const ssm = new FakeSsm();
+  const lock = mk(ssm);
+  await lock.setNonceAware(true);
+  await lock.acquire(UNTIL);
+  assert.equal(ssm.m.has(OLD_LOCK_PARAM), false);
+  let ran = false;
+  await lock.aroundLegacyDeploy(async () => { ran = true; });
+  assert.ok(ran);
+  assert.ok(!ssm.log.some(l => l.endsWith(' ' + OLD_LOCK_PARAM)), 'legacy key never touched');
+  const s2 = new FakeSsm(); const l2 = mk(s2);
+  await l2.setNonceAware(false); await l2.acquire(UNTIL);
+  assert.ok(s2.m.has(OLD_LOCK_PARAM));
+  await l2.setNonceAware(true);
+  assert.equal(s2.m.has(OLD_LOCK_PARAM), false);
 });

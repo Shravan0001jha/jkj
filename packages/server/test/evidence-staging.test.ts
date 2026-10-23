@@ -90,3 +90,23 @@ test('RealServerDeployer: passes STAGING_DEPLOY_FOR_EVIDENCE = the run nonce onl
     assert.equal(readFileSync(seen, 'utf8').trim(), 'unset');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('RealServerDeployer: releases the legacy key around the deploy only when the checkout\'s staging.sh does not know the evidence key', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iris-deploy-mig-'));
+  const repo = join(dir, 'repo'); const checkout = join(dir, 'checkout');
+  mkdirSync(join(repo, '.venv', 'bin'), { recursive: true });
+  mkdirSync(join(checkout, 'scripts'), { recursive: true });
+  const cfg = { ...loadConfig(['--no-open'], {}).evidence, stagingUrl: 'https://staging.example.test' };
+  const events: string[] = [];
+  const around = async <T>(fn: () => Promise<T>): Promise<T> => { events.push('release'); try { return await fn(); } finally { events.push('re-hold'); } };
+  const d = new RealServerDeployer(cfg, undefined, async () => 'n', around);
+  try {
+    writeFileSync(join(checkout, 'scripts', 'staging.sh'), '#!/usr/bin/env bash\ntrue\n');
+    await d.deploy({ repo, checkout, sha: 'abc', log: join(dir, 'd.log') });
+    assert.deepEqual(events, ['release', 're-hold']);
+    events.length = 0;
+    writeFileSync(join(checkout, 'scripts', 'staging.sh'), '#!/usr/bin/env bash\n# STAGING_DEPLOY_FOR_EVIDENCE\ntrue\n');
+    await d.deploy({ repo, checkout, sha: 'abc', log: join(dir, 'd.log') });
+    assert.deepEqual(events, []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

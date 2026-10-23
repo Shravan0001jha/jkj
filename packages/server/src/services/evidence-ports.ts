@@ -103,6 +103,10 @@ export interface ServerDeployer {
 export interface StagingLock {
   /** Before a run starts: take the lock, yielding to a deploy; throws StagingBusyError once the bounded wait is over. */
   acquire?(untilMs: number): Promise<void>;
+  /** Whether trunk's staging.sh understands the evidence key + STAGING_DEPLOY_FOR_EVIDENCE (#543). Until it does the legacy key is kept too. */
+  setNonceAware?(aware: boolean): Promise<void>;
+  /** Runs `fn` (the in-run deploy) with the legacy key released, restoring it in a finally. A no-op wrapper once nonce-aware. */
+  aroundLegacyDeploy?<T>(fn: () => Promise<T>): Promise<T>;
   hold(untilMs: number): Promise<void>;
   release(): Promise<void>;
 }
@@ -179,6 +183,16 @@ const liveEpoch = (v: string | null, nowMs: number): number => {
 export class RealStagingLock implements StagingLock {
   private held = false;
   private nonce = '';
+  /**
+   * MIGRATION: until trunk staging.sh knows the evidence key (it greps for STAGING_DEPLOY_FOR_EVIDENCE), an old staging.sh
+   * (batch timer, by hand) only reads the legacy key. Dropping it would show staging FREE mid-run and let a deploy replace
+   * the code under a live suite, and `stop` would stop refusing. So we also hold the legacy key (bare epoch, same expiry) and
+   * release it only around our own in-run deploy, which that old script would otherwise wait on forever.
+   */
+  private legacy = true;
+  private legacyOn = false;
+  private paused = false;
+  private lastUntil = 0;
   private inflight: Promise<void> | null = null;
   constructor(
     private readonly cfg: EvidenceConfig,
@@ -224,6 +238,30 @@ export class RealStagingLock implements StagingLock {
     }
     this.nonce = nonce;
     this.held = true;
+    this.lastUntil = until;
+    await this.writeLegacy(until);
+  }
+
+  private async writeLegacy(until: number): Promise<void> {
+    if (!this.legacy || this.paused) return;
+    await this.ssm.put(OLD_LOCK_PARAM, String(until));
+    this.legacyOn = true;
+  }
+
+  async setNonceAware(aware: boolean): Promise<void> {
+    this.legacy = !aware;
+    if (aware && this.legacyOn && !this.paused) { this.legacyOn = false; await this.ssm.delete(OLD_LOCK_PARAM).catch(() => undefined); }
+  }
+
+  async aroundLegacyDeploy<T>(fn: () => Promise<T>): Promise<T> {
+    if (!this.legacy || !this.legacyOn) return fn();
+    this.paused = true; this.legacyOn = false;
+    await this.ssm.delete(OLD_LOCK_PARAM);
+    try { return await fn(); }
+    finally {
+      this.paused = false;
+      if (this.held && this.legacy) await this.writeLegacy(this.lastUntil).catch(() => undefined);
+    }
   }
 
   /**
@@ -249,7 +287,10 @@ export class RealStagingLock implements StagingLock {
 
   /** Refresh NEVER yields: it only extends our own key, whatever the deploy key says (evidence beats deploy once running). */
   private async refresh(untilMs: number): Promise<void> {
-    await this.ssm.put(STAGING_LOCK_PARAM, `${Math.floor(untilMs / 1000)}:${this.nonce}`);
+    const until = Math.floor(untilMs / 1000);
+    await this.ssm.put(STAGING_LOCK_PARAM, `${until}:${this.nonce}`);
+    this.lastUntil = until;
+    await this.writeLegacy(until);
   }
 
   async hold(untilMs: number): Promise<void> {
@@ -271,6 +312,7 @@ export class RealStagingLock implements StagingLock {
   async release(): Promise<void> {
     this.held = false;
     await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined);
+    if (this.legacyOn) { this.legacyOn = false; await this.ssm.delete(OLD_LOCK_PARAM).catch(() => undefined); }
   }
 }
 
@@ -286,6 +328,11 @@ export const BUILDER_VERSION = 'b1';
 /** What a child gets from the Workplace's environment: what a shell on this Mac needs, no tokens. */
 const ENV_ALLOW = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TERM',
   'AWS_PROFILE', 'AWS_REGION', 'AWS_DEFAULT_REGION', 'AWS_CONFIG_FILE', 'AWS_SHARED_CREDENTIALS_FILE', 'JAVA_HOME'];
+
+/** Does this checkout's scripts/staging.sh know the evidence key (#543)? */
+export function stagingKnowsEvidenceKey(checkout: string): boolean {
+  try { return readFileSync(join(checkout, 'scripts', 'staging.sh'), 'utf8').includes('STAGING_DEPLOY_FOR_EVIDENCE'); } catch { return false; }
+}
 
 export function childEnvFor(extra: Record<string, string>, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const out: Record<string, string> = {};
@@ -669,7 +716,7 @@ export class RealServerDeployer implements ServerDeployer {
    * the evidence run, whose own established key would otherwise make staging.sh wait forever: the nonce (only) is passed as
    * STAGING_DEPLOY_FOR_EVIDENCE and staging.sh skips waiting on the evidence key only when its nonce matches.
    */
-  constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 25 * 60_000, private readonly evidenceKeyValue: () => Promise<string | null> = async () => null) {}
+  constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 25 * 60_000, private readonly evidenceKeyValue: () => Promise<string | null> = async () => null, private readonly around?: <T>(fn: () => Promise<T>) => Promise<T>) {}
 
   async deploy(r: ServerDeployRequest): Promise<void> {
     const script = join(r.checkout, 'scripts', 'staging.sh');
@@ -678,7 +725,10 @@ export class RealServerDeployer implements ServerDeployer {
     linkUntracked(r.repo, r.checkout);
     const held = await this.evidenceKeyValue().catch(() => null);
     const env = childEnvFor({ STAGING_HOST: new URL(this.cfg.stagingUrl).host, ...(held ? { STAGING_DEPLOY_FOR_EVIDENCE: held } : {}) });
-    const ran = await runLogged('bash', [script, 'deploy'], { cwd: r.checkout, env, logFile: r.log, timeoutMs: this.timeoutMs, ...(r.onSpawn ? { onSpawn: r.onSpawn } : {}) });
+    // Until the checkout's staging.sh knows STAGING_DEPLOY_FOR_EVIDENCE, release the legacy key around the deploy (see RealStagingLock).
+    const aware = stagingKnowsEvidenceKey(r.checkout);
+    const run = (): ReturnType<typeof runLogged> => runLogged('bash', [script, 'deploy'], { cwd: r.checkout, env, logFile: r.log, timeoutMs: this.timeoutMs, ...(r.onSpawn ? { onSpawn: r.onSpawn } : {}) });
+    const ran = aware || !this.around ? await run() : await this.around(run);
     if (ran.code !== 0) {
       const lines = ran.tail.split('\n').map(l => l.trim()).filter(Boolean);
       const why = [...lines].reverse().find(l => /❌|error|fail|refus|not running/i.test(l)) ?? lines.at(-1) ?? '';
