@@ -1,5 +1,5 @@
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { GitHubPort } from './github-port.js';
@@ -101,33 +101,218 @@ export interface ServerDeployer {
  * and the on-box idle stopper reads the expiry from its access log.
  */
 export interface StagingLock {
+  /** Before a run starts: take the lock, yielding to a deploy; throws StagingBusyError once the bounded wait is over. */
+  acquire?(untilMs: number): Promise<void>;
+  /** Whether trunk's staging.sh understands the evidence key + STAGING_DEPLOY_FOR_EVIDENCE (#543). Until it does the legacy key is kept too. */
+  setNonceAware?(aware: boolean): Promise<void>;
+  /** Runs `fn` (the in-run deploy) with the legacy key released, restoring it in a finally. A no-op wrapper once nonce-aware. */
+  aroundLegacyDeploy?<T>(fn: () => Promise<T>): Promise<T>;
   hold(untilMs: number): Promise<void>;
   release(): Promise<void>;
 }
 
-export const STAGING_LOCK_PARAM = '/iris-staging/in-use';
+/** Two keys, one owner each (CTO, 23 Oct): deploy writes DEPLOY_PARAM (staging.sh), evidence writes EVIDENCE_PARAM (here). */
+export const STAGING_LOCK_PARAM = '/iris-staging/in-use-evidence';
+export const DEPLOY_LOCK_PARAM = '/iris-staging/in-use-deploy';
+/** The pre-split shared key: read-only here, honoured as a live lock for one release (migration). */
+export const OLD_LOCK_PARAM = '/iris-staging/in-use';
+
+/** SSM as the lock uses it; injectable so the protocol is tested against an atomic in-memory fake. */
+export interface SsmPort {
+  get(name: string): Promise<string | null>;
+  /** Conditional create (put-parameter WITHOUT --overwrite): false when the parameter exists. */
+  putIfAbsent(name: string, value: string): Promise<boolean>;
+  put(name: string, value: string): Promise<void>;
+  delete(name: string): Promise<void>;
+}
+
+export class AwsCliSsm implements SsmPort {
+  constructor(private readonly region = 'ap-south-1') {}
+  private aws(args: string[]): Promise<string> {
+    return new Promise((resolve, reject) => {
+      execFile('aws', ['--region', this.region, ...args], { timeout: 30_000, env: { ...process.env, AWS_PAGER: '' } }, (err, stdout, stderr) => {
+        if (err) { const e = err as Error & { stderr?: string }; e.stderr = String(stderr); reject(e); } else resolve(String(stdout));
+      });
+    });
+  }
+  async get(name: string): Promise<string | null> {
+    try { return (await this.aws(['ssm', 'get-parameter', '--name', name, '--query', 'Parameter.Value', '--output', 'text'])).trim(); }
+    catch (err) { if (/ParameterNotFound/.test(String((err as { stderr?: string }).stderr ?? err))) return null; throw err; }
+  }
+  async putIfAbsent(name: string, value: string): Promise<boolean> {
+    try { await this.aws(['ssm', 'put-parameter', '--name', name, '--type', 'String', '--value', value]); return true; }
+    catch (err) { if (/ParameterAlreadyExists/.test(String((err as { stderr?: string }).stderr ?? err))) return false; throw err; }
+  }
+  async put(name: string, value: string): Promise<void> { await this.aws(['ssm', 'put-parameter', '--name', name, '--type', 'String', '--overwrite', '--value', value]); }
+  async delete(name: string): Promise<void> {
+    try { await this.aws(['ssm', 'delete-parameter', '--name', name]); }
+    catch (err) { if (!/ParameterNotFound/.test(String((err as { stderr?: string }).stderr ?? err))) throw err; }
+  }
+}
+
+/** Staging is held by something that wins over evidence at acquire, or the wait bound was reached. The run is deferred, not failed for its code. */
+export class StagingBusyError extends Error {
+  constructor(readonly holder: 'deploy' | 'evidence' | 'old', message?: string) {
+    super(message ?? (holder === 'deploy' || holder === 'old' ? 'staging busy (deploy), run deferred' : 'staging busy (another evidence run), run deferred'));
+    this.name = 'StagingBusyError';
+  }
+}
+
+/** Backoff bound: 6 tries, jittered ~30-90 s apart (about 6 minutes of waiting, 10 at the outside). */
+export interface LockBounds { tries: number; baseMs: number; jitterMs: number; sleep: (ms: number) => Promise<void>; now: () => number }
+export const DEFAULT_LOCK_BOUNDS: LockBounds = { tries: 6, baseMs: 30_000, jitterMs: 60_000, sleep: ms => new Promise(r => setTimeout(r, ms)), now: () => Date.now() };
+
+/**
+ * Value format of the evidence key: `p:<epoch s>:<nonce>` when created (provisional, before the other keys are checked),
+ * `<epoch s>:<nonce>` once the check passed and the run starts (established); refresh rewrites `<new epoch>:<same nonce>`.
+ * The nonce (16 hex chars, random, once per run) identifies the holder to the in-run deploy. Deploy and legacy keys stay
+ * bare epochs. Anything matching none of the shapes reads as established (fail-safe toward waiting).
+ */
+export const PROVISIONAL_PREFIX = 'p:';
+export const newNonce = (): string => randomBytes(8).toString('hex');
+
+/** Expiry epoch (s) of a lock value if still live; unparseable counts as live (established). 0 = free or expired. */
+const liveEpoch = (v: string | null, nowMs: number): number => {
+  if (v === null) return 0;
+  const m = /^(?:p:)?(\d+)(?::[0-9a-f]+)?$/.exec(v.trim());
+  if (!m) return Number.MAX_SAFE_INTEGER;
+  const n = Number(m[1]);
+  return n * 1000 > nowMs ? n : 0;
+};
 
 export class RealStagingLock implements StagingLock {
-  constructor(private readonly cfg: EvidenceConfig, private readonly region = 'ap-south-1') {}
+  private held = false;
+  private nonce = '';
+  /**
+   * MIGRATION: until trunk staging.sh knows the evidence key (it greps for STAGING_DEPLOY_FOR_EVIDENCE), an old staging.sh
+   * (batch timer, by hand) only reads the legacy key. Dropping it would show staging FREE mid-run and let a deploy replace
+   * the code under a live suite, and `stop` would stop refusing. So we also hold the legacy key (bare epoch, same expiry) and
+   * release it only around our own in-run deploy, which that old script would otherwise wait on forever.
+   */
+  private legacy = true;
+  private legacyOn = false;
+  private paused = false;
+  private lastUntil = 0;
+  private inflight: Promise<void> | null = null;
+  constructor(
+    private readonly cfg: EvidenceConfig,
+    private readonly region = 'ap-south-1',
+    private readonly ssm: SsmPort = new AwsCliSsm(region),
+    private readonly bounds: LockBounds = DEFAULT_LOCK_BOUNDS,
+  ) {}
 
-  private aws(args: string[]): Promise<void> {
-    return new Promise((resolve, reject) => {
-      execFile('aws', ['--region', this.region, ...args], { timeout: 30_000, env: { ...process.env, AWS_PAGER: '' } }, err => (err ? reject(err) : resolve()));
-    });
+  /** The latest expiry (epoch s) across all three keys, 0 when none is live: "is staging in use at all". */
+  async latestExpiry(): Promise<number> {
+    const now = this.bounds.now();
+    const vals = await Promise.all([STAGING_LOCK_PARAM, DEPLOY_LOCK_PARAM, OLD_LOCK_PARAM].map(k => this.ssm.get(k)));
+    return Math.max(...vals.map(v => liveEpoch(v, now)));
+  }
+
+  /** One attempt: create own key, then look at the deploy and old keys; yield (delete own) to either. */
+  private async tryOnce(until: number): Promise<void> {
+    const now = this.bounds.now();
+    const nonce = this.held ? this.nonce : newNonce();
+    const prov = `${PROVISIONAL_PREFIX}${until}:${nonce}`;
+    if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, prov))) {
+      const cur = await this.ssm.get(STAGING_LOCK_PARAM);
+      if (cur !== null && liveEpoch(cur, now)) throw new StagingBusyError('evidence');
+      // Expired (a crashed run): reclaim by delete + conditional create, so two reclaimers still resolve to one.
+      if (cur !== null) await this.ssm.delete(STAGING_LOCK_PARAM);
+      if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, prov))) throw new StagingBusyError('evidence');
+    }
+    const [d, o] = await Promise.all([this.ssm.get(DEPLOY_LOCK_PARAM), this.ssm.get(OLD_LOCK_PARAM)]);
+    const holder = liveEpoch(d, now) ? 'deploy' : liveEpoch(o, now) ? 'old' : null;
+    if (holder) { await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined); throw new StagingBusyError(holder); }
+    // Nobody else holds staging: confirm (extend to the full TTL). From here on this run is established and never yields.
+    // ORDER MATTERS: promote p:<epoch> -> bare <epoch> and read it back BEFORE the run starts any work (acquire() resolves
+    // only after this). Starting first would advertise a live suite as provisional, and a deploy may legitimately stomp a
+    // provisional hold. A failed or mis-read promotion deletes our key and the run does not start.
+    const bare = `${until}:${nonce}`;
+    try {
+      await this.ssm.put(STAGING_LOCK_PARAM, bare);
+      const back = await this.ssm.get(STAGING_LOCK_PARAM);
+      if (back !== bare) throw new Error(`read back ${back === null ? 'nothing' : JSON.stringify(back)}`);
+    } catch (err) {
+      await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined);
+      throw new Error(`staging lock not confirmed, run not started: ${String(err).split('\n')[0]!.slice(0, 200)}`);
+    }
+    this.nonce = nonce;
+    this.held = true;
+    this.lastUntil = until;
+    await this.writeLegacy(until);
+  }
+
+  private async writeLegacy(until: number): Promise<void> {
+    if (!this.legacy || this.paused) return;
+    await this.ssm.put(OLD_LOCK_PARAM, String(until));
+    this.legacyOn = true;
+  }
+
+  async setNonceAware(aware: boolean): Promise<void> {
+    this.legacy = !aware;
+    if (aware && this.legacyOn && !this.paused) { this.legacyOn = false; await this.ssm.delete(OLD_LOCK_PARAM).catch(() => undefined); }
+  }
+
+  async aroundLegacyDeploy<T>(fn: () => Promise<T>): Promise<T> {
+    if (!this.legacy || !this.legacyOn) return fn();
+    this.paused = true; this.legacyOn = false;
+    await this.ssm.delete(OLD_LOCK_PARAM);
+    try { return await fn(); }
+    finally {
+      this.paused = false;
+      if (this.held && this.legacy) await this.writeLegacy(this.lastUntil).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Acquire (the only place evidence yields): bounded retries with jitter; then StagingBusyError.
+   * Already held by this process: just extends. Concurrent callers share one attempt.
+   */
+  acquire(untilMs: number): Promise<void> {
+    if (this.held) return this.refresh(untilMs);
+    if (!this.inflight) {
+      this.inflight = (async () => {
+        const until = Math.floor(untilMs / 1000);
+        let last: StagingBusyError | undefined;
+        for (let i = 0; i < this.bounds.tries; i++) {
+          try { await this.tryOnce(until); return; }
+          catch (err) { if (!(err instanceof StagingBusyError)) throw err; last = err; }
+          if (i < this.bounds.tries - 1) await this.bounds.sleep(this.bounds.baseMs + Math.random() * this.bounds.jitterMs);
+        }
+        throw new StagingBusyError(last?.holder ?? 'deploy', `${last?.message ?? 'staging busy (deploy), run deferred'} (gave up after ${this.bounds.tries} tries)`);
+      })().finally(() => { this.inflight = null; });
+    }
+    return this.inflight;
+  }
+
+  /** Refresh NEVER yields: it only extends our own key, whatever the deploy key says (evidence beats deploy once running). */
+  private async refresh(untilMs: number): Promise<void> {
+    const until = Math.floor(untilMs / 1000);
+    await this.ssm.put(STAGING_LOCK_PARAM, `${until}:${this.nonce}`);
+    this.lastUntil = until;
+    await this.writeLegacy(until);
   }
 
   async hold(untilMs: number): Promise<void> {
     const until = Math.floor(untilMs / 1000);
     const [, param] = await Promise.allSettled([
       fetch(`${this.cfg.stagingUrl}/v1/min-version?in-use-until=${until}`, { signal: AbortSignal.timeout(10_000) }).then(r => { if (!r.ok) throw new Error(`touch ${r.status}`); }),
-      this.aws(['ssm', 'put-parameter', '--name', STAGING_LOCK_PARAM, '--type', 'String', '--overwrite', '--value', String(until)]),
+      this.held ? this.refresh(untilMs) : this.inflight ? Promise.resolve() : this.tryOnce(until),
     ]);
     // A staging that is down (queued before the run starts it) or an SSM hiccup is not an error of the run.
-    if (param.status === 'rejected') throw new Error(`staging lock not written: ${String(param.reason).split('\n')[0]!.slice(0, 200)}`);
+    if (param.status === 'rejected') {
+      if (param.reason instanceof StagingBusyError) throw param.reason;
+      throw new Error(`staging lock not written: ${String(param.reason).split('\n')[0]!.slice(0, 200)}`);
+    }
   }
 
+  /** The run's nonce while the evidence key is held (for the in-run deploy), else null. */
+  currentNonce(): string | null { return this.held ? this.nonce : null; }
+
   async release(): Promise<void> {
-    await this.aws(['ssm', 'delete-parameter', '--name', STAGING_LOCK_PARAM]).catch(() => undefined);
+    this.held = false;
+    await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined);
+    if (this.legacyOn) { this.legacyOn = false; await this.ssm.delete(OLD_LOCK_PARAM).catch(() => undefined); }
   }
 }
 
@@ -143,6 +328,11 @@ export const BUILDER_VERSION = 'b1';
 /** What a child gets from the Workplace's environment: what a shell on this Mac needs, no tokens. */
 const ENV_ALLOW = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TERM',
   'AWS_PROFILE', 'AWS_REGION', 'AWS_DEFAULT_REGION', 'AWS_CONFIG_FILE', 'AWS_SHARED_CREDENTIALS_FILE', 'JAVA_HOME'];
+
+/** Does this checkout's scripts/staging.sh know the evidence key (#543)? */
+export function stagingKnowsEvidenceKey(checkout: string): boolean {
+  try { return readFileSync(join(checkout, 'scripts', 'staging.sh'), 'utf8').includes('STAGING_DEPLOY_FOR_EVIDENCE'); } catch { return false; }
+}
 
 export function childEnvFor(extra: Record<string, string>, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const out: Record<string, string> = {};
@@ -521,15 +711,24 @@ export class RealStaging implements Staging {
  * reaches it.
  */
 export class RealServerDeployer implements ServerDeployer {
-  constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 25 * 60_000) {}
+  /**
+   * `evidenceKeyValue` gives the nonce of the in-use-evidence value while this process holds it. The deploy runs INSIDE
+   * the evidence run, whose own established key would otherwise make staging.sh wait forever: the nonce (only) is passed as
+   * STAGING_DEPLOY_FOR_EVIDENCE and staging.sh skips waiting on the evidence key only when its nonce matches.
+   */
+  constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 25 * 60_000, private readonly evidenceKeyValue: () => Promise<string | null> = async () => null, private readonly around?: <T>(fn: () => Promise<T>) => Promise<T>) {}
 
   async deploy(r: ServerDeployRequest): Promise<void> {
     const script = join(r.checkout, 'scripts', 'staging.sh');
     if (!existsSync(script)) throw new Error(`there is no scripts/staging.sh at ${r.sha.slice(0, 8)} to deploy with`);
     // deploy-api.sh and deploy-agent.sh run their tests with ../../.venv first.
     linkUntracked(r.repo, r.checkout);
-    const env = childEnvFor({ STAGING_HOST: new URL(this.cfg.stagingUrl).host });
-    const ran = await runLogged('bash', [script, 'deploy'], { cwd: r.checkout, env, logFile: r.log, timeoutMs: this.timeoutMs, ...(r.onSpawn ? { onSpawn: r.onSpawn } : {}) });
+    const held = await this.evidenceKeyValue().catch(() => null);
+    const env = childEnvFor({ STAGING_HOST: new URL(this.cfg.stagingUrl).host, ...(held ? { STAGING_DEPLOY_FOR_EVIDENCE: held } : {}) });
+    // Until the checkout's staging.sh knows STAGING_DEPLOY_FOR_EVIDENCE, release the legacy key around the deploy (see RealStagingLock).
+    const aware = stagingKnowsEvidenceKey(r.checkout);
+    const run = (): ReturnType<typeof runLogged> => runLogged('bash', [script, 'deploy'], { cwd: r.checkout, env, logFile: r.log, timeoutMs: this.timeoutMs, ...(r.onSpawn ? { onSpawn: r.onSpawn } : {}) });
+    const ran = aware || !this.around ? await run() : await this.around(run);
     if (ran.code !== 0) {
       const lines = ran.tail.split('\n').map(l => l.trim()).filter(Boolean);
       const why = [...lines].reverse().find(l => /❌|error|fail|refus|not running/i.test(l)) ?? lines.at(-1) ?? '';

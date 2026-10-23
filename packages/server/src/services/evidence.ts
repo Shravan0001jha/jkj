@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import type { EvidenceRunRecord, EvidenceServer, EvidenceState, StagingServerState, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { AppBuilder, EvidenceRunner, Platform, RunnerOutcome, ServerDeployer, Staging, StagingLock } from './evidence-ports.js';
-import { BUILDER_VERSION, BuildError, GitHubRunner, killGroupIfOurs, RealBuilder, RealRunner, RealServerDeployer, RealStaging, RealStagingLock } from './evidence-ports.js';
+import { BUILDER_VERSION, BuildError, GitHubRunner, killGroupIfOurs, RealBuilder, RealRunner, RealServerDeployer, RealStaging, RealStagingLock, stagingKnowsEvidenceKey } from './evidence-ports.js';
 import * as work from './work.js';
 import * as trail from './trail.js';
 import * as coo from './coo.js';
@@ -193,7 +193,7 @@ function portsOf(wp: Workplace): EvidencePorts {
   // Tests never touch staging or SSM: without a fake, the lock does nothing.
   p.lock ??= underTest() ? { hold: async () => undefined, release: async () => undefined } : new RealStagingLock(cfg);
   // Nor deploy to it.
-  p.deployer ??= underTest() ? { deploy: async () => { throw new Error('no staging deploys under test'); } } : new RealServerDeployer(cfg);
+  p.deployer ??= underTest() ? { deploy: async () => { throw new Error('no staging deploys under test'); } } : new RealServerDeployer(cfg, undefined, async () => (p.lock instanceof RealStagingLock ? p.lock.currentNonce() : null), (fn) => (p.lock?.aroundLegacyDeploy ? p.lock.aroundLegacyDeploy(fn) : fn()));
   ports.set(wp, p);
   return p as EvidencePorts;
 }
@@ -623,6 +623,9 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
   if (!outcome) try {
     const checkout = checkoutFor(wp, ctx.repo, slot);
     prepareCheckout(ctx.repo, checkout, sha);
+    // Evidence yields to a deploy only here, at acquire; once running the refresher never backs off.
+    await p.lock.setNonceAware?.(stagingKnowsEvidenceKey(checkout));
+    await p.lock.acquire?.(Date.now() + LOCK_FOR_MS);
     const stagingUp = p.staging.ensureUp().then(() => null, (err: unknown) => errText(err));
 
     const apps: Partial<Record<Platform, string>> = {};
