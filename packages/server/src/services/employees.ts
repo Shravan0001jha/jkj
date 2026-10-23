@@ -1721,10 +1721,10 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         async ({ itemId, reason }) => {
           try { const r = await board.resetBranch(wp, itemId, employeeId, reason); return ok(`${r.branch} reset ${r.was.slice(0, 8)} → ${r.now.slice(0, 8)}; backup ${r.backup}.`); } catch (err) { return ok(`Not done: ${err instanceof Error ? err.message : String(err)}`); }
         }),
-      tool('map_assign', 'Chief of Staff only: assign files that no charter owns to a charter in the ownership map (map.yaml), so the person waiting can report_done. Exact repo-relative paths (a folder path covers what is under it); each must be unmapped; the org reloads at once.',
+      tool('map_assign', 'Chief of Staff only: assign files to a charter in the ownership map (map.yaml), so the person waiting can report_done. Exact repo-relative paths only (no globs). A path no charter owns is added; a path that only resolves through a directory default (e.g. scripts/) gets an exact-path override placed before that default. A path with its own exact entry is refused (changing an existing owner is the COO\'s call). A reason is required; it is written beside the entry and audited. The org reloads at once.',
         { paths: z.array(z.string()), charterId: z.string(), reason: z.string() },
         async ({ paths, charterId, reason }) => {
-          try { const r = board.assignMap(wp, paths, charterId, employeeId, reason); return ok(`Mapped ${r.added.join(', ')} to ${charterId}; the org is reloaded.`); } catch (err) { return ok(`Not done: ${err instanceof Error ? err.message : String(err)}`); }
+          try { const r = board.assignMap(wp, paths, charterId, employeeId, reason); return ok(`Mapped ${r.added.join(', ')} to ${charterId}${r.overrides.length ? ` (exact override of a directory default: ${r.overrides.join(', ')})` : ''}; the org is reloaded.`); } catch (err) { return ok(`Not done: ${err instanceof Error ? err.message : String(err)}`); }
         }),
       tool('propose_org_change', 'Propose a hire, split, merge, reassign or restructure with a reason. The owner approves it in the Inbox. `paramsJson` is a JSON object as a string (see the handbook for the shape of each kind).',
         // A z.record() here makes the MCP SDK fail to list ANY tool of this server; a JSON string does not.

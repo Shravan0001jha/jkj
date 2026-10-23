@@ -10,7 +10,7 @@ import { approvalHolds, githubMode, isQa } from './review-policy.js';
 import * as reviewWake from './review-wake.js';
 import { isChiefOfStaff } from './employees.js';
 import { nameOf, rawGet } from './v2-map.js';
-import { resolve as resolveOwner } from './ownership.js';
+import { normalisePath, resolve as resolveOwner } from './ownership.js';
 import { BadRequest, Forbidden, NotFound } from '../util/errors.js';
 import { log } from '../util/logger.js';
 
@@ -205,29 +205,48 @@ export async function resetBranch(wp: Workplace, itemId: string, by: string, rea
 
 /* ---------- 7. assign unmapped files to a charter ---------- */
 
-export function assignMap(wp: Workplace, paths: string[], charterId: string, by: string, reason?: string): { added: string[]; mapEntries: number } {
+export function assignMap(wp: Workplace, paths: string[], charterId: string, by: string, reason?: string): { added: string[]; overrides: string[]; mapEntries: number } {
   requireMaintainer(wp, by);
   const why = reasonOf(reason);
   if (!paths.length) throw new BadRequest('Give at least one path.');
   if (!wp.org.charters.has(charterId)) throw new BadRequest(`No charter ${charterId}.`);
   const repoId = 'iris';
   const keys = [...new Set(paths.map(p => p.trim().replace(/^\.?\//, '').replace(/^iris:/, '')))];
+  const overrides: string[] = [];
   for (const k of keys) {
     if (!k || k.includes('..') || /\s/.test(k) || k.endsWith('/')) throw new BadRequest(`"${k}" is not a clean repo-relative path (no spaces, "..", or trailing slash).`);
-    const owner = resolveOwner(wp.org.map, { kind: 'path', key: `${repoId}:${k}` });
-    if (owner) throw new BadRequest(`${k} is already mapped to ${owner.primary}; a mapped path is changed by a map change through the COO.`);
+    if (/[*?[\]{}]/.test(k)) throw new BadRequest(`"${k}" is a glob; map exact paths only.`);
+    const full = `${repoId}:${k}`;
+    const owner = resolveOwner(wp.org.map, { kind: 'path', key: full });
+    if (!owner) continue;
+    // A directory/prefix default may be overridden by an exact entry; an exact entry of its own is the COO's to change.
+    if (wp.org.map.some(e => e.kind === 'path' && normalisePath(e.key) === full)) {
+      throw new BadRequest(`${k} is already mapped to ${owner.primary}; a mapped path is changed by a map change through the COO.`);
+    }
+    overrides.push(k);
   }
   const file = join(wp.config.workplaceDir, 'map.yaml');
-  const text = readFileSync(file, 'utf8');
-  const lines = keys.map(k => `  - kind: path\n    key: ${repoId}:${k}\n    primary: ${charterId}\n    contributors: []\n    consulted: []\n`).join('');
-  appendFileSync(file, `${text.endsWith('\n') ? '' : '\n'}${lines}`);
+  let text = readFileSync(file, 'utf8');
+  const date = new Date().toISOString().slice(0, 10);
+  const note = `# via map_assign by ${by}, ${date}: ${why.replace(/\s+/g, ' ')}`;
+  const block = (k: string, comment: boolean): string => `  - kind: path\n    key: ${repoId}:${k}\n    primary: ${charterId}${comment ? `   ${note}` : ''}\n    contributors: []\n    consulted: []\n`;
+  let appended = '';
+  for (const k of keys) {
+    if (!overrides.includes(k)) { appended += block(k, false); continue; }
+    // Longest prefix wins in the resolver, so the position is cosmetic; put it just before the default it overrides.
+    const def = resolveOwner(wp.org.map, { kind: 'path', key: `${repoId}:${k}` }) && wp.org.map.filter(e => e.kind === 'path' && `${repoId}:${k}`.startsWith(normalisePath(e.key).endsWith(':') ? normalisePath(e.key) : `${normalisePath(e.key)}/`)).sort((x, y) => normalisePath(y.key).length - normalisePath(x.key).length)[0];
+    const m = def ? new RegExp(`^  - kind: path\\n    key: ${normalisePath(def.key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/?\\n`, 'm').exec(text) : null;
+    if (m) text = text.slice(0, m.index) + block(k, true) + text.slice(m.index);
+    else appended += block(k, true);
+  }
+  writeFileSync(file, `${text}${appended && !text.endsWith('\n') ? '\n' : ''}${appended}`);
   const org = wp.reloadOrg();
   for (const k of keys) {
     const o = resolveOwner(org.map, { kind: 'path', key: `${repoId}:${k}` });
     if (o?.primary !== charterId) throw new BadRequest(`The map did not take ${k} after the reload (resolves to ${o?.primary ?? 'nothing'}); map.yaml is not in the expected shape, tell the COO.`);
   }
-  audit(wp, null, by, `Mapped ${keys.join(', ')} to charter ${charterId}: ${why}`);
-  return { added: keys, mapEntries: org.map.length };
+  audit(wp, null, by, `Mapped ${keys.join(', ')} to charter ${charterId}${overrides.length ? ` (exact override of a directory default: ${overrides.join(', ')})` : ''}: ${why}`);
+  return { added: keys, overrides, mapEntries: org.map.length };
 }
 
 /* ---------- 7. revoke one misrecorded approval ---------- */

@@ -16,6 +16,7 @@ import { doneProblem } from '../src/services/review-policy.js';
 import { employee, foreignChanges, workplaceTools, WORKPLACE_TOOLS } from '../src/services/employees.js';
 import { AUTOSAVE_SUBJECT, ensureWorktree } from '../src/services/worktrees.js';
 import { rawGet } from '../src/services/v2-map.js';
+import { resolve as resolveOwner } from '../src/services/ownership.js';
 import { testWorkplace } from './fakes/workplace.js';
 import { FakeGitHub } from './fakes/fake-github.js';
 import { writePrePr } from './fakes/pre-pr.js';
@@ -262,6 +263,27 @@ test('map_assign maps exact paths to a charter, refuses mapped paths and unknown
     board.assignMap(s.wp, ['tools/new-script.sh'], charter, 'asha', 'a new tool script nobody owned');
     assert.equal(foreignChanges(s.wp, employee(s.wp, 'kabir'), wtInfo).includes('tools/new-script.sh'), false, 'owned after the reload, no restart');
     assert.throws(() => board.assignMap(s.wp, ['tools/new-script.sh'], charter, 'asha', 'mapping the same file twice'), /already mapped/);
+  } finally { await s.done(); }
+});
+
+test('map_assign adds an exact-path override under a directory default, placed before it, and still refuses exact entries and globs', async () => {
+  const s = setup('on');
+  try {
+    const dir = s.wp.config.workplaceDir;
+    const file = join(dir, 'map.yaml');
+    const base = readFileSync(file, 'utf8');
+    writeFileSync(file, `${base}${base.endsWith('\n') ? '' : '\n'}  - kind: path\n    key: iris:zzdir\n    primary: kabir-charter-placeholder\n    contributors: []\n    consulted: []\n`.replace('kabir-charter-placeholder', employee(s.wp, 'kabir').charterIds[0]!));
+    s.wp.reloadOrg();
+    const other = employee(s.wp, 'nikhil').charterIds[0]!;
+    assert.throws(() => board.assignMap(s.wp, ['zzdir/*.sh'], other, 'asha', 'a glob is never mapped'), /glob|clean/);
+    assert.throws(() => board.assignMap(s.wp, ['zzdir/deploy.sh'], other, 'asha', 'x'), /reason/);
+    board.assignMap(s.wp, ['zzdir/deploy.sh'], other, 'asha', 'deploy tooling under the directory default');
+    const text = readFileSync(file, 'utf8');
+    assert.match(text, /key: iris:zzdir\/deploy\.sh\n\s+primary: [^\n#]+# via map_assign by asha, \d{4}-\d\d-\d\d: deploy tooling under the directory default/);
+    assert.ok(text.indexOf('iris:zzdir/deploy.sh') < text.indexOf('key: iris:zzdir\n'), 'inserted before the default');
+    assert.equal(resolveOwner(s.wp.org.map, { kind: 'path', key: 'iris:zzdir/deploy.sh' })?.primary, other, 'the exact entry wins');
+    assert.notEqual(resolveOwner(s.wp.org.map, { kind: 'path', key: 'iris:zzdir/other.sh' })?.primary, other, 'siblings keep the default');
+    assert.throws(() => board.assignMap(s.wp, ['zzdir/deploy.sh'], employee(s.wp, 'kabir').charterIds[0]!, 'asha', 'changing an existing owner'), /already mapped/);
   } finally { await s.done(); }
 });
 
