@@ -289,8 +289,16 @@ struct ConversationView: View {
                 await talk.reload(rest)
             }
         }
-        .onDisappear { if isCoo { model.coo.stopPolling() }; model.talkPrefs.markRead(employeeId) }
-        .onAppear { model.talkPrefs.markRead(employeeId) }
+        .onDisappear { if isCoo { model.coo.stopPolling() }; model.talkPrefs.markRead(employeeId); model.chatClosed(threadId) }
+        .onAppear { model.talkPrefs.markRead(employeeId); model.chatOpened(threadId) }
+        .task(id: "fallback-\(threadId)") {
+            // While the live socket is down, check this chat every few seconds so a reply still shows.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled, !model.socketIsOpen, model.talkThreads.supported == true, let r = model.rest else { continue }
+                await model.talkThreads.loadMessages(r, threadId: threadId)
+            }
+        }
         .onChange(of: isCoo ? model.coo.log.count : talk.log.count) { _, _ in model.talkPrefs.markRead(employeeId) }
         .onChange(of: model.talkThreads.messages[threadId]?.count ?? 0) { _, _ in
             // A message arrived while the thread is on screen: it is read (LLD-app-fixes §2).

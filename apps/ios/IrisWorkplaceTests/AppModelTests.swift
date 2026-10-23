@@ -424,6 +424,40 @@ final class ReliabilityAndPushTests: XCTestCase {
         }
     }
 
+    func testAReplySentWhileTheSocketWasDownShowsAfterTheReconnect() async {
+        // The owner's bug (23 Oct): an agent's reply posted during a socket gap (tunnel blip, app in the
+        // background) was never pushed, so the open chat stayed stale until it was left and re-opened.
+        let thread = #"{"id":"tara","employeeId":"tara","name":"Tara","unreadCount":0,"pinned":false,"typing":false}"#
+        let reply = #"{"id":"m2","threadId":"tara","at":"2026-10-23T10:00:05Z","from":"tara","fromName":"Tara","direction":"out","text":"Done.","mentions":[],"attachments":[]}"#
+        let replied = ReplyState()
+        StubURLProtocol.handler = { req in
+            switch req.url!.path {
+            case "/api/health": return (200, try! Fixtures.data("health"))
+            case "/api/office": return (200, try! Fixtures.data("office"))
+            case "/api/inbox": return (200, try! Fixtures.data("inbox"))
+            case "/api/talk/threads": return (200, Data("[\(thread)]".utf8))
+            case "/api/talk/threads/tara/messages": return (200, Data((replied.on ? "[\(reply)]" : "[]").utf8))
+            default: return (404, Data(#"{"error":"no"}"#.utf8))
+            }
+        }
+        let m = model()
+        m.start()
+        await expectEventually { self.transports.count == 1 }
+        transports[0].open()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        m.chatOpened("tara")
+        await m.resyncOpenChats()
+        XCTAssertEqual(m.talkThreads.shown("tara").count, 0)
+        transports[0].drop(WorkplaceError.transport("tunnel blip"))
+        await expectEventually { !m.socketIsOpen }
+        replied.on = true                        // the reply lands on the server while the socket is down
+        await expectEventually { self.transports.count == 2 }
+        transports[1].open()                     // reconnect: no event is replayed, the app must re-fetch
+        await expectEventually { m.talkThreads.shown("tara").map(\.id) == ["m2"] }
+        m.chatClosed("tara")
+        XCTAssertTrue(m.openChats.isEmpty)
+    }
+
     func testNetworkChangeReconnectsAtOnce() async {
         serve()
         let m = model()
@@ -645,3 +679,6 @@ final class AsyncGate: @unchecked Sendable {
     func wait() { _ = sem.wait(timeout: .now() + 5) }
     func release() { sem.signal() }
 }
+
+
+final class ReplyState: @unchecked Sendable { var on = false }

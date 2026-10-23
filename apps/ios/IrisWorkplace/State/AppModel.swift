@@ -69,6 +69,13 @@ final class AppModel {
     private(set) var health: WorkplaceHealthResponse?
     private(set) var lastSocketError: String?
     private var socket: SocketClient?
+    /// True while the live socket is open. A chat on screen polls lightly while it is false.
+    private(set) var socketIsOpen = false
+    /// Talk threads on screen right now (thread id -> how many views show it). A reconnect re-fetches
+    /// them: events sent while the socket was down (tunnel blip, app in the background) are never
+    /// replayed, so without this an agent's reply only appeared after leaving and re-opening the chat.
+    private(set) var openChats: [String: Int] = [:]
+    private var everOpened = false
 
     let office = OfficeStore()
     let inbox = InboxStore()
@@ -383,8 +390,22 @@ final class AppModel {
 
     // MARK: connection
 
+    func chatOpened(_ threadId: String) { openChats[threadId, default: 0] += 1 }
+    func chatClosed(_ threadId: String) {
+        guard let n = openChats[threadId] else { return }
+        if n <= 1 { openChats[threadId] = nil } else { openChats[threadId] = n - 1 }
+    }
+
+    /// Re-fetch what the socket may have missed: the thread list (unread, typing) and every open chat.
+    func resyncOpenChats() async {
+        guard let rest, talkThreads.supported != false else { return }
+        await talkThreads.load(rest)
+        for id in openChats.keys { await talkThreads.loadMessages(rest, threadId: id) }
+    }
+
     func foreground() {
         guard hasCredential else { return }
+        Task { await resyncOpenChats() }
         switch connection {
         case .macOffline, .accessOff, .unauthorized: connect()
         default: if socket == nil { connect() } else { socket?.reconnectNow() }
@@ -501,7 +522,12 @@ final class AppModel {
         case .open:
             offlineTask?.cancel(); offlineTask = nil
             connection = .online(version: health?.version ?? "")
+            socketIsOpen = true
+            // A RE-open (not the first): whatever was posted while it was down was never pushed.
+            if everOpened { Task { await resyncOpenChats() } }
+            everOpened = true
         case .closed(let retryAt):
+            socketIsOpen = false
             switch connection {
             case .unauthorized, .macOffline, .accessOff, .signedOut: return
             default: break
