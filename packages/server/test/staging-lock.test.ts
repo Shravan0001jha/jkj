@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { test } from 'node:test';
-import { DEPLOY_LOCK_PARAM, OLD_LOCK_PARAM, PROVISIONAL_TTL_S, RealStagingLock, STAGING_LOCK_PARAM, StagingBusyError, type LockBounds, type SsmPort } from '../src/services/evidence-ports.js';
+import { DEPLOY_LOCK_PARAM, OLD_LOCK_PARAM, PROVISIONAL_PREFIX, RealStagingLock, STAGING_LOCK_PARAM, StagingBusyError, type LockBounds, type SsmPort } from '../src/services/evidence-ports.js';
 
 /** In-memory SSM: every method is atomic (no await between check and set), as a conditional create is. */
 class FakeSsm implements SsmPort {
@@ -69,12 +69,24 @@ test('lock table: rows without a new evidence action exist (conflict_during_refr
   assert.equal(row('bound_reached').evidence.action, 'give_up_after_bound');
 });
 
-test('the evidence acquire (create, check, confirm) finishes well inside the table\'s provisional window', { skip: table.evidence_provisional_max_s === undefined ? 'waiting on table field evidence_provisional_max_s' : false }, async () => {
-  const max = table.evidence_provisional_max_s!;
-  assert.ok(PROVISIONAL_TTL_S <= max, 'our provisional expiry is within the window deploy treats as provisional');
-  const t0 = Date.now();
-  await mk(new FakeSsm()).acquire(UNTIL);
-  assert.ok(Date.now() - t0 < (max * 1000) / 2);
+test('value format: provisional p:<epoch> before the check, bare epoch once running, p: never written by refresh; unparseable reads as held', async () => {
+  const ssm = new FakeSsm();
+  const seen: string[] = [];
+  const g = ssm.get.bind(ssm);
+  ssm.get = async n => { if (n === DEPLOY_LOCK_PARAM) seen.push(ssm.m.get(STAGING_LOCK_PARAM) ?? ''); return g(n); };
+  const lock = mk(ssm);
+  await lock.acquire(UNTIL);
+  const bare = String(Math.floor(UNTIL / 1000));
+  assert.deepEqual(seen, [PROVISIONAL_PREFIX + bare], 'provisional while the others are checked');
+  assert.equal(ssm.m.get(STAGING_LOCK_PARAM), bare, 'established after');
+  await lock.hold(UNTIL + 1000).catch(() => undefined);
+  assert.equal(ssm.m.get(STAGING_LOCK_PARAM), String(Math.floor((UNTIL + 1000) / 1000)));
+  for (const v of ['garbage', 'p:', '12x']) {
+    const s2 = new FakeSsm(); s2.m.set(DEPLOY_LOCK_PARAM, v);
+    await assert.rejects(mk(s2, bounds({ tries: 1 })).acquire(UNTIL), StagingBusyError, `${v} treated as held`);
+  }
+  const s3 = new FakeSsm(); s3.m.set(STAGING_LOCK_PARAM, 'p:' + sec(600));
+  await assert.rejects(mk(s3, bounds({ tries: 1 })).acquire(UNTIL), /another evidence run/, 'a live provisional evidence key is held too');
 });
 
 test('bound: gives up after N tries with the visible deferred message, sleeping between tries only', async () => {

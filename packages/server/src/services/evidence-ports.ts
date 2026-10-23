@@ -159,13 +159,20 @@ export interface LockBounds { tries: number; baseMs: number; jitterMs: number; s
 export const DEFAULT_LOCK_BOUNDS: LockBounds = { tries: 6, baseMs: 30_000, jitterMs: 60_000, sleep: ms => new Promise(r => setTimeout(r, ms)), now: () => Date.now() };
 
 /**
- * Evidence publishes PROVISIONALLY (this short expiry), checks the deploy and old keys, and only then extends to the full
- * TTL (established). A deploy that sees a provisional hold may proceed (a tie); an established one it waits for. Must stay
- * under the table's evidence_provisional_max_s (scripts/staging-lock-cases.json, read by the test, never by this code).
+ * Value format of the evidence key: `p:<epoch s>` when created (provisional, before the other keys are checked), the bare
+ * `<epoch s>` once the check passed and the run starts (established); refresh writes bare epochs only. Readers treat a
+ * value that parses as neither as established (fail-safe toward waiting).
  */
-export const PROVISIONAL_TTL_S = 30;
+export const PROVISIONAL_PREFIX = 'p:';
 
-const liveEpoch = (v: string | null, nowMs: number): number => { const n = Number(v); return v !== null && Number.isFinite(n) && n * 1000 > nowMs ? n : 0; };
+/** Expiry epoch (s) of a lock value if still live; unparseable counts as live (established). 0 = free or expired. */
+const liveEpoch = (v: string | null, nowMs: number): number => {
+  if (v === null) return 0;
+  const m = /^(?:p:)?(\d+)$/.exec(v.trim());
+  if (!m) return Number.MAX_SAFE_INTEGER;
+  const n = Number(m[1]);
+  return n * 1000 > nowMs ? n : 0;
+};
 
 export class RealStagingLock implements StagingLock {
   private held = false;
@@ -187,7 +194,7 @@ export class RealStagingLock implements StagingLock {
   /** One attempt: create own key, then look at the deploy and old keys; yield (delete own) to either. */
   private async tryOnce(until: number): Promise<void> {
     const now = this.bounds.now();
-    const prov = String(Math.floor(now / 1000) + PROVISIONAL_TTL_S);
+    const prov = PROVISIONAL_PREFIX + until;
     if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, prov))) {
       const cur = await this.ssm.get(STAGING_LOCK_PARAM);
       if (cur !== null && liveEpoch(cur, now)) throw new StagingBusyError('evidence');
