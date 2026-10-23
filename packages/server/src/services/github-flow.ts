@@ -415,9 +415,10 @@ export function runCoversHead(wp: Workplace, w: WorkItem, runSha: string): boole
 export function effectiveEvidence(wp: Workplace, w: WorkItem): PrRecord['evidence'] | undefined {
   const pr = w.pr;
   if (!pr) return undefined;
-  if (pr.evidence === 'success' || pr.evidence === 'failure') return pr.evidence;
+  // The latest finished run that covers the head wins over a stored value that may predate a re-score.
   const run = w.evidenceRun;
-  if (run && (run.state === 'success' || run.state === 'failure') && run.sha !== pr.headSha && runCoversHead(wp, w, run.sha)) return run.state;
+  if (run && (run.state === 'success' || run.state === 'failure') && (run.sha === pr.headSha || runCoversHead(wp, w, run.sha))) return run.state;
+  if (pr.evidence === 'success' || pr.evidence === 'failure') return pr.evidence;
   return pr.evidence;
 }
 
@@ -881,13 +882,14 @@ export function statusesFor(wp: Workplace, w: WorkItem): Status[] {
   const t = pr.tests && pr.tests.sha === pr.headSha ? pr.tests : undefined;
   const ci = pr.mobileCi && pr.mobileCi.sha === pr.headSha && pr.mobileCi.runUrl ? pr.mobileCi.runUrl : undefined;
   const tests: Status = t ? { context: CONTEXTS.tests, state: t.state, description: t.summary, ...(ci ? { targetUrl: ci } : {}) } : { context: CONTEXTS.tests, state: 'pending', description: 'Checks queued' };
-  const evidence: Status = pr.evidence === 'success' ? { context: CONTEXTS.evidence, state: 'success', description: pr.evidenceNote ?? 'Evidence checked' }
-    : pr.evidence === 'failure' ? { context: CONTEXTS.evidence, state: 'failure', description: pr.evidenceNote ?? 'Evidence missing' }
-    : pr.evidence === 'stale' ? { context: CONTEXTS.evidence, state: 'pending', description: 'Stale: a new commit needs run_evidence again' }
+  const ev = effectiveEvidence(wp, w);
+  const evidence: Status = ev === 'success' ? { context: CONTEXTS.evidence, state: 'success', description: pr.evidenceNote ?? 'Evidence checked' }
+    : ev === 'failure' ? { context: CONTEXTS.evidence, state: 'failure', description: pr.evidenceNote ?? 'Evidence missing' }
+    : ev === 'stale' ? { context: CONTEXTS.evidence, state: 'pending', description: 'Stale: a new commit needs run_evidence again' }
     : { context: CONTEXTS.evidence, state: 'pending', description: 'Waiting for run_evidence on this commit' };
   // The shared report of the run behind this status (the global link), when there is one.
-  const share = w.evidenceRun && w.evidenceRun.state === effectiveEvidence(wp, w) ? w.evidenceRun.share : undefined;
-  if (share && (pr.evidence === 'success' || pr.evidence === 'failure')) evidence.targetUrl = share.url;
+  const share = w.evidenceRun && w.evidenceRun.state === ev ? w.evidenceRun.share : undefined;
+  if (share && (ev === 'success' || ev === 'failure')) evidence.targetUrl = share.url;
   return [review, tests, evidence];
 }
 
@@ -1722,7 +1724,7 @@ export async function merge(wp: Workplace, itemId: string, by: string): Promise<
     blockers.push(`workplace/tests is ${pr.tests && pr.tests.sha === pr.headSha ? pr.tests.state : 'not run'} on ${pr.headSha.slice(0, 8)}`);
   }
   // Evidence before merge (owner, 10 Oct): the robot suite passed, or QA's doc says why there is none.
-  if (!evidenceOk(wp, w)) blockers.push(`workplace/evidence is ${pr.evidence}, and the QA doc does not say "Evidence: n/a — <why>" with a "Tests:" line`);
+  if (!evidenceOk(wp, w)) blockers.push(`workplace/evidence is ${effectiveEvidence(wp, w)}, and the QA doc does not say "Evidence: n/a — <why>" with a "Tests:" line`);
   if (m === 'shadow') return { mode: m, merged: false, wouldMerge: blockers.length === 0, blockers };
   if (blockers.length) throw new Conflict(`Not merged: ${blockers.join('; ')}.`);
 
@@ -1807,7 +1809,7 @@ export function autoReady(wp: Workplace, w: WorkItem): 'ready' | 'waiting' | 're
   if (!pr.tests || pr.tests.sha !== pr.headSha) return 'waiting';
   if (pr.tests.state !== 'success') return pr.tests.state === 'pending' ? 'waiting' : 'red';
   if (evidenceOk(wp, w)) return 'ready';
-  return pr.evidence === 'failure' ? 'red' : 'waiting';
+  return effectiveEvidence(wp, w) === 'failure' ? 'red' : 'waiting';
 }
 
 /** CI and infrastructure: a change here can cost money, so it merges only after the COO approves the spend. */

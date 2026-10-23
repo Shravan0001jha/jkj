@@ -562,6 +562,54 @@ test('22c: a passing evidence run on S covers a head that only trunk catch-ups m
   } finally { await s.done(); }
 });
 
+test('22e: the latest covering run wins over a stale stored pr.evidence; a failing run stays failing; an author commit leaves the stored value', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    const runSha = pr(s).headSha;
+    runOn(s, runSha);
+    await flow.approve(s.wp, s.storyId, 'arjun');
+    work.saveQuiet(s.wp, { ...rawGet(s.wp, s.storyId)!, pr: { ...pr(s), evidence: 'failure' } });
+    trunkMovesAndMergesIn(s, 'a.py');
+    await flow.syncHeads(s.wp);
+    assert.notEqual(pr(s).headSha, runSha);
+    assert.equal(pr(s).evidence, 'failure', 'stored value is stale-failure');
+    assert.equal(flow.effectiveEvidence(s.wp, rawGet(s.wp, s.storyId)!), 'success', 'the covering success run wins');
+    const qa = await flow.approve(s.wp, s.storyId, 'nikhil', undefined, qaText(s.wp));
+    assert.equal(qa.stage, 'qa', 'review_approve passes the evidence check');
+  } finally { await s.done(); }
+});
+
+test('22f: a covering failed run is failure even if the stored value says success', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    const runSha = pr(s).headSha;
+    const w = rawGet(s.wp, s.storyId)!;
+    work.saveQuiet(s.wp, { ...w, pr: { ...pr(s), evidence: 'success' } });
+    runOn(s, runSha);
+    const w2 = rawGet(s.wp, s.storyId)!;
+    work.saveQuiet(s.wp, { ...w2, evidenceRun: { ...w2.evidenceRun!, state: 'failure' } });
+    assert.equal(flow.effectiveEvidence(s.wp, rawGet(s.wp, s.storyId)!), 'failure');
+  } finally { await s.done(); }
+});
+
+test('22g: a run on a sha with an author commit since does not override the stored value', async () => {
+  const s = setup('shadow');
+  try {
+    s.commit({ 'services/memory-svc/recall.py': 'x = 1\n' });
+    await reviewed(s);
+    const runSha = pr(s).headSha;
+    runOn(s, runSha);
+    s.commit({ 'services/memory-svc/recall.py': 'x = 2\n' });
+    await flow.syncHeads(s.wp);
+    work.saveQuiet(s.wp, { ...rawGet(s.wp, s.storyId)!, pr: { ...pr(s), evidence: 'failure' } });
+    assert.equal(flow.effectiveEvidence(s.wp, rawGet(s.wp, s.storyId)!), 'failure');
+  } finally { await s.done(); }
+});
+
 test('22d: a head moved by the author\'s own commit leaves the run on S stale', async () => {
   const s = setup('shadow');
   try {

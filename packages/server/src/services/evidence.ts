@@ -1001,6 +1001,9 @@ export async function rescore(wp: Workplace, itemId: string, by: string, runId?:
   trail.comment(wp, itemId, { by: 'workplace', text });
   linkDeferred(wp, itemId, w.title, next);
   const pr = cur.pr;
+  if (githubFlow.mode(wp) === 'local' && pr && !pr.merged && coversPr(wp, itemId, rec.sha)) {
+    githubFlow.savePr(wp, itemId, c => (c.pr ? { pr: { ...c.pr, evidence: next.state === 'success' ? 'success' : 'failure' } } : {}));
+  }
   if (githubFlow.mode(wp) !== 'local' && pr && !pr.merged && coversPr(wp, itemId, rec.sha)) {
     try { await githubFlow.setEvidence(wp, itemId, 'success', `${next.passed} passed, ${next.failed} failed${next.deferred?.length ? `, ${next.deferred.length} deferred (${next.deferred.map(d => `${d.case} → ${d.storyId}`).join(', ')})` : ''} on ${next.platforms.join('+')} (re-scored)`); }
     catch (err) { log.warn('evidence', `${itemId}: re-score setEvidence: ${errText(err)}`); }
