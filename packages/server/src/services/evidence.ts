@@ -80,7 +80,8 @@ export function parsePlanPer(src: string): Record<string, string[]> | null {
   const body = src.slice(start.index + start[0].length, src.indexOf('\n};', start.index));
   const out: Record<string, string[]> = {};
   for (const m of body.matchAll(/^\s*['"]?([a-z][\w-]*)['"]?\s*:\s*\{([^}]*)\}/gm)) {
-    out[m[1]!] = [...m[2]!.matchAll(/(?:^|[\s,{])['"]?([a-z][\w-]*)['"]?\s*:/g)].map(x => x[1]!);
+    // A quoted key may hold ':' (a case inside a feature, e.g. 'image:make'): read it whole, never split at the colon.
+    out[m[1]!] = [...m[2]!.matchAll(/(?:^|[\s,{])(?:'([^']+)'|"([^"]+)"|([a-z][\w-]*))\s*:/g)].map(x => (x[1] ?? x[2] ?? x[3])!);
   }
   return out.android && out.ios ? out : null;
 }
