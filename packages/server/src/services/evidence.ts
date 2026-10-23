@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { EvidenceRunRecord, EvidenceServer, EvidenceState, StagingServerState, WorkItem } from '@jkj/shared';
+import type { EvidenceDeferred, EvidenceRunRecord, EvidenceServer, EvidenceState, StagingServerState, WorkItem } from '@jkj/shared';
 import type { Workplace } from './workplace.js';
 import type { AppBuilder, EvidenceRunner, Platform, RunnerOutcome, ServerDeployer, Staging, StagingLock } from './evidence-ports.js';
 import { BUILDER_VERSION, BuildError, GitHubRunner, killGroupIfOurs, RealBuilder, RealRunner, RealServerDeployer, RealStaging, RealStagingLock, stagingKnowsEvidenceKey, type LockMemory } from './evidence-ports.js';
@@ -22,6 +22,7 @@ import { branchFor, excludeLinked } from './worktrees.js';
 import { isReviewerRole, isQa } from './review-policy.js';
 import { assertNotRealPath, underTest } from './test-guard.js';
 import * as evidenceShare from './evidence-share.js';
+import * as deferred from './deferred.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -593,7 +594,7 @@ function prepareCheckout(repo: string, path: string, sha: string): void {
 
 /* ---------- one run ---------- */
 
-interface Outcome { state: EvidenceState; passed: number; failed: number; failures: string[]; note?: string; server?: EvidenceServer }
+interface Outcome { state: EvidenceState; passed: number; failed: number; failures: string[]; note?: string; server?: EvidenceServer; deferred?: EvidenceDeferred[] }
 
 async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<void> {
   const cfg = wp.config.evidence;
@@ -715,6 +716,8 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
         const res = await p.runner.run({ checkout, platforms: job.platforms, features: job.features, ...(job.androidApi ? { androidApi: job.androidApi } : {}), api: cfg.stagingUrl, apps, slot, out: runDir, log: join(logs, 'runner.log'), onSpawn, sha, repo: ctx.repo, branch: ctx.branch, requestId: `${job.itemId}-${job.run}` });
         const afterState = stagingServer(wp);
         if (!job.server && JSON.stringify(afterState) !== before) srv.changedTo = knownSha(afterState);
+        // Known infra gaps: a listed BLOCKED case is deferred to the story that will verify it, not a failure.
+        deferred.scoreRun(runDir, deferredEntries(wp, ctx.repo, ctx.trunk, sha), id => deferred.usable(wp, id));
         return { ...readOutcome(runDir, res), server: srv };
       };
       if (job.server) { job.phase = 'waiting for staging (another server run)'; persist(wp, job); }
@@ -746,7 +749,7 @@ export function readOutcome(runDir: string, res: RunnerOutcome): Outcome {
   if (res.exitCode === 2 || !existsSync(summaryFile) || !existsSync(resultsFile)) {
     return { state: 'error', passed: 0, failed: 0, failures: [], note: `the runner stopped before its report (exit ${res.exitCode ?? res.signal ?? '?'})${lastLine ? `: ${lastLine.slice(0, 200)}` : ''}` };
   }
-  let results: { verdict?: string; counts?: Record<string, number> } = {};
+  let results: { verdict?: string; counts?: Record<string, number>; deferred?: EvidenceDeferred[] } = {};
   try { results = JSON.parse(readFileSync(resultsFile, 'utf8')) as typeof results; } catch { /* unreadable: no counts */ }
   const counts = results.counts ?? {};
   const passed = (counts['PASS'] ?? 0) + (counts['FLAKY'] ?? 0);
@@ -754,8 +757,19 @@ export function readOutcome(runDir: string, res: RunnerOutcome): Outcome {
   const lines = readFileSync(summaryFile, 'utf8').split('\n');
   const at = lines.findIndex(l => /^FAILURES \(\d+\)/.test(l));
   const failures = at < 0 ? [] : lines.slice(at + 1).map(l => l.trim()).filter(Boolean).slice(0, 10);
-  const pass = results.verdict === 'PASS' && res.exitCode === 0;
-  return { state: pass ? 'success' : 'failure', passed, failed, failures, ...(pass || failures.length ? {} : { note: `the suite did not pass (exit ${res.exitCode ?? res.signal ?? '?'})` }) };
+  // A job that exited non-zero only because of cases we deferred (rewritten into results.json) still passes.
+  const def = results.deferred?.length ? results.deferred : undefined;
+  const pass = results.verdict === 'PASS' && (res.exitCode === 0 || !!def);
+  return { state: pass ? 'success' : 'failure', passed, failed, failures, ...(def ? { deferred: def } : {}), ...(pass || failures.length ? {} : { note: `the suite did not pass (exit ${res.exitCode ?? res.signal ?? '?'})` }) };
+}
+
+/** Deferred cases from e2e/DEFERRED.md at the story's commit (then the trunk's, like plan.mjs), then the COO's allowlist. */
+function deferredEntries(wp: Workplace, repo: string, trunk: string, sha: string): deferred.DeferredEntry[] {
+  let fromFile: deferred.DeferredEntry[] = [];
+  for (const ref of [sha, `origin/${trunk}`, trunk]) {
+    try { fromFile = deferred.parseDeferredFile(git(repo, ['show', `${ref}:${deferred.DEFERRED_PATH}`])); break; } catch { /* none at this ref */ }
+  }
+  return [...fromFile, ...deferred.allowlist(wp)];
 }
 
 const dur = (s: number): string => (s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${s}s`);
@@ -776,7 +790,8 @@ const WORD: Record<EvidenceState, string> = { success: 'PASS', failure: 'FAIL', 
 export function summaryText(rec: EvidenceRunRecord, title: string): string {
   const link = rec.share ? rec.share.url : 'link unavailable (the upload failed; the evidence still counts)';
   return [
-    `Evidence ${WORD[rec.state]} for "${title}" on ${rec.sha.slice(0, 8)} (${rec.platforms.join(',')} / ${rec.features.join(',')}): ${rec.passed} passed, ${rec.failed} failed, ${dur(rec.durationS)}. Report: ${link}`,
+    `Evidence ${WORD[rec.state]} for "${title}" on ${rec.sha.slice(0, 8)} (${rec.platforms.join(',')} / ${rec.features.join(',')}): ${rec.passed} passed, ${rec.failed} failed${rec.deferred?.length ? `, ${rec.deferred.length} deferred` : ''}, ${dur(rec.durationS)}. Report: ${link}`,
+    ...(rec.deferred?.length ? [deferred.deferredLine(rec.deferred)] : []),
     ...(rec.server ? [evidenceShare.serverLine(rec.server)] : []),
     ...(rec.note && rec.state !== 'failure' ? [`Why: ${rec.note}.`] : []),
     ...(rec.failures.length ? ['Failures:', ...rec.failures.slice(0, 5).map(f => `- ${f}`), ...(rec.failures.length > 5 ? [`- … ${rec.failures.length - 5} more in the report`] : [])] : []),
@@ -789,7 +804,7 @@ async function finish(wp: Workplace, job: EvidenceJob, outcome: Outcome, started
     run: job.run!, sha: job.sha!, state: outcome.state, platforms: job.platforms, features: job.features,
     passed: outcome.passed, failed: outcome.failed, failures: outcome.failures,
     durationS: Math.round((Date.now() - started) / 1000), report: reportPath(job.itemId, job.run!),
-    by: job.by, at: now(), ...(outcome.note ? { note: outcome.note } : {}), ...(outcome.server ? { server: outcome.server } : {}),
+    by: job.by, at: now(), ...(outcome.note ? { note: outcome.note } : {}), ...(outcome.server ? { server: outcome.server } : {}), ...(outcome.deferred?.length ? { deferred: outcome.deferred } : {}),
   };
   const w = rawGet(wp, job.itemId);
   const title = w?.title ?? job.itemId;
@@ -807,12 +822,13 @@ async function finish(wp: Workplace, job: EvidenceJob, outcome: Outcome, started
       const cur = rawGet(wp, job.itemId)!;
       work.saveQuiet(wp, { ...cur, evidenceRun: rec });
       trail.comment(wp, job.itemId, { by: 'workplace', text, ...(rec.failures.length || rec.note ? { details: [...rec.failures, ...(rec.note ? [`note: ${rec.note}`] : []), `logs: ${rec.report.replace(/index\.html$/, 'workplace/')}`].join('\n') } : {}) });
-      trail.record(wp, { itemId: job.itemId, by: 'workplace', kind: 'test', text: `Evidence ${WORD[rec.state]} on ${rec.sha.slice(0, 8)}: ${rec.passed} passed, ${rec.failed} failed (${rec.platforms.join(',')})` });
+      trail.record(wp, { itemId: job.itemId, by: 'workplace', kind: 'test', text: `Evidence ${WORD[rec.state]} on ${rec.sha.slice(0, 8)}: ${rec.passed} passed, ${rec.failed} failed${rec.deferred?.length ? `, ${rec.deferred.length} deferred` : ''} (${rec.platforms.join(',')})` });
+      linkDeferred(wp, job.itemId, title, rec);
     } catch (err) { log.warn('evidence', `${job.id}: not recorded on the item: ${errText(err)}`); }
     // shadow/on: the PR's workplace/evidence status, only for the commit that was tested.
     const pr = rawGet(wp, job.itemId)?.pr;
     if (githubFlow.mode(wp) !== 'local' && pr && !pr.merged && pr.headSha === rec.sha && rec.state !== 'error') {
-      try { await githubFlow.setEvidence(wp, job.itemId, rec.state, `${rec.passed} passed, ${rec.failed} failed on ${rec.platforms.join('+')} (run_evidence)`); }
+      try { await githubFlow.setEvidence(wp, job.itemId, rec.state, `${rec.passed} passed, ${rec.failed} failed${rec.deferred?.length ? `, ${rec.deferred.length} deferred (${rec.deferred.map(d => `${d.case} → ${d.storyId}`).join(', ')})` : ''} on ${rec.platforms.join('+')} (run_evidence)`); }
       catch (err) { log.warn('evidence', `${job.id}: setEvidence: ${errText(err)}`); }
       try { await githubFlow.prComment(wp, job.itemId, text); }
       catch (err) { log.warn('evidence', `${job.id}: PR comment: ${errText(err)}`); }
@@ -826,6 +842,17 @@ async function finish(wp: Workplace, job: EvidenceJob, outcome: Outcome, started
   persist(wp, job);
   pruneFinished(wp);
   log.info('evidence', `${job.itemId}: ${job.id} ${WORD[rec.state]} on ${rec.sha.slice(0, 8)} (${rec.passed}/${rec.passed + rec.failed}, ${dur(rec.durationS)}, delivered to ${job.delivered})`);
+}
+
+/** The verifying story hears which case of whose run waits on it (once per case and commit). */
+function linkDeferred(wp: Workplace, itemId: string, title: string, rec: EvidenceRunRecord): void {
+  for (const d of rec.deferred ?? []) {
+    try {
+      const target = rawGet(wp, d.storyId);
+      const text = `Deferred to this story: ${d.case} (${d.platform}) was BLOCKED by a known infra gap in the evidence run of ${itemId} "${title}" on ${rec.sha.slice(0, 8)}${d.reason ? ` (${d.reason})` : ''}. Verify it here on a real device.`;
+      if (target && !trail.comments(wp, d.storyId).some(c => c.text === text)) trail.comment(wp, d.storyId, { by: 'workplace', text });
+    } catch (err) { log.warn('evidence', `${itemId}: deferred link to ${d.storyId}: ${errText(err)}`); }
+  }
 }
 
 /** The caller's open session gets the summary; with none open, the item comment is the delivery. */
@@ -940,4 +967,37 @@ export function reportFile(wp: Workplace, item: string, run: string, rest: strin
     if (real !== realRoot && !real.startsWith(realRoot + sep)) return null;
     return statSync(real).isFile() ? real : null;
   } catch { return null; }
+}
+
+/**
+ * Re-scores a stored run (no new GitHub run): a failure whose only blocked cases are now deferred (the COO
+ * just allowed them, or the commit lists them) becomes a pass, on the item and on the PR for the same head.
+ */
+export async function rescore(wp: Workplace, itemId: string, by: string, runId?: string): Promise<EvidenceRunRecord> {
+  const w = rawGet(wp, itemId);
+  if (!w) throw new BadRequest(`no item ${itemId}`);
+  const rec = w.evidenceRun;
+  if (!rec || (runId && rec.run !== runId)) throw new BadRequest(`${itemId}: ${runId ? `run ${runId} is not the latest evidence run` : 'no evidence run to re-score'}`);
+  if (rec.state !== 'failure') throw new BadRequest(`${itemId}: the latest run is ${rec.state}, only a failed run is re-scored`);
+  const runDir = join(wp.config.evidence.dir, itemId, rec.run);
+  if (!existsSync(join(runDir, 'results.json'))) throw new BadRequest(`${itemId}: run ${rec.run} has no stored results.json`);
+  const ctx = storyOf(wp, w);
+  const repo = typeof ctx === 'string' ? '' : ctx.repo, trunk = typeof ctx === 'string' ? wp.config.github.trunk : ctx.trunk;
+  deferred.scoreRun(runDir, repo ? deferredEntries(wp, repo, trunk, rec.sha) : deferred.allowlist(wp), id => deferred.usable(wp, id));
+  const o = readOutcome(runDir, { exitCode: 1, stderrTail: '' });
+  if (o.state !== 'success' && !o.deferred?.length) return rec;
+  const next: EvidenceRunRecord = { ...rec, state: o.state, passed: o.passed, failed: o.failed, failures: o.failures, ...(o.deferred ? { deferred: o.deferred } : {}) };
+  if (o.state === 'success') delete next.note;
+  const cur = rawGet(wp, itemId)!;
+  work.saveQuiet(wp, { ...cur, evidenceRun: next });
+  const text = `${summaryText(next, w.title)}\nRe-scored by ${by} from the stored run ${rec.run}; no new run.`;
+  trail.comment(wp, itemId, { by: 'workplace', text });
+  linkDeferred(wp, itemId, w.title, next);
+  const pr = cur.pr;
+  if (githubFlow.mode(wp) !== 'local' && pr && !pr.merged && pr.headSha === rec.sha) {
+    try { await githubFlow.setEvidence(wp, itemId, 'success', `${next.passed} passed, ${next.failed} failed${next.deferred?.length ? `, ${next.deferred.length} deferred (${next.deferred.map(d => `${d.case} → ${d.storyId}`).join(', ')})` : ''} on ${next.platforms.join('+')} (re-scored)`); }
+    catch (err) { log.warn('evidence', `${itemId}: re-score setEvidence: ${errText(err)}`); }
+    try { await githubFlow.prComment(wp, itemId, text); } catch (err) { log.warn('evidence', `${itemId}: re-score PR comment: ${errText(err)}`); }
+  }
+  return next;
 }

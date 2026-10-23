@@ -328,7 +328,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
     if (ev && ev.sha === ctx.head && (ev.state === 'success' || ev.state === 'failure') && (!reuse || (moved && !carried))) {
       record.evidence = ev.state;
       tookOver = true;
-      record.evidenceNote = `${ev.passed} passed, ${ev.failed} failed on ${ev.platforms.join('+')} (run_evidence)`;
+      record.evidenceNote = `${ev.passed} passed, ${ev.failed} failed${ev.deferred?.length ? `, ${ev.deferred.length} deferred (${ev.deferred.map(d => `${d.case} → ${d.storyId}`).join(', ')})` : ''} on ${ev.platforms.join('+')} (run_evidence)`;
     }
     // A live check on the head that only merged the trunk in still describes this code (like the approvals).
     const liveChecks = moved && carried && cur.liveChecks ? cur.liveChecks.map(l => (l.sha === before ? { ...l, sha: ctx.head } : l)) : cur.liveChecks;
@@ -371,7 +371,7 @@ export async function onReview(wp: Workplace, itemId: string, by: string): Promi
   if (tookOver) {
     const ev = rawGet(wp, itemId)!.evidenceRun!;
     const link = ev.share ? (await freshLink(wp, ev.share))?.url : undefined;
-    await prComment(wp, itemId, `Evidence ${ev.state === 'success' ? 'PASS' : 'FAIL'} on ${ev.sha.slice(0, 8)} (${ev.platforms.join(',')} / ${ev.features.join(',')}): ${ev.passed} passed, ${ev.failed} failed. Report: ${link ?? 'link unavailable'}`);
+    await prComment(wp, itemId, `Evidence ${ev.state === 'success' ? 'PASS' : 'FAIL'} on ${ev.sha.slice(0, 8)} (${ev.platforms.join(',')} / ${ev.features.join(',')}): ${ev.passed} passed, ${ev.failed} failed${ev.deferred?.length ? `, ${ev.deferred.length} deferred (${ev.deferred.map(d => `${d.case} → ${d.storyId}`).join(', ')})` : ''}. Report: ${link ?? 'link unavailable'}`);
   }
   const tests = carried ? Promise.resolve() : recordTests(wp, itemId, ctx);
   return {
