@@ -623,6 +623,8 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
   if (!outcome) try {
     const checkout = checkoutFor(wp, ctx.repo, slot);
     prepareCheckout(ctx.repo, checkout, sha);
+    // Evidence yields to a deploy only here, at acquire; once running the refresher never backs off.
+    await p.lock.acquire?.(Date.now() + LOCK_FOR_MS);
     const stagingUp = p.staging.ensureUp().then(() => null, (err: unknown) => errText(err));
 
     const apps: Partial<Record<Platform, string>> = {};

@@ -101,33 +101,140 @@ export interface ServerDeployer {
  * and the on-box idle stopper reads the expiry from its access log.
  */
 export interface StagingLock {
+  /** Before a run starts: take the lock, yielding to a deploy; throws StagingBusyError once the bounded wait is over. */
+  acquire?(untilMs: number): Promise<void>;
   hold(untilMs: number): Promise<void>;
   release(): Promise<void>;
 }
 
-export const STAGING_LOCK_PARAM = '/iris-staging/in-use';
+/** Two keys, one owner each (CTO, 23 Oct): deploy writes DEPLOY_PARAM (staging.sh), evidence writes EVIDENCE_PARAM (here). */
+export const STAGING_LOCK_PARAM = '/iris-staging/in-use-evidence';
+export const DEPLOY_LOCK_PARAM = '/iris-staging/in-use-deploy';
+/** The pre-split shared key: read-only here, honoured as a live lock for one release (migration). */
+export const OLD_LOCK_PARAM = '/iris-staging/in-use';
+
+/** SSM as the lock uses it; injectable so the protocol is tested against an atomic in-memory fake. */
+export interface SsmPort {
+  get(name: string): Promise<string | null>;
+  /** Conditional create (put-parameter WITHOUT --overwrite): false when the parameter exists. */
+  putIfAbsent(name: string, value: string): Promise<boolean>;
+  put(name: string, value: string): Promise<void>;
+  delete(name: string): Promise<void>;
+}
+
+export class AwsCliSsm implements SsmPort {
+  constructor(private readonly region = 'ap-south-1') {}
+  private aws(args: string[]): Promise<string> {
+    return new Promise((resolve, reject) => {
+      execFile('aws', ['--region', this.region, ...args], { timeout: 30_000, env: { ...process.env, AWS_PAGER: '' } }, (err, stdout, stderr) => {
+        if (err) { const e = err as Error & { stderr?: string }; e.stderr = String(stderr); reject(e); } else resolve(String(stdout));
+      });
+    });
+  }
+  async get(name: string): Promise<string | null> {
+    try { return (await this.aws(['ssm', 'get-parameter', '--name', name, '--query', 'Parameter.Value', '--output', 'text'])).trim(); }
+    catch (err) { if (/ParameterNotFound/.test(String((err as { stderr?: string }).stderr ?? err))) return null; throw err; }
+  }
+  async putIfAbsent(name: string, value: string): Promise<boolean> {
+    try { await this.aws(['ssm', 'put-parameter', '--name', name, '--type', 'String', '--value', value]); return true; }
+    catch (err) { if (/ParameterAlreadyExists/.test(String((err as { stderr?: string }).stderr ?? err))) return false; throw err; }
+  }
+  async put(name: string, value: string): Promise<void> { await this.aws(['ssm', 'put-parameter', '--name', name, '--type', 'String', '--overwrite', '--value', value]); }
+  async delete(name: string): Promise<void> {
+    try { await this.aws(['ssm', 'delete-parameter', '--name', name]); }
+    catch (err) { if (!/ParameterNotFound/.test(String((err as { stderr?: string }).stderr ?? err))) throw err; }
+  }
+}
+
+/** Staging is held by something that wins over evidence at acquire, or the wait bound was reached. The run is deferred, not failed for its code. */
+export class StagingBusyError extends Error {
+  constructor(readonly holder: 'deploy' | 'evidence' | 'old', message?: string) {
+    super(message ?? (holder === 'deploy' || holder === 'old' ? 'staging busy (deploy), run deferred' : 'staging busy (another evidence run), run deferred'));
+    this.name = 'StagingBusyError';
+  }
+}
+
+/** Backoff bound: 6 tries, jittered ~30-90 s apart (about 6 minutes of waiting, 10 at the outside). */
+export interface LockBounds { tries: number; baseMs: number; jitterMs: number; sleep: (ms: number) => Promise<void>; now: () => number }
+export const DEFAULT_LOCK_BOUNDS: LockBounds = { tries: 6, baseMs: 30_000, jitterMs: 60_000, sleep: ms => new Promise(r => setTimeout(r, ms)), now: () => Date.now() };
+
+const liveEpoch = (v: string | null, nowMs: number): number => { const n = Number(v); return v !== null && Number.isFinite(n) && n * 1000 > nowMs ? n : 0; };
 
 export class RealStagingLock implements StagingLock {
-  constructor(private readonly cfg: EvidenceConfig, private readonly region = 'ap-south-1') {}
+  private held = false;
+  private inflight: Promise<void> | null = null;
+  constructor(
+    private readonly cfg: EvidenceConfig,
+    private readonly region = 'ap-south-1',
+    private readonly ssm: SsmPort = new AwsCliSsm(region),
+    private readonly bounds: LockBounds = DEFAULT_LOCK_BOUNDS,
+  ) {}
 
-  private aws(args: string[]): Promise<void> {
-    return new Promise((resolve, reject) => {
-      execFile('aws', ['--region', this.region, ...args], { timeout: 30_000, env: { ...process.env, AWS_PAGER: '' } }, err => (err ? reject(err) : resolve()));
-    });
+  /** The latest expiry (epoch s) across all three keys, 0 when none is live: "is staging in use at all". */
+  async latestExpiry(): Promise<number> {
+    const now = this.bounds.now();
+    const vals = await Promise.all([STAGING_LOCK_PARAM, DEPLOY_LOCK_PARAM, OLD_LOCK_PARAM].map(k => this.ssm.get(k)));
+    return Math.max(...vals.map(v => liveEpoch(v, now)));
+  }
+
+  /** One attempt: create own key, then look at the deploy and old keys; yield (delete own) to either. */
+  private async tryOnce(until: number): Promise<void> {
+    const now = this.bounds.now();
+    if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, String(until)))) {
+      const cur = await this.ssm.get(STAGING_LOCK_PARAM);
+      if (cur !== null && liveEpoch(cur, now)) throw new StagingBusyError('evidence');
+      // Expired (a crashed run): reclaim by delete + conditional create, so two reclaimers still resolve to one.
+      if (cur !== null) await this.ssm.delete(STAGING_LOCK_PARAM);
+      if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, String(until)))) throw new StagingBusyError('evidence');
+    }
+    const [d, o] = await Promise.all([this.ssm.get(DEPLOY_LOCK_PARAM), this.ssm.get(OLD_LOCK_PARAM)]);
+    const holder = liveEpoch(d, now) ? 'deploy' : liveEpoch(o, now) ? 'old' : null;
+    if (holder) { await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined); throw new StagingBusyError(holder); }
+    this.held = true;
+  }
+
+  /**
+   * Acquire (the only place evidence yields): bounded retries with jitter; then StagingBusyError.
+   * Already held by this process: just extends. Concurrent callers share one attempt.
+   */
+  acquire(untilMs: number): Promise<void> {
+    if (this.held) return this.refresh(untilMs);
+    if (!this.inflight) {
+      this.inflight = (async () => {
+        const until = Math.floor(untilMs / 1000);
+        let last: StagingBusyError | undefined;
+        for (let i = 0; i < this.bounds.tries; i++) {
+          try { await this.tryOnce(until); return; }
+          catch (err) { if (!(err instanceof StagingBusyError)) throw err; last = err; }
+          if (i < this.bounds.tries - 1) await this.bounds.sleep(this.bounds.baseMs + Math.random() * this.bounds.jitterMs);
+        }
+        throw new StagingBusyError(last?.holder ?? 'deploy', `${last?.message ?? 'staging busy (deploy), run deferred'} (gave up after ${this.bounds.tries} tries)`);
+      })().finally(() => { this.inflight = null; });
+    }
+    return this.inflight;
+  }
+
+  /** Refresh NEVER yields: it only extends our own key, whatever the deploy key says (evidence beats deploy once running). */
+  private async refresh(untilMs: number): Promise<void> {
+    await this.ssm.put(STAGING_LOCK_PARAM, String(Math.floor(untilMs / 1000)));
   }
 
   async hold(untilMs: number): Promise<void> {
     const until = Math.floor(untilMs / 1000);
     const [, param] = await Promise.allSettled([
       fetch(`${this.cfg.stagingUrl}/v1/min-version?in-use-until=${until}`, { signal: AbortSignal.timeout(10_000) }).then(r => { if (!r.ok) throw new Error(`touch ${r.status}`); }),
-      this.aws(['ssm', 'put-parameter', '--name', STAGING_LOCK_PARAM, '--type', 'String', '--overwrite', '--value', String(until)]),
+      this.held ? this.refresh(untilMs) : this.inflight ? Promise.resolve() : this.tryOnce(until),
     ]);
     // A staging that is down (queued before the run starts it) or an SSM hiccup is not an error of the run.
-    if (param.status === 'rejected') throw new Error(`staging lock not written: ${String(param.reason).split('\n')[0]!.slice(0, 200)}`);
+    if (param.status === 'rejected') {
+      if (param.reason instanceof StagingBusyError) throw param.reason;
+      throw new Error(`staging lock not written: ${String(param.reason).split('\n')[0]!.slice(0, 200)}`);
+    }
   }
 
   async release(): Promise<void> {
-    await this.aws(['ssm', 'delete-parameter', '--name', STAGING_LOCK_PARAM]).catch(() => undefined);
+    this.held = false;
+    await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined);
   }
 }
 
