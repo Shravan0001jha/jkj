@@ -158,6 +158,13 @@ export class StagingBusyError extends Error {
 export interface LockBounds { tries: number; baseMs: number; jitterMs: number; sleep: (ms: number) => Promise<void>; now: () => number }
 export const DEFAULT_LOCK_BOUNDS: LockBounds = { tries: 6, baseMs: 30_000, jitterMs: 60_000, sleep: ms => new Promise(r => setTimeout(r, ms)), now: () => Date.now() };
 
+/**
+ * Evidence publishes PROVISIONALLY (this short expiry), checks the deploy and old keys, and only then extends to the full
+ * TTL (established). A deploy that sees a provisional hold may proceed (a tie); an established one it waits for. Must stay
+ * under the table's evidence_provisional_max_s (scripts/staging-lock-cases.json, read by the test, never by this code).
+ */
+export const PROVISIONAL_TTL_S = 30;
+
 const liveEpoch = (v: string | null, nowMs: number): number => { const n = Number(v); return v !== null && Number.isFinite(n) && n * 1000 > nowMs ? n : 0; };
 
 export class RealStagingLock implements StagingLock {
@@ -180,16 +187,19 @@ export class RealStagingLock implements StagingLock {
   /** One attempt: create own key, then look at the deploy and old keys; yield (delete own) to either. */
   private async tryOnce(until: number): Promise<void> {
     const now = this.bounds.now();
-    if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, String(until)))) {
+    const prov = String(Math.floor(now / 1000) + PROVISIONAL_TTL_S);
+    if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, prov))) {
       const cur = await this.ssm.get(STAGING_LOCK_PARAM);
       if (cur !== null && liveEpoch(cur, now)) throw new StagingBusyError('evidence');
       // Expired (a crashed run): reclaim by delete + conditional create, so two reclaimers still resolve to one.
       if (cur !== null) await this.ssm.delete(STAGING_LOCK_PARAM);
-      if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, String(until)))) throw new StagingBusyError('evidence');
+      if (!(await this.ssm.putIfAbsent(STAGING_LOCK_PARAM, prov))) throw new StagingBusyError('evidence');
     }
     const [d, o] = await Promise.all([this.ssm.get(DEPLOY_LOCK_PARAM), this.ssm.get(OLD_LOCK_PARAM)]);
     const holder = liveEpoch(d, now) ? 'deploy' : liveEpoch(o, now) ? 'old' : null;
     if (holder) { await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined); throw new StagingBusyError(holder); }
+    // Nobody else holds staging: confirm (extend to the full TTL). From here on this run is established and never yields.
+    await this.ssm.put(STAGING_LOCK_PARAM, String(until));
     this.held = true;
   }
 

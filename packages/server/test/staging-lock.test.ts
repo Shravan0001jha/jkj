@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { test } from 'node:test';
-import { DEPLOY_LOCK_PARAM, OLD_LOCK_PARAM, RealStagingLock, STAGING_LOCK_PARAM, StagingBusyError, type LockBounds, type SsmPort } from '../src/services/evidence-ports.js';
+import { DEPLOY_LOCK_PARAM, OLD_LOCK_PARAM, PROVISIONAL_TTL_S, RealStagingLock, STAGING_LOCK_PARAM, StagingBusyError, type LockBounds, type SsmPort } from '../src/services/evidence-ports.js';
 
 /** In-memory SSM: every method is atomic (no await between check and set), as a conditional create is. */
 class FakeSsm implements SsmPort {
@@ -21,44 +21,61 @@ const bounds = (over: Partial<LockBounds> = {}): LockBounds => ({ tries: 3, base
 const mk = (ssm: SsmPort, b = bounds()) => new RealStagingLock({ stagingUrl: 'http://127.0.0.1:9' } as never, 'ap-south-1', ssm, b);
 const UNTIL = NOW + 25 * 60_000;
 
-/** The shared case table (Iris scripts/staging-lock-cases.json, Vivek's story as_mvk9n36u0tbhy). Until it lands on trunk a draft with the same rows stands in. */
-interface Row { name: string; keys: Partial<Record<'deploy' | 'evidence' | 'old', 'live' | 'expired'>>; expect: 'acquired' | 'busy'; holder?: string }
-const DRAFT: Row[] = [
-  { name: 'deploy held', keys: { deploy: 'live' }, expect: 'busy', holder: 'deploy' },
-  { name: 'evidence held', keys: { evidence: 'live' }, expect: 'busy', holder: 'evidence' },
-  { name: 'old key held', keys: { old: 'live' }, expect: 'busy', holder: 'old' },
-  { name: 'both free', keys: {}, expect: 'acquired' },
-  { name: 'holder expired (deploy, evidence, old)', keys: { deploy: 'expired', evidence: 'expired', old: 'expired' }, expect: 'acquired' },
-];
-function loadTable(): { rows: Row[]; real: boolean } {
-  try {
-    const txt = execFileSync('git', ['-C', `${homedir()}/claude-dev`, 'show', 'origin/feat/iris-character:scripts/staging-lock-cases.json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    return { rows: (JSON.parse(txt) as { cases?: Row[] }).cases ?? (JSON.parse(txt) as Row[]), real: true };
-  } catch {
-    if (process.env['STAGING_LOCK_REQUIRE_TABLE']) throw new Error('scripts/staging-lock-cases.json is missing on origin/feat/iris-character');
-    return { rows: DRAFT, real: false };
-  }
+/** The shared case table lives on Iris trunk (scripts/staging-lock-cases.json); read live, never copied. Missing = fail clearly. */
+interface Side { action: string; acquires: boolean | null }
+interface Row { name: string; evidence: Side }
+function loadTable(): { cases: Row[]; evidence_provisional_max_s?: number } {
+  let txt: string;
+  try { txt = execFileSync('git', ['-C', `${homedir()}/claude-dev`, 'show', 'origin/feat/iris-character:scripts/staging-lock-cases.json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch (e) { throw new Error(`scripts/staging-lock-cases.json is missing on origin/feat/iris-character (git fetch origin feat/iris-character in ~/claude-dev): ${String(e).slice(0, 200)}`); }
+  return JSON.parse(txt) as { cases: Row[]; evidence_provisional_max_s?: number };
 }
 const table = loadTable();
 const keyName = { deploy: DEPLOY_LOCK_PARAM, evidence: STAGING_LOCK_PARAM, old: OLD_LOCK_PARAM };
+const row = (n: string): Row => { const r = table.cases.find(c => c.name === n); assert.ok(r, `table row ${n} exists`); return r; };
 
-for (const row of table.rows) {
-  test(`lock table${table.real ? '' : ' (DRAFT)'}: ${row.name}`, async () => {
+/** What each named row sets up (the table says what must happen; this says how the fake is put into that state). */
+const SETUP: Record<string, (ssm: FakeSsm) => void> = {
+  both_free: () => undefined,
+  deploy_held: ssm => { ssm.m.set(keyName.deploy, sec(600)); },
+  evidence_established: ssm => { ssm.m.set(keyName.evidence, sec(1500)); },
+  old_key_held: ssm => { ssm.m.set(keyName.old, sec(600)); },
+  holder_expired: ssm => { ssm.m.set(keyName.deploy, sec(-600)); ssm.m.set(keyName.old, sec(-600)); },
+  // deploy arrives in the instant between evidence's provisional create and its confirm check
+  conflict_at_acquire: ssm => { const c = ssm.putIfAbsent.bind(ssm); ssm.putIfAbsent = async (n, v) => { const r = await c(n, v); if (r && n === keyName.evidence) ssm.m.set(keyName.deploy, sec(600)); return r; }; },
+};
+
+for (const name of ['both_free', 'deploy_held', 'evidence_established', 'conflict_at_acquire', 'old_key_held', 'holder_expired']) {
+  test(`lock table: ${name}`, async () => {
+    const ev = row(name).evidence;
     const ssm = new FakeSsm();
-    for (const [k, st] of Object.entries(row.keys)) ssm.m.set(keyName[k as keyof typeof keyName], sec(st === 'live' ? 600 : -600));
-    const lock = mk(ssm, bounds({ tries: 2 }));
-    if (row.expect === 'acquired') {
+    SETUP[name]!(ssm);
+    const before = new Map(ssm.m);
+    const lock = mk(ssm, bounds({ tries: 1 }));
+    if (ev.acquires) {
       await lock.acquire(UNTIL);
-      assert.equal(ssm.m.get(STAGING_LOCK_PARAM), String(Math.floor(UNTIL / 1000)));
+      assert.equal(ssm.m.get(STAGING_LOCK_PARAM), String(Math.floor(UNTIL / 1000)), 'established at the full TTL');
     } else {
-      await assert.rejects(lock.acquire(UNTIL), (e: unknown) => e instanceof StagingBusyError && (!row.holder || (e as StagingBusyError).holder === row.holder));
-      // yielding leaves a live evidence key only when evidence itself was the holder
-      if (row.holder !== 'evidence') assert.equal(ssm.m.has(STAGING_LOCK_PARAM), false, 'own key deleted on yield');
+      await assert.rejects(lock.acquire(UNTIL), StagingBusyError);
+      if (ev.action === 'back_off_and_retry') assert.equal(ssm.m.has(STAGING_LOCK_PARAM), false, 'own key deleted on back-off');
+      if (ev.action === 'wait_same_key') assert.equal(ssm.m.get(STAGING_LOCK_PARAM), before.get(STAGING_LOCK_PARAM), 'the other evidence run key untouched');
     }
-    // never touches the other keys
-    for (const k of ['deploy', 'old'] as const) assert.equal(ssm.m.get(keyName[k]), row.keys[k] ? sec(row.keys[k] === 'live' ? 600 : -600) : undefined);
+    for (const k of ['deploy', 'old'] as const) if (name !== 'conflict_at_acquire') assert.equal(ssm.m.get(keyName[k]), before.get(keyName[k]), `${k} key untouched`);
   });
 }
+
+test('lock table: rows without a new evidence action exist (conflict_during_refresh = n/a, bound_reached = give_up_after_bound)', () => {
+  assert.equal(row('conflict_during_refresh').evidence.action, 'n/a');
+  assert.equal(row('bound_reached').evidence.action, 'give_up_after_bound');
+});
+
+test('the evidence acquire (create, check, confirm) finishes well inside the table\'s provisional window', { skip: table.evidence_provisional_max_s === undefined ? 'waiting on table field evidence_provisional_max_s' : false }, async () => {
+  const max = table.evidence_provisional_max_s!;
+  assert.ok(PROVISIONAL_TTL_S <= max, 'our provisional expiry is within the window deploy treats as provisional');
+  const t0 = Date.now();
+  await mk(new FakeSsm()).acquire(UNTIL);
+  assert.ok(Date.now() - t0 < (max * 1000) / 2);
+});
 
 test('bound: gives up after N tries with the visible deferred message, sleeping between tries only', async () => {
   const ssm = new FakeSsm(); ssm.m.set(DEPLOY_LOCK_PARAM, sec(600));
