@@ -74,3 +74,19 @@ test('RealServerDeployer: runs the checkout\'s own scripts/staging.sh deploy wit
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('RealServerDeployer: passes STAGING_DEPLOY_FOR_EVIDENCE = the exact current evidence key value, only while held', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'iris-deploy-env-'));
+  const repo = join(dir, 'repo'); const checkout = join(dir, 'checkout');
+  mkdirSync(join(repo, '.venv', 'bin'), { recursive: true });
+  mkdirSync(join(checkout, 'scripts'), { recursive: true });
+  const seen = join(dir, 'seen');
+  writeFileSync(join(checkout, 'scripts', 'staging.sh'), `#!/usr/bin/env bash\necho "\${STAGING_DEPLOY_FOR_EVIDENCE:-unset}" > "${seen}"\n`);
+  const cfg = { ...loadConfig(['--no-open'], {}).evidence, stagingUrl: 'https://staging.example.test' };
+  try {
+    await new RealServerDeployer(cfg, undefined, async () => '1800001500').deploy({ repo, checkout, sha: 'abc', log: join(dir, 'd.log') });
+    assert.equal(readFileSync(seen, 'utf8').trim(), '1800001500');
+    await new RealServerDeployer(cfg, undefined, async () => null).deploy({ repo, checkout, sha: 'abc', log: join(dir, 'd.log') });
+    assert.equal(readFileSync(seen, 'utf8').trim(), 'unset');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

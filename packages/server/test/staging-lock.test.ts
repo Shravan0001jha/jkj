@@ -182,3 +182,13 @@ test('order: promote -> confirm (read back) -> acquire resolves; a failed or mis
     assert.equal(s.m.has(STAGING_LOCK_PARAM), false, `${mode}: own key deleted`);
   }
 });
+
+test('currentValue: the exact bare epoch of the held evidence key (what the in-run deploy is told), null when not held', async () => {
+  const ssm = new FakeSsm();
+  const lock = mk(ssm);
+  assert.equal(await lock.currentValue(), null);
+  await lock.acquire(UNTIL);
+  assert.equal(await lock.currentValue(), String(Math.floor(UNTIL / 1000)));
+  await lock.release();
+  assert.equal(await lock.currentValue(), null);
+});

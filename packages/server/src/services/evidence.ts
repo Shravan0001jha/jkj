@@ -193,7 +193,7 @@ function portsOf(wp: Workplace): EvidencePorts {
   // Tests never touch staging or SSM: without a fake, the lock does nothing.
   p.lock ??= underTest() ? { hold: async () => undefined, release: async () => undefined } : new RealStagingLock(cfg);
   // Nor deploy to it.
-  p.deployer ??= underTest() ? { deploy: async () => { throw new Error('no staging deploys under test'); } } : new RealServerDeployer(cfg);
+  p.deployer ??= underTest() ? { deploy: async () => { throw new Error('no staging deploys under test'); } } : new RealServerDeployer(cfg, undefined, async () => (p.lock instanceof RealStagingLock ? p.lock.currentValue() : null));
   ports.set(wp, p);
   return p as EvidencePorts;
 }

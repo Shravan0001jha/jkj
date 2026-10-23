@@ -260,6 +260,11 @@ export class RealStagingLock implements StagingLock {
     }
   }
 
+  /** The exact current value of our own key while held (for the in-run deploy), else null. */
+  async currentValue(): Promise<string | null> {
+    return this.held ? this.ssm.get(STAGING_LOCK_PARAM) : null;
+  }
+
   async release(): Promise<void> {
     this.held = false;
     await this.ssm.delete(STAGING_LOCK_PARAM).catch(() => undefined);
@@ -656,14 +661,20 @@ export class RealStaging implements Staging {
  * reaches it.
  */
 export class RealServerDeployer implements ServerDeployer {
-  constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 25 * 60_000) {}
+  /**
+   * `evidenceKeyValue` gives the exact current value of in-use-evidence while this process holds it. The deploy runs INSIDE
+   * the evidence run, whose own established key would otherwise make staging.sh wait forever: it is passed as
+   * STAGING_DEPLOY_FOR_EVIDENCE and staging.sh skips waiting on the evidence key only when it equals that value.
+   */
+  constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 25 * 60_000, private readonly evidenceKeyValue: () => Promise<string | null> = async () => null) {}
 
   async deploy(r: ServerDeployRequest): Promise<void> {
     const script = join(r.checkout, 'scripts', 'staging.sh');
     if (!existsSync(script)) throw new Error(`there is no scripts/staging.sh at ${r.sha.slice(0, 8)} to deploy with`);
     // deploy-api.sh and deploy-agent.sh run their tests with ../../.venv first.
     linkUntracked(r.repo, r.checkout);
-    const env = childEnvFor({ STAGING_HOST: new URL(this.cfg.stagingUrl).host });
+    const held = await this.evidenceKeyValue().catch(() => null);
+    const env = childEnvFor({ STAGING_HOST: new URL(this.cfg.stagingUrl).host, ...(held ? { STAGING_DEPLOY_FOR_EVIDENCE: held } : {}) });
     const ran = await runLogged('bash', [script, 'deploy'], { cwd: r.checkout, env, logFile: r.log, timeoutMs: this.timeoutMs, ...(r.onSpawn ? { onSpawn: r.onSpawn } : {}) });
     if (ran.code !== 0) {
       const lines = ran.tail.split('\n').map(l => l.trim()).filter(Boolean);
