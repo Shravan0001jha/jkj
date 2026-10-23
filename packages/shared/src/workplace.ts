@@ -354,6 +354,17 @@ export interface LiveCheck {
 export type EvidenceState = 'success' | 'failure' | 'stale' | 'error';
 
 /** One finished run_evidence run, on the commit it built. */
+/** A BLOCKED case the run counted as DEFERRED: a known infra gap that the named story verifies for real. */
+export interface EvidenceDeferred {
+  case: string;
+  platform: string;
+  storyId: string;
+  reason?: string;
+  /** e2e/DEFERRED.md at the story's commit, or the COO's Workplace allowlist. */
+  source: 'file' | 'allowlist';
+  by?: string;
+}
+
 export interface EvidenceRunRecord {
   /** "<sha12>-<yyyymmddHHMMSS>": the run's directory under evidence/<item>/. */
   run: string;
@@ -377,6 +388,8 @@ export interface EvidenceRunRecord {
   share?: EvidenceShare;
   /** The iris-api + cloud-agent commit staging ran for this run (absent on runs before 5 Oct). */
   server?: EvidenceServer;
+  /** BLOCKED cases counted as deferred (not in passed or failed); the run's verdict ignores them. */
+  deferred?: EvidenceDeferred[];
 }
 
 /**

@@ -40,6 +40,7 @@ import * as board from '../services/board.js';
 import * as talk from '../services/talk.js';
 import * as talkStore from '../services/talk-store.js';
 import * as evidence from '../services/evidence.js';
+import * as deferred from '../services/deferred.js';
 import * as stagingDiag from '../services/staging-diag.js';
 import * as hygiene from '../services/hygiene.js';
 import * as macQueue from '../services/mac-queue.js';
@@ -619,6 +620,9 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     }),
     r('GET', '/api/coo/evidence', (req, res) => { requireLocal(req); json(res, 200, evidence.state(wp)); }),
     r('GET', '/api/coo/evidence/staging', (req, res) => { requireLocal(req); json(res, 200, evidence.stagingServer(wp)); }),
+    r('GET', '/api/coo/evidence/deferred', (req, res) => { requireLocal(req); json(res, 200, deferred.allowlist(wp)); }),
+    r('POST', '/api/coo/evidence/deferred', async (req, res) => { requireLocal(req); const body = await readJson(req); json(res, 200, deferred.allow(wp, { case: str(body['case']), storyId: str(body['storyId']), reason: str(body['reason']) }, str(body['by']) || 'coo')); }),
+    r('POST', '/api/coo/evidence/rescore', async (req, res) => { requireLocal(req); const body = await readJson(req); json(res, 200, await evidence.rescore(wp, str(body['itemId']), str(body['by']) || 'coo', str(body['run']) || undefined)); }),
     r('POST', '/api/coo/evidence/staging', async (req, res) => { requireLocal(req); const body = await readJson(req); json(res, 200, evidence.recordStagingDeploy(wp, str(body['sha']), str(body['by']) || 'coo')); }),
     r('GET', '/api/evidence/:item/:run(?:/(.*))?', (_req, res, _url, [item, run, rest]) => {
       const file = evidence.reportFile(wp, item ?? '', run ?? '', rest);
