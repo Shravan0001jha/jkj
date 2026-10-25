@@ -381,3 +381,23 @@ test('Asha closes never-started and parked stories as superseded with a reason, 
     assert.equal(items.update(s.wp, mine.id, { status: 'done', resolution: 'wont-do', reason: 'the COO may' }, 'coo').status, 'done');
   } finally { await s.done(); }
 });
+
+test('item_update sets a story\'s title and acceptance (a scope cut lands on the story, handbook §14, 24 Oct); it needs a reason', async () => {
+  const s = setup('on');
+  try {
+    const server = workplaceTools(s.wp, 'kabir', () => ({ agentId: 'a', employeeId: 'kabir', assignmentId: s.storyId, startedAt: '', seen: {}, planCaptured: false }));
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(st);
+    const c = new Client({ name: 'test', version: '1' });
+    await c.connect(ct);
+    const refused = await c.callTool({ name: 'item_update', arguments: { itemId: s.storyId, title: 'Smaller scope' } });
+    assert.match(JSON.stringify(refused.content), /needs a reason/);
+    assert.notEqual(rawGet(s.wp, s.storyId)!.title, 'Smaller scope');
+    const out = await c.callTool({ name: 'item_update', arguments: { itemId: s.storyId, title: 'Refine: two preset chips', acceptance: ['Two preset chips refine the last image', 'Free-text refine is as_follow1'], reason: 'scope cut: free-text refine moved to as_follow1' } });
+    assert.doesNotMatch(JSON.stringify(out.content), /Not changed/);
+    const it = rawGet(s.wp, s.storyId)!;
+    assert.equal(it.title, 'Refine: two preset chips');
+    assert.deepEqual(it.acceptance, ['Two preset chips refine the last image', 'Free-text refine is as_follow1']);
+    await c.close();
+  } finally { await s.done(); }
+});
