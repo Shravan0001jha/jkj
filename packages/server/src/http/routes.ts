@@ -549,6 +549,7 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       requireLocal(req);
       const body = await readJson(req);
       if (body['liftGithubCap'] === true) spendCaps.liftGithub(wp, 'owner (via the COO)');
+      if (typeof body['githubMonthBlocked'] === 'boolean') spendCaps.setGithubMonthBlocked(wp, body['githubMonthBlocked'], 'coo');
       json(res, 200, spendCaps.today(wp));
     }),
 

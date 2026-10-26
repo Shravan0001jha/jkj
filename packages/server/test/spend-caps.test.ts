@@ -258,3 +258,17 @@ test("today's GitHub bill is polled live (throttled) into cost:github:live:<day>
     assert.equal(caps.githubToday(wp, nowMs).billedUsd, 4.25);
   } finally { tmp.cleanup(); }
 });
+
+test('a COO month block refuses GitHub dispatch with the real reason (the org budget), even with today\'s cap unspent, and clears', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const t = Date.parse('2026-10-25T23:00:00Z');
+    assert.equal(caps.githubBlock(wp, t), null, 'nothing spent today: not blocked');
+    caps.setGithubMonthBlocked(wp, true, 'coo', t);
+    const b = caps.githubBlock(wp, t);
+    assert.ok(b && /budget for 2026-10 is used up/.test(b.message) && /Don't re-queue/.test(b.message), b?.message);
+    assert.equal(caps.githubBlock(wp, Date.parse('2026-11-01T00:30:00Z')), null, 'a new month is not blocked');
+    caps.setGithubMonthBlocked(wp, false, 'coo', t);
+    assert.equal(caps.githubBlock(wp, t), null, 'unblocked');
+  } finally { tmp.cleanup(); }
+});

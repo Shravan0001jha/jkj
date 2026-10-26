@@ -81,8 +81,22 @@ export const GITHUB_PAUSED = 'GitHub Actions paused for today';
 /** Null while the Workplace may start GitHub Actions today; otherwise why not, worded for the story. */
 export function githubBlock(wp: Workplace, nowMs = Date.now()): { spentUsd: number; message: string } | null {
   const g = githubToday(wp, nowMs);
+  // The org's MONTHLY GitHub budget (set in GitHub billing, owner's) can be used up while today's cap is not:
+  // GitHub then refuses every run at its plan job, and agents re-queued into that wall (25 Oct). The COO marks
+  // the month blocked so dispatch is refused here with the real reason; it clears itself next month.
+  const month = new Date(nowMs).toISOString().slice(0, 7);
+  if (get(wp, `spend-cap:github-month-blocked:${month}`)) {
+    return { spentUsd: g.usd, message: `GitHub Actions budget for ${month} is used up (GitHub refuses every run); the owner decides whether to raise it. Don't re-queue: submit with Tests: <cmd> <counts>` };
+  }
   if (g.usd < GITHUB_CAP_USD || get(wp, `spend-cap:github-lifted:${g.day}`)) return null;
   return { spentUsd: g.usd, message: `${GITHUB_PAUSED}: ${usd(g.usd)} spent of the ${usd(GITHUB_CAP_USD).replace('.00', '')} daily cap; resumes tomorrow or when the owner lifts it` };
+}
+
+export function setGithubMonthBlocked(wp: Workplace, blocked: boolean, by: string, nowMs = Date.now()): void {
+  const month = new Date(nowMs).toISOString().slice(0, 7);
+  if (blocked) put(wp, `spend-cap:github-month-blocked:${month}`, JSON.stringify({ by, at: now() }));
+  else wp.db.prepare('delete from settings where key = ?').run(`spend-cap:github-month-blocked:${month}`);
+  log.info('spend-caps', `GitHub month ${month} ${blocked ? 'blocked' : 'unblocked'} by ${by}`);
 }
 
 export function liftGithub(wp: Workplace, by: string, nowMs = Date.now()): void {
