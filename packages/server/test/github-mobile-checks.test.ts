@@ -12,6 +12,7 @@ import * as flow from '../src/services/github-flow.js';
 import { employee } from '../src/services/employees.js';
 import { ensureWorktree } from '../src/services/worktrees.js';
 import { rawGet } from '../src/services/v2-map.js';
+import * as spendCaps from '../src/services/spend-caps.js';
 import { testWorkplace } from './fakes/workplace.js';
 import { FakeGitHub } from './fakes/fake-github.js';
 import { writePrePr } from './fakes/pre-pr.js';
@@ -291,4 +292,26 @@ test('android and ios both deferred: only mobile-android is dispatched', async (
     await reviewed(s);
     assert.equal(s.gh.runs[0]!.inputs['areas'], 'mobile-android');
   } finally { s.done(); }
+});
+
+test('28 Oct, PR #616: under the month block the tests summary never changes, so workplace/tests is posted once, not every sweep', async () => {
+  const s = setup('on');
+  const saved = { ...flow.mobileCiTiming };
+  try {
+    spendCaps.setGithubMonthBlocked(s.wp, true, 'coo');
+    const head = s.commit('mobile/android/app/Alarm.kt', 'class Alarm\n');
+    await reviewed(s);
+    assert.equal(s.gh.count('dispatchWorkflow'), 0, 'blocked: nothing is dispatched');
+    const first = pr(s).tests!.summary;
+    const posts = (): number => s.gh.calls.filter(c => c.op === 'setStatus' && (c.args[1] as { context: string }).context === 'workplace/tests').length;
+    const before = posts();
+    for (const retryMs of [60 * 60 * 1000, 0, 60 * 60 * 1000, 0]) {
+      flow.mobileCiTiming.retryMs = retryMs;
+      await flow.syncHeads(s.wp);
+      assert.equal(pr(s).tests!.summary, first, 'one wording while blocked');
+    }
+    assert.equal(posts(), before, 'no re-post of an unchanged status');
+    assert.equal(s.gh.count('dispatchWorkflow'), 0);
+    assert.equal(s.gh.status(head, 'workplace/tests')?.state, 'pending');
+  } finally { Object.assign(flow.mobileCiTiming, saved); s.done(); }
 });

@@ -766,7 +766,10 @@ async function mobileChecks(wp: Workplace, itemId: string, sha: string, local: p
   if (!rec) return dispatch(1);
   if (rec.state === 'error') {
     // Waiting on the daily GitHub cap is not a failed attempt: try again on every pass, at no cost.
-    if (rec.lastError?.startsWith(spendCaps.GITHUB_PAUSED)) return dispatch(rec.attempts + 1);
+    // Any block (the daily cap or the COO's month block) goes through capped() so the summary stays
+    // the same: alternating two texts re-posted workplace/tests every minute until GitHub refused at
+    // 1,000 statuses per commit (28 Oct, PR #616) and the flow fell back to local.
+    if (rec.lastError?.startsWith(spendCaps.GITHUB_PAUSED) || spendCaps.githubBlock(wp)) return dispatch(rec.attempts + 1);
     return agoMs(rec.attemptAt) >= mobileCiTiming.retryMs ? dispatch(rec.attempts + 1) : pending(`mobile checks (${areas.join(', ')}) could not start on GitHub (${(rec.lastError ?? '').slice(0, 60)}); retrying`);
   }
 
