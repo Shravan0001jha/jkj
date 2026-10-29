@@ -1,3 +1,4 @@
+import * as usageCeiling from '../services/usage-ceiling.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createReadStream, statSync } from 'node:fs';
 import { extname } from 'node:path';
@@ -521,6 +522,9 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const body = await readJson(req);
       if (typeof body['paused'] !== 'boolean') throw new BadRequest('paused must be true or false.');
       const reason = typeof body['reason'] === 'string' ? body['reason'].trim().slice(0, 300) : '';
+      // Owner lifted the 90% weekly stop for this window: the ceiling must not re-pause on the next reading.
+      const lifted = body['liftWeeklyStop'] === true ? usageCeiling.liftWeeklyStop(wp, 'coo') : null;
+      if (body['liftWeeklyStop'] === true && !lifted) throw new BadRequest('No usage reading yet: cannot tell which weekly window to lift.');
       const st = floor.setPaused(wp, body['paused'], reason, 'coo');
       // Resumed: the queued work starts now, not at the next sweep.
       if (!st.paused) { try { dispatch.sweep(wp); } catch (err) { log.warn('floor', `sweep after resume: ${err instanceof Error ? err.message : err}`); } }

@@ -29,8 +29,19 @@ export function evaluate(r: Reading, line = CEILING, weeklyStop = WEEKLY_STOP): 
 
 const pingKey = (v: CeilingVerdict): string => `usage-ceiling:pinged:${v.window}:${v.resetsAtMs ?? 'none'}`;
 
+/** The owner lifted the 90% stop for this weekly window (29 Oct: "keep working till 98%"): the daily pace cap still holds. */
+export const liftKey = (resetsAtMs: number | undefined): string => `usage-ceiling:lifted:${resetsAtMs ?? 'none'}`;
+export function liftWeeklyStop(wp: Workplace, by: string): string | null {
+  const last = wp.db.prepare("select value from settings where key = 'pace:last'").get() as { value: string } | undefined;
+  const resetsAtMs = last ? (JSON.parse(last.value) as { resetsAtMs?: number }).resetsAtMs : undefined;
+  if (!resetsAtMs) return null;
+  wp.db.prepare('insert or replace into settings (key, value) values (?, ?)').run(liftKey(resetsAtMs), JSON.stringify({ by, at: new Date().toISOString() }));
+  return new Date(resetsAtMs).toISOString();
+}
+
 export function apply(wp: Workplace, r: Reading): CeilingVerdict {
-  const v = evaluate(r);
+  const lifted = !!wp.db.prepare('select value from settings where key = ?').get(liftKey(r.resetsAtMs));
+  const v = lifted ? evaluate(r, CEILING, Number.POSITIVE_INFINITY) : evaluate(r);
   const st = floor.state(wp);
   if (v.stop) {
     if (!st.paused) {
