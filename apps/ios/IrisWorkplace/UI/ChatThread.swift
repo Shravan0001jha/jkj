@@ -419,6 +419,7 @@ struct ChatThreadView<Header: View, Footer: View, Trailing: View>: View {
                     .padding(.horizontal, 10)
                 }
                 .background(ChatWallpaper())
+                .modifier(AmbientScrollPause())
                 .defaultScrollAnchor(.bottom)
                 .onChange(of: items.isEmpty, initial: true) { _, empty in if !empty && initialIds == nil { initialIds = Set(rows.map(\.id)) } }
                 .scrollDismissesKeyboard(.interactively)

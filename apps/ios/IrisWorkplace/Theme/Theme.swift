@@ -212,6 +212,7 @@ final class ThemeStore {
 private struct ThemeKey: EnvironmentKey { static let defaultValue = Theme.default }
 private struct MotionKey: EnvironmentKey { static let defaultValue = MotionLevel.off }
 private struct ThemeStoreKey: EnvironmentKey { static let defaultValue: ThemeStore? = nil }
+private struct AmbientPausedKey: EnvironmentKey { static let defaultValue = false }
 
 extension EnvironmentValues {
     var theme: Theme {
@@ -221,6 +222,11 @@ extension EnvironmentValues {
     var motionLevel: MotionLevel {
         get { self[MotionKey.self] }
         set { self[MotionKey.self] = newValue }
+    }
+    /// True while the scroll view underneath is moving: ambient effects hold still (frame budget).
+    var ambientPaused: Bool {
+        get { self[AmbientPausedKey.self] }
+        set { self[AmbientPausedKey.self] = newValue }
     }
     var themeStore: ThemeStore? {
         get { self[ThemeStoreKey.self] }

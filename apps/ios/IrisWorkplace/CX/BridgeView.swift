@@ -93,6 +93,8 @@ struct BridgeView: View {
                         }
                         Button { model.router.openInbox(top.id) } label: { Text("Open").font(.caption.weight(.semibold)) }
                             .buttonStyle(.bordered).controlSize(.small)
+                            // Not a bare "Open": the Plan's filter menu has an "Open" status too.
+                            .accessibilityLabel("Open the decision: \(top.title)")
                             .accessibilityIdentifier("bridge.open")
                     }
                 }
@@ -213,10 +215,13 @@ struct Radar: View {
     let blips: [(name: String, tint: Color)]
     let motion: MotionLevel
     @Environment(\.scenePhase) private var phase
+    @Environment(\.ambientPaused) private var paused
     @State private var visible = false
+    @State private var clock = AmbientClock()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: motion != .full || !visible || phase != .active)) { ctx in
+        let running = motion == .full && visible && phase == .active && !paused && !AmbientDebug.off.contains("radar")
+        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !running)) { ctx in
             Canvas { g, size in
                 let c = CGPoint(x: size.width / 2, y: size.height / 2)
                 let r = min(size.width, size.height) / 2 - 1
@@ -228,7 +233,7 @@ struct Radar: View {
                 cross.move(to: CGPoint(x: c.x - r, y: c.y)); cross.addLine(to: CGPoint(x: c.x + r, y: c.y))
                 cross.move(to: CGPoint(x: c.x, y: c.y - r)); cross.addLine(to: CGPoint(x: c.x, y: c.y + r))
                 g.stroke(cross, with: .color(SciFiPalette.accent.color(0.15)), lineWidth: 0.5)
-                let angle = motion == .full ? (ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 4) / 4) * 2 * .pi : -.pi / 4
+                let angle = motion == .full ? (clock.time(ctx.date).truncatingRemainder(dividingBy: 4) / 4) * 2 * .pi - .pi / 4 : -.pi / 4
                 var wedge = Path()
                 wedge.move(to: c)
                 wedge.addArc(center: c, radius: r, startAngle: .radians(angle - 0.6), endAngle: .radians(angle), clockwise: false)
@@ -248,7 +253,8 @@ struct Radar: View {
                 }
             }
         }
-        .onAppear { visible = true }
+        .onAppear { visible = true; clock.set(running: running) }
         .onDisappear { visible = false }
+        .onChange(of: running) { _, r in clock.set(running: r) }
     }
 }

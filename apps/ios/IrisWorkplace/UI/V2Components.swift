@@ -40,7 +40,6 @@ struct EpicProgressBar: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color(.tertiarySystemFill))
                     Capsule().fill(fraction >= 1 ? Color.green : Color.accentColor).frame(width: max(fraction > 0 ? 6 : 0, g.size.width * fraction))
-                        .glow(theme.hasChrome, fraction >= 1 ? Color.green : Color.accentColor, radius: 4)
                 }
             }
             .frame(height: theme.radii.progressHeight)
@@ -74,7 +73,6 @@ struct ItemRow: View {
             Image(systemName: g.symbol).foregroundStyle(g.tint).frame(width: 22).padding(.top, 1)
                 .accessibilityLabel(g.label)
                 .scaleEffect(lockIn ? 1.35 : 1)
-                .background { if theme.hasChrome && item.status == .inProgress { PulseRing(color: g.tint, motion: motion).frame(width: 18, height: 18).padding(.top, 1) } }
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title).font(.subheadline.weight(.medium)).lineLimit(2)
                 Text(meta).font(.caption).foregroundStyle(.secondary).lineLimit(1)

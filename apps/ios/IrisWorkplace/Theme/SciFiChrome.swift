@@ -36,33 +36,86 @@ struct SciFiChrome: ThemeChrome {
 
 // MARK: - Backdrop
 
-/// Deep space: a navy gradient, two static nebulae, a two-layer starfield that drifts (24 fps,
-/// paused when off screen, inactive or not at full motion) and, for chats, a perspective grid.
+/// Deep space: a navy gradient, two static nebulae, a two-layer starfield and, for chats, a
+/// perspective grid. The sky is rasterised once (`drawingGroup`) and drifts by moving that layer
+/// (a transform, composited by the GPU: no per-frame redraw while a list scrolls over it). The near
+/// layer drifts faster than the far one (parallax); both stop below full motion or off screen.
 /// Dims when the socket is not live: the "system pulse".
 struct SpaceBackdrop: View {
     let motion: MotionLevel
     var live = true
     var grid = false
     @Environment(\.scenePhase) private var phase
+    @Environment(\.ambientPaused) private var paused
     @State private var visible = false
+    @State private var clock = AmbientClock()
 
+    var body: some View {
+        let drifting = motion == .full && visible && phase == .active && !paused && !AmbientDebug.off.contains("stars")
+        ZStack {
+            SpaceGradient().equatable()
+            TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !drifting)) { ctx in
+                let t = clock.time(ctx.date)
+                ZStack {
+                    StarLayer(layer: 0, shift: (t / 140).truncatingRemainder(dividingBy: 1))
+                    StarLayer(layer: 1, shift: (t / 55).truncatingRemainder(dividingBy: 1))
+                }
+            }
+            .opacity(live ? 1 : 0.45)
+            .animation(.easeInOut(duration: 0.6), value: live)
+            if grid { Canvas { g, size in Starfield.drawGrid(in: &g, size: size) } }
+        }
+        .ignoresSafeArea()
+        .onAppear { visible = true; clock.set(running: drifting) }
+        .onDisappear { visible = false }
+        .onChange(of: drifting) { _, d in clock.set(running: d) }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The navy gradient and both nebulae, flattened into one rasterised layer (one blend, not three).
+private struct SpaceGradient: View, Equatable {
     var body: some View {
         ZStack {
             LinearGradient(colors: [SciFiPalette.backgroundTop.color, SciFiPalette.backgroundBottom.color], startPoint: .top, endPoint: .bottom)
             RadialGradient(colors: [SciFiPalette.nebulaViolet.color(0.55), .clear], center: UnitPoint(x: 0.9, y: 0.12), startRadius: 0, endRadius: 320)
             RadialGradient(colors: [SciFiPalette.nebulaCyan.color(0.45), .clear], center: UnitPoint(x: 0.05, y: 0.78), startRadius: 0, endRadius: 360)
-            TimelineView(.animation(minimumInterval: 1.0 / 24, paused: motion != .full || !visible || phase != .active)) { ctx in
-                Canvas { g, size in
-                    Starfield.draw(in: &g, size: size, t: ctx.date.timeIntervalSinceReferenceDate, dim: live ? 1 : 0.45)
-                    if grid { Starfield.drawGrid(in: &g, size: size) }
-                }
+        }
+        .drawingGroup()
+    }
+}
+
+/// One layer of stars, slid up by `shift` screens. Only the offset changes per tick: the tile below
+/// is an Equatable view, so SwiftUI never re-runs its Canvas and the rasterised layer is reused.
+private struct StarLayer: View {
+    let layer: Int
+    let shift: Double
+
+    var body: some View {
+        GeometryReader { g in
+            StarTile(layer: layer, width: g.size.width, height: g.size.height)
+                .equatable()
+                .offset(y: -g.size.height * shift)
+        }
+    }
+}
+
+/// Two identical skies stacked (a seamless wrap), drawn once and rasterised (`drawingGroup`).
+private struct StarTile: View, Equatable {
+    let layer: Int
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        Canvas { ctx, size in
+            for k in 0..<2 {
+                ctx.translateBy(x: 0, y: k == 0 ? 0 : height)
+                Starfield.draw(in: &ctx, size: CGSize(width: width, height: height), layer: layer)
             }
         }
-        .ignoresSafeArea()
-        .onAppear { visible = true }
-        .onDisappear { visible = false }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        .frame(width: width, height: height * 2)
+        .drawingGroup()
     }
 }
 
@@ -79,15 +132,11 @@ enum Starfield {
         }
     }()
 
-    static func draw(in g: inout GraphicsContext, size: CGSize, t: Double, dim: Double) {
-        let speeds = [3.0, 9.0]   // points per second: far, near (parallax)
-        for st in stars {
-            let dy = (t * speeds[st.layer]).truncatingRemainder(dividingBy: Double(size.height))
-            var y = st.y * size.height - dy
-            if y < 0 { y += size.height }
+    static func draw(in g: inout GraphicsContext, size: CGSize, layer: Int) {
+        for st in stars where st.layer == layer {
+            let y = st.y * size.height
             let x = st.x * size.width
-            let twinkle = 0.55 + 0.45 * sin(t * (st.layer == 1 ? 1.7 : 0.9) + st.phase)
-            let a = (st.layer == 1 ? 0.85 : 0.5) * twinkle * dim
+            let a = (st.layer == 1 ? 0.85 : 0.5) * (0.55 + 0.45 * sin(st.phase))
             let rect = CGRect(x: x - st.r, y: y - st.r, width: st.r * 2, height: st.r * 2)
             let tint: Color = st.layer == 1 && st.phase > 4.5 ? SciFiPalette.accent.color(a) : Color.white.opacity(a)
             g.fill(Path(ellipseIn: rect), with: .color(tint))
@@ -130,9 +179,11 @@ struct HoloCard: View {
     var accent: Color? = nil
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        // No .shadow: a shadow is an offscreen pass per card per frame while scrolling. A wide,
+        // faint stroke outside the edge reads as the glow for the cost of a path.
         shape.fill(SciFiPalette.surface.color(SciFiPalette.surfaceAlpha))
             .overlay(shape.strokeBorder(HoloEdge.gradient(accent), lineWidth: 1))
-            .shadow(color: (accent ?? SciFiPalette.accent.color).opacity(0.22), radius: 8)
+            .background(shape.stroke((accent ?? SciFiPalette.accent.color).opacity(0.14), lineWidth: 6))
             .accessibilityHidden(true)
     }
 }
@@ -144,17 +195,44 @@ enum HoloEdge {
     }
 }
 
-/// An animated gradient border (the Bridge): the angular gradient turns once every 8 s at full motion.
+/// An animated gradient border (the Bridge): the gradient turns once every 8 s at full motion.
+/// The gradient is a disc drawn once (an Equatable, rasterised view) that only rotates — a transform
+/// — under a static stroke used as a mask. (Re-rendering an AngularGradient stroke at a new angle
+/// each tick cost ~7% of frames in the simulator; this costs a transform.)
 struct ShimmerBorder: View {
     let radius: CGFloat
     let motion: MotionLevel
-    @State private var turn = false
+    @Environment(\.ambientPaused) private var paused
+    @Environment(\.scenePhase) private var phase
+    @State private var clock = AmbientClock()
+    @State private var visible = false
     var body: some View {
-        RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .strokeBorder(AngularGradient(colors: [SciFiPalette.accent.color, SciFiPalette.accent2.color(0.4), SciFiPalette.accent3.color, SciFiPalette.accent.color(0.3), SciFiPalette.accent.color],
-                                          center: .center, angle: .degrees(turn ? 360 : 0)), lineWidth: 1.2)
-            .onAppear { if motion == .full { withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) { turn = true } } }
-            .accessibilityHidden(true)
+        let running = motion == .full && visible && !paused && phase == .active && !AmbientDebug.off.contains("shimmer")
+        GeometryReader { g in
+            let d = (g.size.width * g.size.width + g.size.height * g.size.height).squareRoot()
+            TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !running)) { ctx in
+                ShimmerDisc(diameter: d).equatable()
+                    .rotationEffect(.degrees((clock.time(ctx.date) / 8).truncatingRemainder(dividingBy: 1) * 360))
+                    .position(x: g.size.width / 2, y: g.size.height / 2)
+            }
+        }
+        .mask(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(lineWidth: 1.2))
+        .onAppear { visible = true; clock.set(running: running) }
+        .onDisappear { visible = false }
+        .onChange(of: running) { _, r in clock.set(running: r) }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct ShimmerDisc: View, Equatable {
+    let diameter: CGFloat
+    var body: some View {
+        Circle()
+            .fill(AngularGradient(colors: [SciFiPalette.accent.color, SciFiPalette.accent2.color(0.4), SciFiPalette.accent3.color,
+                                           SciFiPalette.accent.color(0.3), SciFiPalette.accent.color], center: .center))
+            .frame(width: diameter, height: diameter)
+            .drawingGroup()
     }
 }
 
@@ -263,14 +341,23 @@ struct BootSequence: View {
 struct PulseRing: View {
     let color: Color
     let motion: MotionLevel
-    @State private var on = false
+    @Environment(\.ambientPaused) private var paused
+    @Environment(\.scenePhase) private var phase
+    @State private var clock = AmbientClock()
+    @State private var visible = false
     var body: some View {
-        Circle().stroke(color, lineWidth: 1.5)
-            .scaleEffect(on ? 2.2 : 1).opacity(on ? 0 : 0.8)
-            .onAppear { if motion == .full { withAnimation(.easeOut(duration: 2).repeatForever(autoreverses: false)) { on = true } } }
-            .opacity(motion == .full ? 1 : 0)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        let running = motion == .full && visible && !paused && phase == .active && !AmbientDebug.off.contains("pulse")
+        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !running)) { ctx in
+            let p = (clock.time(ctx.date) / 2).truncatingRemainder(dividingBy: 1)
+            Circle().stroke(color, lineWidth: 1.5)
+                .scaleEffect(1 + 1.2 * p).opacity(0.8 * (1 - p))
+        }
+        .opacity(motion == .full ? 1 : 0)
+        .onAppear { visible = true; clock.set(running: running) }
+        .onDisappear { visible = false }
+        .onChange(of: running) { _, r in clock.set(running: r) }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

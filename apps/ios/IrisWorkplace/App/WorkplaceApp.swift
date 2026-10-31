@@ -28,6 +28,9 @@ struct WorkplaceApp: App {
                 .themeRoot(themes)
                 .onAppear {
                     model.alerts.isActive = { UIApplication.shared.applicationState == .active }
+                    #if DEBUG
+                    FrameProbe.shared.startIfAsked()
+                    #endif
                     model.start()
                 }
                 .onChange(of: model.hasCredential, initial: true) { _, has in

@@ -55,6 +55,8 @@ struct ThemeRoot: ViewModifier {
                     chrome.boot(motion: motion).allowsHitTesting(false).accessibilityHidden(true)
                 }
             }
+            // The boot plays on a cold launch only: a later switch to Sci-fi never replays it.
+            .task { try? await Task.sleep(for: .seconds(2)); BootOnce.done = true }
             .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
                 lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
             }
@@ -103,8 +105,35 @@ struct ThemedList: ViewModifier {
     func body(content: Content) -> some View {
         content
             .scrollContentBackground(theme.hasChrome ? .hidden : .automatic)
-            .background { if let c = theme.chrome { c.backdrop(motion: motion, live: live) } }
+            .background { if let c = theme.chrome, !AmbientDebug.off.contains("backdrop") { c.backdrop(motion: motion, live: live) } }
+            .modifier(AmbientScrollPause())
     }
+}
+
+/// Ambient effects hold still while the scroll view moves (iOS 18+; on iOS 17 they keep going).
+struct AmbientScrollPause: ViewModifier {
+    @State private var scrolling = false
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .onScrollPhaseChange { _, phase in scrolling = phase.isScrolling }
+                .environment(\.ambientPaused, scrolling)
+        } else {
+            content
+        }
+    }
+}
+
+/// Time for an ambient effect that only advances while it runs, so a pause (scrolling, off screen)
+/// resumes where it stopped instead of jumping.
+final class AmbientClock {
+    private var acc: TimeInterval = 0
+    private var since: Date?
+    func set(running: Bool, now: Date = Date()) {
+        if running { if since == nil { since = now } }
+        else if let s = since { acc += now.timeIntervalSince(s); since = nil }
+    }
+    func time(_ now: Date) -> TimeInterval { acc + (since.map { max(0, now.timeIntervalSince($0)) } ?? 0) }
 }
 
 struct ThemedScreen: ViewModifier {
@@ -122,7 +151,7 @@ struct ThemedScreen: ViewModifier {
 struct ThemedRows: ViewModifier {
     @Environment(\.theme) private var theme
     func body(content: Content) -> some View {
-        if let c = theme.chrome {
+        if let c = theme.chrome, !AmbientDebug.off.contains("rows") {
             content.listRowBackground(c.rowBackground()).listRowSeparatorTint(c.separator)
         } else {
             content
