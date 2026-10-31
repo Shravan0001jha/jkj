@@ -3,6 +3,7 @@
 import { storyTimeline, type Transition } from './timeline.js';
 import { splitWait, type Span, type Cause } from './causes.js';
 import { throughputForecast } from './forecast.js';
+import { buildProducts, type ProductConfig, type Product, type Trends } from './products.js';
 
 const DAY = 86_400_000;
 const FIXED_DAYS = 2;            // staging batch + CTO journey + owner device check (6 Nov plan)
@@ -15,7 +16,7 @@ export interface EpicRow {
   id: string; title: string; status: string; statusSince: number; targetDate: string | null; createdAt: number;
   targetHistory: { at: number; from: string | null; to: string | null }[];
 }
-export interface StoryRow { id: string; epicId: string; title: string; status: string; employeeId: string | null; charterId: string | null; createdAt: number }
+export interface StoryRow { id: string; epicId: string; title: string; status: string; employeeId: string | null; charterId: string | null; createdAt: number; type?: string | null }
 export interface Rows {
   now: number;
   epics: EpicRow[];
@@ -43,6 +44,8 @@ export interface Feature {
 }
 export interface Snapshot {
   version: 1; generatedAt: string;
+  products: Product[];
+  trends: Trends;
   features: Feature[];
   gaps: {
     window: '30d';
@@ -74,7 +77,7 @@ function scopeStatus(status: string): ScopeStatus {
   return 'not-started';
 }
 
-export function buildSnapshot(rows: Rows): Snapshot {
+export function buildSnapshot(rows: Rows, cfg: ProductConfig = { products: [] }): Snapshot {
   const now = rows.now;
   const byStory = new Map<string, Transition[]>();
   for (const t of rows.transitions) (byStory.get(t.itemId) ?? byStory.set(t.itemId, []).get(t.itemId)!).push(t);
@@ -102,6 +105,7 @@ export function buildSnapshot(rows: Rows): Snapshot {
   const windowStart = now - 30 * DAY;
   let unknownMs = 0, waitMs = 0, totalSendBacks = 0;
   const reviewWaits: number[] = [];
+  const waitParts: { at: number; to: number; cause: string; ms: number }[] = [];
 
   const features: Feature[] = rows.epics.map(ep => {
     const stories = rows.stories.filter(s => s.epicId === ep.id);
@@ -131,6 +135,7 @@ export function buildSnapshot(rows: Rows): Snapshot {
         if (seg.status === 'in-review') reviewWaits.push(segMs / 3_600_000);
         if (seg.to === now && !CLOSED.has(s.status) && parts.length) { const c = parts[parts.length - 1]!.cause; openWait.set(c, (openWait.get(c) ?? 0) + 1); }
         for (const { cause, ms } of parts) {
+          waitParts.push({ at: seg.from, to: seg.to, cause, ms });
           lost[cause] = (lost[cause] ?? 0) + ms / DAY;
           
           // Workplace-gap totals: this cause's share of the part of the segment inside the 30-day window.
@@ -201,8 +206,9 @@ export function buildSnapshot(rows: Rows): Snapshot {
   const parkedDays = gapLost.get('parked') ?? 0;
   gapLost.delete('parked');
   const lostWait = waitMs - parkedDays * DAY;
+  const { products, trends } = buildProducts(rows, features, cfg, waitParts);
   return {
-    version: 1, generatedAt: iso(now), features,
+    version: 1, generatedAt: iso(now), products, trends, features,
     gaps: {
       window: '30d',
       unit: 'story-days',

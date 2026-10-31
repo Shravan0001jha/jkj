@@ -33,92 +33,57 @@ button,input{font:inherit;color:inherit}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* Top bar */
-.bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 0 12px;
-  background:linear-gradient(var(--void) 70%,transparent)}
+.bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 0 12px;background:linear-gradient(var(--void) 75%,transparent)}
 .brand{display:flex;align-items:baseline;gap:10px;margin-right:auto}
 .brand h1{font-size:1.15rem;color:var(--cyan);text-shadow:0 0 18px var(--cyan-glow)}
-.brand span{color:var(--faint);font-family:var(--mono);font-size:.75rem}
 .tabs{display:flex;gap:4px;border:1px solid var(--edge);border-radius:8px;padding:3px;background:var(--deck)}
 .tab{border:0;background:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-family:var(--display);letter-spacing:.12em;font-size:.78rem;color:var(--dim)}
 .tab[aria-selected=true]{background:var(--panel);color:var(--cyan);box-shadow:inset 0 0 0 1px var(--edge),0 0 14px rgba(77,227,255,.12)}
 .ghost{border:1px solid var(--edge);background:none;border-radius:6px;padding:6px 10px;color:var(--dim);cursor:pointer;font-size:.8rem}
 .ghost:hover{color:var(--ink);border-color:var(--faint)}
-.fresh{font-family:var(--mono);font-size:.75rem;color:var(--faint)}
-.fresh.stale{color:var(--amber)}
-
-/* Status strip */
-.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:8px 0 22px}
-.stat{background:var(--deck);border:1px solid var(--edge);border-radius:10px;padding:12px 14px;min-width:0}
-.stat b{display:block;font-family:var(--display);font-size:1.6rem;font-weight:600;line-height:1.1;margin-top:4px}
-.stat small{color:var(--dim);font-size:.78rem}
-
-/* Sections & cards */
-section{margin-bottom:28px}
-section > header{display:flex;align-items:baseline;gap:10px;margin-bottom:12px}
-section > header h2{font-size:.95rem;letter-spacing:.14em;text-transform:uppercase}
-section > header .count{font-family:var(--mono);color:var(--faint);font-size:.8rem}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-.card{position:relative;background:linear-gradient(180deg,var(--panel),var(--deck));border:1px solid var(--edge);border-radius:12px;padding:16px;cursor:pointer;
-  text-align:left;width:100%;transition:border-color .15s,transform .15s;min-width:0}
-.card:hover{border-color:var(--faint);transform:translateY(-1px)}
-.card::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:0 3px 3px 0;background:var(--h,var(--faint));box-shadow:0 0 12px var(--h,transparent)}
-.card h3{font-size:1rem;font-weight:600;letter-spacing:.02em;margin:0 0 10px;padding-right:86px;line-height:1.3}
-.pill{position:absolute;top:14px;right:14px;font-family:var(--display);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;padding:3px 8px;border-radius:99px;border:1px solid currentColor;color:var(--h,var(--dim))}
-.h-on-track{--h:var(--green)} .h-at-risk{--h:var(--amber)} .h-late{--h:var(--red)} .h-delivered{--h:var(--cyan)} .h-no-date{--h:var(--faint)}
-.dates{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
-.dates div{min-width:0}
-.dates b{display:block;font-family:var(--mono);font-size:.86rem;font-weight:500}
-.prog{height:6px;background:var(--void);border-radius:99px;overflow:hidden;border:1px solid var(--edge)}
-.prog i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--green));box-shadow:0 0 10px var(--cyan-glow)}
-.meta{display:flex;justify-content:space-between;gap:8px;margin-top:8px;font-size:.8rem;color:var(--dim)}
-.reason{margin-top:10px;font-size:.84rem;color:var(--amber)}
-.list{display:flex;flex-direction:column;border:1px solid var(--edge);border-radius:12px;overflow:hidden;background:var(--deck)}
-.row{display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--edge);cursor:pointer;background:none;border-left:0;border-right:0;border-top:0;text-align:left;width:100%}
-.row:last-child{border-bottom:0}
-.row:hover{background:var(--panel)}
-.row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.delta{font-family:var(--mono);font-size:.8rem}
-.delta.late{color:var(--red)} .delta.ok{color:var(--green)}
-
+.fresh{font-family:var(--mono);font-size:.72rem;color:var(--faint)}
+/* Tiles */
+.hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:6px 0 24px}
+.tile{background:linear-gradient(180deg,var(--panel),var(--deck));border:1px solid var(--edge);border-radius:14px;padding:14px 16px;min-width:0;display:flex;flex-direction:column;gap:6px}
+.big{font-family:var(--display);font-size:2.2rem;font-weight:600;line-height:1}
+.sub{font-family:var(--mono);font-size:.75rem;color:var(--dim)}
+.up{color:var(--green)} .down{color:var(--amber)}
+h2.sec{font-size:.82rem;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin:6px 0 12px}
+/* Product grid */
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:28px}
+@media (max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.grid{grid-template-columns:1fr}}
+.prod{position:relative;background:linear-gradient(180deg,var(--panel),var(--deck));border:1px solid var(--edge);border-radius:14px;padding:14px;cursor:pointer;text-align:left;width:100%;color:inherit;display:grid;grid-template-columns:76px 1fr;gap:4px 12px;align-items:center;transition:border-color .15s,transform .15s}
+.prod:hover{border-color:var(--faint);transform:translateY(-1px)}
+.prod h3{grid-column:1/-1;font-size:.95rem;font-weight:600;letter-spacing:.02em;display:flex;justify-content:space-between;gap:8px;align-items:center;min-width:0}
+.prod h3 span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ring{width:76px;height:76px}
+.ring text{font-family:var(--display);font-weight:600;fill:var(--ink)}
+.dates{grid-column:1/-1;display:flex;justify-content:space-between;font-family:var(--mono);font-size:.72rem;color:var(--dim);margin-top:4px}
+.st{display:inline-flex;align-items:center;gap:5px;font-family:var(--display);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;padding:2px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap;flex:none}
+.st-on-track,.st-delivered{color:var(--green)} .st-at-risk{color:var(--amber)} .st-late{color:var(--red)} .st-no-date{color:var(--faint)}
+/* Charts */
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-bottom:28px}
+.chart{background:var(--deck);border:1px solid var(--edge);border-radius:14px;padding:14px 14px 8px;min-width:0}
+.chart h3{font-size:.74rem;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:8px;font-weight:600}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.ax{fill:var(--faint);font-family:var(--mono);font-size:10px}
+.gl{stroke:rgba(130,149,177,.12);stroke-width:1}
+.legend{display:flex;flex-wrap:wrap;gap:10px 14px;font-size:.74rem;color:var(--dim);margin:2px 0 8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.hit{fill:transparent;cursor:crosshair}
+#tip{position:fixed;z-index:20;pointer-events:none;background:#020509ee;border:1px solid var(--edge);border-radius:8px;padding:7px 10px;font:12px/1.4 var(--mono);color:var(--ink);box-shadow:0 8px 24px rgba(0,0,0,.5);max-width:260px}
 /* Detail */
-.back{margin:6px 0 14px}
-.detail-head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:16px}
-.detail-head h2{font-size:1.4rem;margin-right:auto}
-.detail-head .pill{position:static}
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
-.panel{background:var(--deck);border:1px solid var(--edge);border-radius:12px;padding:16px;min-width:0}
-.panel h3{font-size:.8rem;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:12px}
-.scope{display:flex;flex-direction:column;gap:6px;max-height:420px;overflow:auto;padding-right:4px}
-.si{display:flex;gap:10px;align-items:flex-start;font-size:.88rem}
-.dot{flex:none;width:9px;height:9px;border-radius:50%;margin-top:6px;background:var(--faint)}
-.s-merged{background:var(--green);box-shadow:0 0 8px var(--green)} .s-building{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
-.s-staging{background:var(--violet)} .s-verified{background:var(--green)} .s-dropped{background:#3a4458}
-.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:.78rem;color:var(--dim);margin-bottom:10px}
-.legend span{display:inline-flex;align-items:center;gap:6px}
-.stack{display:flex;height:14px;border-radius:99px;overflow:hidden;background:var(--void);border:1px solid var(--edge)}
-.stack i{display:block;height:100%}
-.kv{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-.kv b{display:block;font-family:var(--display);font-size:1.25rem}
-.hist{font-size:.85rem;display:flex;flex-direction:column;gap:6px}
-details summary{cursor:pointer;color:var(--dim);font-size:.85rem;margin:8px 0}
-
-/* Gaps */
-.bars{display:flex;flex-direction:column;gap:12px}
-.bar-row{display:grid;grid-template-columns:minmax(120px,190px) 1fr 70px 90px;gap:12px;align-items:center}
-.bar-row .track{height:10px;background:var(--void);border-radius:99px;border:1px solid var(--edge);overflow:hidden}
-.bar-row .track i{display:block;height:100%;border-radius:99px}
-.bar-row .v{font-family:var(--mono);text-align:right}
-.spark{display:block;width:90px;height:24px}
-.note{color:var(--faint);font-size:.8rem;margin-top:12px;max-width:72ch}
-@media (max-width:560px){
-  .bar-row{grid-template-columns:1fr 64px;row-gap:4px}
-  .bar-row .track{grid-column:1/-1;grid-row:2}
-  .bar-row .spark{display:none}
-  .dates{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .row{grid-template-columns:1fr auto}
-  .row .delta{display:none}
-}
-
+.back{margin:6px 0 12px}
+.dhead{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:14px}
+.dhead h2{font-size:1.5rem;margin-right:auto}
+.epics{display:flex;flex-direction:column;gap:8px}
+.ep{display:grid;grid-template-columns:1fr 120px 52px;gap:12px;align-items:center;font-size:.86rem}
+.ep span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meter{height:8px;background:var(--void);border:1px solid var(--edge);border-radius:99px;overflow:hidden}
+.meter i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--green))}
+.note{color:var(--faint);font-size:.76rem;margin:16px 0 0;max-width:80ch}
+@media (max-width:560px){.ep{grid-template-columns:1fr 70px 44px}.big{font-size:1.6rem}.hero{grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px}.tile{padding:10px 12px}}
 /* Login */
 .gate{min-height:100vh;display:grid;place-items:center;padding:24px 0}
 .console{width:min(420px,100%);background:linear-gradient(180deg,var(--panel),var(--deck));border:1px solid var(--edge);border-radius:16px;padding:28px;
@@ -152,7 +117,7 @@ details summary{cursor:pointer;color:var(--dim);font-size:.85rem;margin:8px 0}
   const HEALTH = { 'on-track': 'On track', 'at-risk': 'At risk', 'late': 'Late', 'delivered': 'Delivered', 'no-date': 'No date' };
   const fmtDate = d => d ? new Date(d + (d.length === 10 ? 'T00:00:00Z' : '')).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '—';
   const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
-  let snap = null, tab = 'roadmap';
+  let snap = null, tab = 'product';
 
   async function api(path, opts = {}) {
     const r = await fetch(path, { credentials: 'same-origin', ...opts, headers: { 'content-type': 'application/json', ...(opts.method && opts.method !== 'GET' ? { 'x-dash': '1' } : {}), ...(opts.headers || {}) } });
@@ -195,109 +160,164 @@ details summary{cursor:pointer;color:var(--dim);font-size:.85rem;margin:8px 0}
   }
 
   // ---------- Shell ----------
+  const tip = document.createElement('div'); tip.id = 'tip'; tip.hidden = true; document.body.appendChild(tip);
+  document.addEventListener('pointermove', e => {
+    const t = e.target.closest?.('[data-tip]');
+    if (!t) { tip.hidden = true; return; }
+    tip.innerHTML = t.getAttribute('data-tip'); tip.hidden = false;
+    const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8), y = Math.max(8, e.clientY - tip.offsetHeight - 12);
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  });
   function shell(inner) {
     const age = snap ? Math.round((Date.now() - Date.parse(snap.generatedAt)) / 60000) : null;
-    const fresh = age === null ? '' : age < 90 ? `updated ${age < 1 ? 'just now' : age + ' min ago'}` : `updated ${Math.round(age / 60)} h ago`;
-    app.innerHTML = `<div class="bar"><div class="brand"><h1>IRIS // COMMAND</h1><span>workplace</span></div>
-      <div class="tabs" role="tablist"><button class="tab" role="tab" data-t="roadmap" aria-selected="${tab === 'roadmap'}">Roadmap</button><button class="tab" role="tab" data-t="gaps" aria-selected="${tab === 'gaps'}">Gaps</button></div>
-      <span class="fresh ${age > 180 ? 'stale' : ''}">${esc(fresh)}</span><button class="ghost" id="out">Sign out</button></div>${inner}`;
+    const fresh = age === null ? '' : age < 90 ? `${age < 1 ? 'now' : age + ' min ago'}` : `${Math.round(age / 60)} h ago`;
+    app.innerHTML = `<div class="bar"><div class="brand"><h1>IRIS // COMMAND</h1></div>
+      <div class="tabs" role="tablist"><button class="tab" role="tab" data-t="product" aria-selected="${tab === 'product'}">Product</button><button class="tab" role="tab" data-t="workplace" aria-selected="${tab === 'workplace'}">Workplace</button></div>
+      <span class="fresh">⟳ ${esc(fresh)}</span><button class="ghost" id="out">Sign out</button></div>${inner}`;
     app.querySelectorAll('.tab').forEach(b => b.onclick = () => { location.hash = b.dataset.t; });
     $('#out').onclick = async () => { await api('/api/logout', { method: 'POST' }); snap = null; gate(); };
+    app.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { location.hash = 'p-' + b.dataset.p; });
+  }
+  const wk = d => new Date(d + 'T00:00:00Z').toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const ST = { 'on-track': ['●', 'On track'], 'at-risk': ['▲', 'At risk'], late: ['■', 'Late'], delivered: ['✓', 'Delivered'], 'no-date': ['○', 'No date'] };
+  const status = h => `<span class="st st-${h}">${ST[h][0]} ${ST[h][1]}</span>`;
+
+  // ---------- Charts (SVG, one scale per chart, hover tips) ----------
+  let W = 340, H = 150; const P = { l: 30, r: 10, t: 10, b: 22 };
+  const wide = f => { W = 1000; H = 230; try { return f(); } finally { W = 340; H = 150; } };
+  const niceMax = v => { if (v <= 0) return 1; const m = Math.pow(10, Math.floor(Math.log10(v))), n = v / m; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * m; };
+  function frame(max, labels) {
+    const ih = H - P.t - P.b, ticks = [0, max / 2, max];
+    const g = ticks.map(v => { const y = P.t + ih - (v / max) * ih; return `<line class="gl" x1="${P.l}" x2="${W - P.r}" y1="${y}" y2="${y}"/><text class="ax" x="${P.l - 6}" y="${y + 3}" text-anchor="end">${Math.round(v * 10) / 10}</text>`; }).join('');
+    const iw = W - P.l - P.r, step = iw / labels.length;
+    const xl = labels.map((l, i) => (i % Math.ceil(labels.length / 6) === 0 || i === labels.length - 1) ? `<text class="ax" x="${P.l + step * i + step / 2}" y="${H - 6}" text-anchor="middle">${esc(l)}</text>` : '').join('');
+    return { g: g + xl, ih, iw, step };
+  }
+  function bars(values, labels, color, unit) {
+    const max = niceMax(Math.max(...values, 1)), f = frame(max, labels), bw = Math.min(26, f.step - 6);
+    const b = values.map((v, i) => { const h = (v / max) * f.ih, x = P.l + f.step * i + (f.step - bw) / 2, y = P.t + f.ih - h;
+      return `<path d="M${x},${P.t + f.ih} V${y + Math.min(4, h)} q0,-4 4,-4 h${bw - 8} q4,0 4,4 V${P.t + f.ih} Z" fill="${color}" opacity="${h ? 1 : 0}"/><rect class="hit" x="${P.l + f.step * i}" y="${P.t}" width="${f.step}" height="${f.ih}" data-tip="<b>${esc(labels[i])}</b><br>${v} ${unit}"/>`; }).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" role="img">${f.g}${b}</svg>`;
+  }
+  function lines(series, labels, unit, opts = {}) {
+    const all = series.flatMap(s => s.values.filter(v => v != null));
+    const max = niceMax(Math.max(...all, 1)), f = frame(max, labels);
+    const X = i => P.l + f.step * i + f.step / 2, Y = v => P.t + f.ih - (v / max) * f.ih;
+    const paths = series.map(s => {
+      const pts = s.values.map((v, i) => v == null ? null : [X(i), Y(v)]).filter(Boolean);
+      const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0] + ',' + p[1]).join(' ');
+      const area = s.area && pts.length ? `<path d="${d} L${pts.at(-1)[0]},${P.t + f.ih} L${pts[0][0]},${P.t + f.ih} Z" fill="${s.color}" opacity=".12"/>` : '';
+      const last = pts.at(-1);
+      return `${area}<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" ${s.dash ? 'stroke-dasharray="4 4"' : ''} stroke-linejoin="round"/>${last ? `<circle cx="${last[0]}" cy="${last[1]}" r="4" fill="${s.color}" stroke="var(--deck)" stroke-width="2"/>` : ''}`;
+    }).join('');
+    const hits = labels.map((l, i) => `<rect class="hit" x="${P.l + f.step * i}" y="${P.t}" width="${f.step}" height="${f.ih}" data-tip="<b>${esc(l)}</b>${series.map(s => `<br>${esc(s.name)}: ${s.values[i] ?? '—'} ${unit}`).join('')}"/>`).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" role="img">${f.g}${paths}${hits}</svg>`;
+  }
+  function stacked(layers, labels, unit) {
+    const tot = labels.map((_, i) => layers.reduce((n, l) => n + l.values[i], 0));
+    const max = niceMax(Math.max(...tot, 1)), f = frame(max, labels), bw = Math.min(26, f.step - 6);
+    let out = '';
+    labels.forEach((lab, i) => {
+      let y = P.t + f.ih; const x = P.l + f.step * i + (f.step - bw) / 2;
+      layers.forEach(l => { const h = (l.values[i] / max) * f.ih; if (h > 0.5) { y -= h; out += `<rect x="${x}" y="${y + 1}" width="${bw}" height="${Math.max(0, h - 2)}" rx="2" fill="${l.color}"/>`; } });
+      out += `<rect class="hit" x="${P.l + f.step * i}" y="${P.t}" width="${f.step}" height="${f.ih}" data-tip="<b>${esc(lab)}</b>${layers.map(l => `<br>${esc(l.name)}: ${l.values[i]} ${unit}`).join('')}"/>`;
+    });
+    return `<svg viewBox="0 0 ${W} ${H}" role="img">${f.g}${out}</svg>`;
+  }
+  function ring(done, total) {
+    const p = total ? done / total : 0, r = 30, c = 2 * Math.PI * r;
+    return `<svg class="ring" viewBox="0 0 76 76" role="img" aria-label="${Math.round(p * 100)}% done"><circle cx="38" cy="38" r="${r}" fill="none" stroke="var(--edge)" stroke-width="7"/><circle cx="38" cy="38" r="${r}" fill="none" stroke="var(--cyan)" stroke-width="7" stroke-linecap="round" stroke-dasharray="${c * p} ${c}" transform="rotate(-90 38 38)" style="filter:drop-shadow(0 0 4px var(--cyan-glow))"/><text x="38" y="43" text-anchor="middle" font-size="15">${Math.round(p * 100)}%</text></svg>`;
+  }
+  function mini(p) {   // tiny burn-up: scope (dashed) vs done
+    const w = 150, h = 54, max = Math.max(...p.burnup.total, 1), n = p.burnup.total.length;
+    const X = i => 2 + (i / Math.max(1, n - 1)) * (w - 6), Y = v => h - 4 - (v / max) * (h - 10);
+    const d = a => a.map((v, i) => (i ? 'L' : 'M') + X(i) + ',' + Y(v)).join(' ');
+    return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:54px" aria-hidden="true"><path d="${d(p.burnup.total)}" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="3 3"/><path d="${d(p.burnup.done)} L${X(n - 1)},${h - 4} L${X(0)},${h - 4} Z" fill="var(--cyan)" opacity=".12"/><path d="${d(p.burnup.done)}" fill="none" stroke="var(--cyan)" stroke-width="2"/></svg>`;
+  }
+  const CAUSE_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'];
+  function causeLayers(byCause) {
+    const tot = Object.entries(byCause).map(([c, v]) => [c, v, v.reduce((a, b) => a + b, 0)]).sort((a, b) => b[2] - a[2]);
+    const top = tot.slice(0, 4), rest = tot.slice(4);
+    const layers = top.map(([c, v], i) => ({ name: CAUSE[c]?.[0] ?? c, values: v, color: CAUSE_COLORS[i] }));
+    if (rest.length) layers.push({ name: 'Other', values: rest[0][1].map((_, i) => Math.round(rest.reduce((n, r) => n + r[1][i], 0) * 10) / 10), color: CAUSE_COLORS[4] });
+    return layers;
+  }
+  const legend = layers => `<div class="legend">${layers.map(l => `<span><i style="background:${l.color}"></i>${esc(l.name)}</span>`).join('')}</div>`;
+
+  // ---------- Product (home) ----------
+  function product() {
+    const T = snap.trends, labels = T.weeks.map(wk), P_ = snap.products;
+    const sum = a => a.reduce((x, y) => x + y, 0);
+    const delivered = T.weeks.map((_, i) => sum(P_.map(p => T.deliveredByProduct[p.id][i])));
+    const bugs = T.weeks.map((_, i) => sum(P_.map(p => T.bugsByProduct[p.id][i])));
+    const thisW = delivered.at(-1), lastW = delivered.at(-2) ?? 0, dlt = thisW - lastW;
+    const shipped = P_.filter(p => p.health === 'delivered').length;
+    const hero = `<div class="hero">
+      <div class="tile"><span class="label">Products complete</span><span class="big">${shipped}<span style="color:var(--faint);font-size:1.2rem"> / ${P_.length}</span></span></div>
+      <div class="tile"><span class="label">Delivered this week</span><span class="big">${thisW}</span><span class="sub ${dlt >= 0 ? 'up' : 'down'}">${dlt >= 0 ? '▲' : '▼'} ${Math.abs(dlt)} vs last week</span></div>
+      <div class="tile"><span class="label">Open bugs</span><span class="big">${T.bugsOpenTotal.at(-1)}</span><span class="sub">${T.bugsOpenTotal.at(-1) <= (T.bugsOpenTotal.at(-2) ?? 0) ? '<span class="up">▼ falling</span>' : '<span class="down">▲ rising</span>'}</span></div></div>`;
+    const tiles = P_.map(p => `<button class="prod" data-p="${esc(p.id)}"><h3><span>${esc(p.name)}</span>${status(p.health)}</h3>${ring(p.done, p.total)}<div>${mini(p)}</div>
+      <div class="dates"><span>${p.committedDate ? '◆ ' + wk(p.committedDate) : '◆ —'}</span><span>${p.health === 'delivered' ? 'done' : p.forecast.p50 ? '→ ' + wk(p.forecast.p50) : '→ stalled'}</span></div></button>`).join('');
+    const layers = causeLayers(T.waitByCause);
+    shell(hero + `<h2 class="sec">Products</h2><div class="grid">${tiles}</div>
+      <h2 class="sec">Trends · last 6 weeks</h2><div class="charts">
+        <div class="chart"><h3>Delivered per week</h3>${bars(delivered, labels, 'var(--cyan)', 'stories')}</div>
+        <div class="chart"><h3>Open bugs</h3>${lines([{ name: 'Open bugs', values: T.bugsOpenTotal, color: '#d55181', area: true }], labels, '')}</div>
+        <div class="chart"><h3>New bugs per week</h3>${bars(bugs, labels, '#d95926', 'bugs')}</div>
+        <div class="chart"><h3>Hours to deliver a story · median</h3>${lines([{ name: 'Median', values: T.medianHoursToDone, color: '#199e70', area: true }], labels, 'h')}</div></div>
+      <p class="note">◆ committed date · → forecast at the current pace · ring = stories done · mini chart: done (solid) vs total scope (dashed)</p>`);
   }
 
-  // ---------- Roadmap ----------
-  function card(f) {
-    const total = f.done + f.remaining, pct = total ? Math.round((f.done / total) * 100) : 0;
-    return `<button class="card h-${f.health}" data-f="${esc(f.id)}"><span class="pill">${HEALTH[f.health]}</span><h3>${esc(f.name)}</h3>
-      <div class="dates"><div><span class="label">Committed</span><b>${fmtDate(f.committedDate)}</b></div><div><span class="label">Forecast</span><b>${f.forecast.p50 ? fmtDate(f.forecast.p50) : (f.state === 'delivered' ? '—' : 'stalled')}</b></div><div><span class="label">Age</span><b>${f.ageDays == null ? '—' : f.ageDays + ' d'}</b></div></div>
-      <div class="prog"><i style="width:${pct}%"></i></div><div class="meta"><span>${f.done} done · ${f.remaining} open</span><span class="mono">${pct}%</span></div>
-      ${f.healthReason ? `<div class="reason">${esc(reasonText(f.healthReason))}</div>` : ''}</button>`;
-  }
-  const reasonText = r => r.replace(/waiting on ([a-z/-]+)$/, (_, c) => c === 'parked' ? 'parked' : 'waiting: ' + (CAUSE[c]?.[0] ?? c).toLowerCase());
-  function roadmap() {
-    const live = snap.features.filter(f => f.state !== 'delivered');
-    const active = live.filter(f => f.health !== 'no-date'), undated = live.filter(f => f.health === 'no-date');
-    const done = snap.features.filter(f => f.state === 'delivered').sort((a, b) => (b.deliveredAt || '').localeCompare(a.deliveredAt || ''));
-    const risky = live.filter(f => f.health === 'late' || f.health === 'at-risk').length;
-    const strip = `<div class="strip">
-      <div class="stat"><span class="label">In flight</span><b>${live.length}</b><small>${active.length} with a date</small></div>
-      <div class="stat"><span class="label">Late or at risk</span><b style="color:${risky ? 'var(--amber)' : 'var(--green)'}">${risky}</b><small>against the committed date</small></div>
-      <div class="stat"><span class="label">Delivered</span><b>${done.length}</b><small>since 27 Sep</small></div></div>`;
-    const sec = (title, items, body) => items.length ? `<section><header><h2>${title}</h2><span class="count">${items.length}</span></header>${body}</section>` : '';
-    const rows = done.map(f => {
-      const d = f.deliveredAt?.slice(0, 10), promised = f.originalDate || f.committedDate;
-      const delta = d && promised ? daysBetween(promised, d) : null;
-      return `<button class="row" data-f="${esc(f.id)}"><span>${esc(f.name)}</span><span class="mono">${fmtDate(d)}</span><span class="delta ${delta > 0 ? 'late' : 'ok'}">${delta == null ? 'no date set' : delta > 0 ? `+${delta} d vs promise` : 'on time'}</span></button>`;
-    }).join('');
-    shell(strip + sec('Committed', active, `<div class="cards">${active.map(card).join('')}</div>`)
-      + sec('In progress, no date yet', undated, `<div class="cards">${undated.map(card).join('')}</div>`)
-      + sec('Delivered', done, `<div class="list">${rows}</div>`)
-      + `<p class="note">${esc(snap.notes.join(' '))}</p>`);
-    app.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { location.hash = 'f-' + b.dataset.f; });
+  // ---------- Product detail ----------
+  function detail(id) {
+    const p = snap.products.find(x => x.id === id); if (!p) { location.hash = 'product'; return; }
+    const T = snap.trends, labels = T.weeks.map(wk);
+    const eps = snap.features.filter(f => p.epics.includes(f.id));
+    const waits = {}; eps.forEach(f => Object.entries(f.lostDays).forEach(([c, v]) => { if (c !== 'parked') waits[c] = (waits[c] || 0) + v; }));
+    const wl = Object.entries(waits).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const wmax = Math.max(...wl.map(x => x[1]), 1);
+    const waitBars = wl.map(([c, v], i) => `<div class="ep" data-tip="${esc(CAUSE[c]?.[0] ?? c)}: ${Math.round(v * 10) / 10} story-days"><span>${esc(CAUSE[c]?.[0] ?? c)}</span><div class="meter"><i style="width:${(v / wmax) * 100}%;background:${CAUSE_COLORS[i]}"></i></div><span class="mono">${Math.round(v)}</span></div>`).join('');
+    const epRows = eps.sort((a, b) => (a.done + a.remaining) - (b.done + b.remaining)).reverse().map(f => { const t = f.done + f.remaining, pc = t ? Math.round((f.done / t) * 100) : 0;
+      return `<div class="ep" data-tip="${f.done} of ${t} stories done"><span>${esc(f.name)}</span><div class="meter"><i style="width:${pc}%"></i></div><span class="mono">${pc}%</span></div>`; }).join('');
+    shell(`<button class="ghost back" id="back">← Products</button>
+      <div class="dhead"><h2>${esc(p.name)}</h2>${status(p.health)}</div>
+      <div class="hero">
+        <div class="tile"><span class="label">Done</span><span class="big">${p.done}<span style="color:var(--faint);font-size:1.2rem"> / ${p.total}</span></span></div>
+        <div class="tile"><span class="label">Committed</span><span class="big mono" style="font-size:1.6rem">${p.committedDate ? wk(p.committedDate) : '—'}</span></div>
+        <div class="tile"><span class="label">Forecast</span><span class="big mono" style="font-size:1.6rem">${p.health === 'delivered' ? 'Done' : p.forecast.p50 ? wk(p.forecast.p50) : 'Stalled'}</span>${p.forecast.p90 && p.health !== 'delivered' ? `<span class="sub">worst case ${wk(p.forecast.p90)}</span>` : ''}</div>
+        <div class="tile"><span class="label">Running for</span><span class="big">${p.ageDays ?? '—'}<span style="color:var(--faint);font-size:1.2rem"> d</span></span></div></div>
+      <div class="charts">
+        <div class="chart"><h3>Burn-up</h3>${legend([{ name: 'Done', color: 'var(--cyan)' }, { name: 'Total scope', color: 'var(--faint)' }])}${lines([{ name: 'Done', values: p.burnup.done, color: 'var(--cyan)', area: true }, { name: 'Total scope', values: p.burnup.total, color: '#8295b1', dash: true }], labels, 'stories')}</div>
+        <div class="chart"><h3>Delivered per week</h3>${bars(p.weekly.delivered, labels, 'var(--cyan)', 'stories')}</div>
+        <div class="chart"><h3>New bugs per week</h3>${bars(p.weekly.bugs, labels, '#d95926', 'bugs')}</div>
+        <div class="chart"><h3>Where waiting went · story-days</h3><div class="epics" style="margin-top:6px">${waitBars || '<p class="note">No waiting recorded.</p>'}</div></div></div>
+      <h2 class="sec">Parts</h2><div class="chart"><div class="epics">${epRows}</div></div>`);
+    $('#back').onclick = () => { location.hash = 'product'; };
   }
 
-  // ---------- Feature ----------
-  function feature(id) {
-    const f = snap.features.find(x => x.id === id);
-    if (!f) { location.hash = 'roadmap'; return; }
-    const lost = Object.entries(f.lostDays).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-    const totalLost = lost.reduce((n, [, v]) => n + v, 0), all = totalLost + f.buildingDays;
-    const stack = all ? `<div class="stack"><i style="width:${(f.buildingDays / all) * 100}%;background:var(--green)" title="Building"></i>${lost.map(([c, v]) => `<i style="width:${(v / all) * 100}%;background:${CAUSE[c]?.[1] ?? '#555'}" title="${esc(CAUSE[c]?.[0] ?? c)}"></i>`).join('')}</div>` : '<p class="note">No work recorded yet.</p>';
-    const legend = `<div class="legend"><span><i class="dot" style="background:var(--green)"></i>Building ${f.buildingDays} d</span>${lost.map(([c, v]) => `<span><i class="dot" style="background:${CAUSE[c]?.[1] ?? '#555'}"></i>${esc(CAUSE[c]?.[0] ?? c)} ${v} d</span>`).join('')}</div>`;
-    const order = ['building', 'not-started', 'staging', 'merged', 'verified', 'dropped'];
-    const label = { building: 'Building', 'not-started': 'Not started', staging: 'On staging', merged: 'Merged', verified: 'Verified on your phone', dropped: 'Dropped' };
-    const groups = order.map(s => [s, f.scope.filter(x => x.status === s)]).filter(([, xs]) => xs.length);
-    const scope = groups.map(([s, xs]) => {
-      const items = xs.map(x => `<div class="si"><i class="dot s-${s}"></i><span>${esc(x.label)}</span></div>`).join('');
-      return (s === 'merged' || s === 'dropped' || xs.length > 25) && s !== 'building'
-        ? `<details><summary>${label[s]} · ${xs.length}</summary><div class="scope">${items}</div></details>`
-        : `<div class="label" style="margin:10px 0 6px">${label[s]} · ${xs.length}</div><div class="scope">${items}</div>`;
-    }).join('');
-    const hist = f.dateHistory.length ? f.dateHistory.map(h => `<div><span class="mono">${fmtDate(h.at.slice(0, 10))}</span> · ${h.from ? `${fmtDate(h.from)} → ` : 'set to '}<b>${fmtDate(h.to)}</b></div>`).join('') : '<div class="note">The date has never moved.</div>';
-    shell(`<button class="ghost back" id="back">← Roadmap</button>
-      <div class="detail-head"><h2>${esc(f.name)}</h2><span class="pill h-${f.health}" style="color:var(--h)">${HEALTH[f.health]}</span></div>
-      <div class="strip"><div class="stat"><span class="label">Committed</span><b class="mono">${fmtDate(f.committedDate)}</b><small>first promised ${fmtDate(f.originalDate)}</small></div>
-        <div class="stat"><span class="label">Forecast</span><b class="mono">${fmtDate(f.forecast.p50)}</b><small>worst case ${fmtDate(f.forecast.p90)}</small></div>
-        <div class="stat"><span class="label">Progress</span><b>${f.done}/${f.done + f.remaining}</b><small>stories done</small></div>
-        <div class="stat"><span class="label">Age</span><b>${f.ageDays ?? '—'}${f.ageDays != null ? ' d' : ''}</b><small>since the first story started</small></div></div>
-      <div class="grid2"><div class="panel"><h3>What you get</h3>${scope || '<p class="note">No stories yet.</p>'}</div>
-        <div style="display:flex;flex-direction:column;gap:14px">
-          <div class="panel"><h3>Where the time went</h3>${legend}${stack}<p class="note">Story-days: each story's days added up, so stories waiting together count separately.</p></div>
-          <div class="panel"><h3>Numbers</h3><div class="kv"><div><span class="label">Send-backs</span><b>${f.sendBacks}</b></div><div><span class="label">Model cost</span><b>₹${f.costInr.toLocaleString('en-IN')}</b></div><div><span class="label">Started</span><b class="mono" style="font-size:1rem">${fmtDate(f.startedAt?.slice(0, 10))}</b></div><div><span class="label">Delivered</span><b class="mono" style="font-size:1rem">${fmtDate(f.deliveredAt?.slice(0, 10))}</b></div></div></div>
-          <div class="panel"><h3>Date history</h3><div class="hist">${hist}</div></div></div></div>`);
-    $('#back').onclick = () => { location.hash = 'roadmap'; };
-  }
-
-  // ---------- Gaps ----------
-  function spark(vals, color) {
-    const max = Math.max(...vals, 0.01), w = 90, h = 24, n = vals.length;
-    const pts = vals.map((v, i) => `${(i / Math.max(1, n - 1)) * (w - 4) + 2},${h - 3 - (v / max) * (h - 6)}`).join(' ');
-    return `<svg class="spark" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.6"/><circle cx="${pts.split(' ').pop().split(',')[0]}" cy="${pts.split(' ').pop().split(',')[1]}" r="2.4" fill="${color}"/></svg>`;
-  }
-  function gaps() {
-    const g = snap.gaps, max = Math.max(...g.lostDaysByCause.map(x => x.days), 1);
-    const bars = g.lostDaysByCause.map(x => {
-      const [name, color] = CAUSE[x.cause] ?? [x.cause, '#888'];
-      return `<div class="bar-row"><span>${esc(name)}</span><div class="track"><i style="width:${(x.days / max) * 100}%;background:${color};box-shadow:0 0 10px ${color}55"></i></div><span class="v">${x.days}</span>${spark(x.weekly, color)}</div>`;
-    }).join('');
-    const rw = g.reviewWait;
-    shell(`<div class="strip">
-        <div class="stat"><span class="label">Review, approval 1</span><b class="mono">${rw.approval1Minutes.p50 ?? '—'} min</b><small>median · 90% within ${rw.approval1Minutes.p90 ?? '—'} min</small></div>
-        <div class="stat"><span class="label">Review, approval 2</span><b class="mono">${rw.approval2Minutes.p50 ?? '—'} min</b><small>median · 90% within ${rw.approval2Minutes.p90 ?? '—'} min</small></div>
-        <div class="stat"><span class="label">Staging down</span><b class="mono">${g.stagingDownDays} d</b><small>last 30 days</small></div>
-        <div class="stat"><span class="label">Send-backs</span><b class="mono">${g.sendBacks}</b><small>all time</small></div></div>
-      <section><header><h2>Where waiting time went</h2><span class="count">last 30 days · story-days</span></header>
-        <div class="panel"><div class="bars">${bars}</div>
-        <p class="note">Each bar adds up the days stories spent waiting for that reason. The lines show the trend over five 6-day windows, oldest on the left. Parked work (${g.parkedStoryDays} story-days) is left out, because it was put aside on purpose. ${Math.round(snap.unknownShare * 100)}% of waiting time could not be matched to a reason.</p></div></section>`);
+  // ---------- Workplace (gaps) ----------
+  function workplace() {
+    const g = snap.gaps, T = snap.trends, labels = T.weeks.map(wk), rw = g.reviewWait;
+    const layers = causeLayers(T.waitByCause);
+    shell(`<div class="hero">
+        <div class="tile"><span class="label">Review · approval 1</span><span class="big">${rw.approval1Minutes.p50 ?? '—'}<span style="color:var(--faint);font-size:1.2rem"> min</span></span><span class="sub">90% within ${rw.approval1Minutes.p90 ?? '—'} min</span></div>
+        <div class="tile"><span class="label">Review · approval 2</span><span class="big">${rw.approval2Minutes.p50 ?? '—'}<span style="color:var(--faint);font-size:1.2rem"> min</span></span><span class="sub">90% within ${rw.approval2Minutes.p90 ?? '—'} min</span></div>
+        <div class="tile"><span class="label">Staging down · 30 d</span><span class="big">${g.stagingDownDays}<span style="color:var(--faint);font-size:1.2rem"> d</span></span></div>
+        <div class="tile"><span class="label">Not classified</span><span class="big">${Math.round(snap.unknownShare * 100)}<span style="color:var(--faint);font-size:1.2rem">%</span></span><span class="sub">of waiting time</span></div></div>
+      <div class="charts">
+        <div class="chart" style="grid-column:1/-1"><h3>Waiting by cause · story-days per week</h3>${legend(layers)}${wide(() => stacked(layers, labels, 'story-days'))}</div>
+        <div class="chart"><h3>Lost story-days · last 30 days</h3><div class="epics" style="margin-top:6px">${g.lostDaysByCause.slice(0, 8).map(x => { const m = g.lostDaysByCause[0].days || 1; return `<div class="ep" data-tip="${esc(CAUSE[x.cause]?.[0] ?? x.cause)}: ${x.days}"><span>${esc(CAUSE[x.cause]?.[0] ?? x.cause)}</span><div class="meter"><i style="width:${(x.days / m) * 100}%;background:var(--violet)"></i></div><span class="mono">${Math.round(x.days)}</span></div>`; }).join('')}</div></div>
+        <div class="chart"><h3>Hours to deliver a story · median</h3>${lines([{ name: 'Median', values: T.medianHoursToDone, color: '#199e70', area: true }], labels, 'h')}</div></div>
+      <p class="note">Story-days add up each waiting story, so stories waiting at the same time each count. Parked work is left out, because it was put aside on purpose.</p>`);
   }
 
   // ---------- Router ----------
   function route() {
     if (!snap) return;
     const h = location.hash.slice(1);
-    if (h.startsWith('f-')) { tab = 'roadmap'; feature(h.slice(2)); }
-    else if (h === 'gaps') { tab = 'gaps'; gaps(); }
-    else { tab = 'roadmap'; roadmap(); }
+    if (h.startsWith('p-')) { tab = 'product'; detail(h.slice(2)); }
+    else if (h === 'workplace') { tab = 'workplace'; workplace(); }
+    else { tab = 'product'; product(); }
     window.scrollTo(0, 0);
   }
   window.addEventListener('hashchange', route);

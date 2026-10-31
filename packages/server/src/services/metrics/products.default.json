@@ -1,0 +1,15 @@
+{
+  "note": "Product view (owner, 1 Nov): each product part lists the epics that build it. Epics not listed are internal (tests, QA, Workplace) and stay off the product view. Edit ~/iris-workplace/products.json to override.",
+  "products": [
+    { "id": "phone", "name": "Phone without the Mac", "epics": ["ft_mv438x2svlhtf", "ft_murpqm4774jf5", "ft_muk0srruh7dwv"] },
+    { "id": "smarthome", "name": "Smart home", "epics": ["ft_mushtk4hm47wb", "ft_mutmj5j9e2bwk", "ft_muygyikiohil0"] },
+    { "id": "plans", "name": "Plans & credits", "epics": ["ft_mvl76rr9byyez", "ft_mvduo6e7u0mht", "ft_murpvaphtk4eo"] },
+    { "id": "image", "name": "Image expert", "epics": ["ft_mvc1qc5f5a992"] },
+    { "id": "voice", "name": "Voice & wake word", "epics": ["ft_muwv4nwmor9ym", "ft_mummakwyuew19"] },
+    { "id": "character", "name": "Iris character", "epics": ["ft_muk0zk573q8v1", "ft_mulrmufpu49uj", "ft_murpqm3z2r31f", "ft_muv6799j4bic4", "ft_mux241w6i318k"] },
+    { "id": "answers", "name": "Answers & everyday help", "epics": ["ft_mushtk3rlth1x", "ft_murpqm43tv775", "ft_murpqm4142xj7", "ft_murpvapkve1qn"] },
+    { "id": "trust", "name": "Privacy & account", "epics": ["ft_murpqm45i90bf", "ft_murpqm3kag9n0", "ft_mv3txa3d8ls5w", "ft_muz1eu3clk28n", "ft_muslen71s99nw"] },
+    { "id": "launch", "name": "Launch & app stores", "epics": ["ft_muzm1gd1i3spv", "ft_mv2helkrtbms0", "ft_murbmb8lyn5hv", "ft_murpqm492o7ya", "ft_muslen5qqi9ua", "ft_muslen6fhwv48"] }
+  ],
+  "committed": { "phone": null }
+}

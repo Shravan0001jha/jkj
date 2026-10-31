@@ -62,7 +62,7 @@ export function loadRows(dbPath: string, stagingLogPath: string | null, now = Da
       const j = JSON.parse(r.json);
       const epicId = r.parent_id && epicIds.has(r.parent_id) ? r.parent_id : j.featureId && epicIds.has(j.featureId) ? j.featureId : null;
       if (!epicId) continue;
-      stories.push({ id: r.id, epicId, title: j.title, status: j.status, employeeId: j.employeeId ?? null, charterId: j.charterId ?? null, createdAt: ms(j.createdAt) });
+      stories.push({ id: r.id, epicId, title: j.title, status: j.status, employeeId: j.employeeId ?? null, charterId: j.charterId ?? null, createdAt: ms(j.createdAt), type: j.type ?? null });
       if (j.pr?.devApproval?.at) devApprovals[r.id] = ms(j.pr.devApproval.at);
       if (j.pr?.pushedAt) prTimes[r.id] = { pushedAt: ms(j.pr.pushedAt), devAt: j.pr.devApproval?.at ? ms(j.pr.devApproval.at) : null, qaAt: j.pr.qaApproval?.at ? ms(j.pr.qaApproval.at) : null };
       if (j.startsAfter) startsAfter[r.id] = String(j.startsAfter);

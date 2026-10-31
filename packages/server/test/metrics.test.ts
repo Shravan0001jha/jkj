@@ -159,3 +159,19 @@ test('throughput forecast: own finish rate; stalled features get no date', async
   assert.deepEqual(throughputForecast(5, 0, 2, now), { p50: null, p90: null });
   assert.equal(throughputForecast(0, 0, 2, now).p50, '2026-11-03');
 });
+
+test('products: parts group epics; weekly delivered, bugs and burn-up come from records', () => {
+  const r = rows();
+  r.stories.push({ id: 'b1', epicId: 'ep1', title: 'x', status: 'ready', employeeId: 'a', charterId: 'server', createdAt: Date.parse('2026-10-28T00:00:00Z'), type: 'bug' });
+  const snap = buildSnapshot(r, { products: [{ id: 'alarms', name: 'Alarms', epics: ['ep1'] }], committed: { alarms: '2026-11-06' } });
+  const p = snap.products[0]!;
+  assert.equal(p.total, 3);
+  assert.equal(p.done, 1);
+  assert.equal(p.committedDate, '2026-11-06');
+  assert.equal(snap.trends.weeks.length, 6);
+  assert.equal(p.weekly.delivered.reduce((a, b) => a + b, 0), 1);   // s1 done on 23 Oct
+  assert.equal(p.weekly.bugs.at(-1), 1);                             // bug opened 28 Oct: 1 Nov's week starts Mon 26 Oct
+  assert.equal(p.burnup.done.at(-1), 1);
+  assert.equal(p.burnup.total.at(-1), 3);
+  assert.ok(snap.trends.bugsOpenTotal.at(-1)! >= 1);
+});
