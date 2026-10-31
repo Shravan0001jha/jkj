@@ -205,3 +205,19 @@ test('the relay\'s result is kept for the health line', () => {
     assert.deepEqual(h.push.status().last, { id: 'p1', sent: 1, dropped: 0, failed: 0, at: '2026-09-28T05:00:00.000Z' });
   } finally { h.tmp.cleanup(); }
 });
+
+/** Owner, 1 Nov: tapping an alert about a story opens that story, not the office or a person's page. */
+test('an alert about a story links to the story; others keep their employee/office link', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const ring = intentFor(wp, { type: 'alert', level: 'ring', title: 'Chain stalled', body: 'b', itemIds: ['as_a', 'as_b'] }, ['owner'])!;
+    assert.equal(ring.data.link, 'item/as_a');
+    assert.equal(ring.data.itemId, 'as_a');
+    const blocked = intentFor(wp, { type: 'alert', level: 'blocked', title: 'Blocked: X', body: 'b', itemIds: ['as_c'] }, ['owner'])!;
+    assert.equal(blocked.data.link, 'item/as_c');
+    const plain = intentFor(wp, { type: 'alert', level: 'blocked', title: 'Something', body: 'b' }, ['owner'])!;
+    assert.equal(plain.data.link, 'office');
+    const ringNoItem = intentFor(wp, { type: 'alert', level: 'ring', title: 'Ring', body: 'b' }, ['owner'])!;
+    assert.equal(ringNoItem.data.link, 'office');
+  } finally { tmp.cleanup?.(); }
+});

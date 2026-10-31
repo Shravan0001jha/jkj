@@ -111,11 +111,12 @@ export function intentFor(wp: Workplace, event: WorkplaceEvent, _handles: string
         data: { link: `inbox/${event.inboxId}`, inboxId: event.inboxId },
       };
     }
+    const itemId = event.itemIds?.[0];
     if (event.level === 'ring') {
       return {
         id: newId(), title: oneLine(event.title, TITLE_MAX), body: scrub(event.body),
         collapseId: `ring:${slug(event.title)}`, threadId: 'alerts', level: 'ring', category: 'WP_ALERT', sound: 'critical',
-        data: { link: 'office' },
+        data: itemId ? { link: `item/${itemId}`, itemId } : { link: 'office' },
       };
     }
     const employee = wp.org.employees.find(e => event.title.startsWith(`${e.name} `) || event.title.startsWith(`${e.id} `));
@@ -123,7 +124,9 @@ export function intentFor(wp: Workplace, event: WorkplaceEvent, _handles: string
     return {
       id: newId(), title: oneLine(event.title, TITLE_MAX), body: toolApproval ? TOOL_APPROVAL_BODY : scrub(event.body),
       collapseId: `alert:${slug(event.title)}`, threadId: 'alerts', level: event.level, category: 'WP_ALERT',
-      data: { link: employee ? `employee/${employee.id}` : 'office', ...(employee ? { employeeId: employee.id } : {}) },
+      // Owner, 1 Nov: an alert about a story opens that story.
+      data: itemId ? { link: `item/${itemId}`, itemId, ...(employee ? { employeeId: employee.id } : {}) }
+        : { link: employee ? `employee/${employee.id}` : 'office', ...(employee ? { employeeId: employee.id } : {}) },
     };
   }
   // Rework W4: Updates and Team Room mentions no longer push; the owner reads them in the app.

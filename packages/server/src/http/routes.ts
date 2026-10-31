@@ -1,7 +1,7 @@
 import * as usageCeiling from '../services/usage-ceiling.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createReadStream, statSync } from 'node:fs';
-import { extname } from 'node:path';
+import { extname, join } from 'node:path';
 import type {
   Attachment, CreateAgentRequest, Evidence, PermissionMode, PivotRows, ProposalKind, Shippable, WorkKind, WorkState,
 } from '@jkj/shared';
@@ -705,6 +705,14 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       json(res, 200, superFocus.setSuperFocus(wp, { hours: body['hours'] as number, by: actorOf(req) }));
     }),
     r('POST', '/api/focus', async (req, res) => json(res, 200, items.setFocus(wp, strs((await readJson(req))['epicIds']), actorOf(req)))),
+    // Dashboard snapshot v1 (HLD-dashboard §2): built hourly by metrics-cli; the app keeps the last copy on the phone.
+    r('GET', '/api/metrics/snapshot', (_req, res) => {
+      const file = join(config.workplaceDir, 'metrics', 'snapshot-v1.json');
+      let size = 0;
+      try { size = statSync(file).size; } catch { json(res, 404, { error: 'No snapshot yet: the metrics job has not run.' }); return; }
+      res.writeHead(200, { 'content-type': 'application/json', 'content-length': size, 'cache-control': 'no-store' });
+      createReadStream(file).pipe(res);
+    }),
     r('GET', '/api/items', (_req, res, url) => {
       const q = (k: string) => url.searchParams.get(k) ?? undefined;
       const sort = q('sort');
