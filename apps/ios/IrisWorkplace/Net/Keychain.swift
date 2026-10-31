@@ -5,8 +5,23 @@ import Security
 /// sign-out or re-pair, and never displayed.
 protocol TokenStore: AnyObject {
     var token: String? { get }
+    /// Like `token`, but tells "there is none" apart from "it is there but cannot be read right now".
+    func read() -> TokenRead
     func save(token: String)
     func clear()
+}
+
+/// What a credential read found. `unavailable` is never "signed out": the Keychain refuses reads
+/// (`errSecInteractionNotAllowed`) while protected data is locked, e.g. after a reboot before the
+/// first unlock, and a transient failure must not look like the owner signed out.
+enum TokenRead: Equatable {
+    case present(String)
+    case absent
+    case unavailable
+}
+
+extension TokenStore {
+    var token: String? { if case .present(let t) = read() { return t } else { return nil } }
 }
 
 final class Keychain: TokenStore {
@@ -22,14 +37,16 @@ final class Keychain: TokenStore {
         self.account = account
     }
 
-    var token: String? {
+    func read() -> TokenRead {
         var q = base()
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: AnyObject?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return nil }
-        let s = String(data: d, encoding: .utf8)
-        return (s ?? "").isEmpty ? nil : s
+        let status = SecItemCopyMatching(q as CFDictionary, &out)
+        if status == errSecItemNotFound { return .absent }
+        guard status == errSecSuccess, let d = out as? Data else { return .unavailable }
+        let s = String(data: d, encoding: .utf8) ?? ""
+        return s.isEmpty ? .absent : .present(s)
     }
 
     func save(token: String) {
@@ -58,7 +75,10 @@ final class Keychain: TokenStore {
 /// In-memory store for tests and previews.
 final class MemoryTokenStore: TokenStore {
     var token: String?
+    /// Tests: the store answers like a locked Keychain (the token is kept, but unreadable).
+    var unavailable = false
     init(token: String? = nil) { self.token = token }
+    func read() -> TokenRead { unavailable ? .unavailable : token.map(TokenRead.present) ?? .absent }
     func save(token: String) { self.token = token }
     func clear() { token = nil }
 }

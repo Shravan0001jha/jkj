@@ -110,6 +110,8 @@ enum API {
     static let pushRegister = "/api/push/register"
     static let pushUnregister = "/api/push/unregister"
     static let pushDevices = "/api/push/devices"
+    /// Ends the session the bearer names (relay app.py `POST /logout`).
+    static let relayLogout = "/logout"
 
     /// `encodeURIComponent`: everything but A–Z a–z 0–9 - _ . ! ~ * ' ( ) is percent-encoded.
     static func enc(_ s: String) -> String {

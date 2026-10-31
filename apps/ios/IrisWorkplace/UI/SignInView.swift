@@ -55,36 +55,19 @@ struct SignInView: View {
     }
 }
 
-/// Shown when the credential was refused: sign in again (relay) or re-pair (LAN).
+/// LAN mode only: the Mac refused the paired token. (Relay mode keeps the screens and shows
+/// `ReauthStrip` instead: an ended relay session is one tap away from fixed.)
 struct ReauthView: View {
     @Environment(AppModel.self) private var model
-    @State private var busy = false
-    @State private var error: String?
 
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "key.slash").font(.system(size: 44)).foregroundStyle(.orange)
-            if model.mode == .relay {
-                Text("Your session has ended").font(.title3.weight(.semibold))
-                Text("Sessions end after 12 hours idle or 7 days. Sign in again to continue.")
-                    .multilineTextAlignment(.center).foregroundStyle(.secondary)
-                if let error { Text(error).font(.subheadline).foregroundStyle(.red).multilineTextAlignment(.center) }
-                Button {
-                    Task {
-                        busy = true; error = nil
-                        defer { busy = false }
-                        do { try await model.signIn() } catch WebAuthError.cancelled {} catch { if let m = error.userMessage { self.error = m } }
-                    }
-                } label: { Text(busy ? "Signing in…" : "Sign in again").frame(minWidth: 160) }
-                .buttonStyle(.borderedProminent).disabled(busy)
-                Button("Sign out") { model.signOut() }.font(.footnote)
-            } else {
-                Text("This phone is no longer paired").font(.title3.weight(.semibold))
-                Text("The Workplace refused the token. Pair again with a new code from the Mac, or use the relay.")
-                    .multilineTextAlignment(.center).foregroundStyle(.secondary)
-                Button("Re-pair") { model.unpair() }.buttonStyle(.borderedProminent)
-                Button("Use the relay instead") { model.useRelay() }.font(.footnote)
-            }
+            Text("This phone is no longer paired").font(.title3.weight(.semibold))
+            Text("The Workplace refused the token. Pair again with a new code from the Mac, or use the relay.")
+                .multilineTextAlignment(.center).foregroundStyle(.secondary)
+            Button("Re-pair") { model.unpair() }.buttonStyle(.borderedProminent)
+            Button("Use the relay instead") { model.useRelay() }.font(.footnote)
         }
         .padding(24)
     }

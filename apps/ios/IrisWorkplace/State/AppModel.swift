@@ -13,7 +13,9 @@ enum Connection: Equatable {
     case macOffline
     /// The owner switched published access off. Probed every few seconds.
     case accessOff
-    /// The credential was refused: sign in again (relay) or re-pair (LAN).
+    /// The relay confirmed the credential is no longer valid (a 401 on the health probe): sign in
+    /// again (relay) or re-pair (LAN). Never set from a socket close or an outage alone. Cached lists
+    /// stay on screen under a "Sign in again" strip; only an explicit Sign out clears them.
     case unauthorized
 }
 
@@ -199,9 +201,17 @@ final class AppModel {
 
     /// The credential store for the current mode.
     private var tokens: TokenStore { config.mode == .relay ? relayTokens : lanTokens }
-    /// Stored, not computed from the Keychain, so SwiftUI re-renders when it changes.
+    /// Stored, not computed from the Keychain, so SwiftUI re-renders when it changes. True also while
+    /// the token is there but unreadable (protected data locked): that is never "signed out".
     private(set) var hasCredential = false
-    private func syncCredential() { hasCredential = tokens.token != nil }
+    /// The Keychain refused the read (phone locked since a reboot, or a transient failure); retried on foreground.
+    private(set) var credentialUnreadable = false
+    private func syncCredential() {
+        let read = tokens.read()
+        credentialUnreadable = read == .unavailable
+        hasCredential = read != .absent
+    }
+    static let waitingForUnlock = "Waiting for the phone to unlock"
     var mode: ServerMode { config.mode }
     /// The LAN address a developer paired with earlier, if any.
     var savedLANURL: URL? { ServerConfig.savedLAN(defaults: defaults) }
@@ -218,7 +228,7 @@ final class AppModel {
         #endif
         syncCredential()
         guard hasCredential else { connection = .signedOut; return }
-        connect()
+        if credentialUnreadable { connection = .offline(reason: Self.waitingForUnlock, retryAt: nil) } else { connect() }
         #if DEBUG
         // Scripted runs (screenshots) open a screen directly.
         if let t = env["WORKPLACE_TAB"], let tab = Tab(rawValue: t) { router.tab = tab }
@@ -328,8 +338,16 @@ final class AppModel {
 
     /// Forget the relay session and go back to the sign-in screen.
     func signOut() {
-        if let token = pushToken, let rest, pushRegistered {
-            Task { try? await rest.unregisterPush(token: token) }   // best effort; the relay drops it with the session anyway
+        // Best effort, never waited on: drop this phone's push registration and end the session on
+        // the relay (POST /logout), so a forgotten token is dead there too. Sent with a copy of the
+        // token: the Keychain is cleared below before these requests are built.
+        if config.mode == .relay, let session = relayTokens.token {
+            let farewell = RestClient(config: config, tokens: MemoryTokenStore(token: session), session: urlSession)
+            let device = pushRegistered ? pushToken : nil
+            Task {
+                if let device { try? await farewell.unregisterPush(token: device) }
+                try? await farewell.logout()
+            }
         }
         pushRegistered = false
         stopConnections()
@@ -413,7 +431,11 @@ final class AppModel {
     }
 
     func foreground() {
-        guard hasCredential else { return }
+        // A token that could not be read at launch (phone locked) is readable now: connect with it.
+        let wasUnreadable = credentialUnreadable
+        if wasUnreadable || !hasCredential { syncCredential() }
+        guard hasCredential, !credentialUnreadable else { return }
+        if wasUnreadable { connect(); Task { await registerPush() }; return }
         Task { await resyncOpenChats() }
         switch connection {
         case .macOffline, .accessOff, .unauthorized: connect()
@@ -433,10 +455,20 @@ final class AppModel {
     }
 
     private func connect() {
-        guard let token = tokens.token else { connection = .signedOut; return }
+        let token: String
+        switch tokens.read() {
+        case .present(let t): token = t
+        case .absent: connection = .signedOut; return
+        case .unavailable: credentialUnreadable = true; connection = .offline(reason: Self.waitingForUnlock, retryAt: nil); return
+        }
         stopConnections()
         connection = .connecting
         let rest = RestClient(config: config, tokens: tokens, session: urlSession)
+        // A 401 from any call (a screen's load, an answer) is checked against the relay at once, so a
+        // session that ended mid-run shows the "Sign in again" strip instead of only a row's error.
+        rest.onUnauthorized = { [weak self, weak rest] in
+            Task { @MainActor in if let self, let rest { self.confirmSession(rest) } }
+        }
         self.rest = rest
         // Stale-while-revalidate: the last good lists show now, before the health probe and the
         // loads below make their round trips through the relay; `loadAll()` replaces them.
@@ -456,6 +488,34 @@ final class AppModel {
                 self.waitForMac(rest, socket: socket)
             case .unauthorized, .signedOut, .connecting:
                 break
+            }
+        }
+    }
+
+    private var confirmingSession = false
+
+    /// A call was refused with a 401: one health probe decides (a 4401 socket close takes the same
+    /// probe in `socketState`). Only
+    /// the relay answering 401 there is a confirmed-invalid session; an outage or an asleep server
+    /// is offline / Mac offline and keeps everything on screen.
+    private func confirmSession(_ rest: RestClient) {
+        guard rest === self.rest, !confirmingSession else { return }
+        switch connection {
+        case .unauthorized, .signedOut, .connecting: return   // already decided, or a connect's own probe is in flight
+        default: break
+        }
+        confirmingSession = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.confirmingSession = false }
+            let socket = self.socket
+            let result = await self.probe(rest)
+            guard rest === self.rest else { return }
+            switch result {
+            case .unauthorized: socket?.stop()
+            case .macOffline, .accessOff: if let socket { socket.stop(); self.waitForMac(rest, socket: socket) }
+            case .online: if let socket, socket.state != .open { self.connection = .offline(reason: "Connection lost", retryAt: nil) }
+            default: break
             }
         }
     }
@@ -555,10 +615,11 @@ final class AppModel {
             default: break
             }
             guard let retryAt, let rest, let socket else { return }
-            // The relay says why it closed: 4401 = the session is gone, 1013 = the Mac is offline.
-            if socket.lastCloseCode == SocketClosed.unauthorized { socket.stop(); connection = .unauthorized; return }
+            // The relay says why it closed: 1013 = the Mac is offline (or the server is asleep).
             if socket.lastCloseCode == SocketClosed.macOffline { socket.stop(); connection = .macOffline; waitForMac(rest, socket: socket); return }
-            connection = .offline(reason: "Connection lost", retryAt: retryAt)
+            // 4401 is not proof the session is gone: the relay also sends it while access is switched
+            // off. The probe below asks over HTTP, where 401 (session) and 503 (off, Mac offline) differ.
+            connection = socket.lastCloseCode == SocketClosed.unauthorized ? .connecting : .offline(reason: "Connection lost", retryAt: retryAt)
             // Was it the network, the Mac, or the session? One health call tells.
             Task { [weak self] in
                 guard let self else { return }

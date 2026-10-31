@@ -36,6 +36,8 @@ final class RestClient {
     private let session: URLSession
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
+    /// Called on every 401, before it is thrown: the model checks the session once with the relay.
+    var onUnauthorized: (() -> Void)?
 
     init(config: ServerConfig, tokens: TokenStore, session: URLSession = .shared) {
         self.config = config
@@ -139,6 +141,7 @@ final class RestClient {
     }
     func unregisterPush(token: String) async throws { let _: OkResponse = try await post(API.pushUnregister, PushUnregisterRequest(token: token)) }
     func pushDevices() async throws -> PushDevicesResponse { try await get(API.pushDevices) }
+    func logout() async throws { let _: OkResponse = try await post(API.relayLogout, Empty()) }
 
     /// Pairing has no token yet; the exchange is the one unauthenticated call.
     static func exchange(config: ServerConfig, code: String, session: URLSession = .shared) async throws -> String {
@@ -158,7 +161,7 @@ final class RestClient {
             throw WorkplaceError.transport(Self.describeTransport(error, host: req.url?.host ?? "the server"))
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401 { throw WorkplaceError.unauthorized }
+        if status == 401 { onUnauthorized?(); throw WorkplaceError.unauthorized }
         if Self.isMacOffline(status: status, body: data) { throw WorkplaceError.macOffline }
         guard (200..<300).contains(status) else {
             let message = (try? decoder.decode(ErrorResponse.self, from: data))?.error
@@ -213,7 +216,7 @@ final class RestClient {
             throw WorkplaceError.transport(Self.describeTransport(error, host: req.url?.host ?? "the server"))
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401 { throw WorkplaceError.unauthorized }
+        if status == 401 { onUnauthorized?(); throw WorkplaceError.unauthorized }
         if Self.isAccessOff(status: status, body: data) { throw WorkplaceError.accessOff }
         if Self.isMacOffline(status: status, body: data) { throw WorkplaceError.macOffline }
         if !(200..<300).contains(status) {

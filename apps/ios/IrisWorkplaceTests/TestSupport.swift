@@ -57,9 +57,10 @@ final class StubURLProtocol: URLProtocol {
         }
         Self.recorded.append(Recorded(request: request, body: body))
         let (status, data) = Self.handler?(request) ?? (404, Data("{\"error\":\"no handler\"}".utf8))
-        // `cancelledStatus`: the load is cancelled, as when the view that started it goes away.
-        if status == Self.cancelledStatus {
-            client?.urlProtocol(self, didFailWithError: URLError(.cancelled))
+        // A negative status is a URLError code instead of a response: `cancelledStatus` (-999) is the
+        // load cancelled as when the view that started it goes away; -1001 a timeout, -1004 refused, -1003 DNS.
+        if status < 0 {
+            client?.urlProtocol(self, didFailWithError: URLError(URLError.Code(rawValue: status)))
             return
         }
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",

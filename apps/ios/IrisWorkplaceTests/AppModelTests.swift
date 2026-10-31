@@ -514,9 +514,160 @@ final class ReliabilityAndPushTests: XCTestCase {
         await expectEventually { self.transports.count == 2 }
         transports[1].open()
         await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        // 4401 alone is not proof: the relay confirms over HTTP. Here it refuses the session.
+        StubURLProtocol.handler = { _ in (401, Data(#"{"error":"Sign in first."}"#.utf8)) }
         transports[1].drop(SocketClosed(code: 4401, reason: "session"))
         await expectEventually { m.connection == .unauthorized }
-        XCTAssertTrue(transports[1].closed)
+        await expectEventually { self.transports[1].closed }
+    }
+
+    // MARK: staying signed in (P0, Nov 2026): only a confirmed-invalid session asks for sign-in
+
+    /// The phone's cached lists, in a folder of its own.
+    private func tempCache() -> DiskCache {
+        DiskCache(root: FileManager.default.temporaryDirectory.appendingPathComponent("AuthCache-\(UUID().uuidString)"))
+    }
+
+    private func model(cache: DiskCache?) -> AppModel {
+        AppModel(relayTokens: relay, lanTokens: MemoryTokenStore(), defaults: defaults, notifier: FakeNotifier(),
+                 urlSession: StubURLProtocol.session(),
+                 makeTransport: { [unowned self] in let t = FakeSocketTransport(); self.transports.append(t); return t },
+                 webAuth: FakeWebAuth(), env: [:], offlineProbeInterval: 0.05, pathMonitor: path, deviceAuth: auth, cache: cache)
+    }
+
+    private func onlineModel(cache: DiskCache? = nil) async -> AppModel {
+        serve()
+        let m = model(cache: cache)
+        m.start()
+        await expectEventually { self.transports.count == 1 }
+        transports[0].open()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        await expectEventually { m.office.data != nil && m.inbox.loaded }
+        return m
+    }
+
+    func testA401KeepsTheCacheAndTheScreensAndOnlySignOutClearsThem() async {
+        let cache = tempCache()
+        let m = await onlineModel(cache: cache)
+        StubURLProtocol.handler = { _ in (401, Data(#"{"error":"Sign in first."}"#.utf8)) }
+        transports[0].drop(nil)
+        await expectEventually { m.connection == .unauthorized }
+        XCTAssertTrue(m.hasCredential, "the strip asks to sign in again over the screens; not the sign-in page")
+        XCTAssertEqual(relay.token, "s", "a refused session is not deleted from the Keychain")
+        XCTAssertNotNil(m.office.data, "the lists on screen stay")
+        XCTAssertNotNil(cache.load(OfficeResponse.self, key: .office), "and so does the phone's copy")
+        XCTAssertNotNil(cache.load([InboxItem].self, key: .inbox))
+
+        // A relaunch while signed-out-by-the-relay still shows the cached lists at once.
+        let again = model(cache: cache)
+        again.start()
+        await expectEventually { again.connection == .unauthorized }
+        XCTAssertNotNil(again.office.data)
+
+        m.signOut()
+        XCTAssertNil(cache.load(OfficeResponse.self, key: .office), "an explicit Sign out is what clears it")
+        XCTAssertNil(relay.token)
+    }
+
+    func testSocket4401WithAValidSessionIsNotALogout() async {
+        let m = await onlineModel()
+        var states: [Connection] = []
+        let watch = Task { @MainActor in while !Task.isCancelled { states.append(m.connection); try? await Task.sleep(for: .milliseconds(5)) } }
+        transports[0].drop(SocketClosed(code: 4401, reason: "blip"))
+        await expectEventually { self.transports.count == 2 }
+        transports[1].open()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        watch.cancel()
+        XCTAssertFalse(states.contains(.unauthorized), "the relay still accepts the session over HTTP: reconnect, never sign-in")
+        XCTAssertEqual(relay.token, "s")
+    }
+
+    func testSocket4401WhileAccessIsOffIsAccessOff() async {
+        let m = await onlineModel()
+        StubURLProtocol.handler = { _ in (503, Data(#"{"error":"Published access is switched off."}"#.utf8)) }
+        transports[0].drop(SocketClosed(code: 4401, reason: nil))
+        await expectEventually { m.connection == .accessOff }
+        XCTAssertNotEqual(m.connection, .unauthorized)
+    }
+
+    /// An asleep or unreachable Workplace (or relay) is an outage, never a logout.
+    func testOutagesAreNeverUnauthorized() async {
+        let cases: [(String, (Int, Data), (Connection) -> Bool)] = [
+            ("1013 socket close → probe 503", (503, Data(#"{"error":"The Mac is offline."}"#.utf8)), { $0 == .macOffline }),
+            ("502 from a proxy in front of the relay", (502, Data("<html>Bad gateway</html>".utf8)), { $0 == .macOffline }),
+            ("504", (504, Data()), { $0 == .macOffline }),
+            ("timeout", (-1001, Data()), { if case .offline = $0 { return true } else { return false } }),
+            ("connection refused", (-1004, Data()), { if case .offline = $0 { return true } else { return false } }),
+            ("DNS failure", (-1003, Data()), { if case .offline = $0 { return true } else { return false } }),
+            ("relay error page", (500, Data("Internal Server Error".utf8)), { if case .offline = $0 { return true } else { return false } }),
+        ]
+        for (name, answer, expected) in cases {
+            StubURLProtocol.reset(); transports = []; relay = MemoryTokenStore(token: "s")
+            let cache = tempCache()
+            let m = await onlineModel(cache: cache)
+            StubURLProtocol.handler = { req in req.url!.path == "/relay/health" ? (200, Data(#"{"ok":true,"mac":"offline"}"#.utf8)) : answer }
+            transports[0].drop(name.hasPrefix("1013") ? SocketClosed(code: 1013, reason: nil) : URLError(.networkConnectionLost))
+            let ok = await eventually { expected(m.connection) }
+            XCTAssertTrue(ok, "\(name): got \(m.connection)")
+            XCTAssertNotEqual(m.connection, .unauthorized, name)
+            XCTAssertTrue(m.hasCredential, name)
+            XCTAssertNotNil(m.office.data, "\(name): the screens keep their lists")
+            XCTAssertNotNil(cache.load(OfficeResponse.self, key: .office), name)
+            m.signOut()
+        }
+    }
+
+    func testAColdStartWhileTheServerSleepsShowsTheCacheAndIsNotSignedOut() async {
+        let cache = tempCache()
+        cache.setScope(.relay)
+        let office = try! Fixtures.decode("office", as: OfficeResponse.self)
+        cache.save(office, as: .office)
+        StubURLProtocol.handler = { _ in (-1004, Data()) }
+        let m = model(cache: cache)
+        m.start()
+        await expectEventually { if case .offline = m.connection { return true } else { return false } }
+        XCTAssertNotNil(m.office.data)
+        XCTAssertTrue(m.hasCredential)
+    }
+
+    func testA401FromAScreenIsCheckedWithTheRelayOnce() async {
+        let m = await onlineModel()
+        // The inbox answers 401 but the relay's probe accepts the session: a one-off, stay online.
+        StubURLProtocol.handler = { req in
+            switch req.url!.path {
+            case "/api/inbox": return (401, Data(#"{"error":"Sign in first."}"#.utf8))
+            case "/api/health": return (200, try! Fixtures.data("health"))
+            default: return (404, Data())
+            }
+        }
+        await m.inbox.load(m.rest!)
+        await expectEventually { StubURLProtocol.recorded.filter { $0.request.url?.path == "/api/health" }.count >= 2 }
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(m.connection, .online(version: "0.3.0-mock"))
+        XCTAssertFalse(self.transports[0].closed)
+
+        // Now the relay refuses it too: confirmed, the strip shows and the socket stops.
+        StubURLProtocol.handler = { _ in (401, Data(#"{"error":"Sign in first."}"#.utf8)) }
+        await m.inbox.load(m.rest!)
+        await expectEventually { m.connection == .unauthorized }
+        await expectEventually { self.transports[0].closed }
+        XCTAssertTrue(m.inbox.loaded, "the list already on screen stays")
+    }
+
+    func testALockedKeychainIsNotSignedOutAndConnectsOnceReadable() async {
+        serve()
+        relay.unavailable = true
+        let m = model(cache: nil)
+        m.start()
+        XCTAssertTrue(m.hasCredential, "unreadable is not absent: no sign-in page")
+        XCTAssertEqual(m.connection, .offline(reason: AppModel.waitingForUnlock, retryAt: nil))
+        XCTAssertTrue(StubURLProtocol.recorded.isEmpty, "nothing is sent without the token")
+        relay.unavailable = false
+        m.foreground()
+        await expectEventually { self.transports.count == 1 }
+        transports[0].open()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        XCTAssertEqual(relay.token, "s")
     }
 
     func testRelayProbeGatesTheApiProbeWhileTheMacIsDown() async {
@@ -576,6 +727,34 @@ final class ReliabilityAndPushTests: XCTestCase {
         m.signOut()
         await expectEventually { StubURLProtocol.recorded.contains { $0.request.url?.path == "/api/push/unregister" } }
         XCTAssertFalse(m.pushRegistered)
+        let unreg = StubURLProtocol.recorded.first { $0.request.url?.path == "/api/push/unregister" }!
+        XCTAssertEqual(unreg.request.value(forHTTPHeaderField: "Authorization"), "Bearer s",
+                       "sent with the session being signed out, though the Keychain is already cleared")
+    }
+
+    /// Sign out ends the session on the relay too (POST /logout with the bearer), best effort: the
+    /// phone is signed out at once even when the relay cannot be reached.
+    func testSignOutEndsTheRelaySession() async {
+        serve()
+        let m = model()
+        m.start()
+        await expectEventually { m.connection == .online(version: "0.3.0-mock") }
+        m.signOut()
+        XCTAssertEqual(m.connection, .signedOut, "never waits for the relay")
+        XCTAssertNil(relay.token)
+        await expectEventually { StubURLProtocol.recorded.contains { $0.request.url?.path == "/logout" } }
+        let out = StubURLProtocol.recorded.first { $0.request.url?.path == "/logout" }!
+        XCTAssertEqual(out.request.httpMethod, "POST")
+        XCTAssertEqual(out.request.value(forHTTPHeaderField: "Authorization"), "Bearer s")
+
+        // Unreachable relay: still signed out on the phone.
+        relay.save(token: "s2")
+        let m2 = model()
+        m2.start()
+        StubURLProtocol.handler = { _ in (-1004, Data()) }
+        m2.signOut()
+        XCTAssertEqual(m2.connection, .signedOut)
+        XCTAssertNil(relay.token)
     }
 
     func testPushRegistrationFailureIsExplained() async {

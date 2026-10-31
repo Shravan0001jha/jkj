@@ -8,7 +8,9 @@ struct RootView: View {
         Group {
             if !model.hasCredential {
                 if model.mode == .relay { SignInView() } else { PairingView() }
-            } else if model.connection == .unauthorized {
+            } else if model.connection == .unauthorized && model.mode == .lan {
+                // Relay: the session ended, but the cached lists stay on screen under a "Sign in again"
+                // strip (ConnectionStrip). LAN: the Mac refused its token; only re-pairing fixes that.
                 ReauthView()
             } else if model.connection == .accessOff && model.office.data == nil {
                 AccessOffView()
@@ -57,8 +59,10 @@ struct ConnectionStrip: View {
 
     var body: some View {
         switch model.connection {
-        case .online, .signedOut, .unauthorized:
+        case .online, .signedOut:
             EmptyView()
+        case .unauthorized:
+            ReauthStrip()
         case .connecting:
             strip("Connecting…", symbol: "antenna.radiowaves.left.and.right", tint: .secondary)
         case .macOffline:
@@ -84,6 +88,40 @@ struct ConnectionStrip: View {
         .padding(.vertical, 6)
         .background(.bar)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// The relay ended the session: one tap signs in again, over whatever the screen already shows.
+/// Nothing is cleared here; Sign out (Settings) is the only thing that forgets the cached lists.
+struct ReauthStrip: View {
+    @Environment(AppModel.self) private var model
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "key.slash")
+                Text("Your session has ended").lineLimit(1)
+                Spacer()
+                Button(busy ? "Signing in…" : "Sign in again") { signIn() }
+                    .font(.caption.weight(.semibold)).buttonStyle(.borderedProminent).controlSize(.mini).disabled(busy)
+            }
+            .foregroundStyle(.orange)
+            if let error { Text(error).foregroundStyle(.red).lineLimit(2) }
+        }
+        .font(.caption)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(.bar)
+    }
+
+    private func signIn() {
+        Task {
+            busy = true; error = nil
+            defer { busy = false }
+            do { try await model.signIn() } catch WebAuthError.cancelled {} catch { if let m = error.userMessage { self.error = m } }
+        }
     }
 }
 
