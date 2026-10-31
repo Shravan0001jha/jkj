@@ -17,7 +17,7 @@ struct RootView: View {
                 MacOfflineView()
                     .sheet(isPresented: $router.showSettings) { SettingsView() }
             } else {
-                TabView(selection: $router.tab) {
+                TabView(selection: $router.barSelection) {
                     PlanView()
                         .tabItem { Label("Plan", systemImage: "list.bullet.rectangle.portrait") }
                         .tag(Tab.plan)
@@ -32,10 +32,10 @@ struct RootView: View {
                         .tabItem { Label("Room", systemImage: "person.3") }
                         .badge(model.room.unread.count)
                         .tag(Tab.room)
-                    UpdatesView()
-                        .tabItem { Label("Updates", systemImage: "bolt.horizontal") }
+                    DashboardTab()
+                        .tabItem { Label("Dashboard", systemImage: "gauge.with.dots.needle.33percent") }
                         .badge(model.updates.unseen)
-                        .tag(Tab.updates)
+                        .tag(Tab.dashboard)
                 }
                 .overlay(alignment: .top) { AlertBanner() }
                 .sheet(isPresented: $router.showSettings) { SettingsView() }

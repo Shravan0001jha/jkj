@@ -42,6 +42,9 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.irisforu.workplace.auth
             CFBundleURLSchemes: [irisworkplace]
+        # The dashboard's background refresh (BGAppRefreshTask, HLD-dashboard §2).
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [com.irisforu.workplace.dashboard-refresh]
     entitlements:
       path: IrisWorkplace/IrisWorkplace.entitlements
       properties:

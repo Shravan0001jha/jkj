@@ -132,6 +132,9 @@ final class RestClient {
     func macQueue() async throws -> [MacQueueEntry] { (try await get(API.macQueue) as MacQueueResponse).entries }
     func grantMac(_ id: String) async throws { let _: IgnoredResponse = try await post(API.macQueueGrant(id), Empty()) }
 
+    /// The metrics snapshot (HLD-dashboard §5). 404 until the server has the endpoint.
+    func metricsSnapshot() async throws -> DashboardSnapshot { try await get(API.metricsSnapshot) }
+
     // Relay-only routes (never proxied to the Mac).
     func relayHealth() async throws -> RelayHealth { try await get(API.relayHealth) }
     func registerPush(token: String, env: PushEnvironment, device: String?) async throws -> PushRegisterResponse {

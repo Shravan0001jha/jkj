@@ -10,14 +10,20 @@ import Foundation
 /// the phone is locked), kept per Workplace (relay or LAN address), and all deleted on sign-out.
 ///
 /// A copy that is too old (`maxAge`) or from an older layout (`schema`) is discarded rather than shown:
-/// a stale screen that looks current would be worse than a spinner.
+/// a stale screen that looks current would be worse than a spinner. The one exception is the
+/// dashboard snapshot (HLD-dashboard §2): it carries its own `generatedAt` and is always shown with
+/// its age ("updated 3 h ago"), so it never expires — the Workplace server sleeps, and an old
+/// snapshot that says how old it is beats an empty tab.
 final class DiskCache: @unchecked Sendable {
     /// Bump when a cached type's layout changes in a way old files would decode wrongly.
     static let schema = 1
     static let maxAge: TimeInterval = 24 * 3600
 
     enum Key: String, CaseIterable {
-        case office, inbox, plan, rooms
+        case office, inbox, plan, rooms, dashboard
+
+        /// How long a copy may be shown; nil = always (the screen shows the copy's own age).
+        var maxAge: TimeInterval? { self == .dashboard ? nil : DiskCache.maxAge }
     }
 
     private struct Envelope<T: Codable>: Codable {
@@ -74,7 +80,7 @@ final class DiskCache: @unchecked Sendable {
         guard let data = try? Data(contentsOf: url) else { return nil }
         guard let env = try? JSONDecoder().decode(Envelope<T>.self, from: data),
               env.schema == Self.schema,
-              now().timeIntervalSince(env.savedAt) <= Self.maxAge else {
+              key.maxAge.map({ now().timeIntervalSince(env.savedAt) <= $0 }) ?? true else {
             try? fm.removeItem(at: url)
             return nil
         }

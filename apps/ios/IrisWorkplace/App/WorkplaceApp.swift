@@ -41,7 +41,9 @@ struct WorkplaceApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .active: model.foreground()
-                    case .background: model.background()
+                    case .background:
+                        model.background()
+                        DashboardRefresh.schedule()
                     default: break
                     }
                     ScreenAwake.update()
@@ -49,6 +51,12 @@ struct WorkplaceApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryStateDidChangeNotification)) { _ in
                     ScreenAwake.update()
                 }
+        }
+        // The dashboard's background refresh: SwiftUI registers this handler at launch; each run
+        // books the next one, then fetches (a failure keeps the cached snapshot).
+        .backgroundTask(.appRefresh(DashboardRefresh.identifier)) { [model] in
+            DashboardRefresh.schedule()
+            _ = await model.backgroundRefreshDashboard()
         }
     }
 }
