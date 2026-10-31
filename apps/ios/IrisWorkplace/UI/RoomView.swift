@@ -10,7 +10,7 @@ struct RoomView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
+            List { Group {
                 if let e = model.rooms.error, !model.rooms.loaded {
                     ErrorRow(message: e) { Task { await reload() } }
                 } else if !model.rooms.loaded {
@@ -27,7 +27,8 @@ struct RoomView: View {
                 if let releases = rooms.first(where: { $0.kind == .releases }) {
                     Section { roomLink(releases) } header: { SectionHeader(text: "Releases") }
                 }
-            }
+            }.themedRows() }
+            .themedList()
             .listStyle(.insetGrouped)
             .refreshable { await reload() }
             .navigationTitle("Room")
@@ -46,6 +47,11 @@ struct RoomView: View {
                 guard let id else { return }
                 path = NavigationPath([ThreadRoute(id: id)])
                 model.router.roomThreadId = nil
+            }
+            .onChange(of: model.router.roomId, initial: true) { _, id in
+                guard let id else { return }
+                path = NavigationPath([RoomRoute(id: id)])
+                model.router.roomId = nil
             }
             .onChange(of: model.router.roomList, initial: true) { _, list in
                 guard list else { return }
@@ -125,7 +131,7 @@ struct RoomDetailView: View {
     private var detail: RoomDetail? { model.rooms.details[id] }
 
     var body: some View {
-        List {
+        List { Group {
             if let d = detail {
                 let pinned = d.threads.filter { $0.id == RoomStore.generalId || $0.id.hasPrefix("th_area_") }
                 let epics = d.threads.filter { $0.epicId != nil && $0.state != .resolved }
@@ -156,7 +162,8 @@ struct RoomDetailView: View {
             } else {
                 HStack { Spacer(); ProgressView(); Spacer() }
             }
-        }
+        }.themedRows() }
+        .themedList()
         .listStyle(.insetGrouped)
         .refreshable { await load() }
         .navigationTitle(detail?.room.title ?? model.rooms.rooms.first { $0.id == id }?.title ?? "Room")
@@ -262,7 +269,7 @@ struct ThreadView: View {
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.bar)
+                .themedBar(Material.bar)
             }
             ScrollViewReader { proxy in
                 ScrollView {
@@ -288,6 +295,7 @@ struct ThreadView: View {
                     .padding(.vertical, 8)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                .themedList()
                 .onChange(of: messages.count) { _, _ in withAnimation { proxy.scrollTo("bottom") } }
                 .onChange(of: model.room.replying[id]) { _, who in if who != nil { withAnimation { proxy.scrollTo("replying") } } }
                 .onAppear { proxy.scrollTo("bottom") }
@@ -340,7 +348,7 @@ struct ThreadView: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.bar)
+        .themedBar(Material.bar)
     }
 
     private func senderName(_ m: RoomMessage) -> String {

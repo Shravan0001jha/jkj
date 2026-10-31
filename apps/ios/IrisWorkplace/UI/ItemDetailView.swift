@@ -54,7 +54,7 @@ struct ItemDetailView: View {
     private func content(_ d: ItemDetail) -> some View {
         let item = d.item
         return ScrollViewReader { proxy in
-            List {
+            List { Group {
                 header(d)
                 fields(item)
                 if let url = item.docUrl.flatMap(URL.init(string:)), url.scheme?.hasPrefix("http") == true {
@@ -121,7 +121,8 @@ struct ItemDetailView: View {
                     Section { NavigationLink(value: ThreadRoute(id: t)) { Label("Discuss in the Room", systemImage: "person.3") } }
                 }
                 Color.clear.frame(height: 1).listRowBackground(Color.clear).id("end")
-            }
+            }.themedRows() }
+            .themedList()
             .listStyle(.insetGrouped)
             .safeAreaInset(edge: .bottom, spacing: 0) { composer(d) }
             .onChange(of: d.comments.count) { _, _ in withAnimation { proxy.scrollTo("comments-end", anchor: .bottom) } }
@@ -352,7 +353,7 @@ struct ItemDetailView: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.bar)
+        .themedBar(Material.bar)
     }
 
     // MARK: actions

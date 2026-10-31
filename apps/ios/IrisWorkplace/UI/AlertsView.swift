@@ -7,7 +7,7 @@ struct AlertsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            List { Group {
                 if model.alerts.alerts.isEmpty {
                     EmptyState(symbol: "bell", title: "No alerts yet",
                                text: "When an employee needs you, is blocked, or the spend cap is reached, it shows here and as a banner. With the app closed, Inbox items that need you arrive as notifications.")
@@ -37,7 +37,8 @@ struct AlertsView: View {
                     .buttonStyle(.plain)
                     .disabled(a.event.inboxId == nil)
                 }
-            }
+            }.themedRows() }
+            .themedList()
             .listStyle(.insetGrouped)
             .navigationTitle("Alerts")
             .toolbar {

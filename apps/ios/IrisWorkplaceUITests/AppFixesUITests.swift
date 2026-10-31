@@ -8,7 +8,7 @@ final class AppFixesUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchEnvironment = ["WORKPLACE_URL": "127.0.0.1:4411", "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
+        app.launchEnvironment = ["WORKPLACE_URL": UITestEnv.talkHost, "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
                                  "WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_NO_DEVICE_AUTH": "1"]
     }
 
@@ -17,7 +17,7 @@ final class AppFixesUITests: XCTestCase {
 
     func testTalkThreadSenderExpandMenuReplyReceiptsTyping() {
         app.launchEnvironment["WORKPLACE_TALK"] = "asha"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.textFields["chat.composer"].waitForExistence(timeout: 10))
         // The COO's words in Asha's thread are named, never "You".
         let sender = app.staticTexts["Claude — COO"]
@@ -62,7 +62,7 @@ final class AppFixesUITests: XCTestCase {
 
     func testALinkOpensSafari() {
         app.launchEnvironment["WORKPLACE_TALK"] = "coo"
-        app.launch()
+        app.launchThemed()
         let link = app.links.matching(NSPredicate(format: "label CONTAINS 'github.com'")).firstMatch
         XCTAssertTrue(link.waitForExistence(timeout: 10))
         link.tap()
@@ -70,7 +70,7 @@ final class AppFixesUITests: XCTestCase {
     }
 
     func testTalkListPinnedThenUnread() {
-        app.launch()
+        app.launchThemed()
         app.tabBars.buttons["Talk"].tap()
         let coo = any("talk.row.coo"), asha = any("talk.row.asha"), dev = any("talk.row.dev")
         XCTAssertTrue(coo.waitForExistence(timeout: 10))
@@ -81,7 +81,7 @@ final class AppFixesUITests: XCTestCase {
     }
 
     func testPlanFilterAndSearch() {
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(any("plan.filter").waitForExistence(timeout: 10))
         any("plan.filter").tap()
         app.buttons["Open"].tap()

@@ -8,6 +8,7 @@
 // Pairing code: 482913 (printed at start). Token after exchange: mock-token-0123456789abcdef.
 // Relay sign-in: GET /login?app=1 and /login/enrol?app=1 serve a page whose button redirects to
 // irisworkplace://auth#token=mock-session-<n>; any mock-session-* bearer is accepted.
+// --no-live turns off the scripted event stream (deterministic screenshots).
 // --mac-offline (or POST /api/_offline {offline:true}) answers 503 {error:"Mac offline"} like a relay
 // whose Mac is down. Loopback needs no token (as the real server).
 
@@ -565,8 +566,9 @@ function decodeFrame(buf) {
 
 // ---- A scripted stream of live events, so the screens visibly change ----
 
+// --no-live: no scripted stream, so repeated screenshots of a screen are pixel-identical (theme diffs).
 setInterval(() => {
-  if (clients.size === 0) return;
+  if (clients.size === 0 || args.includes('--no-live')) return;
   tick++;
   const rohan = state.cards.find(c => c.employee.id === 'rohan');
   switch (tick % 6) {

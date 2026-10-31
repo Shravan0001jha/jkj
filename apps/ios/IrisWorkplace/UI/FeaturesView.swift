@@ -57,7 +57,7 @@ struct FeaturesView: View {
     }
 
     private var board: some View {
-        List {
+        List { Group {
             if let e = model.features.error, model.features.board == nil {
                 ErrorRow(message: e) { Task { await reload() } }
             }
@@ -81,7 +81,8 @@ struct FeaturesView: View {
             if let e = model.features.error, model.features.board != nil {
                 Section { ErrorRow(message: e) { Task { await reload() } } }
             }
-        }
+        }.themedRows() }
+        .themedList()
         .listStyle(.insetGrouped)
         .refreshable { await reload() }
     }
@@ -124,7 +125,7 @@ struct FeatureDetailView: View {
     private var feature: WorkItem? { detail?.feature ?? model.features.board?.features.first { $0.id == id } }
 
     var body: some View {
-        List {
+        List { Group {
             if let f = feature {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
@@ -214,7 +215,8 @@ struct FeatureDetailView: View {
                     }
                 } header: { SectionHeader(text: "History") }
             }
-        }
+        }.themedRows() }
+        .themedList()
         .listStyle(.insetGrouped)
         .navigationTitle("Feature")
         .navigationBarTitleDisplayMode(.inline)
@@ -437,7 +439,7 @@ struct PivotItemsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            List { Group {
                 Section {
                     ForEach(selection.cell.items) { it in
                         VStack(alignment: .leading, spacing: 4) {
@@ -467,7 +469,8 @@ struct PivotItemsView: View {
                         .padding(.vertical, 2)
                     }
                 } header: { SectionHeader(text: "\(selection.row) × \(selection.col)") }
-            }
+            }.themedRows() }
+            .themedList()
             .listStyle(.insetGrouped)
             .navigationTitle("\(selection.cell.total) item\(selection.cell.total == 1 ? "" : "s")")
             .navigationBarTitleDisplayMode(.inline)

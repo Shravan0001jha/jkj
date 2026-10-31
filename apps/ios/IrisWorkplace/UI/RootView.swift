@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(SciFiCX.self) private var cx
+    @Environment(\.theme) private var theme
 
     var body: some View {
         @Bindable var router = model.router
@@ -39,7 +41,10 @@ struct RootView: View {
                         .badge(model.updates.unseen)
                         .tag(Tab.dashboard)
                 }
+                .themedTabChrome(index: Tab.bar.firstIndex(of: router.barSelection) ?? 0, count: Tab.bar.count)
+                .overlay(alignment: .bottom) { if theme.has(.decisionQueue) { StagedDecisionsBar() } }
                 .overlay(alignment: .top) { AlertBanner() }
+                .sheet(isPresented: Bindable(cx).showPalette) { CommandPaletteView() }
                 .sheet(isPresented: $router.showSettings) { SettingsView() }
                 .sheet(isPresented: $router.showAlerts) { AlertsView() }
                 .sheet(isPresented: $router.showSpend) { SpendView() }
@@ -86,7 +91,7 @@ struct ConnectionStrip: View {
         .foregroundStyle(tint)
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(.bar)
+        .themedBar(Material.bar)
         .accessibilityElement(children: .combine)
     }
 }
@@ -105,7 +110,7 @@ struct ReauthStrip: View {
                 Text("Your session has ended").lineLimit(1)
                 Spacer()
                 Button(busy ? "Signing in…" : "Sign in again") { signIn() }
-                    .font(.caption.weight(.semibold)).buttonStyle(.borderedProminent).controlSize(.mini).disabled(busy)
+                    .font(.caption.weight(.semibold)).themedProminent().controlSize(.mini).disabled(busy)
             }
             .foregroundStyle(.orange)
             if let error { Text(error).foregroundStyle(.red).lineLimit(2) }
@@ -113,7 +118,7 @@ struct ReauthStrip: View {
         .font(.caption)
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(.bar)
+        .themedBar(Material.bar)
     }
 
     private func signIn() {
@@ -128,6 +133,7 @@ struct ReauthStrip: View {
 /// The in-app banner for a socket `alert`. Tapping one with an Inbox id opens it.
 struct AlertBanner: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
 
     var body: some View {
         if let b = model.alerts.banner {
@@ -146,8 +152,8 @@ struct AlertBanner: View {
                     Image(systemName: "xmark").font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(12)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(g.tint.opacity(0.5)))
+                .themedCard(radius: theme.radii.card, fill: Material.regularMaterial, accent: g.tint)
+                .overlay(RoundedRectangle(cornerRadius: theme.radii.card).strokeBorder(g.tint.opacity(0.5)))
                 .padding(.horizontal, 12)
                 .padding(.top, 4)
             }
@@ -175,5 +181,6 @@ struct AccessOffView: View {
             Button("Settings") { model.router.showSettings = true }.font(.footnote)
         }
         .padding(24)
+        .themedScreen()
     }
 }

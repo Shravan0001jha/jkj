@@ -288,6 +288,7 @@ extension AppModel {
 struct QuoteBlock: View {
     let quote: ChatQuote
     let mine: Bool
+    @Environment(\.theme) private var theme
 
     var body: some View {
         HStack(spacing: 6) {
@@ -300,7 +301,7 @@ struct QuoteBlock: View {
         }
         .padding(.vertical, 4).padding(.horizontal, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background((mine ? Color.white.opacity(0.15) : Color(.tertiarySystemFill)), in: RoundedRectangle(cornerRadius: 8))
+        .background((mine ? Color.white.opacity(0.15) : Color(.tertiarySystemFill)), in: RoundedRectangle(cornerRadius: theme.radii.quote))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Replying to \(quote.sender): \(quote.text)")
     }
@@ -342,7 +343,7 @@ struct ReplyStrip: View {
                 .accessibilityLabel("Cancel reply")
         }
         .padding(.horizontal, 14).padding(.vertical, 6)
-        .background(.bar)
+        .themedBar(Material.bar)
         .accessibilityIdentifier("chat.replyStrip")
     }
 }
@@ -377,7 +378,12 @@ struct ChatThreadView<Header: View, Footer: View, Trailing: View>: View {
     var onComposerError: (String) -> Void = { _ in }
     /// Who can be @mentioned from this chat (empty: no mentions here).
     var mentionable: [String] = []
+    /// Sci-fi: one-tap reply chips above the composer (the COO chat).
+    var quickReplies = false
     @FocusState private var focused: Bool
+    @Environment(\.theme) private var theme
+    /// The rows on screen when the conversation first loaded: anything after them "arrives".
+    @State private var initialIds: Set<String>?
 
     var body: some View {
         let rows = ChatLayout.rows(items)
@@ -399,7 +405,8 @@ struct ChatThreadView<Header: View, Footer: View, Trailing: View>: View {
                         ForEach(rows) { row in
                             if let day = row.day { DaySeparator(text: day) }
                             ChatRowView(row: row, maxBubbleWidth: (geo.size.width * 0.8).rounded(.down),
-                                        onReply: { replyTo = $0; focused = true })
+                                        onReply: { replyTo = $0; focused = true },
+                                        arriving: theme.has(.transmission) && initialIds.map { !$0.contains(row.id) } == true)
                                 .padding(.top, row.continuesGroup ? 2 : 8)
                                 .id(row.id)
                         }
@@ -413,6 +420,7 @@ struct ChatThreadView<Header: View, Footer: View, Trailing: View>: View {
                 }
                 .background(ChatWallpaper())
                 .defaultScrollAnchor(.bottom)
+                .onChange(of: items.isEmpty, initial: true) { _, empty in if !empty && initialIds == nil { initialIds = Set(rows.map(\.id)) } }
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: items.count) { _, _ in withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) } }
                 .onChange(of: typing) { _, t in if t { withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) } } }
@@ -420,7 +428,10 @@ struct ChatThreadView<Header: View, Footer: View, Trailing: View>: View {
             }
             }
             if !mentionable.isEmpty {
-                MentionSuggestions(draft: $draft, known: mentionable).background(.bar)
+                MentionSuggestions(draft: $draft, known: mentionable).themedBar(Material.bar)
+            }
+            if quickReplies && theme.has(.quickReplies) && replyTo == nil && draft.isEmpty {
+                QuickReplyChips(suggestions: quickReplySuggestions) { text in draft = text; onSend() }
             }
             if let r = replyTo {
                 ReplyStrip(sender: r.mine == true ? "You" : (r.sender ?? typingName), text: r.text ?? "") { replyTo = nil }
@@ -434,6 +445,12 @@ struct ChatThreadView<Header: View, Footer: View, Trailing: View>: View {
         })
         .task(id: items.count) { await model.loadTitles(in: items.compactMap { if case .message(_, let t, let d) = $0.kind { return t + " " + (d ?? "") }; return nil }) }
     }
+
+    private var quickReplySuggestions: [String] {
+        let last = items.last { if case .message = $0.kind { return true }; return false }
+        guard let last, case .message(let mine, let text, _) = last.kind else { return QuickReplies.suggestions(lastText: nil, lastFromOwner: false) }
+        return QuickReplies.suggestions(lastText: text, lastFromOwner: mine)
+    }
 }
 
 /// A message bubble or a note caption.
@@ -443,8 +460,11 @@ struct ChatRowView: View {
     /// About 80% of the screen: the widest a bubble gets.
     var maxBubbleWidth: CGFloat = 300
     var onReply: ((ChatItem) -> Void)?
+    /// Sci-fi: a message that arrived while the chat was open plays the transmission effect.
+    var arriving = false
     @State private var expanded = false
     @State private var showSteps = false
+    @Environment(\.theme) private var theme
 
     var body: some View {
         switch row.item.kind {
@@ -489,13 +509,19 @@ struct ChatRowView: View {
                     }
                 }
                 HStack(spacing: 3) {
-                    Text(Format.time(row.item.at))
+                    Text(Format.time(row.item.at)).themedTime()
                     if mine, let r = row.item.receipt { ReceiptMark(receipt: r) }
                 }
                 .font(.caption2).foregroundStyle(mine ? Color.white.opacity(0.75) : Color.secondary)
             }
             .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
-            .background(ChatPalette.bubble(mine: mine), in: UnevenRoundedRectangle(cornerRadii: corners(mine: mine), style: .continuous))
+            .background(theme.chrome?.bubbleFill(mine: mine) ?? ChatPalette.bubble(mine: mine), in: UnevenRoundedRectangle(cornerRadii: corners(mine: mine), style: .continuous))
+            .overlay {
+                if let c = theme.chrome {
+                    UnevenRoundedRectangle(cornerRadii: corners(mine: mine), style: .continuous).strokeBorder(c.bubbleEdge(mine: mine), lineWidth: 1)
+                }
+            }
+            .modifier(TransmissionArrival(active: arriving && !mine))
             .shadow(color: .black.opacity(mine ? 0.10 : 0.07), radius: 1.5, x: 0, y: 1)
             .contentShape(.contextMenuPreview, UnevenRoundedRectangle(cornerRadii: corners(mine: mine), style: .continuous))
             // Tap anywhere on a long bubble to unfold it; links inside still open on their own.
@@ -512,7 +538,7 @@ struct ChatRowView: View {
 
     /// 18 pt everywhere; the corner toward the speaker tightens inside a group.
     private func corners(mine: Bool) -> RectangleCornerRadii {
-        let r: CGFloat = 18, tight: CGFloat = 6
+        let r: CGFloat = theme.radii.bubble, tight: CGFloat = theme.radii.bubbleTight
         let top = row.continuesGroup ? tight : r
         let bottom = row.groupContinues ? tight : r
         return mine
@@ -554,8 +580,14 @@ struct TypingBubble: View {
     let name: String
     @State private var phase = 0
     private let timer = Timer.publish(every: 0.35, on: .main, in: .common).autoconnect()
+    @Environment(\.theme) private var theme
+    @Environment(\.motionLevel) private var motion
 
     var body: some View {
+        if theme.hasChrome { TransmissionTyping(name: name, motion: motion) } else { dots }
+    }
+
+    private var dots: some View {
         HStack {
             HStack(spacing: 4) {
                 ForEach(0..<3) { i in
@@ -590,6 +622,7 @@ struct ChatComposer<Trailing: View>: View {
     var onError: (String) -> Void = { _ in }
     var mentionable: [String] = []
 
+    @Environment(\.theme) private var theme
     @State private var recorder = VoiceRecorder()
     @State private var holding = false
     @State private var cancelArmed = false
@@ -617,8 +650,8 @@ struct ChatComposer<Trailing: View>: View {
                         .font(.body)
                         .focused(focused)
                         .padding(.horizontal, 14).padding(.vertical, 9)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color(.separator).opacity(0.6), lineWidth: 0.5))
+                        .background(fieldFill, in: RoundedRectangle(cornerRadius: theme.radii.composer, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: theme.radii.composer, style: .continuous).strokeBorder(fieldEdge, lineWidth: theme.hasChrome ? 1 : 0.5))
                         .accessibilityIdentifier("chat.composer")
                     trailing()
                     if showMic { micButton } else { sendButton }
@@ -626,12 +659,15 @@ struct ChatComposer<Trailing: View>: View {
                 .padding(.horizontal, 10).padding(.vertical, 6)
             }
         }
-        .background(.bar)
+        .themedBar(Material.bar)
         .alert("Microphone access is off", isPresented: Binding(get: { recorder.state == .denied }, set: { _ in })) {
             Button("Open Settings") { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } }
             Button("Not now", role: .cancel) {}
         } message: { Text("Allow the microphone for Iris Workplace in Settings to record voice notes.") }
     }
+
+    private var fieldFill: Color { theme.hasChrome ? SciFiPalette.surface.color(0.8) : Color(.secondarySystemBackground) }
+    private var fieldEdge: Color { theme.hasChrome ? SciFiPalette.accent.color(0.45) : Color(.separator).opacity(0.6) }
 
     private var sendButton: some View {
         Button(action: onSend) {
@@ -736,9 +772,16 @@ enum ChatPalette {
 /// wallpapers. Light and dark versions; drawn once with Canvas, so it costs nothing while scrolling.
 struct ChatWallpaper: View {
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.theme) private var theme
+    @Environment(\.motionLevel) private var motion
+    @Environment(AppModel.self) private var model
     private static let symbols = ["bubble.left", "sparkles", "star", "paperplane", "heart", "bolt", "leaf", "moon", "cloud", "music.note"]
 
     var body: some View {
+        if let c = theme.chrome { c.wallpaper(motion: motion, live: model.socketIsOpen) } else { telegram }
+    }
+
+    @ViewBuilder private var telegram: some View {
         let dark = scheme == .dark
         ZStack {
             LinearGradient(colors: dark

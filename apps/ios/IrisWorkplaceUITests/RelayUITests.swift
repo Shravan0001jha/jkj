@@ -5,7 +5,7 @@ import XCTest
 /// state and its recovery; the expired-session screen; the developer toggle.
 final class RelayUITests: XCTestCase {
     private var app: XCUIApplication!
-    private let mock = URL(string: "http://127.0.0.1:4399")!
+    private let mock = URL(string: "http://\(UITestEnv.host)")!
 
     override func setUp() async throws {
         continueAfterFailure = false
@@ -13,7 +13,7 @@ final class RelayUITests: XCTestCase {
         req.httpMethod = "POST"
         _ = try? await URLSession.shared.data(for: req)
         app = XCUIApplication()
-        app.launchEnvironment = ["WORKPLACE_RELAY_URL": "127.0.0.1:4399", "WORKPLACE_NO_NOTIF_PROMPT": "1"]
+        app.launchEnvironment = ["WORKPLACE_RELAY_URL": UITestEnv.host, "WORKPLACE_NO_NOTIF_PROMPT": "1"]
     }
 
     private func setOffline(_ offline: Bool) async {
@@ -33,7 +33,7 @@ final class RelayUITests: XCTestCase {
 
     func testSignInThroughTheWebPageLandsOnTheOffice() {
         app.launchEnvironment["WORKPLACE_FORGET"] = "1"
-        app.launch()
+        app.launchThemed()
         let signIn = app.buttons["Sign in"]
         XCTAssertTrue(signIn.waitForExistence(timeout: 8), "a fresh install in relay mode starts at Sign in")
         XCTAssertTrue(app.buttons["First time here? Set up a passkey"].exists)
@@ -78,7 +78,7 @@ final class RelayUITests: XCTestCase {
     func testMacOfflineIsShownAndRecovers() async {
         await setOffline(true)
         app.launchEnvironment["WORKPLACE_TOKEN"] = "mock-session-ui"
-        app.launch()
+        app.launchThemed()
         let offline = app.staticTexts["Your Mac is offline"]
         XCTAssertTrue(offline.waitForExistence(timeout: 10), "a relay answering 503 is the Mac-offline state, not a network error")
         XCTAssertTrue(app.buttons["Check now"].exists)
@@ -91,9 +91,9 @@ final class RelayUITests: XCTestCase {
     func testExpiredSessionAsksToSignInAgain() throws {
         // Off loopback the mock enforces the token, so a bad session is a 401. TEST_RUNNER_LAN_IP = this Mac's address.
         guard let ip = ProcessInfo.processInfo.environment["LAN_IP"], !ip.isEmpty else { throw XCTSkip("LAN_IP not set") }
-        app.launchEnvironment["WORKPLACE_RELAY_URL"] = "\(ip):4399"
+        app.launchEnvironment["WORKPLACE_RELAY_URL"] = "\(ip):\(UITestEnv.port)"
         app.launchEnvironment["WORKPLACE_TOKEN"] = "not-a-session"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.staticTexts["Your session has ended"].waitForExistence(timeout: 12))
         XCTAssertTrue(app.buttons["Sign in again"].exists)
         shot("relay-session-ended")
@@ -107,7 +107,7 @@ final class LiveRelayPagesUITests: XCTestCase {
         guard ProcessInfo.processInfo.environment["LIVE_RELAY"] == "1" else { throw XCTSkip("LIVE_RELAY not set") }
         let app = XCUIApplication()
         app.launchEnvironment = ["WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_FORGET": "1"]
-        app.launch()
+        app.launchThemed()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         for (button, name) in [("Sign in", "live-login-page"), ("First time here? Set up a passkey", "live-enrol-page")] {
             XCTAssertTrue(app.buttons[button].waitForExistence(timeout: 8))

@@ -5,6 +5,7 @@ import SwiftUI
 /// anything to anyone (himself too) and sets the focus.
 struct PlanView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
     @State private var path = NavigationPath()
     @State private var editMode: EditMode = .inactive
     @State private var creating: NewItemView.Draft?
@@ -56,11 +57,16 @@ struct PlanView: View {
     // MARK: areas
 
     private var areasList: some View {
-        List {
+        List { Group {
             if let e = store.error, store.plan == nil {
                 ErrorRow(message: e) { Task { await reload() } }
             } else if store.plan == nil {
                 HStack { Spacer(); ProgressView("Loading the plan…"); Spacer() }
+            }
+            if theme.has(.bridge) {
+                Section { BridgeView() }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                    .listRowBackground(Color.clear)
             }
             if let plan = store.plan {
                 Section {
@@ -130,7 +136,8 @@ struct PlanView: View {
             if let e = store.error, store.plan != nil {
                 Section { ErrorRow(message: e) { Task { await reload() } } }
             }
-        }
+        }.themedRows() }
+        .themedList()
     }
 
     @ViewBuilder
@@ -180,7 +187,7 @@ struct PlanView: View {
     // MARK: board
 
     private var boardList: some View {
-        List {
+        List { Group {
             if store.board == nil {
                 if let e = store.error { ErrorRow(message: e) { Task { await reload() } } }
                 else { HStack { Spacer(); ProgressView("Loading the board…"); Spacer() } }
@@ -205,7 +212,8 @@ struct PlanView: View {
                     }
                 }
             }
-        }
+        }.themedRows() }
+        .themedList()
     }
 
     /// The board's columns after the filter: a status filter hides the columns it excludes.
@@ -223,7 +231,7 @@ struct PlanView: View {
 
     private var resultsList: some View {
         let results = query.results(plan: store.plan, board: store.board)
-        return List {
+        return List { Group {
             if query.isFiltering || query.sort != .plan { Section { activeFilters } }
             Section {
                 if results.isEmpty {
@@ -243,7 +251,8 @@ struct PlanView: View {
             } header: {
                 SectionHeader(text: "\(results.count) result\(results.count == 1 ? "" : "s")")
             }
-        }
+        }.themedRows() }
+        .themedList()
     }
 
     // MARK: filter

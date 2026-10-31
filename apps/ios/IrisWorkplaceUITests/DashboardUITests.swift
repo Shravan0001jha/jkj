@@ -8,7 +8,7 @@ final class DashboardUITests: XCTestCase {
 
     override func setUp() {
         continueAfterFailure = false
-        let port = ProcessInfo.processInfo.environment["MOCK_PORT"] ?? "4399"
+        let port = UITestEnv.port
         app = XCUIApplication()
         app.launchEnvironment = ["WORKPLACE_URL": "127.0.0.1:\(port)", "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
                                  "WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_NO_DEVICE_AUTH": "1"]
@@ -25,7 +25,7 @@ final class DashboardUITests: XCTestCase {
     }
 
     func testDashboardShowsFeaturesGapsAndAFeaturesScopeAndHistory() {
-        app.launch()
+        app.launchThemed()
         let tab = app.tabBars.buttons["Dashboard"]
         XCTAssertTrue(tab.waitForExistence(timeout: 8))
         XCTAssertEqual(app.tabBars.buttons.count, 5, "five tabs, no More")

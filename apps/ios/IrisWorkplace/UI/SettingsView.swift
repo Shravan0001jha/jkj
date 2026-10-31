@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.themeStore) private var themes
     @State private var confirmRepair = false
     @State private var confirmSignOut = false
     @State private var showDeveloper = false
@@ -13,7 +14,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            List { Group {
                 Section {
                     LabeledContent("Reached through", value: model.mode == .relay ? "Relay" : "LAN (developer)")
                     LabeledContent("Server", value: model.config.baseURL.absoluteString)
@@ -103,12 +104,14 @@ struct SettingsView: View {
                 } footer: {
                     Text("LAN pairing for a Workplace on the same network, without the relay.")
                 }
+                appearanceSection
                 Section {
                     LabeledContent("App", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                     Text("Alerts reach this phone while the app is open or was just backgrounded. With the app closed, Inbox items that need you arrive as notifications through the relay.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } header: { SectionHeader(text: "About") }
-            }
+            }.themedRows() }
+            .themedList()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -137,6 +140,29 @@ struct SettingsView: View {
             .task {
                 guard model.mode == .relay, let rest = model.rest else { return }
                 do { devices = try await rest.pushDevices().devices } catch { if let m = error.userMessage { devicesError = m } }
+            }
+        }
+    }
+
+    // MARK: appearance (docs/THEMES.md)
+
+    /// Theme: Default (the original look) or Sci-fi. Switches live.
+    @ViewBuilder private var appearanceSection: some View {
+        if let themes {
+            @Bindable var store = themes
+            Section {
+                Picker(selection: $store.selected) {
+                    ForEach(Theme.all) { t in Text(t.name).tag(t.id) }
+                } label: { Label("Theme", systemImage: "paintpalette") }
+                .accessibilityIdentifier("settings.theme")
+                if store.selected == .scifi {
+                    Toggle(isOn: $store.uiSounds) { Label("Interface sounds", systemImage: "speaker.wave.2") }
+                        .accessibilityIdentifier("settings.uiSounds")
+                }
+            } header: { SectionHeader(text: "Appearance") } footer: {
+                Text(store.selected == .scifi
+                     ? "Sci-fi is always dark. It follows Reduce Motion (effects become still or fade) and Low Power Mode (effects off)."
+                     : "Default is the original look and follows the system's light or dark setting.")
             }
         }
     }
@@ -213,7 +239,7 @@ struct SettingsView: View {
                         if e.id == store.head?.id {
                             if store.granting == e.id { ProgressView() } else {
                                 Button("Grant now") { grant(e.id) }
-                                    .buttonStyle(.borderedProminent).controlSize(.small)
+                                    .themedProminent().controlSize(.small)
                                     .accessibilityIdentifier("settings.macQueue.grant")
                             }
                         }

@@ -56,6 +56,8 @@ final class Router {
     var featureId: String?
     var pivot: PivotRows?
     var roomThreadId: String?
+    /// A room to open on the Room tab (the Sci-fi command palette).
+    var roomId: String?
     /// Set by a push's DECIDE action: the item opens with its options in view.
     var decideItemId: String?
     var showSettings = false
@@ -74,6 +76,7 @@ final class Router {
     func openInboxList() { closeSheets(); inboxItemId = nil; inboxList = true; tab = .inbox }
     func openThread(_ id: String) { closeSheets(); roomThreadId = id; tab = .room }
     func openRoomList() { closeSheets(); roomThreadId = nil; roomList = true; tab = .room }
+    func openRoom(_ id: String) { closeSheets(); roomId = id; tab = .room }
     func talk(to employeeId: String) { closeSheets(); talkEmployeeId = employeeId; tab = .talk }
     func openItem(_ id: String) { closeSheets(); itemId = id; tab = .plan }
     func openReleasePost(_ id: String) { closeSheets(); releasePostId = id; tab = .room }

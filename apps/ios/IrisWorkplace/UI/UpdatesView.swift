@@ -10,7 +10,7 @@ struct UpdatesView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
+            List { Group {
                 if let e = store.error, !store.loaded {
                     ErrorRow(message: e) { Task { await reload() } }
                 } else if !store.loaded {
@@ -30,7 +30,8 @@ struct UpdatesView: View {
                         .task { if let rest = model.rest { await store.loadMore(rest) } }
                 }
                 if let e = store.error, store.loaded { Section { ErrorRow(message: e) { Task { await reload() } } } }
-            }
+            }.themedRows() }
+            .themedList()
             .listStyle(.insetGrouped)
             .refreshable { await reload() }
             .navigationTitle("Updates")
@@ -132,7 +133,7 @@ struct ReleasePostsView: View {
     private var store: ReleasePostsStore { model.releasePosts }
 
     var body: some View {
-        List {
+        List { Group {
             if let e = store.error, !store.loaded { ErrorRow(message: e) { Task { await reload() } } }
             else if !store.loaded { HStack { Spacer(); ProgressView(); Spacer() } }
             if store.loaded && store.posts.isEmpty {
@@ -154,7 +155,8 @@ struct ReleasePostsView: View {
                     .padding(.vertical, 2)
                 }
             }
-        }
+        }.themedRows() }
+        .themedList()
         .listStyle(.insetGrouped)
         .refreshable { await reload() }
         .navigationTitle("Releases")
@@ -175,7 +177,7 @@ struct ReleasePostView: View {
     private var post: ReleasePost? { model.releasePosts.post(id) ?? loaded }
 
     var body: some View {
-        List {
+        List { Group {
             if let p = post {
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
@@ -207,7 +209,8 @@ struct ReleasePostView: View {
             } else {
                 HStack { Spacer(); ProgressView(); Spacer() }
             }
-        }
+        }.themedRows() }
+        .themedList()
         .listStyle(.insetGrouped)
         .navigationTitle(post?.version ?? "Release")
         .navigationBarTitleDisplayMode(.inline)

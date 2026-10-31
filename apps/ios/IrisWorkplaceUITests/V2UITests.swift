@@ -7,11 +7,11 @@ final class V2UITests: XCTestCase {
 
     override func setUp() async throws {
         continueAfterFailure = false
-        var req = URLRequest(url: URL(string: "http://127.0.0.1:4399/api/_reset")!)
+        var req = URLRequest(url: URL(string: "http://\(UITestEnv.host)/api/_reset")!)
         req.httpMethod = "POST"
         _ = try? await URLSession.shared.data(for: req)
         app = XCUIApplication()
-        app.launchEnvironment = ["WORKPLACE_URL": "127.0.0.1:4399", "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
+        app.launchEnvironment = ["WORKPLACE_URL": UITestEnv.host, "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
                                  "WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_NO_DEVICE_AUTH": "1"]
     }
 
@@ -26,7 +26,7 @@ final class V2UITests: XCTestCase {
     }
 
     func testPlanIsHomeWithMineOnTopAreasFocusAndBoard() {
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.tabBars.buttons["Plan"].isSelected || app.tabBars.buttons["Plan"].waitForExistence(timeout: 4))
         XCTAssertTrue(app.staticTexts["Assigned to you"].waitForExistence(timeout: 8), "assigned to the owner, on top")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Test the music fix on your Mac'")).firstMatch.exists)
@@ -44,7 +44,7 @@ final class V2UITests: XCTestCase {
 
     func testEpicPageAssignStoryToMeAndCommentWithMention() {
         app.launchEnvironment["WORKPLACE_ITEM"] = "ft_mummakwyuew19"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.staticTexts["item.title"].waitForExistence(timeout: 8))
         let story = app.buttons.matching(NSPredicate(format: "label CONTAINS 'QA and Release'")).firstMatch
         XCTAssertTrue(reveal(story), "child stories are listed")
@@ -80,7 +80,7 @@ final class V2UITests: XCTestCase {
 
     func testInboxThreadRecommendedOptionAndFreeTextReply() {
         app.launchEnvironment["WORKPLACE_INBOX_ITEM"] = "in_muqel76q1h1i1"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.staticTexts["inbox.question"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["High"].exists, "urgency by colour and label")
         XCTAssertTrue(app.buttons["Approve the 2-entry manual map edit now, recommended"].exists, "the recommended option is marked")
@@ -99,7 +99,7 @@ final class V2UITests: XCTestCase {
 
     func testUpdateOpensItsItemAndReleaseChangeOpensItsStory() {
         app.launchEnvironment["WORKPLACE_TAB"] = "updates"
-        app.launch()
+        app.launchThemed()
         let blocked = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Blocked: P0 bug bundle'")).firstMatch
         XCTAssertTrue(blocked.waitForExistence(timeout: 8), "newest-first one-line events")
         shot("updates")
@@ -122,7 +122,7 @@ final class V2UITests: XCTestCase {
 
     func testTalkShowsOnlyWrittenMessages() {
         app.launchEnvironment["WORKPLACE_TALK"] = "mira"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.navigationBars["Mira"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'The expert is in'")).firstMatch.waitForExistence(timeout: 8))
         XCTAssertFalse(app.staticTexts["Assignment a-1: Errand receiver on the Mac. Reply with ## Plan first."].exists, "the Workplace's prompt is not shown as the owner's message")
@@ -136,9 +136,9 @@ final class V2UITests: XCTestCase {
 final class ChatAlignmentUITests: XCTestCase {
     private func measure(_ talk: String, file: StaticString = #filePath, line: UInt = #line) {
         let app = XCUIApplication()
-        app.launchEnvironment = ["WORKPLACE_URL": "127.0.0.1:4399", "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
+        app.launchEnvironment = ["WORKPLACE_URL": UITestEnv.host, "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
                                  "WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_NO_DEVICE_AUTH": "1", "WORKPLACE_TALK": talk]
-        app.launch()
+        app.launchThemed()
         let field = app.textFields["chat.composer"]
         XCTAssertTrue(field.waitForExistence(timeout: 8), file: file, line: line)
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat.theirs").firstMatch.waitForExistence(timeout: 8), file: file, line: line)

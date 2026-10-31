@@ -13,7 +13,7 @@ struct ReleasesView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            List { Group {
                 if let error, !loaded { ErrorRow(message: error) { Task { await load() } } }
                 if loaded && ready.isEmpty {
                     EmptyState(symbol: "shippingbox", title: "Nothing to release", text: "When work is merged but unreleased, it shows here per app or service.")
@@ -38,7 +38,7 @@ struct ReleasesView: View {
                                     Button {
                                         confirmRun = rel
                                     } label: { HStack { if running.contains(rel.id) { ProgressView() }; Text("Run") } }
-                                    .buttonStyle(.borderedProminent).disabled(running.contains(rel.id))
+                                    .themedProminent().disabled(running.contains(rel.id))
                                 default:
                                     EmptyView()
                                 }
@@ -54,7 +54,8 @@ struct ReleasesView: View {
                     } header: { SectionHeader(text: name(r.shippable)) }
                 }
                 if let error, loaded { Section { ErrorRow(message: error) { Task { await load() } } } }
-            }
+            }.themedRows() }
+            .themedList()
             .listStyle(.insetGrouped)
             .navigationTitle("Releases")
             .navigationBarTitleDisplayMode(.inline)
@@ -119,7 +120,7 @@ struct ProposalDetailView: View {
     @State private var error: String?
 
     var body: some View {
-        List {
+        List { Group {
             if let d = detail {
                 Section {
                     HStack {
@@ -155,7 +156,8 @@ struct ProposalDetailView: View {
             } else {
                 HStack { Spacer(); ProgressView(); Spacer() }
             }
-        }
+        }.themedRows() }
+        .themedList()
         .listStyle(.insetGrouped)
         .navigationTitle("Org change")
         .navigationBarTitleDisplayMode(.inline)

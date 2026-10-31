@@ -13,7 +13,7 @@ struct SpendView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            List { Group {
                 if let s = summary {
                     Section {
                         SpendMeter(spend: s).padding(.vertical, 4)
@@ -84,7 +84,8 @@ struct SpendView: View {
                 } else {
                     HStack { Spacer(); ProgressView(); Spacer() }
                 }
-            }
+            }.themedRows() }
+            .themedList()
             .listStyle(.insetGrouped)
             .navigationTitle("Spend")
             .navigationBarTitleDisplayMode(.inline)

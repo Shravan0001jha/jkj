@@ -25,7 +25,7 @@ struct SignInView: View {
                         HStack { if busy { ProgressView().tint(.white) }; Text(busy ? "Signing in…" : "Sign in").fontWeight(.semibold) }
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent).controlSize(.large).disabled(busy)
+                    .themedProminent().controlSize(.large).disabled(busy)
                     Button { Task { await signIn(enrol: true) } } label: {
                         Text("First time here? Set up a passkey").frame(maxWidth: .infinity)
                     }
@@ -37,6 +37,7 @@ struct SignInView: View {
                 Button("Developer options") { showDeveloper = true }.font(.footnote).foregroundStyle(.secondary)
                     .padding(.bottom, 8)
             }
+            .themedScreen()
             .sheet(isPresented: $showDeveloper) { DeveloperOptionsView() }
         }
     }
@@ -66,10 +67,11 @@ struct ReauthView: View {
             Text("This phone is no longer paired").font(.title3.weight(.semibold))
             Text("The Workplace refused the token. Pair again with a new code from the Mac, or use the relay.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Button("Re-pair") { model.unpair() }.buttonStyle(.borderedProminent)
+            Button("Re-pair") { model.unpair() }.themedProminent()
             Button("Use the relay instead") { model.useRelay() }.font(.footnote)
         }
         .padding(24)
+        .themedScreen()
     }
 }
 
@@ -88,6 +90,7 @@ struct MacOfflineView: View {
             Button("Settings") { model.router.showSettings = true }.font(.footnote)
         }
         .padding(24)
+        .themedScreen()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Your Mac is offline. Workplace unavailable. Checking every few seconds.")
     }

@@ -25,6 +25,7 @@ extension View {
 /// Points done / total as a bar; when nothing is pointed yet, stories done / total, said so.
 struct EpicProgressBar: View {
     let progress: EpicProgress
+    @Environment(\.theme) private var theme
 
     private var fraction: Double { min(1, max(0, progress.pct / 100)) }
     private var label: String {
@@ -39,9 +40,10 @@ struct EpicProgressBar: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color(.tertiarySystemFill))
                     Capsule().fill(fraction >= 1 ? Color.green : Color.accentColor).frame(width: max(fraction > 0 ? 6 : 0, g.size.width * fraction))
+                        .glow(theme.hasChrome, fraction >= 1 ? Color.green : Color.accentColor, radius: 4)
                 }
             }
-            .frame(height: 6)
+            .frame(height: theme.radii.progressHeight)
             HStack {
                 Text(label)
                 Spacer()
@@ -59,14 +61,20 @@ struct EpicProgressBar: View {
 /// One story or task: state glyph, title, then assignee · reviewer · points.
 struct ItemRow: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+    @Environment(\.motionLevel) private var motion
     let item: Item
     var showEpic = false
+    /// Sci-fi: the moment an item turns Done it "locks in" (a flash and a settle).
+    @State private var lockIn = false
 
     var body: some View {
         let g = item.status.glyph
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: g.symbol).foregroundStyle(g.tint).frame(width: 22).padding(.top, 1)
                 .accessibilityLabel(g.label)
+                .scaleEffect(lockIn ? 1.35 : 1)
+                .background { if theme.hasChrome && item.status == .inProgress { PulseRing(color: g.tint, motion: motion).frame(width: 18, height: 18).padding(.top, 1) } }
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title).font(.subheadline.weight(.medium)).lineLimit(2)
                 Text(meta).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -82,6 +90,12 @@ struct ItemRow: View {
             }
         }
         .padding(.vertical, 2)
+        .onChange(of: item.status) { old, new in
+            guard theme.hasChrome, new == .done, old != .done, MotionEffect.lockIn.animates(at: motion) else { return }
+            withAnimation(motion == .full ? .spring(response: 0.25, dampingFraction: 0.5) : .easeOut(duration: 0.2)) { lockIn = true }
+            withAnimation(.easeOut(duration: 0.4).delay(0.3)) { lockIn = false }
+        }
+        .themedHaptic(.success, trigger: item.status == .done)
     }
 
     private var meta: String {

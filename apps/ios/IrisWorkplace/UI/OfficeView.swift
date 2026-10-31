@@ -9,7 +9,7 @@ struct OfficeView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            List { Group {
                 if let error = model.office.error, model.office.data == nil {
                     ErrorRow(message: error) { Task { await reload() } }
                 }
@@ -49,7 +49,8 @@ struct OfficeView: View {
                 } else if model.office.loading {
                     Section { HStack { Spacer(); ProgressView("Loading the office…"); Spacer() } }
                 }
-            }
+            }.themedRows() }
+            .themedList()
             .listStyle(.insetGrouped)
             .refreshable { await reload() }
             .navigationTitle("Office")

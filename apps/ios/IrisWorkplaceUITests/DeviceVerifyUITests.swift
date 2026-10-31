@@ -14,7 +14,7 @@ final class DeviceVerifyUITests: XCTestCase {
     private func any(_ id: String) -> XCUIElement { app.descendants(matching: .any).matching(identifier: id).firstMatch }
 
     func test1PlanDoneLastFilterSearch() {
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(any("plan.filter").waitForExistence(timeout: 20))
         sleep(3); shot("plan")
         // Done epics sit below open ones in every area: the first "Done" card comes after the last open one.
@@ -37,7 +37,7 @@ final class DeviceVerifyUITests: XCTestCase {
 
     func test2TalkListAndSenders() {
         app.launchEnvironment["WORKPLACE_TAB"] = "talk"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(any("talk.row.coo").waitForExistence(timeout: 20))
         sleep(3); shot("talk-list")
         // The pin action is there (revealed, not tapped).
@@ -50,7 +50,7 @@ final class DeviceVerifyUITests: XCTestCase {
     func test3ChatExpandMenuLinks() {
         for who in ["asha", "coo"] {
             app.launchEnvironment["WORKPLACE_TALK"] = who
-            app.launch()
+            app.launchThemed()
             XCTAssertTrue(app.textFields["chat.composer"].waitForExistence(timeout: 20))
             sleep(4); shot("chat-\(who)")
             let mores = app.buttons.matching(identifier: "message.showMore")

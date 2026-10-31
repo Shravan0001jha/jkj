@@ -42,7 +42,7 @@ struct DashboardTab: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(Color(.systemGroupedBackground))
+            .themedBar(Color(.systemGroupedBackground))
             if router.tab == .updates { UpdatesView() } else { DashboardView() }
         }
     }
@@ -56,7 +56,7 @@ struct DashboardContent: View {
     let loading: Bool
 
     var body: some View {
-        List {
+        List { Group {
             if let snapshot {
                 Section { status(snapshot) }
                 ForEach(Self.groups(snapshot.features), id: \.title) { g in
@@ -79,7 +79,8 @@ struct DashboardContent: View {
                 HStack { Spacer(); ProgressView("Loading dashboard…"); Spacer() }
                     .listRowBackground(Color.clear)
             }
-        }
+        }.themedRows() }
+        .themedList()
         .listStyle(.insetGrouped)
     }
 
@@ -228,7 +229,7 @@ struct DashFeatureDetail: View {
     let feature: DashFeature
 
     var body: some View {
-        List {
+        List { Group {
             Section {
                 if let h = feature.health {
                     HStack(alignment: .firstTextBaseline) {
@@ -281,7 +282,8 @@ struct DashFeatureDetail: View {
                     }
                 } header: { SectionHeader(text: "Lost days") }
             }
-        }
+        }.themedRows() }
+        .themedList()
         .listStyle(.insetGrouped)
         .navigationTitle(feature.name)
         .navigationBarTitleDisplayMode(.inline)

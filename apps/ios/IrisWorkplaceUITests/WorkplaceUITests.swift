@@ -8,12 +8,12 @@ final class WorkplaceUITests: XCTestCase {
     override func setUp() async throws {
         continueAfterFailure = false
         // Every test starts from the mock's seed state.
-        var req = URLRequest(url: URL(string: "http://127.0.0.1:4399/api/_reset")!)
+        var req = URLRequest(url: URL(string: "http://\(UITestEnv.host)/api/_reset")!)
         req.httpMethod = "POST"
         _ = try? await URLSession.shared.data(for: req)
         app = XCUIApplication()
         app.launchEnvironment = [
-            "WORKPLACE_URL": "127.0.0.1:4399",
+            "WORKPLACE_URL": UITestEnv.host,
             "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
             "WORKPLACE_NO_NOTIF_PROMPT": "1",
             "WORKPLACE_NO_DEVICE_AUTH": "1",
@@ -22,7 +22,7 @@ final class WorkplaceUITests: XCTestCase {
 
     private func launch(_ extra: [String: String] = [:]) {
         for (k, v) in extra { app.launchEnvironment[k] = v }
-        app.launch()
+        app.launchThemed()
     }
 
     private func shot(_ name: String) {
@@ -150,7 +150,7 @@ final class WorkplaceUITests: XCTestCase {
         let env = ProcessInfo.processInfo.environment
         guard let realURL = env["REAL_URL"], let code = env["REAL_PAIR_CODE"] else { throw XCTSkip("REAL_URL / REAL_PAIR_CODE not set") }
         app.launchEnvironment = ["WORKPLACE_NO_NOTIF_PROMPT": "1"]
-        app.launch()
+        app.launchThemed()
         let url = app.textFields["192.168.1.5:4317"]
         XCTAssertTrue(url.waitForExistence(timeout: 8))
         url.tap(); url.typeText(realURL)
@@ -185,7 +185,7 @@ final class WorkplaceUITests: XCTestCase {
     func testRealApproveReadOnlyTool() throws {
         guard let employee = ProcessInfo.processInfo.environment["REAL_APPROVE"] else { throw XCTSkip("REAL_APPROVE not set") }
         app.launchEnvironment = ["WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_TALK": employee]
-        app.launch()
+        app.launchThemed()
         let allow = app.buttons["Allow once"]
         XCTAssertTrue(allow.waitForExistence(timeout: 20), "the real session's pending approval is inline")
         let header = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Approve '")).firstMatch
@@ -208,7 +208,7 @@ final class WorkplaceUITests: XCTestCase {
     func testRealTalkStreamsAndInterrupts() throws {
         guard let employee = ProcessInfo.processInfo.environment["REAL_TALK"] else { throw XCTSkip("REAL_TALK not set") }
         app.launchEnvironment = ["WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_TALK": employee]
-        app.launch()
+        app.launchThemed()
         let composer = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Message '")).firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         composer.tap()
@@ -233,8 +233,8 @@ final class WorkplaceUITests: XCTestCase {
     }
 
     func testPairingScreenRefusesABadCode() {
-        app.launchEnvironment = ["WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_FORGET": "1", "WORKPLACE_RELAY_URL": "127.0.0.1:4399"]
-        app.launch()
+        app.launchEnvironment = ["WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_FORGET": "1", "WORKPLACE_RELAY_URL": UITestEnv.host]
+        app.launchThemed()
         XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 8), "a fresh install starts at the relay sign-in")
         app.buttons["Developer options"].tap()
         let toggle = app.switches["Use a LAN Workplace (pairing)"]
@@ -242,7 +242,7 @@ final class WorkplaceUITests: XCTestCase {
         toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
         let url = app.textFields["192.168.1.5:4317"]
         XCTAssertTrue(url.waitForExistence(timeout: 8), "turning it on opens the pairing sheet")
-        url.tap(); url.typeText("127.0.0.1:4399")
+        url.tap(); url.typeText(UITestEnv.host)
         let code = app.textFields["Pairing code"]
         code.tap(); code.typeText("000000")
         app.buttons["Pair this phone"].tap()
@@ -257,11 +257,11 @@ final class NewContractUITests: XCTestCase {
 
     override func setUp() async throws {
         continueAfterFailure = false
-        var req = URLRequest(url: URL(string: "http://127.0.0.1:4399/api/_reset")!)
+        var req = URLRequest(url: URL(string: "http://\(UITestEnv.host)/api/_reset")!)
         req.httpMethod = "POST"
         _ = try? await URLSession.shared.data(for: req)
         app = XCUIApplication()
-        app.launchEnvironment = ["WORKPLACE_URL": "127.0.0.1:4399", "WORKPLACE_TOKEN": "mock-token-0123456789abcdef", "WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_NO_DEVICE_AUTH": "1"]
+        app.launchEnvironment = ["WORKPLACE_URL": UITestEnv.host, "WORKPLACE_TOKEN": "mock-token-0123456789abcdef", "WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_NO_DEVICE_AUTH": "1"]
     }
 
     private func shot(_ name: String) {
@@ -270,7 +270,7 @@ final class NewContractUITests: XCTestCase {
 
     func testRoomListThreadPostAndLiveReply() {
         app.launchEnvironment["WORKPLACE_ROOM"] = "list"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.navigationBars["Room"].waitForExistence(timeout: 8))
         // v2: topic threads live in General's room.
         let generalRoom = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'General'")).firstMatch
@@ -300,7 +300,7 @@ final class NewContractUITests: XCTestCase {
 
     func testGeneralChannelIsPinnedAboveTopicsAndShowsTheWholeTeam() {
         app.launchEnvironment["WORKPLACE_ROOM"] = "list"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.navigationBars["Room"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Everyone"].waitForExistence(timeout: 6), "General is its own room, above the area rooms")
         XCTAssertTrue(app.staticTexts["Areas"].exists, "one room per area")
@@ -320,7 +320,7 @@ final class NewContractUITests: XCTestCase {
 
     func testCooCardShowsPresenceAndOpensTalk() {
         app.launchEnvironment["WORKPLACE_TAB"] = "office"
-        app.launch()
+        app.launchThemed()
         let coo = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Claude' AND label CONTAINS 'Chief Operating Officer' AND label CONTAINS 'online'")).firstMatch
         XCTAssertTrue(coo.waitForExistence(timeout: 8), "the COO card shows above the units with her presence")
         shot("office-coo-card")
@@ -331,7 +331,7 @@ final class NewContractUITests: XCTestCase {
 
     func testMentionedEmployeeShowsReplyingThenTheAnswerInAThread() {
         app.launchEnvironment["WORKPLACE_ROOM"] = "rt-socket"
-        app.launch()
+        app.launchThemed()
         let composer = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Post as you'")).firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 8))
         composer.tap(); composer.typeText("Reuse ask_mac. @kabir go ahead.")
@@ -343,7 +343,7 @@ final class NewContractUITests: XCTestCase {
 
     func testSpendShowsRealMoneyAndFreeSubscriptionUsage() {
         app.launchEnvironment["WORKPLACE_SPEND"] = "1"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.navigationBars["Spend"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Anthropic API"].waitForExistence(timeout: 6))
         XCTAssertTrue(app.staticTexts["estimate"].exists, "estimates are labelled")
@@ -360,7 +360,7 @@ final class NewContractUITests: XCTestCase {
 
     func testEmployeePageNeedsYouAnswersInPlace() {
         app.launchEnvironment["WORKPLACE_TALK"] = "kabir"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.navigationBars["Kabir"].waitForExistence(timeout: 8))
         // v2: Talk stays a chat; what the employee waits on is one line that opens the Inbox.
         let banner = app.buttons.matching(NSPredicate(format: "label CONTAINS 'decision from Kabir waits on you'")).firstMatch
@@ -381,7 +381,7 @@ final class NewContractUITests: XCTestCase {
 
     func testOfficeCountsStalledAndStateReason() {
         app.launchEnvironment["WORKPLACE_TAB"] = "office"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.staticTexts["stalled"].waitForExistence(timeout: 8))
         let reason = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'waiting for your approval to run the errand tests'")).firstMatch
         var n = 0
@@ -398,7 +398,7 @@ final class NewContractUITests: XCTestCase {
 
     func testInboxItemShowsWhoWhatAndRoomLink() {
         app.launchEnvironment["WORKPLACE_INBOX_ITEM"] = "ib-1"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(app.staticTexts["inbox.question"].waitForExistence(timeout: 8))
         let who = app.buttons["Who and what"]
         var n = 0

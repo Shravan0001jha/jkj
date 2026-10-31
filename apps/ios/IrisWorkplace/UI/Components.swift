@@ -78,10 +78,13 @@ enum AvatarPalette {
 /// Online (filled) / offline (hollow) — shape as well as colour, like every other state in this app.
 struct PresenceDot: View {
     let online: Bool?
+    @Environment(\.theme) private var theme
+    @Environment(\.motionLevel) private var motion
     var body: some View {
         Group {
             if online == true {
                 Circle().fill(Color.green)
+                    .background { if theme.hasChrome { PulseRing(color: .green, motion: motion) } }
             } else if online == false {
                 Circle().strokeBorder(Color.secondary, lineWidth: 1.5)
             } else {
@@ -300,6 +303,7 @@ struct Pill: View {
     let text: String
     var symbol: String? = nil
     var tint: Color = .secondary
+    @Environment(\.theme) private var theme
 
     var body: some View {
         HStack(spacing: 4) {
@@ -307,9 +311,10 @@ struct Pill: View {
             Text(text)
         }
         .font(.caption.weight(.medium))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
+        .padding(.horizontal, theme.radii.pillPadding.h)
+        .padding(.vertical, theme.radii.pillPadding.v)
         .background(tint.opacity(0.15), in: Capsule())
+        .overlay { if theme.hasChrome { Capsule().strokeBorder(tint.opacity(0.55), lineWidth: 0.75) } }
         .foregroundStyle(tint)
     }
 }
@@ -467,8 +472,17 @@ struct EvidenceLine: View {
 
 struct SectionHeader: View {
     let text: String
+    @Environment(\.theme) private var theme
     var body: some View {
-        Text(text).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).textCase(nil)
+        if let color = theme.type.sectionHeaderColor {
+            // HUD header: monospaced, uppercase, tracked (Sci-fi).
+            Text(theme.type.sectionHeaderUppercase ? text.uppercased() : text)
+                .font(theme.type.sectionHeader).tracking(theme.type.sectionHeaderTracking)
+                .foregroundStyle(color).textCase(nil)
+                .accessibilityLabel(text)
+        } else {
+            Text(text).font(theme.type.sectionHeader).foregroundStyle(.secondary).textCase(nil)
+        }
     }
 }
 

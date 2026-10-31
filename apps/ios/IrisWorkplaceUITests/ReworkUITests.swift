@@ -8,11 +8,11 @@ final class ReworkUITests: XCTestCase {
 
     override func setUp() async throws {
         continueAfterFailure = false
-        var req = URLRequest(url: URL(string: "http://127.0.0.1:4399/api/_reset")!)
+        var req = URLRequest(url: URL(string: "http://\(UITestEnv.host)/api/_reset")!)
         req.httpMethod = "POST"
         _ = try? await URLSession.shared.data(for: req)
         app = XCUIApplication()
-        app.launchEnvironment = ["WORKPLACE_URL": "127.0.0.1:4399", "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
+        app.launchEnvironment = ["WORKPLACE_URL": UITestEnv.host, "WORKPLACE_TOKEN": "mock-token-0123456789abcdef",
                                  "WORKPLACE_NO_NOTIF_PROMPT": "1", "WORKPLACE_NO_DEVICE_AUTH": "1"]
     }
 
@@ -37,7 +37,7 @@ final class ReworkUITests: XCTestCase {
 
     func testStoryShowsChainAndAuditAndParkingNeedsReasonAndResumeWhen() {
         app.launchEnvironment["WORKPLACE_ITEM"] = "as_mock_waiting"
-        app.launch()
+        app.launchThemed()
         XCTAssertTrue(label("Waiting on").waitForExistence(timeout: 10), "the waiting box names who")
         XCTAssertTrue(any("item.doc").exists, "the doc link")
         shot("story-waiting")
@@ -69,7 +69,7 @@ final class ReworkUITests: XCTestCase {
 
     func testAChainPersonOpensTheirTalkThread() {
         app.launchEnvironment["WORKPLACE_ITEM"] = "as_mock_waiting"
-        app.launch()
+        app.launchThemed()
         let qa = any("item.chain.QA")
         XCTAssertTrue(qa.waitForExistence(timeout: 10) || reveal(qa))
         XCTAssertTrue(reveal(qa))
@@ -82,7 +82,7 @@ final class ReworkUITests: XCTestCase {
 
     func testReassignAsksForAReason() {
         app.launchEnvironment["WORKPLACE_ITEM"] = "as_mock_waiting"
-        app.launch()
+        app.launchThemed()
         let assignee = any("item.assignee")
         XCTAssertTrue(assignee.waitForExistence(timeout: 10))
         assignee.tap()
@@ -96,7 +96,7 @@ final class ReworkUITests: XCTestCase {
     }
 
     func testFinishedEpicsCollectInACollapsedDoneSection() {
-        app.launch()
+        app.launchThemed()
         let done = any("plan.done")
         XCTAssertTrue(done.waitForExistence(timeout: 10) || reveal(done))
         XCTAssertTrue(reveal(done))
@@ -108,7 +108,7 @@ final class ReworkUITests: XCTestCase {
 
     func testInboxItemShowsTheCooNoteOnTop() {
         app.launchEnvironment["WORKPLACE_INBOX_ITEM"] = "in_muqel76q1h1i1"
-        app.launch()
+        app.launchThemed()
         let note = any("inbox.cooNote")
         XCTAssertTrue(note.waitForExistence(timeout: 10))
         XCTAssertTrue(reveal(note, up: false))
@@ -118,7 +118,7 @@ final class ReworkUITests: XCTestCase {
 
     func testSuperFocusAndGrantingTheMac() {
         app.launchEnvironment["WORKPLACE_SETTINGS"] = "1"
-        app.launch()
+        app.launchThemed()
         let toggle = app.switches["settings.superFocus"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 10) || reveal(toggle))
         XCTAssertTrue(reveal(toggle))

@@ -5,12 +5,16 @@ import UserNotifications
 struct WorkplaceApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model: AppModel
+    /// The theme (docs/THEMES.md): Default unless the owner picked another in Settings.
+    @State private var themes = ThemeStore()
+    @State private var cx: SciFiCX
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let notifier = LocalNotifier()
         let m = AppModel(notifier: notifier, cache: DiskCache.appDefault())
         _model = State(initialValue: m)
+        _cx = State(initialValue: SciFiCX(model: m))
         // Wired here, not when a credential appears: a notification tap that cold-launches the app
         // reaches the router before the first view (PushManager keeps it if it arrives earlier still).
         AppDelegate.push.onOpen = { [weak m] link in m?.open(link) }
@@ -20,6 +24,8 @@ struct WorkplaceApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                .environment(cx)
+                .themeRoot(themes)
                 .onAppear {
                     model.alerts.isActive = { UIApplication.shared.applicationState == .active }
                     model.start()
@@ -45,6 +51,7 @@ struct WorkplaceApp: App {
                     case .active: model.foreground()
                     case .background:
                         model.background()
+                        Task { await cx.background() }
                         DashboardRefresh.schedule()
                     default: break
                     }

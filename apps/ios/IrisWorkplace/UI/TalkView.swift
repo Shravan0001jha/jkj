@@ -32,7 +32,7 @@ struct TalkListView: View {
     static let rowHeight: CGFloat = 64
 
     var body: some View {
-        List {
+        List { Group {
             if model.office.data == nil {
                 if let e = model.office.error {
                     ErrorRow(message: e) { Task { if let r = model.rest { await model.office.load(r) } } }
@@ -64,7 +64,8 @@ struct TalkListView: View {
                 }
                 .accessibilityIdentifier("talk.row.\(id)")
             }
-        }
+        }.themedRows() }
+        .themedList()
         .listStyle(.plain)
         .navigationTitle("Talk")
         .refreshable { if let r = model.rest { await model.office.load(r); await model.coo.load(r); await model.talkThreads.load(r) } }
@@ -366,7 +367,7 @@ struct ConversationView: View {
                 if isCoo, cooOnline == false {
                     Text("The COO is offline: messages wait; Asha handles routine work meanwhile.")
                         .font(.caption).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity).padding(.vertical, 6).background(.bar)
+                        .frame(maxWidth: .infinity).padding(.vertical, 6).themedBar(Material.bar)
                 } else if !isCoo, mine, let d = talk.detail, !d.needsYou.isEmpty {
                     NeedsYouBanner(count: d.needsYou.count, name: name).padding(.top, 6)
                 }
@@ -386,7 +387,8 @@ struct ConversationView: View {
             pending: $pending,
             onVoice: { note in Task { await sendToThread(voice: note) } },
             onComposerError: { self.error = $0 },
-            mentionable: model.mentionable.filter { $0 != threadId }
+            mentionable: model.mentionable.filter { $0 != threadId },
+            quickReplies: isCoo
         )
     }
 
@@ -494,7 +496,7 @@ struct ConversationView: View {
                 if cooOnline == false {
                     Text("The COO is offline: messages wait; Asha handles routine work meanwhile.")
                         .font(.caption).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity).padding(.vertical, 6).background(.bar)
+                        .frame(maxWidth: .infinity).padding(.vertical, 6).themedBar(Material.bar)
                 }
             },
             footer: {
@@ -502,7 +504,8 @@ struct ConversationView: View {
                     Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.footnote)
                 }
             },
-            onOpen: open
+            onOpen: open,
+            quickReplies: true
         )
     }
 
@@ -585,7 +588,7 @@ struct ApprovalCard: View {
             }
             .frame(maxHeight: 120)
             HStack {
-                Button("Allow once") { decide(.once) }.buttonStyle(.borderedProminent)
+                Button("Allow once") { decide(.once) }.themedProminent()
                 Button("Always") { decide(.always) }.buttonStyle(.bordered)
                 Button("Deny", role: .destructive) { decide(.deny) }.buttonStyle(.bordered)
                 if busy { ProgressView() }
@@ -618,7 +621,7 @@ struct EmployeeProfileView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            List { Group {
                 if let d = model.talk.detail {
                     Section {
                         LabeledContent("Role", value: d.employee.roleId)
@@ -687,7 +690,8 @@ struct EmployeeProfileView: View {
                 } else {
                     HStack { Spacer(); ProgressView(); Spacer() }
                 }
-            }
+            }.themedRows() }
+            .themedList()
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -710,7 +714,7 @@ struct CharterView: View {
     @State private var error: String?
 
     var body: some View {
-        List {
+        List { Group {
             Section {
                 Text(summary.mission).font(.body)
                 HStack {
@@ -741,7 +745,8 @@ struct CharterView: View {
             } else {
                 HStack { Spacer(); ProgressView(); Spacer() }
             }
-        }
+        }.themedRows() }
+        .themedList()
         .listStyle(.insetGrouped)
         .navigationTitle(summary.title)
         .navigationBarTitleDisplayMode(.inline)

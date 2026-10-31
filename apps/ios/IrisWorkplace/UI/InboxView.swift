@@ -2,11 +2,12 @@ import SwiftUI
 
 struct InboxView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
     @State private var path: [String] = []
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
+            List { Group {
                 if let error = model.inbox.error, !model.inbox.loaded {
                     ErrorRow(message: error) { Task { await reload() } }
                 } else if !model.inbox.loaded {
@@ -16,6 +17,11 @@ struct InboxView: View {
                 if model.inbox.loaded && model.inbox.items.isEmpty {
                     EmptyState(symbol: "tray", title: "Nothing waiting",
                                text: "Approvals, decisions and questions from the employees arrive here.")
+                }
+                if theme.has(.decisionQueue) && !model.inbox.open.isEmpty {
+                    Section { DecisionDeck() }
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                        .listRowBackground(Color.clear)
                 }
                 if !model.inbox.open.isEmpty {
                     Section {
@@ -36,7 +42,8 @@ struct InboxView: View {
                 if let error = model.inbox.error, model.inbox.loaded {
                     Section { ErrorRow(message: error) { Task { await reload() } } }
                 }
-            }
+            }.themedRows() }
+            .themedList()
             .listStyle(.insetGrouped)
             .refreshable { await reload() }
             .navigationTitle("Inbox")
@@ -111,6 +118,7 @@ struct InboxRow: View {
 /// The COO passed this on to the owner: why it needs him, on top of the item.
 struct CooNoteBanner: View {
     let note: CooNote
+    @Environment(\.theme) private var theme
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -124,7 +132,7 @@ struct CooNoteBanner: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+        .themedCard(radius: theme.radii.card, fill: Color.accentColor.opacity(0.1))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("inbox.cooNote")
     }
@@ -140,6 +148,7 @@ extension Optional where Wrapped == InboxUrgency {
 /// (reply, ask back, or suggest something else). `danger` confirms; `needsNote` asks for a note.
 struct InboxItemView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
     let id: String
     @State private var draft = ""
     @State private var error: String?
@@ -168,6 +177,7 @@ struct InboxItemView: View {
                         .padding(16)
                     }
                     .scrollDismissesKeyboard(.interactively)
+                    .themedList()
                     .onChange(of: messages.count) { _, _ in withAnimation { proxy.scrollTo("bottom") } }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) { composer }
@@ -199,8 +209,8 @@ struct InboxItemView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(item.state == .open && item.urgency.isRaised ? u.tint.opacity(0.7) : .clear, lineWidth: 1.5))
+        .themedCard(radius: theme.radii.card, fill: Color(.secondarySystemBackground))
+        .overlay(RoundedRectangle(cornerRadius: theme.radii.card).strokeBorder(item.state == .open && item.urgency.isRaised ? u.tint.opacity(0.7) : .clear, lineWidth: 1.5))
     }
 
     /// Who raised it, what each answer does, links, context: behind one disclosure.
@@ -259,7 +269,7 @@ struct InboxItemView: View {
             .accessibilityLabel("Send reply")
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.bar)
+        .themedBar(Material.bar)
     }
 
     private func load() async {
@@ -449,7 +459,7 @@ private struct OptionStyle: ViewModifier {
         if compact {
             content
         } else if recommended {
-            content.buttonStyle(.borderedProminent)
+            content.themedProminent()
         } else {
             content.buttonStyle(.bordered)
         }

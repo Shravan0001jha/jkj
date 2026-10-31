@@ -110,7 +110,7 @@ struct RequestsList: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        List {
+        List { Group {
             if let e = model.requests.error, !model.requests.loaded { ErrorRow(message: e) { Task { await reload() } } }
             if model.requests.loaded && model.requests.items.isEmpty {
                 EmptyState(symbol: "text.bubble", title: "No requests yet", text: "Tap + to state a feature or ask Asha. The status comes back here.")
@@ -120,7 +120,8 @@ struct RequestsList: View {
                     RequestStatusRow(feature: model.requests.latestFeature(r.feature), status: model.requests.status(for: r.feature.id) ?? r.status)
                 }
             }
-        }
+        }.themedRows() }
+        .themedList()
         .listStyle(.insetGrouped)
         .refreshable { await reload() }
         .task { if !model.requests.loaded { await reload() } }
