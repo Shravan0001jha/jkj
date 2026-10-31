@@ -52,14 +52,24 @@ final class Router {
     var proposalId: String?
     var featuresSegment: String?
 
+    /// Set to show a tab's list itself (pops whatever page that tab had open); the tab clears it.
+    var inboxList = false
+    var roomList = false
+
     func openInbox(_ id: String) { closeSheets(); inboxItemId = id; tab = .inbox }
+    func openInboxList() { closeSheets(); inboxItemId = nil; inboxList = true; tab = .inbox }
     func openThread(_ id: String) { closeSheets(); roomThreadId = id; tab = .room }
+    func openRoomList() { closeSheets(); roomThreadId = nil; roomList = true; tab = .room }
     func talk(to employeeId: String) { closeSheets(); talkEmployeeId = employeeId; tab = .talk }
     func openItem(_ id: String) { closeSheets(); itemId = id; tab = .plan }
     func openReleasePost(_ id: String) { closeSheets(); releasePostId = id; tab = .room }
 
-    /// A jump to another tab from a sheet (the Office's cards, an alert) closes the sheet first.
-    private func closeSheets() { showOffice = false; showFeatures = false; showAlerts = false }
+    /// A jump to another tab from a sheet (the Office's cards, an alert, a notification tap) closes
+    /// the sheet first. A half-written new request is left open.
+    func closeSheets() {
+        showOffice = false; showFeatures = false; showAlerts = false
+        showSettings = false; showSpend = false; showReleases = false
+    }
 }
 
 /// Owns the mode, the credential, the clients and the stores. One per app.
@@ -284,13 +294,18 @@ final class AppModel {
     func open(_ link: AppLink) {
         switch link {
         case .inbox(let id, let decide): router.openInbox(id); router.decideItemId = decide ? id : nil
+        case .inboxList: router.openInboxList()
         case .room(let id): router.openThread(id)
+        case .roomList: router.openRoomList()
         case .employee(let id): router.talk(to: id)
-        case .office: router.showOffice = true
+        case .office: router.closeSheets(); router.showOffice = true
         case .item(let id): router.openItem(id)
-        case .plan: router.tab = .plan
-        case .updates: router.tab = .updates
+        case .plan: router.closeSheets(); router.tab = .plan
+        case .updates: router.closeSheets(); router.tab = .updates
         case .releasePost(let id): router.openReleasePost(id)
+        case .releases: router.closeSheets(); router.showReleases = true
+        case .features: router.closeSheets(); router.showFeatures = true
+        case .spend: router.closeSheets(); router.showSpend = true
         }
     }
 

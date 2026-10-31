@@ -47,6 +47,11 @@ struct RoomView: View {
                 path = NavigationPath([ThreadRoute(id: id)])
                 model.router.roomThreadId = nil
             }
+            .onChange(of: model.router.roomList, initial: true) { _, list in
+                guard list else { return }
+                path = NavigationPath()
+                model.router.roomList = false
+            }
             .onChange(of: model.router.releasePostId, initial: true) { _, id in
                 guard let id else { return }
                 var p = NavigationPath()

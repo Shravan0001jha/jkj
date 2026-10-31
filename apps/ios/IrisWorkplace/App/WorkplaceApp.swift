@@ -11,6 +11,9 @@ struct WorkplaceApp: App {
         let notifier = LocalNotifier()
         let m = AppModel(notifier: notifier, cache: DiskCache.appDefault())
         _model = State(initialValue: m)
+        // Wired here, not when a credential appears: a notification tap that cold-launches the app
+        // reaches the router before the first view (PushManager keeps it if it arrives earlier still).
+        AppDelegate.push.onOpen = { [weak m] link in m?.open(link) }
     }
 
     var body: some Scene {
@@ -27,7 +30,6 @@ struct WorkplaceApp: App {
                     let push = AppDelegate.push
                     push.onToken = { [weak model] hex in model?.pushTokenReceived(hex) }
                     push.onTokenFailure = { [weak model] reason in model?.pushTokenFailed(reason) }
-                    push.onOpen = { [weak model] link in model?.open(link) }
                     push.recentlyShownBySocket = { [weak model] inboxId, threadId in model?.alerts.recentlyShown(inboxId: inboxId, threadId: threadId) ?? false }
                     model.clearNotification = { PushManager.clear(inboxId: $0) }
                     model.housekeeping = { PushManager.housekeeping(openInboxIds: $0) }

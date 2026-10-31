@@ -48,6 +48,11 @@ struct InboxView: View {
                 path = [id]
                 model.router.inboxItemId = nil
             }
+            .onChange(of: model.router.inboxList, initial: true) { _, list in
+                guard list else { return }
+                path = []
+                model.router.inboxList = false
+            }
         }
     }
 
@@ -348,6 +353,9 @@ struct InboxLinkRow: View {
             Button { model.router.openThread(threadId) } label: {
                 Label(link.label, systemImage: "person.3")
             }
+        } else if let app = AppLink.parse(link.href) {
+            // The server's other in-app forms (`#/item/<id>`, `#/employee/<id>?item=…`).
+            Button { model.open(app) } label: { Label(link.label, systemImage: "arrow.forward.circle") }
         } else if let url = link.url {
             Link(destination: url) { Label(link.label, systemImage: "link") }
         } else {

@@ -227,6 +227,6 @@ final class V2ContractTests: XCTestCase {
         XCTAssertEqual(AppLink.parse("releases/rp_1"), .releasePost("rp_1"))
         XCTAssertEqual(AppLink.parse("inbox/in_1"), .inbox("in_1", decide: false))
         XCTAssertEqual(AppLink.parse("room/th_epic_x"), .room("th_epic_x"))
-        XCTAssertNil(AppLink.parse("item"))
+        XCTAssertEqual(AppLink.parse("item"), .plan, "an item link without its id opens the parent screen")
     }
 }

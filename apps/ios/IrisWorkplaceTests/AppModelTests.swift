@@ -818,6 +818,18 @@ final class ReliabilityAndPushTests: XCTestCase {
         XCTAssertEqual(m.router.tab, .updates)
         m.open(.plan)
         XCTAssertEqual(m.router.tab, .plan)
+        // Lists and the menu's sheets (the push summary, the web's routes)
+        m.open(.inboxList)
+        XCTAssertEqual(m.router.tab, .inbox); XCTAssertTrue(m.router.inboxList); XCTAssertNil(m.router.inboxItemId)
+        m.open(.roomList)
+        XCTAssertEqual(m.router.tab, .room); XCTAssertTrue(m.router.roomList)
+        m.open(.releases); XCTAssertTrue(m.router.showReleases)
+        m.open(.features); XCTAssertTrue(m.router.showFeatures); XCTAssertFalse(m.router.showReleases, "one sheet at a time")
+        m.open(.spend); XCTAssertTrue(m.router.showSpend)
+        m.router.showSettings = true
+        m.open(.inbox("in_z", decide: false))
+        XCTAssertFalse(m.router.showSettings, "a notification tap is never hidden under a sheet")
+        XCTAssertFalse(m.router.showSpend)
     }
 }
 

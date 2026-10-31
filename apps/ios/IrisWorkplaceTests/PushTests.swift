@@ -15,10 +15,89 @@ final class AppLinkTests: XCTestCase {
 
     func testJunkIsRejected() {
         XCTAssertNil(AppLink.parse(""))
-        XCTAssertNil(AppLink.parse("inbox"))
+        XCTAssertNil(AppLink.parse("#/"))
         XCTAssertNil(AppLink.parse("settings/x"))
+        XCTAssertNil(AppLink.parse("mailto:owner@example.com"))
         XCTAssertNil(AppLink.parse(url: URL(string: "https://work.irisforu.com/inbox/in_x")!), "only our scheme or a bare link")
         XCTAssertNil(AppLink.parse(url: URL(string: "irisworkplace://auth#token=abc")!), "the sign-in callback is not a deep link")
+    }
+
+    /// Every link form packages/server/src produces (push.ts, trail.ts, status.ts, rhythm.ts, room.ts,
+    /// coo.ts, views.ts) and the web's own routes.
+    func testEveryServerLinkForm() {
+        let cases: [(String, AppLink)] = [
+            // push.ts
+            ("inbox/in_1", .inbox("in_1", decide: false)),
+            ("inbox", .inboxList),                                   // the burst summary
+            ("office", .office),                                     // a ring / an alert with no employee
+            ("employee/dev", .employee("dev")),                      // an alert about an employee
+            ("item/as_1", .item("as_1")),                            // alerts once they carry their item
+            // Update hrefs (trail.ts, status.ts, rhythm.ts)
+            ("plan", .plan), ("updates", .updates), ("releases/rp_1", .releasePost("rp_1")), ("room/th_1", .room("th_1")),
+            // The web's hash form (room.ts, coo.ts, trail.ts, views.ts)
+            ("#/room/th_2", .room("th_2")),
+            ("#/item/as_2", .item("as_2")),
+            ("#/employee/dev?item=as_3", .employee("dev")),
+            ("#/assign?item=as_4", .item("as_4")),
+            ("#/assign", .plan),
+            ("#/inbox", .inboxList), ("#/inbox/in_2", .inbox("in_2", decide: false)),
+            ("#/room", .roomList), ("#/office", .office), ("#/org", .office),
+            ("#/features", .features), ("#/spend", .spend), ("#/releases", .releases),
+            // Leading slashes, a trailing slash, percent-encoding, case
+            ("/inbox/in_3", .inbox("in_3", decide: false)), ("/#/room/th_3", .room("th_3")), ("inbox/", .inboxList),
+            ("#/room/th%20y", .room("th y")), ("Inbox/in_4", .inbox("in_4", decide: false)),
+            // Our scheme
+            ("irisworkplace://inbox", .inboxList), ("irisworkplace://item/as_5", .item("as_5")),
+        ]
+        for (raw, want) in cases { XCTAssertEqual(AppLink.parse(raw), want, raw) }
+        XCTAssertEqual(AppLink.parse("inbox", decide: true), .inboxList)
+        XCTAssertEqual(AppLink.parse("#/inbox/in_5", decide: true), .inbox("in_5", decide: true))
+    }
+
+    /// A tap always opens something: the link, else an id in the payload, else the category's screen, else home.
+    func testANotificationTapAlwaysResolves() {
+        XCTAssertEqual(AppLink.resolve(userInfo: ["link": "inbox"], category: "WP_INBOX"), .inboxList, "the summary push")
+        XCTAssertEqual(AppLink.resolve(userInfo: ["link": "inbox/in_1", "inboxId": "in_1"]), .inbox("in_1", decide: false))
+        XCTAssertEqual(AppLink.resolve(userInfo: ["link": "inbox/in_1"], decide: true), .inbox("in_1", decide: true))
+        XCTAssertEqual(AppLink.resolve(userInfo: ["link": "office"], category: "WP_ALERT"), .office)
+        XCTAssertEqual(AppLink.resolve(userInfo: ["link": "office", "itemId": "as_1"], category: "WP_ALERT"), .item("as_1"), "a specific id beats a list link")
+        XCTAssertEqual(AppLink.resolve(userInfo: ["link": "employee/dev", "employeeId": "dev"], category: "WP_ALERT"), .employee("dev"))
+        XCTAssertEqual(AppLink.resolve(userInfo: ["inboxId": "in_9"]), .inbox("in_9", decide: false), "the app's own local notification carries only the id")
+        XCTAssertEqual(AppLink.resolve(userInfo: ["link": "#/room/th_1"], category: "WP_ROOM"), .room("th_1"))
+        XCTAssertEqual(AppLink.resolve(userInfo: ["link": "whatever/x"], category: "WP_ROOM"), .roomList, "unknown: the category's screen")
+        XCTAssertEqual(AppLink.resolve(userInfo: ["link": "whatever/x"], category: "WP_UPDATE"), .updates)
+        XCTAssertEqual(AppLink.resolve(userInfo: ["link": "whatever/x"], category: "WP_INBOX"), .inboxList)
+        XCTAssertEqual(AppLink.resolve(userInfo: [:]), .plan, "nothing at all: home, never nothing")
+        XCTAssertEqual(AppLink.resolve(userInfo: ["link": ""], category: "WP_ALERT"), .office)
+    }
+
+    /// A cold launch: iOS hands the tap to the delegate before the app has wired `onOpen`. It waits, then applies.
+    @MainActor
+    func testATapBeforeTheAppIsReadyIsQueuedNotDropped() {
+        let push = PushManager()
+        var opened: [AppLink] = []
+        push.deliver(.inbox("in_1", decide: false))
+        push.deliver(.inboxList)
+        XCTAssertEqual(push.pendingLink, .inboxList, "the latest tap is kept")
+        push.onOpen = { opened.append($0) }
+        XCTAssertEqual(opened, [.inboxList])
+        XCTAssertNil(push.pendingLink)
+        push.deliver(.item("as_1"))
+        XCTAssertEqual(opened, [.inboxList, .item("as_1")], "once wired, a tap goes straight through")
+    }
+
+    /// The model applies a link before any screen exists; the screens read the router when they appear.
+    @MainActor
+    func testALinkAppliedBeforeStartSurvivesStart() {
+        let m = AppModel(relayTokens: MemoryTokenStore(token: "s"), lanTokens: MemoryTokenStore(),
+                         defaults: UserDefaults(suiteName: "AppLinkTests")!, notifier: FakeNotifier(),
+                         urlSession: StubURLProtocol.session(), makeTransport: { FakeSocketTransport() },
+                         webAuth: FakeWebAuth(), env: [:], pathMonitor: nil, deviceAuth: FakeDeviceAuth())
+        m.open(.inbox("in_1", decide: true))
+        m.start()
+        XCTAssertEqual(m.router.tab, .inbox)
+        XCTAssertEqual(m.router.inboxItemId, "in_1")
+        XCTAssertEqual(m.router.decideItemId, "in_1")
     }
 
     func testTokenHex() {
