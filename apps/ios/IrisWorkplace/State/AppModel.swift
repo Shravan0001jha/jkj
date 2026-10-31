@@ -22,14 +22,28 @@ enum Connection: Equatable {
 /// v2: Plan is home; Updates replaces the Office counters. Releases live in the Room (the
 /// Releases room), and the Office and Features open from the Plan's menu — six tabs would put
 /// half of them behind iOS's own "More".
+///
+/// Nov 2026: the Dashboard tab (HLD-dashboard) holds two panes, the dashboard and Updates —
+/// "what is planned by when" next to "what happened" — so the bar stays at five. `.updates` is
+/// still its own value (deep links, `WORKPLACE_TAB`): it means the Dashboard tab's Updates pane.
 enum Tab: String, CaseIterable {
-    case plan, inbox, talk, room, updates
+    case plan, inbox, talk, room, updates, dashboard
+
+    /// The tab bar's items, in order. Never more than five, or iOS adds "More".
+    static let bar: [Tab] = [.plan, .inbox, .talk, .room, .dashboard]
 }
 
 /// Cross-tab navigation: an alert opens its Inbox item, an Office card opens Talk.
 @MainActor @Observable
 final class Router {
-    var tab: Tab = .plan
+    var tab: Tab = .plan { didSet { if tab == .updates || tab == .dashboard { dashboardPane = tab } } }
+    /// The Dashboard tab's pane last shown (`.dashboard` or `.updates`), restored when the tab is tapped.
+    private(set) var dashboardPane: Tab = .dashboard
+    /// What the tab bar shows as selected: the Updates pane lives under the Dashboard tab.
+    var barSelection: Tab {
+        get { tab == .updates ? .dashboard : tab }
+        set { tab = newValue == .dashboard ? dashboardPane : newValue }
+    }
     var inboxItemId: String?
     /// An epic/story/task page to open on the Plan (from a push, an Update, a release change).
     var itemId: String?
@@ -111,6 +125,8 @@ final class AppModel {
     let talkPrefs: TalkPrefs
     /// Talk threads (LLD-app-fixes): nil-supported until the server answers; 404 keeps the old chat.
     let talkThreads = TalkThreadsStore()
+    /// The mini dashboard (HLD-dashboard): the cached metrics snapshot, refreshed in the background.
+    let dashboard = DashboardStore()
     private var planReload: Task<Void, Never>?
     let alerts: AlertsStore
     /// Releases updated over the socket, and their streamed log lines.
@@ -171,6 +187,7 @@ final class AppModel {
         inbox.cache = cache
         plan.cache = cache
         rooms.cache = cache
+        dashboard.cache = cache
         pathMonitor?.onChange = { [weak self] satisfied in self?.networkChanged(satisfied: satisfied) }
         pathMonitor?.start()
         alerts.suppressLocal = { [weak self] in self?.pushRegistered ?? false }
@@ -367,6 +384,7 @@ final class AppModel {
         pushRegistered = false
         stopConnections()
         cache?.clearAll()   // nothing from this session stays on the phone
+        dashboard.clear()
         relayTokens.clear()
         syncCredential()
         health = nil
@@ -452,6 +470,7 @@ final class AppModel {
         guard hasCredential, !credentialUnreadable else { return }
         if wasUnreadable { connect(); Task { await registerPush() }; return }
         Task { await resyncOpenChats() }
+        refreshDashboard()
         switch connection {
         case .macOffline, .accessOff, .unauthorized: connect()
         default: if socket == nil { connect() } else { socket?.reconnectNow() }
@@ -583,6 +602,28 @@ final class AppModel {
         inbox.hydrate()
         plan.hydrate()
         rooms.hydrate()
+        dashboard.hydrate()
+    }
+
+    /// Launch and foreground: fetch the snapshot behind the cached one (throttled; never blocks).
+    func refreshDashboard() {
+        guard let rest else { return }
+        Task { await dashboard.refresh(rest) }
+    }
+
+    /// The BGAppRefreshTask run. iOS may launch the app in the background just for this, before any
+    /// scene appeared, so it reads the saved mode and credential itself instead of needing `start()`.
+    /// Returns false when the fetch failed (the cached copy stays either way).
+    func backgroundRefreshDashboard() async -> Bool {
+        if rest == nil {
+            config = ServerConfig.load(defaults: defaults, env: env)
+            syncCredential()
+        }
+        guard hasCredential else { return true }
+        let client = rest ?? RestClient(config: config, tokens: tokens, session: urlSession)
+        cache?.setScope(config)
+        dashboard.hydrate()
+        return await dashboard.load(client)
     }
 
     func loadAll() async {
@@ -592,6 +633,7 @@ final class AppModel {
         async let o: Void = office.load(rest)
         async let i: Void = inbox.load(rest)
         async let p: Void = plan.load(rest)
+        refreshDashboard()
         _ = await (o, i, p)
         syncNeedsYou()
         if inbox.loaded { housekeeping?(Set(inbox.open.map(\.id))) }
