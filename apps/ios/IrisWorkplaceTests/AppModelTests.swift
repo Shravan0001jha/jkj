@@ -264,7 +264,8 @@ final class AppModelTests: XCTestCase {
         let m = model()
         await XCTAssertThrowsErrorAsync(try await m.pair(urlText: "", code: "1"))
         await XCTAssertThrowsErrorAsync(try await m.pair(urlText: "mac.local", code: "  "))
-        XCTAssertTrue(StubURLProtocol.recorded.isEmpty)
+        // Only the exchange counts: the previous test's model may still be finishing its loads.
+        XCTAssertFalse(StubURLProtocol.recorded.contains { $0.request.url?.path == "/api/pair/exchange" })
         XCTAssertEqual(m.mode, .relay)
     }
 
