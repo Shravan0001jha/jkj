@@ -1,0 +1,2 @@
+# Paste into AWS CloudShell. Lets the Workplace server attach ONLY the iris-dash-api role, and ONLY to a Lambda function.
+aws iam put-role-policy --role-name iris-workplace-server --policy-name iris-dash-passrole --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"iam:PassRole","Resource":"arn:aws:iam::425434217148:role/iris-dash-api","Condition":{"StringEquals":{"iam:PassedToService":"lambda.amazonaws.com"}}}]}' && echo DONE
