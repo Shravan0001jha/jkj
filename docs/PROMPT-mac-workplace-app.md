@@ -35,16 +35,20 @@ Fix:
 - **Server:** this is the cloud side. The cloud COO will change `push.ts` so alerts with an `itemId` link to `item/<id>`, and the summary keeps `inbox`. Do not change the server from here. Just make the app robust to all the forms above.
 - Check by hand: after a fresh install, send a test push of each kind, if the server exposes one, and tap each from the lock screen while the app is killed, in the background and in the foreground.
 
-## 3. Mini dashboard tab (owner wants it in the app, data stored on the phone)
+## 3. Mini dashboard tab (owner wants it in the app; data kept on the phone)
 
-- **Contract:** `docs/HLD-dashboard.md` §5, snapshot v1 (branch `coo/dashboard` in the jkj repo). Data comes from `GET /api/metrics/snapshot` through the relay with the existing bearer. The cloud COO is building that endpoint now. Until it exists, use a fixture file with the same shape.
-- **Storage:** save the last snapshot with the existing `DiskCache`. Show it instantly on open, with "updated X min ago".
-- **Refresh:** automatic only, on launch, on foreground and with `BGAppRefreshTask` (register the identifier in Info.plist). No pull-to-refresh is needed. Stale data is fine, and it must never block or blank the screen.
-- **UI:** a new "Dashboard" tab with two parts.
-  - Features: name, committed date, forecast, a health pill (on-track, at-risk, late) and a one-line reason. Tapping a feature opens its scope checklist and date history.
-  - Gaps: the top 3 causes of lost days over 30 days.
-  - Keep it compact and in the app's existing style. The full sci-fi look is for the web dashboard only.
-- **Tests:** decoding the v1 fixture, an unknown future field is ignored, cache round-trip, and a stale timestamp is shown.
+The owner approved the web dashboard at https://dash.irisforu.com (1 Nov). The app gets a compact version of the same thing, built from the same data.
+
+- **Data:** `GET /api/metrics/snapshot` through the relay with the existing bearer session. It returns snapshot v1, the same JSON the website uses. Read `products`, `trends` and `gaps` only; `features` is the old epic list, so ignore it. The shape is defined by `packages/server/src/services/metrics/snapshot.ts` and `products.ts` on branch `coo/dashboard`. Use a real copy as a test fixture: `curl` it through the relay once and save it as `IrisWorkplaceTests/Fixtures/snapshot-v1.json`.
+- **Storage:** keep the last snapshot with the existing `DiskCache`. Show it instantly on open, with "updated X min ago".
+- **Refresh:** automatic only, on launch, on foreground and with `BGAppRefreshTask` (register the id in Info.plist). No pull-to-refresh is needed. Stale data is fine, and it must never blank or block the screen. A 404 (no snapshot yet), 503 or the server asleep all mean "keep showing the cache".
+- **UI:** a new "Dashboard" tab, graphical with minimal text, using the app's style and Swift Charts.
+  - **Top row:** three tiles: products complete (`products` with health `delivered`, out of the total), stories delivered this week (the last value of the summed `trends.deliveredByProduct`, with the change from last week), and open bugs (the last value of `trends.bugsOpenTotal`, with an arrow for rising or falling).
+  - **Products grid:** for each of `products[]`, the name, a progress ring (`done/total`), a tiny burn-up chart (`burnup.done` as a solid line against `burnup.total` as dashed), a status pill with an icon and label (`health`: on-track, at-risk, late, delivered, no-date), and the committed and forecast dates.
+  - **Tapping a product:** a bigger burn-up, bar charts of `weekly.delivered` and `weekly.bugs`, with weeks from `trends.weeks`.
+  - **Trends section:** a bar chart of delivered per week, and a line chart of `trends.bugsOpenTotal`.
+  - **Workplace section:** a stacked bar of `trends.waitByCause` showing the top 4 causes plus "Other", with these colours in this order: #3987e5, #d95926, #199e70, #c98500, #d55181. Add the review medians from `gaps.reviewWait.approval1Minutes.p50` and `approval2Minutes.p50`.
+- **Tests:** decode the real fixture; an unknown future field is ignored; the cache round-trips; a stale timestamp is shown; the summing for each tile is correct.
 
 ## Delivery
 
