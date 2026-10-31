@@ -175,3 +175,23 @@ test('products: parts group epics; weekly delivered, bugs and burn-up come from 
   assert.equal(p.burnup.total.at(-1), 3);
   assert.ok(snap.trends.bugsOpenTotal.at(-1)! >= 1);
 });
+
+test('extras: release stage, filer, cost and send-backs come from records', async () => {
+  const { filerOf } = await import('../src/services/metrics/extras.js');
+  assert.equal(filerOf('nikhil', ['nikhil']), 'qa');
+  assert.equal(filerOf('coo', []), 'coo');
+  assert.equal(filerOf('workplace', []), 'system');
+  assert.equal(filerOf('vivek', ['nikhil']), 'team');
+  const r = rows();
+  r.stage = { s1: 'staging' };
+  r.qaIds = ['b'];
+  r.stories.push({ id: 'b2', epicId: 'ep1', title: 'bug', status: 'ready', employeeId: 'b', charterId: 'server', createdAt: Date.parse('2026-10-29T00:00:00Z'), type: 'bug', createdBy: 'b' });
+  r.pace = { utilization: 0.3, allowance: 0.42, resetsAtMs: Date.parse('2026-11-05T16:00:00Z'), dayIndex: 3 };
+  const p = buildSnapshot(r, { products: [{ id: 'x', name: 'X', epics: ['ep1'] }] }).products[0]!;
+  assert.deepEqual(p.extras.release, { merged: 0, staging: 1, prod: 0 });
+  assert.equal(p.extras.costInr, 150);
+  assert.equal(p.extras.bugsByFiler.qa, 1);
+  assert.equal(p.extras.sendBacksPerStory, 0.5);   // s1 sent back once; s1 and s2 reached review
+  const snap = buildSnapshot(r, { products: [] });
+  assert.ok(snap.usage.projectedAtReset! > 0);
+});

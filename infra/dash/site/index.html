@@ -84,6 +84,18 @@ h2.sec{font-size:.82rem;letter-spacing:.18em;text-transform:uppercase;color:var(
 .meter i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--green))}
 .note{color:var(--faint);font-size:.76rem;margin:16px 0 0;max-width:80ch}
 @media (max-width:560px){.ep{grid-template-columns:1fr 70px 44px}.big{font-size:1.6rem}.hero{grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px}.tile{padding:10px 12px}}
+.since{display:flex;flex-wrap:wrap;gap:8px;margin:-10px 0 22px}
+.chip{font-family:var(--mono);font-size:.74rem;padding:4px 10px;border-radius:99px;border:1px solid var(--edge);background:var(--deck);color:var(--dim)}
+.chip b{color:var(--ink);font-weight:500}
+.stage{grid-column:1/-1;display:flex;height:6px;border-radius:99px;overflow:hidden;background:var(--void);gap:2px;margin-top:6px}
+.stage i{display:block;height:100%}
+.gantt-row{display:grid;grid-template-columns:170px 1fr;gap:10px;align-items:center;font-size:.82rem;min-height:26px}
+.gantt-row > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.heat{display:grid;gap:3px;font-size:.74rem}
+.heat .c{height:22px;border-radius:4px;display:grid;place-items:center;font-family:var(--mono);font-size:.68rem}
+.heat .h{color:var(--faint);font-family:var(--mono);text-align:center}
+.heat .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+@media (max-width:560px){.gantt-row{grid-template-columns:96px 1fr}.ax.odd{display:none}}
 /* Login */
 .gate{min-height:100vh;display:grid;place-items:center;padding:24px 0}
 .console{width:min(420px,100%);background:linear-gradient(180deg,var(--panel),var(--deck));border:1px solid var(--edge);border-radius:16px;padding:28px;
@@ -188,7 +200,7 @@ h2.sec{font-size:.82rem;letter-spacing:.18em;text-transform:uppercase;color:var(
   const niceMax = v => { if (v <= 0) return 1; const m = Math.pow(10, Math.floor(Math.log10(v))), n = v / m; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * m; };
   function frame(max, labels) {
     const ih = H - P.t - P.b, ticks = [0, max / 2, max];
-    const g = ticks.map(v => { const y = P.t + ih - (v / max) * ih; return `<line class="gl" x1="${P.l}" x2="${W - P.r}" y1="${y}" y2="${y}"/><text class="ax" x="${P.l - 6}" y="${y + 3}" text-anchor="end">${Math.round(v * 10) / 10}</text>`; }).join('');
+    const g = ticks.map(v => { const y = P.t + ih - (v / max) * ih; return `<line class="gl" x1="${P.l}" x2="${W - P.r}" y1="${y}" y2="${y}"/><text class="ax" x="${P.l - 6}" y="${y + 3}" text-anchor="end">${v >= 1000 ? Math.round(v / 1000) + 'k' : Math.round(v * 10) / 10}</text>`; }).join('');
     const iw = W - P.l - P.r, step = iw / labels.length;
     const xl = labels.map((l, i) => (i % Math.ceil(labels.length / 6) === 0 || i === labels.length - 1) ? `<text class="ax" x="${P.l + step * i + step / 2}" y="${H - 6}" text-anchor="middle">${esc(l)}</text>` : '').join('');
     return { g: g + xl, ih, iw, step };
@@ -244,6 +256,65 @@ h2.sec{font-size:.82rem;letter-spacing:.18em;text-transform:uppercase;color:var(
   }
   const legend = layers => `<div class="legend">${layers.map(l => `<span><i style="background:${l.color}"></i>${esc(l.name)}</span>`).join('')}</div>`;
 
+
+  // ---------- v3 widgets ----------
+  const STAGE = [['prod', '#3cf2a0', 'In prod'], ['staging', '#9085e9', 'On staging'], ['merged', '#3987e5', 'Merged']];
+  const FILER = [['qa', '#3987e5', 'QA'], ['coo', '#d95926', 'COO (your reports)'], ['cto', '#199e70', 'CTO'], ['team', '#c98500', 'Team'], ['system', '#d55181', 'System']];
+  function stageBar(r) {
+    const t = r.merged + r.staging + r.prod || 1;
+    return `<div class="stage" data-tip="In prod ${r.prod} · on staging ${r.staging} · merged ${r.merged}">${STAGE.map(([k, c]) => r[k] ? `<i style="width:${(r[k] / t) * 100}%;background:${c}"></i>` : '').join('')}</div>`;
+  }
+  function gauge(u, allowance, projected) {
+    if (u == null) return '<span class="big">—</span>';
+    const a = Math.PI, r = 44, cx = 56, cy = 54, pt = f => [cx - r * Math.cos(a * Math.min(1, f)), cy - r * Math.sin(a * Math.min(1, f))];
+    const arc = f => { const [x, y] = pt(f); return `M${cx - r},${cy} A${r},${r} 0 0 1 ${x},${y}`; };
+    const [ax, ay] = pt(allowance ?? 0);
+    const col = projected > 0.9 ? 'var(--amber)' : 'var(--cyan)';
+    return `<svg viewBox="0 0 112 64" style="width:130px;height:74px" data-tip="Used ${Math.round(u * 100)}% of the week · today's cap ${Math.round((allowance ?? 0) * 100)}% · at this pace ${Math.round(projected * 100)}% by reset"><path d="${arc(1)}" fill="none" stroke="var(--edge)" stroke-width="9" stroke-linecap="round"/><path d="${arc(u)}" fill="none" stroke="${col}" stroke-width="9" stroke-linecap="round"/><circle cx="${ax}" cy="${ay}" r="3.5" fill="var(--ink)"/><text x="56" y="52" text-anchor="middle" font-family="Chakra Petch" font-weight="600" font-size="20" fill="var(--ink)">${Math.round(u * 100)}%</text></svg>`;
+  }
+  function gantt(products) {
+    const day = 86400000, today = Date.now();
+    const starts = products.map(p => p.startedAt && Date.parse(p.startedAt)).filter(Boolean);
+    const ends = products.flatMap(p => [p.extras.deliveredAt, p.forecast.p50, p.committedDate].filter(Boolean).map(d => Date.parse(d)));
+    const lo = Math.min(...starts, today) - 2 * day, hi = Math.max(...ends, today + 7 * day) + 3 * day;
+    const X = t => ((t - lo) / (hi - lo)) * 100;
+    const ticks = []; for (let t = lo + ((8 - new Date(lo).getUTCDay()) % 7) * day; t < hi; t += 7 * day) ticks.push(t);
+    const axis = `<div class="gantt-row"><span></span><div style="position:relative;height:16px">${ticks.map((t, i) => `<span class="ax${i % 2 ? ' odd' : ''}" style="position:absolute;left:${X(t)}%;transform:translateX(-50%);font-size:10px;color:var(--faint);font-family:var(--mono)">${new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>`).join('')}</div></div>`;
+    const rows = products.map(p => {
+      if (!p.startedAt) return '';
+      const s = Date.parse(p.startedAt), done = p.extras.deliveredAt && Date.parse(p.extras.deliveredAt);
+      const end = done || (p.forecast.p50 ? Date.parse(p.forecast.p50) : today);
+      const col = p.health === 'delivered' ? 'var(--green)' : p.health === 'late' ? 'var(--red)' : p.health === 'at-risk' ? 'var(--amber)' : 'var(--cyan)';
+      const solidEnd = done || today;
+      const tipTxt = `<b>${esc(p.name)}</b><br>started ${wk(p.startedAt.slice(0, 10))}${done ? '<br>delivered ' + wk(p.extras.deliveredAt.slice(0, 10)) : p.forecast.p50 ? '<br>forecast ' + wk(p.forecast.p50) : '<br>stalled'}${p.committedDate ? '<br>committed ' + wk(p.committedDate) : ''}`;
+      return `<div class="gantt-row"><span data-p="${esc(p.id)}">${esc(p.name)}</span><div style="position:relative;height:16px" data-tip="${tipTxt}">
+        <div style="position:absolute;left:${X(s)}%;width:${Math.max(0.6, X(solidEnd) - X(s))}%;top:4px;height:8px;border-radius:99px;background:${col};box-shadow:0 0 8px ${col}"></div>
+        ${!done && end > today ? `<div style="position:absolute;left:${X(today)}%;width:${X(end) - X(today)}%;top:5px;height:6px;border-radius:99px;border:1px dashed ${col};opacity:.7"></div>` : ''}
+        ${p.committedDate ? `<div style="position:absolute;left:${X(Date.parse(p.committedDate))}%;top:1px;transform:translateX(-50%) rotate(45deg);width:9px;height:9px;background:var(--ink)"></div>` : ''}</div></div>`;
+    }).join('');
+    return `<div style="position:relative">${axis}${rows}<div style="position:absolute;top:0;bottom:0;left:calc(170px + 10px + (100% - 180px) * ${X(today) / 100});border-left:1px dashed var(--amber);opacity:.6;pointer-events:none"></div></div>`;
+  }
+  function heatmap(T, products) {
+    const all = products.flatMap(p => T.deliveredByProduct[p.id]), max = Math.max(...all, 1);
+    const cols = `grid-template-columns:minmax(90px,170px) repeat(${T.weeks.length},1fr)`;
+    const head = `<div class="heat" style="${cols}"><span></span>${T.weeks.map(w => `<span class="h">${wk(w)}</span>`).join('')}</div>`;
+    const rows = products.map(p => `<div class="heat" style="${cols}"><span class="n">${esc(p.name)}</span>${T.deliveredByProduct[p.id].map((v, i) => `<span class="c" style="background:rgba(77,227,255,${v ? 0.12 + 0.75 * (v / max) : 0.03});color:${v / max > 0.55 ? '#021018' : 'var(--dim)'}" data-tip="<b>${esc(p.name)}</b><br>${wk(T.weeks[i])}: ${v} delivered">${v || ''}</span>`).join('')}</div>`).join('');
+    return `<div style="display:flex;flex-direction:column;gap:3px">${head}${rows}</div>`;
+  }
+  function sinceStrip(P_, T) {
+    let prev = null; try { prev = JSON.parse(localStorage.getItem('dash-seen') || 'null'); } catch {}
+    const now = { at: snap.generatedAt, bugs: T.bugsOpenTotal.at(-1), p: Object.fromEntries(P_.map(p => [p.id, { d: p.done, h: p.health, f: p.forecast.p50 }])) };
+    try { if (!prev || prev.at !== now.at) localStorage.setItem('dash-seen', JSON.stringify(now)); } catch {}
+    if (!prev || prev.at === now.at) return '';
+    const chips = [];
+    P_.forEach(p => { const o = prev.p[p.id]; if (!o) return;
+      if (p.done > o.d) chips.push(`<span class="chip"><b>${esc(p.name)}</b> +${p.done - o.d} done</span>`);
+      if (o.h !== p.health) chips.push(`<span class="chip"><b>${esc(p.name)}</b> ${ST[o.h][1]} → ${ST[p.health][1]}</span>`);
+      if (o.f && p.forecast.p50 && p.forecast.p50 > o.f) chips.push(`<span class="chip"><b>${esc(p.name)}</b> forecast slipped to ${wk(p.forecast.p50)}</span>`); });
+    if (now.bugs !== prev.bugs) chips.push(`<span class="chip">open bugs <b>${prev.bugs} → ${now.bugs}</b></span>`);
+    return chips.length ? `<div class="since"><span class="label" style="align-self:center">Since you last looked</span>${chips.join('')}</div>` : '';
+  }
+
   // ---------- Product (home) ----------
   function product() {
     const T = snap.trends, labels = T.weeks.map(wk), P_ = snap.products;
@@ -255,17 +326,25 @@ h2.sec{font-size:.82rem;letter-spacing:.18em;text-transform:uppercase;color:var(
     const hero = `<div class="hero">
       <div class="tile"><span class="label">Products complete</span><span class="big">${shipped}<span style="color:var(--faint);font-size:1.2rem"> / ${P_.length}</span></span></div>
       <div class="tile"><span class="label">Delivered this week</span><span class="big">${thisW}</span><span class="sub ${dlt >= 0 ? 'up' : 'down'}">${dlt >= 0 ? '▲' : '▼'} ${Math.abs(dlt)} vs last week</span></div>
-      <div class="tile"><span class="label">Open bugs</span><span class="big">${T.bugsOpenTotal.at(-1)}</span><span class="sub">${T.bugsOpenTotal.at(-1) <= (T.bugsOpenTotal.at(-2) ?? 0) ? '<span class="up">▼ falling</span>' : '<span class="down">▲ rising</span>'}</span></div></div>`;
+      <div class="tile"><span class="label">Open bugs</span><span class="big">${T.bugsOpenTotal.at(-1)}</span><span class="sub">${T.bugsOpenTotal.at(-1) <= (T.bugsOpenTotal.at(-2) ?? 0) ? '<span class="up">▼ falling</span>' : '<span class="down">▲ rising</span>'}</span></div>
+      <div class="tile" style="align-items:flex-start"><span class="label">Weekly usage</span>${gauge(snap.usage.utilization, snap.usage.allowanceToday, snap.usage.projectedAtReset ?? 0)}<span class="sub">${snap.usage.projectedAtReset != null ? (snap.usage.projectedAtReset > 0.9 ? '<span class="down">▲ ' : '<span class="up">● ') + Math.round(snap.usage.projectedAtReset * 100) + '% by reset</span>' : ''}</span></div></div>`;
     const tiles = P_.map(p => `<button class="prod" data-p="${esc(p.id)}"><h3><span>${esc(p.name)}</span>${status(p.health)}</h3>${ring(p.done, p.total)}<div>${mini(p)}</div>
-      <div class="dates"><span>${p.committedDate ? '◆ ' + wk(p.committedDate) : '◆ —'}</span><span>${p.health === 'delivered' ? 'done' : p.forecast.p50 ? '→ ' + wk(p.forecast.p50) : '→ stalled'}</span></div></button>`).join('');
+      ${stageBar(p.extras.release)}<div class="dates"><span>${p.committedDate ? '◆ ' + wk(p.committedDate) : '◆ —'}</span><span>${p.health === 'delivered' ? 'done' : p.forecast.p50 ? '→ ' + wk(p.forecast.p50) : '→ stalled'}</span></div></button>`).join('');
     const layers = causeLayers(T.waitByCause);
-    shell(hero + `<h2 class="sec">Products</h2><div class="grid">${tiles}</div>
+    const X_ = T.extra, filerLayers = FILER.map(([k, c, n]) => ({ name: n, color: c, values: X_.bugsByFiler[k] }));
+    shell(hero + sinceStrip(P_, T) + `<h2 class="sec">Products</h2><div class="grid">${tiles}</div>
+      <h2 class="sec">Timeline</h2><div class="chart" style="margin-bottom:28px">${gantt(P_)}<p class="note" style="margin-top:8px">Solid = done so far · dashed = forecast · ◆ committed date · amber line = today</p></div>
+      <h2 class="sec">Where effort went · stories delivered per week</h2><div class="chart" style="margin-bottom:28px">${heatmap(T, P_)}</div>
       <h2 class="sec">Trends · last 6 weeks</h2><div class="charts">
         <div class="chart"><h3>Delivered per week</h3>${bars(delivered, labels, 'var(--cyan)', 'stories')}</div>
         <div class="chart"><h3>Open bugs</h3>${lines([{ name: 'Open bugs', values: T.bugsOpenTotal, color: '#d55181', area: true }], labels, '')}</div>
         <div class="chart"><h3>New bugs per week</h3>${bars(bugs, labels, '#d95926', 'bugs')}</div>
-        <div class="chart"><h3>Hours to deliver a story · median</h3>${lines([{ name: 'Median', values: T.medianHoursToDone, color: '#199e70', area: true }], labels, 'h')}</div></div>
-      <p class="note">◆ committed date · → forecast at the current pace · ring = stories done · mini chart: done (solid) vs total scope (dashed)</p>`);
+        <div class="chart"><h3>Hours to deliver a story · median</h3>${lines([{ name: 'Median', values: T.medianHoursToDone, color: '#199e70', area: true }], labels, 'h')}</div>
+        <div class="chart"><h3>Hours to fix a bug · median</h3>${lines([{ name: 'Median', values: X_.bugFixHours, color: '#d55181', area: true }], labels, 'h')}</div>
+        <div class="chart"><h3>Who found the bugs</h3>${legend(filerLayers)}${stacked(filerLayers, labels, 'bugs')}</div>
+        <div class="chart"><h3>Rework · send-backs per review</h3>${lines([{ name: 'Send-backs per review', values: X_.sendBackRate, color: '#c98500', area: true }], labels, '')}</div>
+        <div class="chart"><h3>Model use per week · ₹ equivalent</h3>${bars(X_.costInr, labels, '#9085e9', '₹')}</div></div>
+      <p class="note">Bars under each product: <span style="color:#3cf2a0">in prod</span> · <span style="color:#9085e9">on staging</span> · <span style="color:#3987e5">merged</span> · ◆ committed date · → forecast at the current pace · ring = stories done · mini chart: done (solid) vs total scope (dashed)</p>`);
   }
 
   // ---------- Product detail ----------
@@ -285,11 +364,16 @@ h2.sec{font-size:.82rem;letter-spacing:.18em;text-transform:uppercase;color:var(
         <div class="tile"><span class="label">Done</span><span class="big">${p.done}<span style="color:var(--faint);font-size:1.2rem"> / ${p.total}</span></span></div>
         <div class="tile"><span class="label">Committed</span><span class="big mono" style="font-size:1.6rem">${p.committedDate ? wk(p.committedDate) : '—'}</span></div>
         <div class="tile"><span class="label">Forecast</span><span class="big mono" style="font-size:1.6rem">${p.health === 'delivered' ? 'Done' : p.forecast.p50 ? wk(p.forecast.p50) : 'Stalled'}</span>${p.forecast.p90 && p.health !== 'delivered' ? `<span class="sub">worst case ${wk(p.forecast.p90)}</span>` : ''}</div>
-        <div class="tile"><span class="label">Running for</span><span class="big">${p.ageDays ?? '—'}<span style="color:var(--faint);font-size:1.2rem"> d</span></span></div></div>
+        <div class="tile"><span class="label">Running for</span><span class="big">${p.ageDays ?? '—'}<span style="color:var(--faint);font-size:1.2rem"> d</span></span></div>
+        <div class="tile"><span class="label">Where it is</span><span class="sub">${p.extras.release.prod} in prod · ${p.extras.release.staging} on staging · ${p.extras.release.merged} merged</span>${stageBar(p.extras.release)}</div>
+        <div class="tile"><span class="label">Model use · ₹ equiv.</span><span class="big" style="font-size:1.6rem">₹${p.extras.costInr.toLocaleString('en-IN')}</span><span class="sub">₹${p.extras.costPerDelivered ?? '—'} per delivered story</span></div>
+        <div class="tile"><span class="label">Rework</span><span class="big" style="font-size:1.6rem">${p.extras.sendBacksPerStory ?? '—'}</span><span class="sub">send-backs per reviewed story</span></div></div>
       <div class="charts">
         <div class="chart"><h3>Burn-up</h3>${legend([{ name: 'Done', color: 'var(--cyan)' }, { name: 'Total scope', color: 'var(--faint)' }])}${lines([{ name: 'Done', values: p.burnup.done, color: 'var(--cyan)', area: true }, { name: 'Total scope', values: p.burnup.total, color: '#8295b1', dash: true }], labels, 'stories')}</div>
         <div class="chart"><h3>Delivered per week</h3>${bars(p.weekly.delivered, labels, 'var(--cyan)', 'stories')}</div>
         <div class="chart"><h3>New bugs per week</h3>${bars(p.weekly.bugs, labels, '#d95926', 'bugs')}</div>
+        <div class="chart"><h3>Who found its bugs</h3><div class="epics" style="margin-top:6px">${FILER.map(([k, c, n]) => { const v = p.extras.bugsByFiler[k], m = Math.max(...Object.values(p.extras.bugsByFiler), 1); return `<div class="ep"><span>${n}</span><div class="meter"><i style="width:${(v / m) * 100}%;background:${c}"></i></div><span class="mono">${v}</span></div>`; }).join('')}</div></div>
+        <div class="chart"><h3>Model use per week · ₹ equivalent</h3>${bars(p.extras.weeklyCost, labels, '#9085e9', '₹')}</div>
         <div class="chart"><h3>Where waiting went · story-days</h3><div class="epics" style="margin-top:6px">${waitBars || '<p class="note">No waiting recorded.</p>'}</div></div></div>
       <h2 class="sec">Parts</h2><div class="chart"><div class="epics">${epRows}</div></div>`);
     $('#back').onclick = () => { location.hash = 'product'; };
@@ -307,8 +391,11 @@ h2.sec{font-size:.82rem;letter-spacing:.18em;text-transform:uppercase;color:var(
       <div class="charts">
         <div class="chart" style="grid-column:1/-1"><h3>Waiting by cause · story-days per week</h3>${legend(layers)}${wide(() => stacked(layers, labels, 'story-days'))}</div>
         <div class="chart"><h3>Lost story-days · last 30 days</h3><div class="epics" style="margin-top:6px">${g.lostDaysByCause.slice(0, 8).map(x => { const m = g.lostDaysByCause[0].days || 1; return `<div class="ep" data-tip="${esc(CAUSE[x.cause]?.[0] ?? x.cause)}: ${x.days}"><span>${esc(CAUSE[x.cause]?.[0] ?? x.cause)}</span><div class="meter"><i style="width:${(x.days / m) * 100}%;background:var(--violet)"></i></div><span class="mono">${Math.round(x.days)}</span></div>`; }).join('')}</div></div>
-        <div class="chart"><h3>Hours to deliver a story · median</h3>${lines([{ name: 'Median', values: T.medianHoursToDone, color: '#199e70', area: true }], labels, 'h')}</div></div>
-      <p class="note">Story-days add up each waiting story, so stories waiting at the same time each count. Parked work is left out, because it was put aside on purpose.</p>`);
+        <div class="chart"><h3>Hours to deliver a story · median</h3>${lines([{ name: 'Median', values: T.medianHoursToDone, color: '#199e70', area: true }], labels, 'h')}</div>
+        <div class="chart"><h3>Idle while work waited · person-hours</h3>${bars(T.extra.idleHours, labels, '#c98500', 'person-hours')}</div>
+        <div class="chart"><h3>Your decisions · median hours waiting</h3>${lines([{ name: 'Median wait', values: T.extra.ownerWaitHours, color: '#3987e5', area: true }], labels, 'h')}</div>
+        <div class="chart"><h3>Model use per day · ₹ equivalent</h3>${bars(snap.usage.dailyInr.map(d => d.inr), snap.usage.dailyInr.map(d => wk(d.day)), '#9085e9', '₹')}</div></div>
+      <p class="note">Model use is the ₹-equivalent value of subscription usage, not money billed. Idle: hours someone had nothing in progress while a Ready story in their area waited on a busy colleague. Story-days add up each waiting story, so stories waiting at the same time each count. Parked work is left out, because it was put aside on purpose.</p>`);
   }
 
   // ---------- Router ----------

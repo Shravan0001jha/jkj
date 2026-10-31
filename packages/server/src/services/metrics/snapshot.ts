@@ -4,6 +4,7 @@ import { storyTimeline, type Transition } from './timeline.js';
 import { splitWait, type Span, type Cause } from './causes.js';
 import { throughputForecast } from './forecast.js';
 import { buildProducts, type ProductConfig, type Product, type Trends } from './products.js';
+import type { Usage } from './extras.js';
 
 const DAY = 86_400_000;
 const FIXED_DAYS = 2;            // staging batch + CTO journey + owner device check (6 Nov plan)
@@ -16,7 +17,7 @@ export interface EpicRow {
   id: string; title: string; status: string; statusSince: number; targetDate: string | null; createdAt: number;
   targetHistory: { at: number; from: string | null; to: string | null }[];
 }
-export interface StoryRow { id: string; epicId: string; title: string; status: string; employeeId: string | null; charterId: string | null; createdAt: number; type?: string | null }
+export interface StoryRow { id: string; epicId: string; title: string; status: string; employeeId: string | null; charterId: string | null; createdAt: number; type?: string | null; createdBy?: string | null; mergedSha?: string | null }
 export interface Rows {
   now: number;
   epics: EpicRow[];
@@ -29,6 +30,11 @@ export interface Rows {
   devApprovals: Record<string, number>;
   startsAfter: Record<string, string>;
   prTimes?: Record<string, { pushedAt: number; devAt: number | null; qaAt: number | null }>;
+  stage?: Record<string, 'prod' | 'staging' | 'merged'>;   // furthest place each merged story has reached
+  release?: { prodSha: string | null; stagingSha: string | null };
+  dailyInr?: { day: string; inr: number }[];
+  pace?: { utilization: number; allowance: number; resetsAtMs: number; dayIndex: number } | null;
+  qaIds?: string[];
 }
 
 export type ScopeStatus = 'not-started' | 'building' | 'merged' | 'staging' | 'verified' | 'dropped';
@@ -46,6 +52,8 @@ export interface Snapshot {
   version: 1; generatedAt: string;
   products: Product[];
   trends: Trends;
+  usage: Usage;
+  release: { prodSha: string | null; stagingSha: string | null };
   features: Feature[];
   gaps: {
     window: '30d';
@@ -206,9 +214,9 @@ export function buildSnapshot(rows: Rows, cfg: ProductConfig = { products: [] })
   const parkedDays = gapLost.get('parked') ?? 0;
   gapLost.delete('parked');
   const lostWait = waitMs - parkedDays * DAY;
-  const { products, trends } = buildProducts(rows, features, cfg, waitParts);
+  const { products, trends, usage } = buildProducts(rows, features, cfg, waitParts);
   return {
-    version: 1, generatedAt: iso(now), products, trends, features,
+    version: 1, generatedAt: iso(now), products, trends, usage, release: rows.release ?? { prodSha: null, stagingSha: null }, features,
     gaps: {
       window: '30d',
       unit: 'story-days',

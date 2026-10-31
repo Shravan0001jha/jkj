@@ -1,6 +1,7 @@
 /** Product view (owner, 1 Nov): product parts built from epics, with weekly trends. Pure; inputs are system records. */
 
 import type { Feature, Rows, Snapshot } from './snapshot.js';
+import { buildExtras, type ProductExtras, type TrendExtras, type Usage } from './extras.js';
 
 const DAY = 86_400_000;
 const WEEKS = 6;
@@ -15,6 +16,7 @@ export interface Product {
   health: Feature['health']; committedDate: string | null; forecast: { p50: string | null; p90: string | null };
   done: number; total: number; startedAt: string | null; ageDays: number | null;
   epics: string[];
+  extras: ProductExtras;
   weekly: { delivered: number[]; bugs: number[] };
   burnup: { done: number[]; total: number[] };
 }
@@ -25,6 +27,7 @@ export interface Trends {
   bugsOpenTotal: number[];                           // open bug stories at each week's end (all products)
   medianHoursToDone: (number | null)[];              // first start -> done, stories finished that week
   waitByCause: Record<string, number[]>;             // story-days waiting per week (not parked)
+  extra: TrendExtras;
 }
 
 /** Monday 00:00 UTC of the week containing `ms`. */
@@ -39,7 +42,7 @@ const median = (xs: number[]) => {
   return Math.round((s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2) * 10) / 10;
 };
 
-export function buildProducts(rows: Rows, features: Feature[], cfg: ProductConfig, waitParts: { at: number; to: number; cause: string; ms: number }[]): { products: Product[]; trends: Trends } {
+export function buildProducts(rows: Rows, features: Feature[], cfg: ProductConfig, waitParts: { at: number; to: number; cause: string; ms: number }[]): { products: Product[]; trends: Trends; usage: Usage } {
   const now = rows.now;
   const w0 = weekStart(now) - (WEEKS - 1) * 7 * DAY;
   const weeks = Array.from({ length: WEEKS }, (_, i) => w0 + i * 7 * DAY);
@@ -49,6 +52,7 @@ export function buildProducts(rows: Rows, features: Feature[], cfg: ProductConfi
   const doneAt = (id: string) => (byStory.get(id) ?? []).filter(t => DONE.has(t.to)).map(t => t.at).sort((a, b) => b - a)[0];
   const startAt = (id: string) => (byStory.get(id) ?? []).filter(t => t.to === 'in-progress').map(t => t.at).sort((a, b) => a - b)[0];
 
+  const ex = buildExtras(rows, cfg.products, weeks);
   const deliveredByProduct: Record<string, number[]> = {}, bugsByProduct: Record<string, number[]> = {};
   const products: Product[] = cfg.products.map(p => {
     const fs = features.filter(f => p.epics.includes(f.id));
@@ -79,7 +83,7 @@ export function buildProducts(rows: Rows, features: Feature[], cfg: ProductConfi
     return {
       id: p.id, name: p.name, health, committedDate: committed, forecast, done, total,
       startedAt: starts[0] ?? null, ageDays: starts[0] ? Math.round(((now - Date.parse(starts[0])) / DAY) * 10) / 10 : null,
-      epics: p.epics, weekly: { delivered, bugs }, burnup: { done: doneCum, total: totalCum },
+      epics: p.epics, extras: ex.products[p.id]!, weekly: { delivered, bugs }, burnup: { done: doneCum, total: totalCum },
     };
   });
 
@@ -112,7 +116,8 @@ export function buildProducts(rows: Rows, features: Feature[], cfg: ProductConfi
   for (const k of Object.keys(waitByCause)) waitByCause[k] = waitByCause[k]!.map(v => Math.round(v * 10) / 10);
   return {
     products,
-    trends: { weeks: weeks.map(w => new Date(w).toISOString().slice(0, 10)), deliveredByProduct, bugsByProduct, bugsOpenTotal, medianHoursToDone, waitByCause },
+    trends: { weeks: weeks.map(w => new Date(w).toISOString().slice(0, 10)), deliveredByProduct, bugsByProduct, bugsOpenTotal, medianHoursToDone, waitByCause, extra: ex.trends },
+    usage: ex.usage,
   };
 }
 

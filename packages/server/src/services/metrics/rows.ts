@@ -2,6 +2,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import type { Rows, EpicRow, StoryRow } from './snapshot.js';
 import type { Span } from './causes.js';
 
@@ -40,7 +41,23 @@ export function stagingDownSpans(log: string): Span[] {
   return spans;
 }
 
-export function loadRows(dbPath: string, stagingLogPath: string | null, now = Date.now()): Rows {
+export interface ReleaseInput { repo: string; prodSha: string | null; stagingSha: string | null; orgYaml?: string }
+
+/** Every commit reachable from `sha` in `repo` (empty when the commit is unknown). */
+function ancestors(repo: string, sha: string | null): Set<string> {
+  if (!sha) return new Set();
+  try {
+    return new Set(execFileSync('git', ['-C', repo, 'rev-list', sha], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean));
+  } catch { return new Set(); }
+}
+
+/** The last trunk commit the batch deployed to staging, from its own log. */
+export function lastStagingSha(log: string): string | null {
+  const m = [...log.matchAll(/batch deployed trunk ([0-9a-f]{7,40}) to staging/g)].at(-1);
+  return m ? m[1]! : null;
+}
+
+export function loadRows(dbPath: string, stagingLogPath: string | null, now = Date.now(), rel?: ReleaseInput): Rows {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     const all = <T>(sql: string, ...p: (string | number)[]) => db.prepare(sql).all(...p) as T[];
@@ -62,7 +79,7 @@ export function loadRows(dbPath: string, stagingLogPath: string | null, now = Da
       const j = JSON.parse(r.json);
       const epicId = r.parent_id && epicIds.has(r.parent_id) ? r.parent_id : j.featureId && epicIds.has(j.featureId) ? j.featureId : null;
       if (!epicId) continue;
-      stories.push({ id: r.id, epicId, title: j.title, status: j.status, employeeId: j.employeeId ?? null, charterId: j.charterId ?? null, createdAt: ms(j.createdAt), type: j.type ?? null });
+      stories.push({ id: r.id, epicId, title: j.title, status: j.status, employeeId: j.employeeId ?? null, charterId: j.charterId ?? null, createdAt: ms(j.createdAt), type: j.type ?? null, createdBy: j.history?.[0]?.by ?? null, mergedSha: j.pr?.merged?.sha ?? null });
       if (j.pr?.devApproval?.at) devApprovals[r.id] = ms(j.pr.devApproval.at);
       if (j.pr?.pushedAt) prTimes[r.id] = { pushedAt: ms(j.pr.pushedAt), devAt: j.pr.devApproval?.at ? ms(j.pr.devApproval.at) : null, qaAt: j.pr.qaApproval?.at ? ms(j.pr.qaApproval.at) : null };
       if (j.startsAfter) startsAfter[r.id] = String(j.startsAfter);
@@ -106,8 +123,29 @@ export function loadRows(dbPath: string, stagingLogPath: string | null, now = Da
       if (storyIds.has(r.assignment_id)) costByStory[r.assignment_id] = r.inr ?? 0;
     }
 
-    const stagingDown = stagingLogPath && existsSync(stagingLogPath) ? stagingDownSpans(readFileSync(stagingLogPath, 'utf8')) : [];
-    return { now, epics, stories, transitions, holds, caps, stagingDown, notes, inbox, costByStory, devApprovals, startsAfter, prTimes };
+    const stagingLog = stagingLogPath && existsSync(stagingLogPath) ? readFileSync(stagingLogPath, 'utf8') : '';
+    const stagingDown = stagingLog ? stagingDownSpans(stagingLog) : [];
+
+    // Release stage of each merged story: is its merge commit inside what prod / staging run?
+    const stage: Record<string, 'prod' | 'staging' | 'merged'> = {};
+    let release: Rows['release'] = { prodSha: null, stagingSha: null };
+    if (rel) {
+      const resolve = (sha: string | null) => { if (!sha) return null; try { return execFileSync('git', ['-C', rel.repo, 'rev-parse', '--verify', `${sha}^{commit}`], { encoding: 'utf8' }).trim(); } catch { return null; } };
+      const prodSha = resolve(rel.prodSha), stagingSha = resolve(rel.stagingSha ?? lastStagingSha(stagingLog));
+      const onProd = ancestors(rel.repo, prodSha), onStaging = ancestors(rel.repo, stagingSha);
+      for (const s of stories) {
+        if (s.status !== 'done' || !s.mergedSha) continue;
+        stage[s.id] = onProd.has(s.mergedSha) ? 'prod' : onStaging.has(s.mergedSha) ? 'staging' : 'merged';
+      }
+      release = { prodSha, stagingSha };
+    }
+    const dailyInr = all<{ day: string; inr: number }>("select day, sum(equivalent_inr) as inr from usage group by day order by day desc limit 42").reverse();
+    const paceRow = all<{ value: string }>("select value from settings where key = 'pace:last'")[0];
+    const pace = paceRow ? (() => { const j = JSON.parse(paceRow.value); return { utilization: j.utilization, allowance: j.allowance, resetsAtMs: j.resetsAtMs, dayIndex: j.dayIndex }; })() : null;
+    const qaIds = rel?.orgYaml && existsSync(rel.orgYaml)
+      ? [...readFileSync(rel.orgYaml, 'utf8').matchAll(/- id: ([\w-]+)\n(?:[^\n]*\n){0,3}?\s*roleId: qa\b/g)].map(m => m[1]!)
+      : [];
+    return { now, epics, stories, transitions, holds, caps, stagingDown, notes, inbox, costByStory, devApprovals, startsAfter, prTimes, stage, release, dailyInr, pace, qaIds };
   } finally {
     db.close();
   }

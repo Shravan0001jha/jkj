@@ -18,7 +18,13 @@ const bucket = process.env['DASH_DATA_BUCKET'];
 const override = join(wpDir, 'products.json');
 const fallback = join(dirname(fileURLToPath(import.meta.url)), 'services', 'metrics', 'products.default.json');
 const cfg = JSON.parse(readFileSync(existsSync(override) ? override : existsSync(fallback) ? fallback : join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'services', 'metrics', 'products.default.json'), 'utf8'));
-const snap = buildSnapshot(loadRows(join(wpDir, 'workplace.db'), join(opsDir, 'workplace', 'staging-follow-trunk.log')), cfg);
+// Release stage: prod's running version (read-only health check) and staging's last batch, matched in the Iris repo.
+async function prodSha(): Promise<string | null> {
+  try { const r = await fetch('https://api.irisforu.com/healthz', { signal: AbortSignal.timeout(8000) }); return ((await r.json()) as { version?: string }).version ?? null; } catch { return null; }
+}
+const irisRepo = process.env['IRIS_REPO'] ?? join(homedir(), 'claude-dev');
+const rel = { repo: irisRepo, prodSha: await prodSha(), stagingSha: null, orgYaml: join(wpDir, 'org.yaml') };
+const snap = buildSnapshot(loadRows(join(wpDir, 'workplace.db'), join(opsDir, 'workplace', 'staging-follow-trunk.log'), Date.now(), rel), cfg);
 mkdirSync(outDir, { recursive: true });
 const out = join(outDir, 'snapshot-v1.json');
 writeFileSync(out + '.tmp', JSON.stringify(snap));
