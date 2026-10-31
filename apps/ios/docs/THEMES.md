@@ -86,6 +86,12 @@ appearance setting keeps working for Default. Documented in Settings' footer.
 | `.themedBar(_ fill)` | `background(fill)` — the exact call it replaces | translucent HUD bar with a hairline |
 | `.themedTabChrome()` | nothing | glowing dock underlay with a sweep on tab change |
 | `.themedHaptic(_:trigger:)` | `sensoryFeedback` whose condition is always false | fires |
+| `.themedProminent()` | `.buttonStyle(.borderedProminent)` | same, label in dark navy (white on neon cyan is 1.5:1; navy is 13:1) |
+| `.themedScreen()` (non-list full screens: sign-in, offline states) | nothing | edge-to-edge backdrop |
+| `.glow(on, color)` | nothing | neon shadow |
+
+Lists are wrapped mechanically: `List { Group { …rows… }.themedRows() }.themedList()` — the row
+background is a trait that a Group passes to every row of every Section inside it.
 
 `SectionHeader`, `Pill`, `ChatPalette`, `ChatWallpaper`, `TypingBubble`, chat corner radii and
 `ConnectionStrip` read the tokens directly.
@@ -136,13 +142,17 @@ the dashboard snapshot), removes nothing and adds no taps to a common flow.
 |---|---|---|---|
 | **Bridge HUD** (top of Plan) | One glass panel: *system pulse* (socket live / offline, server version, Mac link), *needs you* (open Inbox count + the top item with its recommended answer as one button), *since you last looked* (what changed), *live agents* (radar + who is doing what, tap → Talk), *state counts strip*, and a command prompt. The normal Plan follows unchanged. | The owner opens the app to ask "what changed and what needs me". Today that is three tabs. Now it is the first screen. | `BridgeDigest` — the since-last-look diff; `BridgeSnapshot` persistence |
 | **Since you last looked** | Diff of a saved snapshot (epic/story counts by state, open Inbox ids, last update id, blocked ids) against now: "+2 done · 1 newly blocked · 3 new decisions · 5 updates". Snapshot saved when the app goes to the background after the Plan was seen. | Cheap, local, honest — no new server API. | `BridgeDigestTests` |
-| **Decision queue** (top of Inbox) | Open items as a card stack: swipe right = the recommended option (only when it is neither `danger` nor `needsNote`), swipe left = later (moves to the back, local only), buttons for every option. A 4-second **undo window** before the answer is sent; device auth still runs where the server requires it (inside `AppModel.answer`); haptic on commit. The full list stays below. | Fastest safe decision path. A swipe never declines and never runs a danger option. | `DecisionQueueTests` (order, defer, eligibility, staged answer + undo + commit) |
+| **Decision queue** (top of Inbox) | Open items as a card stack, one card at a time: swipe right (or its button) = the recommended option (only when it is neither `danger` nor `needsNote`), swipe left / "Later" = moves to the back (local only), "All options" opens the item with every option (unchanged rules: danger confirms, needsNote asks). A 4-second **undo window** before the answer is sent; device auth still runs where the server requires it (inside `AppModel.answer`); haptic on commit. The full list stays below. | Fastest safe decision path. A swipe never declines and never runs a danger option. | `DecisionQueueTests` (order, defer, eligibility, staged answer + undo + commit) |
 | **Command palette** | Prompt in the Bridge (`> jump to…`) opens a sheet: type to find any epic, story, Inbox item, person or room, or run an action (Settings, Spend, Alerts, Office, Ship a release, New request, switch theme). Local search over cached data. | Replaces hunting through menus; no server work. | `CommandSearchTests` (ranking: exact > prefix > word prefix > substring > subsequence; kind tiebreak) |
 | **Quick replies** | In the COO chat: chips above the composer that send at one tap. If the COO's last message asks something: "Yes, go ahead" / "Hold off" / "Explain more"; otherwise "Status?" / "Thanks". | The COO thread is the most-used chat; most replies are one of these. | `QuickRepliesTests` |
 | **Transmission feel** | New incoming messages arrive with a scan-line decode, typing shows as a waveform, chat times are monospaced mission time (`09:41`). | Makes a live conversation feel live. | layout only (no logic) |
 | **Ambient awareness** | Backdrop pulse dims when the socket is offline; presence and working states ping; an item that becomes Done "locks in". | Status changes are noticed without reading. | `MotionLevel` resolution |
 | **Micro-interactions** | Haptics on tab switch, send, answer, swipe commit; spring physics; hero zoom from a Plan epic to its page; **interface sounds off by default** (Settings toggle, system tick sounds). | Physicality without noise. | `ThemeStore` (sounds default off) |
 | *Future, out of scope* | Live Activity / Dynamic Island for a running decision; widgets. Need app extensions and App ID changes. | — | — |
+
+Changed while building: the queue card shows only the safe recommended answer as a button —
+replicating the full option rules (confirm, note) on a card would fork that logic; the item page
+keeps them, one tap away, exactly as in Default.
 
 Rejected: a custom tab bar (would break VoiceOver order and every UI test that taps
 `tabBars.buttons[…]` — the native bar is kept and dressed instead); decoding/scrambling text
@@ -164,6 +174,18 @@ animations (would change accessibility labels mid-animation); always-on particle
 | UI tests | whole existing suite under `WORKPLACE_THEME=default` and `=scifi` |
 
 ---
+
+## 5. Running it
+
+```
+node mock/server.mjs --port 4413 --reusable-code --quiet --no-live      # screenshots (deterministic)
+node mock/server.mjs --port 4415 --reusable-code --quiet                # UI tests
+node mock/server.mjs --port 4416 --talk-threads --reusable-code --quiet # UI tests (AppFixes)
+TEST_RUNNER_MOCK_PORT=4415 TEST_RUNNER_TALK_MOCK_PORT=4416 TEST_RUNNER_THEME=scifi \
+  xcodebuild -scheme IrisWorkplaceUI … test                              # UI suite under Sci-fi
+scripts/theme-diff.sh <baseline.app> <new.app> build/diff 4413 "iPhone 17"   # Default proof
+scripts/shots-themes.sh <app> <out> dark scifi 4413                       # Sci-fi screens
+```
 
 ## 8. Evidence
 
