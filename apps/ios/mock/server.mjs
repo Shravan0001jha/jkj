@@ -140,8 +140,8 @@ const server = createServer(async (req, res) => {
 
   // ---- v2 (LLD §19.8), from the live capture plus mock additions (mock/v2.mjs) ----
   const v2 = state.v2;
-  // The dashboard snapshot (HLD-dashboard §5), the same v1 fixture the unit tests decode.
-  if (m === 'GET' && p === '/api/metrics/snapshot') return json(res, 200, JSON.parse(readFileSync(new URL('../fixtures/dashboard-snapshot.json', import.meta.url), 'utf8')));
+  // The dashboard snapshot v1 (metrics snapshot.ts), the same fixture the unit tests decode.
+  if (m === 'GET' && p === '/api/metrics/snapshot') return json(res, 200, JSON.parse(readFileSync(new URL('../IrisWorkplaceTests/Fixtures/snapshot-v1.json', import.meta.url), 'utf8')));
   if (m === 'GET' && p === '/api/plan') return json(res, 200, V2.plan(v2, url.searchParams.get('view') === 'board'));
   if (m === 'GET' && p === '/api/focus') return json(res, 200, v2.focus);
   if (m === 'POST' && p === '/api/focus') {
