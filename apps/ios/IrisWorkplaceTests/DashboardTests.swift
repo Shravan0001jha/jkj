@@ -1,7 +1,7 @@
 import XCTest
 @testable import IrisWorkplace
 
-/// The mini dashboard (docs/HLD-dashboard.md §5, snapshot v1): decoded leniently, kept on the
+/// The mini dashboard (snapshot v1: products, trends, gaps): decoded leniently, kept on the
 /// phone and shown however old it is (with its age), refreshed only in the background, and a
 /// server without the endpoint yet (404) says so over the cached copy instead of blanking it.
 @MainActor
@@ -15,7 +15,7 @@ final class DashboardTests: XCTestCase {
         cache = DiskCache(root: dir)
         cache.setScope(ServerConfig.relay)
         StubURLProtocol.reset()
-        serve(200, try! Fixtures.data("dashboard-snapshot"))
+        serve(200, try! Fixtures.data("snapshot-v1"))
         rest = RestClient(config: ServerConfig(mode: .lan, baseURL: ServerConfig.parse("127.0.0.1:4317")!),
                           tokens: MemoryTokenStore(token: "t"), session: StubURLProtocol.session())
     }
@@ -30,11 +30,11 @@ final class DashboardTests: XCTestCase {
         }
     }
 
-    private func fixture() throws -> DashboardSnapshot { try Fixtures.decode("dashboard-snapshot") }
+    private func fixture() throws -> DashboardSnapshot { try Fixtures.decode("snapshot-v1") }
 
     /// The fixture with `edit` applied to its JSON object, re-encoded.
     private func edited(_ edit: (inout [String: Any]) -> Void) throws -> Data {
-        var obj = try JSONSerialization.jsonObject(with: Fixtures.data("dashboard-snapshot")) as! [String: Any]
+        var obj = try JSONSerialization.jsonObject(with: Fixtures.data("snapshot-v1")) as! [String: Any]
         edit(&obj)
         return try JSONSerialization.data(withJSONObject: obj)
     }
@@ -44,118 +44,192 @@ final class DashboardTests: XCTestCase {
     func testDecodesTheV1Fixture() throws {
         let s = try fixture()
         XCTAssertEqual(s.version, 1)
-        XCTAssertEqual(s.generatedAt, "2026-11-01T12:00:00Z")
-        XCTAssertEqual(s.features.count, 5)
-        let f = s.features[0]
-        XCTAssertEqual(f.id, "ep_alarms")
-        XCTAssertEqual(f.name, "Alarms & Reminders")
-        XCTAssertEqual(f.state, .inProgress)
-        XCTAssertEqual(f.committedDate, "2026-11-06")
-        XCTAssertEqual(f.forecast?.p50, "2026-11-06")
-        XCTAssertEqual(f.forecast?.p90, "2026-11-08")
-        XCTAssertEqual(f.health, .atRisk)
-        XCTAssertEqual(f.healthReason, "waiting on Mac build, 1.5 d")
-        XCTAssertNil(f.deliveredAt)
-        XCTAssertEqual(f.originalDate, "2026-10-31")
-        XCTAssertEqual(f.scope.map(\.status), [.merged, .building, .verified, .notStarted])
-        XCTAssertEqual(f.scope[0].storyIds, ["st_rep1", "st_rep2"])
-        XCTAssertEqual(f.dateHistory.count, 1)
-        XCTAssertEqual(f.dateHistory[0].approvedBy, "owner")
-        XCTAssertEqual(f.lostDays?["mac-or-device"], 1.5)
-        XCTAssertEqual(f.escapes, 1)
-        XCTAssertEqual(f.costInr, 4120)
-        XCTAssertEqual(s.features.map(\.health), [.atRisk, .onTrack, .late, .onTrack, .onTrack])
-        XCTAssertEqual(s.features.map(\.state), [.inProgress, .inProgress, .inProgress, .delivered, .planned])
-        XCTAssertEqual(s.features[3].deliveredAt, "2026-10-21T15:10:00Z")
-        XCTAssertNil(s.features[4].startedAt)
+        XCTAssertEqual(s.generatedAt, "2026-11-01T06:00:00.000Z")
+        XCTAssertEqual(s.products.map(\.id), ["phone", "smarthome", "plans", "image", "voice", "character", "answers", "trust", "launch"])
+        XCTAssertEqual(s.products.map(\.health), [.noDate, .onTrack, .late, .delivered, .atRisk, .onTrack, .onTrack, .onTrack, .delivered])
+        let p = s.products[1]
+        XCTAssertEqual(p.name, "Smart home")
+        XCTAssertEqual(p.committedDate, "2026-11-20")
+        XCTAssertEqual(p.forecast, DashForecast(p50: "2026-11-10", p90: "2026-11-15"))
+        XCTAssertEqual(p.done, 14)
+        XCTAssertEqual(p.total, 15)
+        XCTAssertEqual(p.epics, ["ft_mushtk4hm47wb", "ft_mutmj5j9e2bwk", "ft_muygyikiohil0"])
+        XCTAssertEqual(p.weekly.delivered, [2, 1, 2, 1, 3, 5])
+        XCTAssertEqual(p.burnup.done.count, 6)
+        XCTAssertEqual(p.burnup.total.last, 15)
+        XCTAssertNotNil(p.startedAt)
+        XCTAssertNotNil(p.ageDays)
+        XCTAssertNil(s.products[0].committedDate, "no-date product")
+        XCTAssertNil(s.products[4].forecast?.p50, "stalled: no forecast")
 
-        let g = try XCTUnwrap(s.gaps)
-        XCTAssertEqual(g.window, "30d")
-        XCTAssertEqual(g.lostDaysByCause.count, 5)
-        XCTAssertEqual(g.lostDaysByCause[1].cause, "review")
-        XCTAssertEqual(g.lostDaysByCause[1].days, 6.5)
-        XCTAssertEqual(g.lostDaysByCause[1].trend, [0.9, 1.4])
-        XCTAssertEqual(g.idleWhileQueuedHours, 41)
-        XCTAssertEqual(g.reviewWaitHours?.p90, 12)
-        XCTAssertEqual(g.stagingSlots?.planned, 10)
-        XCTAssertEqual(g.stagingSlots?.misses.count, 2)
-        XCTAssertEqual(g.forecastAccuracyDays.map(\.delta), [-1, 6])
-        XCTAssertEqual(g.ownerDecisionHours?.p50, 2)
-        XCTAssertEqual(s.unknownShare, 0.04)
+        let t = s.trends
+        XCTAssertEqual(t.weeks, ["2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19", "2026-10-26"])
+        XCTAssertEqual(t.deliveredByProduct.count, 9)
+        XCTAssertEqual(t.bugsByProduct.count, 9)
+        XCTAssertEqual(t.bugsOpenTotal, [1, 2, 6, 9, 12, 11])
+        XCTAssertEqual(t.medianHoursToDone.count, 6)
+        XCTAssertEqual(t.waitByCause["review"], [1.1, 8, 19.6, 23.1, 32.1, 49.1])
+        XCTAssertEqual(s.gaps?.window, "30d")
+        XCTAssertEqual(s.gaps?.reviewWait?.approval1Minutes?.p50, 132.6)
+        XCTAssertEqual(s.gaps?.reviewWait?.approval2Minutes?.p50, 283.3)
+    }
+
+    func testTheFixtureIsTheFullServerShape() throws {
+        // Every field snapshot.ts emits is in the fixture, including the ones the app ignores.
+        let obj = try XCTUnwrap(Fixtures.json("snapshot-v1") as? [String: Any])
+        XCTAssertEqual(Set(obj.keys), ["version", "generatedAt", "products", "trends", "features", "gaps", "unknownShare", "notes"])
+        let product = try XCTUnwrap((obj["products"] as? [[String: Any]])?.first)
+        XCTAssertEqual(Set(product.keys), ["id", "name", "health", "committedDate", "forecast", "done", "total", "startedAt", "ageDays", "epics", "weekly", "burnup"])
+        let trends = try XCTUnwrap(obj["trends"] as? [String: Any])
+        XCTAssertEqual(Set(trends.keys), ["weeks", "deliveredByProduct", "bugsByProduct", "bugsOpenTotal", "medianHoursToDone", "waitByCause"])
     }
 
     func testUnknownFutureFieldsAndValuesAreIgnored() throws {
         let data = try edited { obj in
-            obj["roadmap"] = ["lanes": [1, 2, 3]]                       // a new top-level field
-            var features = obj["features"] as! [[String: Any]]
-            features[0]["owner"] = "kabir"                               // a new feature field
-            features[0]["health"] = "blocked"                            // a health value v1 does not know
-            features[0]["state"] = "paused"
-            var scope = features[0]["scope"] as! [[String: Any]]
-            scope[0]["status"] = "rolled-back"
-            scope[0]["evidence"] = ["url": "x"]
-            features[0]["scope"] = scope
-            obj["features"] = features
+            obj["roadmap"] = ["lanes": [1, 2, 3]]                         // a new top-level field
+            var products = obj["products"] as! [[String: Any]]
+            products[0]["owner"] = "kabir"                                // a new product field
+            products[0]["health"] = "paused"                              // a health value v1 does not know
+            products[1]["weekly"] = ["delivered": [1, 2], "reverted": [0, 1]]
+            products.append(["id": 42])                                   // a product the app cannot read
+            obj["products"] = products
+            var trends = obj["trends"] as! [String: Any]
+            trends["cycleTime"] = [1, 2, 3]
+            obj["trends"] = trends
             var gaps = obj["gaps"] as! [String: Any]
             gaps["mergeQueueHours"] = ["p50": 1]
             obj["gaps"] = gaps
         }
         let s = try JSONDecoder().decode(DashboardSnapshot.self, from: data)
-        XCTAssertEqual(s.features.count, 5)
-        XCTAssertEqual(s.features[0].health, .unknown)
-        XCTAssertEqual(s.features[0].state, .unknown)
-        XCTAssertEqual(s.features[0].scope[0].status, .unknown)
-        XCTAssertEqual(s.features[0].name, "Alarms & Reminders")
-        XCTAssertEqual(s.gaps?.lostDaysByCause.count, 5)
+        XCTAssertEqual(s.products.count, 9, "the unreadable product is skipped, the rest stay")
+        XCTAssertEqual(s.products[0].health, .unknown)
+        XCTAssertEqual(s.products[0].name, "Phone without the Mac")
+        XCTAssertEqual(s.products[1].weekly.delivered, [1, 2])
+        XCTAssertEqual(s.trends.weeks.count, 6)
+        XCTAssertEqual(s.gaps?.reviewWait?.approval1Minutes?.p50, 132.6)
     }
 
     func testMissingOptionalFieldsDoNotFailDecoding() throws {
-        let minimal = Data(#"{"version":1,"generatedAt":"2026-11-01T12:00:00Z","features":[{"id":"ep_a","name":"A"}]}"#.utf8)
+        let minimal = Data(#"{"version":1,"generatedAt":"2026-11-01T12:00:00Z","products":[{"id":"p","name":"P"}]}"#.utf8)
         let s = try JSONDecoder().decode(DashboardSnapshot.self, from: minimal)
-        XCTAssertEqual(s.features.count, 1)
-        let f = s.features[0]
-        XCTAssertNil(f.health)
-        XCTAssertNil(f.state)
-        XCTAssertNil(f.committedDate)
-        XCTAssertNil(f.forecast)
-        XCTAssertEqual(f.scope, [])
-        XCTAssertEqual(f.dateHistory, [])
+        let p = s.products[0]
+        XCTAssertNil(p.health)
+        XCTAssertNil(p.committedDate)
+        XCTAssertNil(p.forecast)
+        XCTAssertEqual(p.done, 0)
+        XCTAssertEqual(p.total, 0)
+        XCTAssertEqual(p.progress, 0)
+        XCTAssertEqual(p.weekly, DashWeekly())
+        XCTAssertEqual(p.burnup, DashBurnup())
+        XCTAssertEqual(s.trends, DashTrends())
         XCTAssertNil(s.gaps)
-        XCTAssertNil(s.unknownShare)
+        XCTAssertEqual(s.productsComplete.total, 1)
+        XCTAssertNil(s.deliveredThisWeek)
+        XCTAssertNil(s.bugsOpen)
+        XCTAssertEqual(s.waitStack, [])
 
-        // Nulls where values are expected, empty gaps, no features at all.
-        let sparse = Data(#"{"version":1,"generatedAt":"2026-11-01T12:00:00Z","gaps":{"lostDaysByCause":[{"cause":"review","days":1}]},"features":[{"id":"ep_b","name":"B","forecast":{"p50":null},"scope":[{"label":"x"}],"dateHistory":[{"to":"2026-11-02"}],"health":null}]}"#.utf8)
+        // Nulls where values are expected.
+        let sparse = Data(#"{"version":1,"generatedAt":"x","products":[{"id":"p","name":"P","health":null,"forecast":{"p50":null},"burnup":{"done":[1]}}],"trends":{"weeks":["2026-10-26"],"medianHoursToDone":[null]},"gaps":{"reviewWait":{"approval1Minutes":{"p50":null}}}}"#.utf8)
         let t = try JSONDecoder().decode(DashboardSnapshot.self, from: sparse)
-        XCTAssertNil(t.features[0].forecast?.p50)
-        XCTAssertNil(t.features[0].scope[0].status)
-        XCTAssertEqual(t.features[0].scope[0].storyIds, [])
-        XCTAssertEqual(t.features[0].dateHistory[0].to, "2026-11-02")
-        XCTAssertEqual(t.gaps?.lostDaysByCause[0].trend, [])
-        XCTAssertEqual(t.gaps?.forecastAccuracyDays, [])
-        let none = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"version":1,"generatedAt":"x"}"#.utf8))
-        XCTAssertEqual(none.features, [])
+        XCTAssertNil(t.products[0].forecast?.p50)
+        XCTAssertEqual(t.products[0].burnup.total, [])
+        XCTAssertEqual(t.trends.medianHoursToDone, [nil])
+        XCTAssertNil(t.gaps?.reviewWait?.approval1Minutes?.p50)
+        XCTAssertEqual(DashNum.minutes(t.gaps?.reviewWait?.approval1Minutes?.p50), "—")
     }
 
-    func testTopGapsAreTheThreeLargestCauses() throws {
+    func testACopyWithoutProductsIsNotAV1ProductSnapshot() {
+        // e.g. a copy cached by the pre-product build: discarded, not shown as an empty grid.
+        let old = Data(#"{"version":1,"generatedAt":"2026-11-01T12:00:00Z","features":[{"id":"ep","name":"A"}]}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(DashboardSnapshot.self, from: old))
+    }
+
+    // MARK: tiles and charts
+
+    func testProductsCompleteCountsDelivered() throws {
         let s = try fixture()
-        XCTAssertEqual(s.topGaps.map(\.cause), ["review", "mac-or-device", "owner-decision"])
+        XCTAssertEqual(s.productsComplete.done, 2)
+        XCTAssertEqual(s.productsComplete.total, 9)
+        let made = DashboardSnapshot(generatedAt: "x", products: [
+            DashProduct(id: "a", name: "A", health: .delivered, done: 3, total: 3),
+            DashProduct(id: "b", name: "B", health: .onTrack, done: 3, total: 3),   // all done but not delivered
+            DashProduct(id: "c", name: "C", health: .unknown, done: 0, total: 1),
+            DashProduct(id: "d", name: "D", health: nil, done: 0, total: 1),
+        ])
+        XCTAssertEqual(made.productsComplete.done, 1)
+        XCTAssertEqual(made.productsComplete.total, 4)
+    }
+
+    func testDeliveredThisWeekSumsEveryProductsLastWeek() throws {
+        let s = try fixture()
+        XCTAssertEqual(s.deliveredPerWeek, [3, 13, 18, 12, 17, 41])
+        XCTAssertEqual(s.deliveredThisWeek?.value, 41)
+        XCTAssertEqual(s.deliveredThisWeek?.change, 24)
+        let manual = s.trends.deliveredByProduct.values.reduce(0) { $0 + $1.last! }
+        XCTAssertEqual(manual, 41)
+
+        // Ragged series are padded, a single week has no change, a drop is negative.
+        let t = DashTrends(weeks: ["2026-10-19", "2026-10-26"], deliveredByProduct: ["a": [5, 2], "b": [4]])
+        let made = DashboardSnapshot(generatedAt: "x", products: [], trends: t)
+        XCTAssertEqual(made.deliveredPerWeek, [9, 2])
+        XCTAssertEqual(made.deliveredThisWeek?.change, -7)
+        let one = DashboardSnapshot(generatedAt: "x", products: [], trends: DashTrends(weeks: ["w"], deliveredByProduct: ["a": [3]]))
+        XCTAssertEqual(one.deliveredThisWeek?.value, 3)
+        XCTAssertNil(one.deliveredThisWeek?.change)
+        XCTAssertEqual(DashNum.signed(24), "+24")
+        XCTAssertEqual(DashNum.signed(-7), "−7")
+    }
+
+    func testOpenBugsIsTheLastValueWithItsDirection() throws {
+        let s = try fixture()
+        XCTAssertEqual(s.bugsOpen?.value, 11)
+        XCTAssertEqual(s.bugsOpen?.direction, .falling)
+        func dir(_ xs: [Double]) -> DashDirection? {
+            DashboardSnapshot(generatedAt: "x", products: [], trends: DashTrends(bugsOpenTotal: xs)).bugsOpen?.direction
+        }
+        XCTAssertEqual(dir([3, 5]), .rising)
+        XCTAssertEqual(dir([5, 5]), .flat)
+        XCTAssertEqual(dir([7]), .flat)
+        XCTAssertNil(dir([]))
+    }
+
+    func testWaitStackIsTheTopFourCausesPlusOther() throws {
+        let s = try fixture()
+        XCTAssertEqual(s.topWaitCauses, ["review", "unknown", "dependency", "mac-or-device"])
+        XCTAssertEqual(s.waitLegend, ["review", "unknown", "dependency", "mac-or-device", "Other"])
+        let stack = s.waitStack
+        XCTAssertEqual(stack.count, 6 * 5)
+        // Other in the last week = every cause outside the top four.
+        let w = 5
+        let top = Set(s.topWaitCauses)
+        let otherExpected = s.trends.waitByCause.filter { !top.contains($0.key) }.values.reduce(0) { $0 + $1[w] }
+        let other = try XCTUnwrap(stack.first { $0.week == w && $0.cause == "Other" })
+        XCTAssertEqual(other.days, otherExpected, accuracy: 1e-9)
+        XCTAssertEqual(stack.filter { $0.week == w }.reduce(0) { $0 + $1.days },
+                       s.trends.waitByCause.values.reduce(0) { $0 + $1[w] }, accuracy: 1e-9, "the stack adds up to all waiting")
+        XCTAssertEqual(DashboardSnapshot.waitColorsHex, ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181"])
+
+        // Four or fewer causes: no Other.
+        let few = DashboardSnapshot(generatedAt: "x", products: [], trends: DashTrends(weeks: ["a", "b"], waitByCause: ["review": [1, 2], "parked": [0, 0]]))
+        XCTAssertEqual(few.waitLegend, ["review"])
+        XCTAssertEqual(few.waitStack.map(\.days), [1, 2])
         XCTAssertEqual(DashboardSnapshot.causeLabel("mac-or-device"), "Mac or device")
-        XCTAssertEqual(DashboardSnapshot.causeLabel("queued-behind-busy"), "Queued behind busy")
         XCTAssertEqual(DashboardSnapshot.causeLabel("something-new"), "Something new")
     }
 
-    func testDatesReadAsShortDays() throws {
-        let f = try fixture().features
+    func testLabelsReadShort() throws {
+        let s = try fixture()
         XCTAssertEqual(DashDate.short("2026-11-06"), "6 Nov")
-        XCTAssertEqual(DashDate.forecast(f[0].forecast!), "6–8 Nov")
+        XCTAssertEqual(DashDate.short(nil), "—")
+        XCTAssertEqual(DashDate.weekLabel(s.trends.weeks, 5), "26 Oct")
+        XCTAssertEqual(DashDate.weekLabel([], 2), "W3")
+        XCTAssertEqual(DashDate.forecast(s.products[1].forecast!), "10–15 Nov")
         XCTAssertEqual(DashDate.forecast(DashForecast(p50: "2026-11-30", p90: "2026-12-02")), "30 Nov – 2 Dec")
-        XCTAssertEqual(DashDate.forecast(DashForecast(p50: "2026-11-06", p90: "2026-11-06")), "6 Nov")
-        XCTAssertEqual(DashDate.datesLine(f[0]), "Due 6 Nov · forecast 6–8 Nov")
-        XCTAssertEqual(DashDate.datesLine(f[3]), "Delivered 21 Oct")
+        XCTAssertEqual(DashNum.minutes(45), "45 min")
+        XCTAssertEqual(DashNum.minutes(132.6), "2.2 h")
+        XCTAssertEqual(DashNum.minutes(3000), "2.1 d")
         XCTAssertEqual(DashDate.days(6.5), "6.5 d")
-        XCTAssertEqual(DashDate.days(2), "2 d")
-        XCTAssertEqual(DashboardContent.groups(f).map(\.title), ["In progress", "Planned", "Delivered"])
-        XCTAssertEqual(DashboardContent.groups(f)[0].features.map(\.id), ["ep_store", "ep_alarms", "ep_wake"], "late, then at risk, then on track")
+        XCTAssertEqual(s.products[1].progress, 14.0 / 15.0, accuracy: 1e-9)
     }
 
     // MARK: storage
@@ -179,6 +253,11 @@ final class DashboardTests: XCTestCase {
         store.hydrate()
         XCTAssertEqual(store.snapshot, s)
         XCTAssertTrue(store.fromCache)
+        // Its age is on screen, and it reads as stale.
+        let generated = try XCTUnwrap(Format.date(s.generatedAt))
+        store.now = { generated.addingTimeInterval(3 * 3600 + 30) }
+        XCTAssertEqual(store.updatedText, "Updated 3 h ago")
+        XCTAssertTrue(DashboardStore.isStale(s.generatedAt, now: store.now()))
     }
 
     func testStaleUpdatedText() {
@@ -197,17 +276,17 @@ final class DashboardTests: XCTestCase {
 
     func testLoadReplacesTheCachedCopyAndKeepsTheFreshOne() async throws {
         var old = try fixture()
-        old.features = Array(old.features.prefix(1))
+        old.products = Array(old.products.prefix(1))
         cache.save(old, as: .dashboard)
         let store = DashboardStore()
         store.cache = cache
         store.hydrate()
-        XCTAssertEqual(store.snapshot?.features.count, 1)
+        XCTAssertEqual(store.snapshot?.products.count, 1)
         await store.load(rest)
-        XCTAssertEqual(store.snapshot?.features.count, 5)
+        XCTAssertEqual(store.snapshot?.products.count, 9)
         XCTAssertFalse(store.fromCache)
         XCTAssertEqual(store.availability, .available)
-        XCTAssertEqual(cache.load(DashboardSnapshot.self, key: .dashboard)?.features.count, 5)
+        XCTAssertEqual(cache.load(DashboardSnapshot.self, key: .dashboard)?.products.count, 9)
         XCTAssertEqual(StubURLProtocol.recorded.last?.request.value(forHTTPHeaderField: "Authorization"), "Bearer t",
                        "the existing bearer, through the same client")
     }
@@ -245,7 +324,7 @@ final class DashboardTests: XCTestCase {
             XCTAssertNotNil(store.error)
         }
         XCTAssertEqual(cache.load(DashboardSnapshot.self, key: .dashboard), s)
-        serve(200, try Fixtures.data("dashboard-snapshot"))
+        serve(200, try Fixtures.data("snapshot-v1"))
         await store.load(rest)
         XCTAssertNil(store.error, "a good load clears the error")
     }
@@ -272,7 +351,7 @@ final class DashboardTests: XCTestCase {
             case "/api/health": return (200, try! Fixtures.data("health"))
             case "/api/office": return (200, try! Fixtures.data("office"))
             case "/api/inbox": return (200, try! Fixtures.data("inbox"))
-            case "/api/metrics/snapshot": return (200, try! Fixtures.data("dashboard-snapshot"))
+            case "/api/metrics/snapshot": return (200, try! Fixtures.data("snapshot-v1"))
             default: return (404, Data(#"{"error":"no route"}"#.utf8))
             }
         }
@@ -320,7 +399,7 @@ final class DashboardTests: XCTestCase {
 
     #if DEBUG
     func testPreviewDataIsTheV1Fixture() throws {
-        XCTAssertEqual(DashboardSnapshot.preview, try fixture(), "previews show exactly the contract fixture")
+        XCTAssertEqual(DashboardSnapshot.preview, try fixture(), "previews show exactly what the app reads from the fixture")
     }
     #endif
 }

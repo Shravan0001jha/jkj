@@ -73,10 +73,14 @@ extension View {
     func themedScreen() -> some View { modifier(ThemedScreen()) }
     /// List content (a Section, a ForEach or a Group of them): the theme's row background.
     func themedRows() -> some View { modifier(ThemedRows()) }
-    /// Replaces `.background(fill, in: RoundedRectangle(cornerRadius: radius))`.
-    func themedCard<S: ShapeStyle>(radius: CGFloat, fill: S, accent: Color? = nil) -> some View {
-        modifier(ThemedCard(radius: radius, fill: fill, accent: accent))
+    /// Replaces `.background(fill, in: RoundedRectangle(cornerRadius: radius, style: style))`.
+    func themedCard<S: ShapeStyle>(radius: CGFloat, fill: S, accent: Color? = nil, style: RoundedCornerStyle = .circular) -> some View {
+        modifier(ThemedCard(radius: radius, fill: fill, accent: accent, style: style))
     }
+    /// Replaces `.background(fill)` behind a whole screen.
+    func themedBackground<S: ShapeStyle>(_ fill: S) -> some View { modifier(ThemedBackground(fill: fill)) }
+    /// A section title: HUD type under a theme with chrome.
+    func themedHeading() -> some View { modifier(ThemedHeading()) }
     /// Replaces `.background(fill)` on a bar.
     func themedBar<S: ShapeStyle>(_ fill: S) -> some View { modifier(ThemedBar(fill: fill)) }
     /// A time or count: monospaced where the theme says so.
@@ -130,12 +134,33 @@ struct ThemedCard<S: ShapeStyle>: ViewModifier {
     let radius: CGFloat
     let fill: S
     let accent: Color?
+    let style: RoundedCornerStyle
     @Environment(\.theme) private var theme
     func body(content: Content) -> some View {
         if let c = theme.chrome {
             content.background { c.card(radius: radius, accent: accent) }
         } else {
-            content.background(fill, in: RoundedRectangle(cornerRadius: radius))
+            content.background(fill, in: RoundedRectangle(cornerRadius: radius, style: style))
+        }
+    }
+}
+
+struct ThemedBackground<S: ShapeStyle>: ViewModifier {
+    let fill: S
+    @Environment(\.theme) private var theme
+    @Environment(\.motionLevel) private var motion
+    func body(content: Content) -> some View {
+        if let c = theme.chrome { content.background { c.backdrop(motion: motion, live: true) } } else { content.background(fill) }
+    }
+}
+
+struct ThemedHeading: ViewModifier {
+    @Environment(\.theme) private var theme
+    func body(content: Content) -> some View {
+        if let color = theme.type.sectionHeaderColor {
+            content.font(theme.type.sectionHeader).tracking(theme.type.sectionHeaderTracking).textCase(.uppercase).foregroundStyle(color)
+        } else {
+            content
         }
     }
 }
