@@ -257,40 +257,62 @@ final class PushManager: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: delegate
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+    // Completion-handler forms, finished on the main thread. The `async` forms these replace let the
+    // Swift thunk call Apple's completion handler from the cooperative pool; when the tap is what
+    // brings the app up (killed or in the background), UIKit then updates its snapshot inside that
+    // handler and asserts the main thread (-[UIApplication _performBlockAfterCATransactionCommit
+    // Synchronizes:]): SIGABRT right after the chat was routed, so the owner saw the app die instead
+    // of the chat (1 Nov). Every UserNotifications completion here is called on the main actor.
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         let info = notification.request.content.userInfo
         let category = notification.request.content.categoryIdentifier
-        if let chat = await MainActor.run(body: { self.chatPresentation(userInfo: info, category: category) }) {
-            if chat == .haptic { await MainActor.run { UIImpactFeedbackGenerator(style: .light).impactOccurred() } }
+        Task { @MainActor in
+            completionHandler(self.presentation(userInfo: info, category: category))
+        }
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                            withCompletionHandler completionHandler: @escaping () -> Void) {
+        let content = response.notification.request.content
+        let action = response.actionIdentifier
+        let typed = (response as? UNTextInputNotificationResponse)?.userText
+        Task { @MainActor in
+            await self.respond(userInfo: content.userInfo, category: content.categoryIdentifier, action: action, typed: typed)
+            completionHandler()
+        }
+    }
+
+    /// What a push shows while the app is in front.
+    func presentation(userInfo info: [AnyHashable: Any], category: String) -> UNNotificationPresentationOptions {
+        if let chat = chatPresentation(userInfo: info, category: category) {
+            if chat == .haptic { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
             return ChatPushPolicy.options(for: chat)
         }
         let inboxId = Self.string(info["inboxId"]) ?? AppLink.parse(Self.string(info["link"]) ?? "").flatMap { if case .inbox(let id, _) = $0 { return id } else { return nil } }
         let threadId = Self.string(info["threadId"]) ?? AppLink.parse(Self.string(info["link"]) ?? "").flatMap { if case .room(let id) = $0 { return id } else { return nil } }
-        let dup = await MainActor.run { self.recentlyShownBySocket?(inboxId, threadId) ?? false }
+        let dup = recentlyShownBySocket?(inboxId, threadId) ?? false
         return dup ? [] : [.banner, .sound, .badge]
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        let content = response.notification.request.content
-        guard response.actionIdentifier != UNNotificationDismissActionIdentifier else { return }
-        if content.categoryIdentifier == PushCategory.chat,
-           response.actionIdentifier == PushCategory.reply || response.actionIdentifier == PushCategory.mute1h {
-            guard let t = ChatPushPolicy.thread(userInfo: content.userInfo, category: content.categoryIdentifier), !t.id.isEmpty else { return }
-            let action: ChatAction
-            if response.actionIdentifier == PushCategory.reply {
-                let text = ((response as? UNTextInputNotificationResponse)?.userText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    /// A tap or an action on a notification: Reply / Mute run in place; anything else opens its screen.
+    func respond(userInfo info: [AnyHashable: Any], category: String, action: String, typed: String?) async {
+        guard action != UNNotificationDismissActionIdentifier else { return }
+        if category == PushCategory.chat, action == PushCategory.reply || action == PushCategory.mute1h {
+            guard let t = ChatPushPolicy.thread(userInfo: info, category: category), !t.id.isEmpty else { return }
+            let chatAction: ChatAction
+            if action == PushCategory.reply {
+                let text = (typed ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { return }
-                action = .reply(threadId: t.id, isRoom: t.isRoom, text: text)
+                chatAction = .reply(threadId: t.id, isRoom: t.isRoom, text: text)
             } else {
-                action = .mute(threadId: t.id, isRoom: t.isRoom)
+                chatAction = .mute(threadId: t.id, isRoom: t.isRoom)
             }
-            let handler = await MainActor.run { self.onChatAction }
-            await handler?(action)
+            await onChatAction?(chatAction)
             return
         }
-        let link = AppLink.resolve(userInfo: content.userInfo, category: content.categoryIdentifier,
-                                   decide: response.actionIdentifier == PushCategory.decide)
-        await MainActor.run { self.deliver(link) }
+        deliver(AppLink.resolve(userInfo: info, category: category, decide: action == PushCategory.decide))
     }
 
     /// A tap that lands before the app has wired `onOpen` (a cold launch: iOS hands the tap to this

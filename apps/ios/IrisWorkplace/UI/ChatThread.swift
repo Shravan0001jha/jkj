@@ -350,6 +350,20 @@ struct ReplyStrip: View {
 
 // MARK: - The component
 
+/// Whether a chat's scroll view is near its newest message (iOS 18 scroll geometry).
+struct NearBottomTracker: ViewModifier {
+    @Binding var nearBottom: Bool
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: Bool.self) { g in
+                g.contentSize.height - (g.contentOffset.y + g.containerSize.height) < max(120, g.containerSize.height * 0.5)
+            } action: { _, near in nearBottom = near }
+        } else {
+            content
+        }
+    }
+}
+
 struct ChatThreadView<Header: View, Footer: View, Trailing: View>: View {
     @Environment(AppModel.self) private var model
     let items: [ChatItem]
@@ -384,6 +398,8 @@ struct ChatThreadView<Header: View, Footer: View, Trailing: View>: View {
     @Environment(\.theme) private var theme
     /// The rows on screen when the conversation first loaded: anything after them "arrives".
     @State private var initialIds: Set<String>?
+    /// Within a screen of the newest message (always true before iOS 18, which cannot tell).
+    @State private var nearBottom = true
 
     var body: some View {
         let rows = ChatLayout.rows(items)
@@ -394,7 +410,7 @@ struct ChatThreadView<Header: View, Footer: View, Trailing: View>: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         if loading && items.isEmpty {
-                            ProgressView().padding(24)
+                            ProgressView().padding(24).accessibilityIdentifier("chat.loading")
                         } else if items.isEmpty {
                             VStack(spacing: 6) {
                                 Text(emptyTitle).font(.headline)
@@ -421,9 +437,24 @@ struct ChatThreadView<Header: View, Footer: View, Trailing: View>: View {
                 .background(ChatWallpaper())
                 .modifier(AmbientScrollPause())
                 .defaultScrollAnchor(.bottom)
-                .onChange(of: items.isEmpty, initial: true) { _, empty in if !empty && initialIds == nil { initialIds = Set(rows.map(\.id)) } }
+                .modifier(NearBottomTracker(nearBottom: $nearBottom))
+                .onChange(of: items.isEmpty, initial: true) { _, empty in
+                    guard !empty, initialIds == nil else { return }
+                    initialIds = Set(rows.map(\.id))
+                    // Opens on the newest message. `defaultScrollAnchor` alone does not get there when
+                    // the messages are already in memory or the cache as the chat appears (a lazy stack
+                    // of estimated heights): it opened part-way up, the newest off screen (1 Nov).
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                    DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
                 .scrollDismissesKeyboard(.interactively)
-                .onChange(of: items.count) { _, _ in withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) } }
+                // A new newest message (live, or the fresh page merged over the cached copy): follow it
+                // when the owner is at the bottom or sent it; reading further up, stay put. Older
+                // messages merged in above never move the view.
+                .onChange(of: items.last?.id) { _, _ in
+                    guard nearBottom || items.last?.mine == true else { return }
+                    withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
                 .onChange(of: typing) { _, t in if t { withAnimation(.snappy) { proxy.scrollTo("bottom", anchor: .bottom) } } }
                 .onChange(of: focused) { _, f in if f { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } } }
             }

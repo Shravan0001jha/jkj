@@ -200,6 +200,9 @@ final class ThemeStore {
         #if DEBUG
         // Scripted runs (screenshots, UI tests) pick a theme without changing the owner's choice.
         forced = env["WORKPLACE_THEME"].flatMap(ThemeID.init(rawValue:))
+        // Notification-tap tests: SpringBoard relaunches the app without this environment.
+        if env["WORKPLACE_PERSIST_CONFIG"] == "1", let forced { defaults.set(forced.rawValue, forKey: Self.key) }
+        if env["WORKPLACE_FORGET_CONFIG"] == "1" { defaults.removeObject(forKey: Self.key) }
         #endif
         overridden = forced != nil
         selected = forced ?? defaults.string(forKey: Self.key).flatMap(ThemeID.init(rawValue:)) ?? .default

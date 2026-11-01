@@ -73,6 +73,13 @@ struct ServerConfig: Equatable {
         }
     }
 
+    #if DEBUG
+    /// Scripted runs: back to a fresh install's choice (the relay at its default address).
+    static func forgetSaved(defaults: UserDefaults) {
+        for k in [modeKey, lanURLKey, relayURLKey] { defaults.removeObject(forKey: k) }
+    }
+    #endif
+
     /// The LAN address the developer last paired with, if any.
     static func savedLAN(defaults: UserDefaults = .standard) -> URL? {
         defaults.string(forKey: lanURLKey).flatMap(parse)
