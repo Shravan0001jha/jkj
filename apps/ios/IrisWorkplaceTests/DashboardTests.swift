@@ -144,6 +144,15 @@ final class DashboardTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(DashboardSnapshot.self, from: old))
     }
 
+    func testDecodesARealSnapshotFromTheLiveWorkplace() throws {
+        // Copied from GET /api/metrics/snapshot on the Workplace, 1 Nov (it also carries usage and release, which the app ignores).
+        let snap: DashboardSnapshot = try Fixtures.decode("snapshot-v1-live")
+        XCTAssertEqual(snap.products.count, 9)
+        XCTAssertEqual(snap.productsComplete.done, 2)
+        XCTAssertEqual(snap.productsComplete.total, 9)
+        XCTAssertNotNil(snap.deliveredThisWeek)
+    }
+
     // MARK: tiles and charts
 
     func testProductsCompleteCountsDelivered() throws {
