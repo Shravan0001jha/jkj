@@ -342,7 +342,7 @@ struct ItemDetailView: View {
                 MentionButton(draft: $draft, known: known)
                 TextField("Comment · @name to mention", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
                     .focused($composing)
                     .accessibilityIdentifier("item.comment")
                 Button { Task { await send() } } label: {

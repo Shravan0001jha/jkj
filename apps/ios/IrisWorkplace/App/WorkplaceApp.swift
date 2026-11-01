@@ -11,6 +11,7 @@ struct WorkplaceApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        BootOnce.launchedAt = Date()
         let notifier = LocalNotifier()
         let m = AppModel(notifier: notifier, cache: DiskCache.appDefault())
         _model = State(initialValue: m)

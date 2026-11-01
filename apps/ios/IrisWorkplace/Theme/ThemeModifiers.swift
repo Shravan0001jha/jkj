@@ -64,7 +64,13 @@ struct ThemeRoot: ViewModifier {
 }
 
 /// The boot animation plays once per process (a cold launch), never on a theme switch.
-@MainActor enum BootOnce { static var done = false }
+@MainActor enum BootOnce {
+    static var done = false
+    /// When the process started (set by the app at launch). A boot whose first frame comes later
+    /// than `lateAfter` is skipped, so a slow cold start never stacks a second wait on top.
+    static var launchedAt = Date()
+    static let lateAfter: TimeInterval = 1.2
+}
 
 // MARK: - Lists, rows, cards, bars
 
@@ -89,6 +95,10 @@ extension View {
     func themedTime() -> some View { modifier(ThemedTime()) }
     /// Replaces `.buttonStyle(.borderedProminent)`: on a bright neon tint the label turns dark (contrast).
     func themedProminent() -> some View { modifier(ThemedProminent()) }
+    /// Replaces `.textFieldStyle(.roundedBorder)` on a composer field.
+    func themedField() -> some View { modifier(ThemedField()) }
+    /// A title that should read as primary text (Sci-fi: its bright text colour).
+    func themedTitle() -> some View { modifier(ThemedTitle()) }
     /// A neon glow when `on`; otherwise the view untouched.
     func glow(_ on: Bool, _ color: Color, radius: CGFloat = 6) -> some View { modifier(Glow(on: on, color: color, radius: radius)) }
     /// Haptic feedback, only for themes with the haptics feature.
@@ -210,6 +220,27 @@ struct ThemedProminent: ViewModifier {
         } else {
             content.buttonStyle(.borderedProminent)
         }
+    }
+}
+
+struct ThemedField: ViewModifier {
+    @Environment(\.theme) private var theme
+    func body(content: Content) -> some View {
+        if theme.hasChrome {
+            content.textFieldStyle(.plain)
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(SciFiPalette.surface.color(0.8), in: RoundedRectangle(cornerRadius: theme.radii.composer, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: theme.radii.composer, style: .continuous).strokeBorder(SciFiPalette.accent.color(0.45), lineWidth: 1))
+        } else {
+            content.textFieldStyle(.roundedBorder)
+        }
+    }
+}
+
+struct ThemedTitle: ViewModifier {
+    @Environment(\.theme) private var theme
+    func body(content: Content) -> some View {
+        if let c = theme.palette.textPrimary { content.foregroundStyle(c) } else { content }
     }
 }
 

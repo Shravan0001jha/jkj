@@ -159,7 +159,7 @@ struct PlanView: View {
                 } : nil)
         } header: {
             VStack(alignment: .leading, spacing: 2) {
-                Text(a.area.title).font(.title3.weight(.bold)).foregroundStyle(.primary).textCase(nil)
+                Text(a.area.title).font(.title3.weight(.bold)).foregroundStyle(.primary).themedTitle().textCase(nil)
                 if let d = a.area.description, !d.isEmpty { Text(d).font(.caption).foregroundStyle(.secondary).textCase(nil).lineLimit(1) }
             }
         }

@@ -337,7 +337,7 @@ struct ThreadView: View {
                 MentionButton(draft: $draft, known: knownIds)
                 TextField("Post as you · @name to mention", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
                     .focused($composing)
                     .disabled(thread?.state == .resolved)
                 Button { Task { await send() } } label: {

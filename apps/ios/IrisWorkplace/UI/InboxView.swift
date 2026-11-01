@@ -259,7 +259,7 @@ struct InboxItemView: View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField("Reply, ask, or suggest something else", text: $draft, axis: .vertical)
                 .lineLimit(1...5)
-                .textFieldStyle(.roundedBorder)
+                .themedField()
                 .focused($composing)
                 .accessibilityIdentifier("inbox.reply")
             Button { Task { await send() } } label: {

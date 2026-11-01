@@ -320,7 +320,9 @@ struct BootSequence: View {
             }
         }
         .task {
-            guard motion != .off else { BootOnce.done = true; return }
+            guard motion != .off, Date().timeIntervalSince(BootOnce.launchedAt) < BootOnce.lateAfter else {
+                gone = true; BootOnce.done = true; return
+            }
             if motion == .full {
                 withAnimation(.easeInOut(duration: 0.75)) { progress = 1 }
                 try? await Task.sleep(for: .milliseconds(650))
