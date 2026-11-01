@@ -1,13 +1,16 @@
 import Foundation
+import CryptoKit
 
 /// The last good copy of the main lists, kept on the phone so a screen shows at once (owner, 23 Oct:
 /// "make it faster by keeping some data in the phone itself").
 ///
 /// Stale-while-revalidate: at connect the stores are filled from here before the first network call
 /// lands, then `loadAll()` refreshes them and every successful load writes its fresh copy back.
-/// Only the lists are kept (Office, Inbox, Plan, Rooms) — never a chat's message stream, never a
-/// credential. Files are written with `.completeFileProtection` (encrypted at rest, unreadable while
-/// the phone is locked), kept per Workplace (relay or LAN address), and all deleted on sign-out.
+/// The lists (Office, Inbox, Plan, Rooms), and since 1 Nov the chats (owner: "open instantly with
+/// the data the phone already has, like Telegram"): the Talk thread list, the COO log and each
+/// thread's latest `chatKeep` messages. Never a credential. Files are written with
+/// `.completeFileProtection` (encrypted at rest, unreadable while the phone is locked), kept per
+/// Workplace (relay or LAN address), and all deleted on sign-out.
 ///
 /// A copy that is too old (`maxAge`) or from an older layout (`schema`) is discarded rather than shown:
 /// a stale screen that looks current would be worse than a spinner. The one exception is the
@@ -21,10 +24,24 @@ final class DiskCache: @unchecked Sendable {
 
     enum Key: String, CaseIterable {
         case office, inbox, plan, rooms, dashboard
+        /// The Talk thread list, and the COO bridge log (servers without Talk threads).
+        case talkThreads, cooLog
 
         /// How long a copy may be shown; nil = always (the screen shows the copy's own age).
-        var maxAge: TimeInterval? { self == .dashboard ? nil : DiskCache.maxAge }
+        var maxAge: TimeInterval? {
+            switch self {
+            case .dashboard: return nil
+            case .talkThreads, .cooLog: return DiskCache.chatMaxAge
+            default: return DiskCache.maxAge
+            }
+        }
     }
+
+    /// Chats: every message carries its own time, so an old copy is still true (only incomplete),
+    /// and it is refreshed the moment the chat opens. A month bounds what sits on a phone unused.
+    static let chatMaxAge: TimeInterval = 30 * 24 * 3600
+    /// Messages kept per chat on disk (the newest).
+    static let chatKeep = 200
 
     private struct Envelope<T: Codable>: Codable {
         let schema: Int
@@ -63,8 +80,34 @@ final class DiskCache: @unchecked Sendable {
         return root.appendingPathComponent(scope, isDirectory: true).appendingPathComponent("\(key.rawValue).json")
     }
 
-    func save<T: Codable>(_ value: T, as key: Key) {
-        let url = file(key)
+    /// One chat's messages: `<scope>/chats/<thread>.json`. Thread ids are server ids (employee ids,
+    /// `coo`); anything outside a safe file-name alphabet, or long, is hashed.
+    private func chatFile(_ threadId: String) -> URL {
+        let safe = threadId.count <= 64 && !threadId.isEmpty && threadId.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
+        let name = safe ? threadId : "h-" + SHA256.hash(data: Data(threadId.utf8)).map { String(format: "%02x", $0) }.joined()
+        lock.lock(); defer { lock.unlock() }
+        return root.appendingPathComponent(scope, isDirectory: true).appendingPathComponent("chats", isDirectory: true)
+            .appendingPathComponent("\(name).json")
+    }
+
+    func save<T: Codable>(_ value: T, as key: Key) { write(value, to: file(key)) }
+
+    func load<T: Codable>(_ type: T.Type, key: Key) -> T? { read(type, from: file(key), maxAge: key.maxAge) }
+
+    /// The newest `chatKeep` messages of one chat (the caller passes them in order, oldest first).
+    func saveChat<T: Codable>(_ messages: [T], threadId: String) {
+        write(Array(messages.suffix(Self.chatKeep)), to: chatFile(threadId))
+    }
+
+    func loadChat<T: Codable>(_ type: T.Type, threadId: String) -> [T]? {
+        read([T].self, from: chatFile(threadId), maxAge: Self.chatMaxAge)
+    }
+
+    func removeChat(threadId: String) { try? fm.removeItem(at: chatFile(threadId)) }
+
+    func remove(_ key: Key) { try? fm.removeItem(at: file(key)) }
+
+    private func write<T: Codable>(_ value: T, to url: URL) {
         do {
             try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             let data = try JSONEncoder().encode(Envelope(schema: Self.schema, savedAt: now(), value: value))
@@ -75,12 +118,11 @@ final class DiskCache: @unchecked Sendable {
     }
 
     /// The cached value, or nil when there is none, it is too old, or it is from another schema.
-    func load<T: Codable>(_ type: T.Type, key: Key) -> T? {
-        let url = file(key)
+    private func read<T: Codable>(_ type: T.Type, from url: URL, maxAge: TimeInterval?) -> T? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         guard let env = try? JSONDecoder().decode(Envelope<T>.self, from: data),
               env.schema == Self.schema,
-              key.maxAge.map({ now().timeIntervalSince(env.savedAt) <= $0 }) ?? true else {
+              maxAge.map({ now().timeIntervalSince(env.savedAt) <= $0 }) ?? true else {
             try? fm.removeItem(at: url)
             return nil
         }

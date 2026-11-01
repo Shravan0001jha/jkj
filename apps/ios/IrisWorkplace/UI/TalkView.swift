@@ -14,6 +14,8 @@ struct TalkView: View {
                 .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
                 .onChange(of: model.router.talkEmployeeId, initial: true) { _, id in
                     guard let id else { return }
+                    // Cached messages first, so the chat's first frame already has them.
+                    model.talkThreads.hydrateMessages(model.office.card(id)?.employee.virtual == true ? "coo" : id)
                     var p = NavigationPath([TalkRoute(employeeId: id)])
                     if model.router.talkProfile { p.append(ChatProfileRoute(threadId: id)); model.router.talkProfile = false }
                     path = p
@@ -302,8 +304,11 @@ struct ConversationView: View {
             guard let rest = model.rest else { return }
             if model.talkThreads.supported == nil { await model.talkThreads.load(rest) }
             if model.talkThreads.supported == true {
+                // The cached copy is on screen already; this fetches what is new and merges it in.
                 await model.talkThreads.loadMessages(rest, threadId: threadId)
                 await model.talkThreads.markRead(rest, threadId: threadId)
+                // Opened straight from a push on a cold launch: the list behind it is still the cached one.
+                if model.talkThreads.listFromCache { await model.talkThreads.load(rest) }
             }
             if isCoo {
                 await model.coo.load(rest)
@@ -315,7 +320,7 @@ struct ConversationView: View {
             }
         }
         .onDisappear { if isCoo { model.coo.stopPolling() }; model.talkPrefs.markRead(employeeId); model.chatClosed(threadId); model.chatHidden(threadId) }
-        .onAppear { model.talkPrefs.markRead(employeeId); model.chatOpened(threadId); model.chatVisible(threadId) }
+        .onAppear { model.talkThreads.hydrateMessages(threadId); model.talkPrefs.markRead(employeeId); model.chatOpened(threadId); model.chatVisible(threadId) }
         .task(id: "fallback-\(threadId)") {
             // While the live socket is down, check this chat every few seconds so a reply still shows.
             while !Task.isCancelled {
@@ -339,6 +344,8 @@ struct ConversationView: View {
     }
 
     private var subtitle: String {
+        // The cached copy is showing and the fresh page is on its way (Telegram's "Updating…").
+        if model.talkThreads.supported == true, model.talkThreads.isUpdating(threadId) { return "Updating…" }
         if isCoo { return cooOnline == false ? "Offline · messages wait" : "Online" }
         guard talk.employeeId == employeeId, let s = talk.session else { return talk.detail?.employee.state.glyph.label ?? " " }
         switch s.status {
@@ -369,7 +376,7 @@ struct ConversationView: View {
             items: ChatItem.from(talk: threads.shown(threadId), threadId: threadId, sentFiles: threads.sentFiles),
             typing: threads.typing.contains(threadId),
             typingName: name,
-            loading: threads.loadingThread.contains(threadId) && threads.messages[threadId] == nil,
+            loading: threads.showsSpinner(threadId),
             emptyTitle: isCoo ? "Nothing yet" : "No messages yet",
             emptyText: isCoo ? "Say what you need. The COO answers within its own authority, or brings you a recommendation."
                              : "Your first message starts a session from \(name)'s context: handbook, unit, charter, status and handoff.",

@@ -14,9 +14,11 @@
 // Chat mute and shared media (mock/chats.mjs): on by default; --no-chats answers 404 like an older server.
 
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
-import { networkInterfaces } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import * as D from './data.mjs';
 import * as V2 from './v2.mjs';
 import { talkState, handleTalk } from './talk.mjs';
@@ -31,6 +33,7 @@ const TOKEN = 'mock-token-0123456789abcdef';
 const PAIR_CODE = '482913';
 const SESSION_PREFIX = 'mock-session-';
 let macOffline = args.includes('--mac-offline');
+let chatDelayMs = 0;
 let powerSource = args.includes('--on-ac') ? 'ac' : 'battery';
 
 // Mutable state: a fresh copy of the data on every start, and on POST /api/_reset (tests).
@@ -130,7 +133,25 @@ const server = createServer(async (req, res) => {
     state.usedCodes.add(body.code);
     return json(res, 200, { token: TOKEN });
   }
-  if (m === 'POST' && p === '/api/_reset') { state = fresh(); tick = 0; macOffline = false; log('state reset'); return json(res, 200, { ok: true }); }
+  if (m === 'POST' && p === '/api/_reset') { state = fresh(); tick = 0; macOffline = false; chatDelayMs = 0; log('state reset'); return json(res, 200, { ok: true }); }
+  // UI tests (loopback only): deliver a real APNs payload to a simulator through `simctl push`, so a
+  // test can tap the banner the way the owner does (the test runner itself cannot run simctl).
+  if (m === 'POST' && p === '/api/_simpush') {
+    if (!isLoopback(req)) return json(res, 403, { error: 'loopback only' });
+    const body = await readJson(req);
+    if (!body?.udid || !body?.payload) return json(res, 400, { error: 'udid and payload required' });
+    const file = join(tmpdir(), `simpush-${Date.now()}-${randomBytes(4).toString('hex')}.apns`);
+    writeFileSync(file, JSON.stringify(body.payload));
+    execFile('xcrun', ['simctl', 'push', body.udid, body.bundle ?? 'com.irisforu.workplace', file], (err, _out, stderr) => {
+      try { unlinkSync(file); } catch {}
+      log('simpush', body.udid, err ? `failed: ${stderr || err.message}` : 'ok');
+      json(res, err ? 500 : 200, err ? { error: String(stderr || err.message) } : { ok: true });
+    });
+    return;
+  }
+  // Slow network (cache-first checks): every /api/talk and /api/coo answer waits `ms`; 0 turns it off.
+  if (m === 'POST' && p === '/api/_delay') { const body = await readJson(req); chatDelayMs = Number(body?.ms) || 0; log('chat delay =', chatDelayMs); return json(res, 200, { ok: true, ms: chatDelayMs }); }
+  if (chatDelayMs > 0 && (p.startsWith('/api/talk') || p.startsWith('/api/coo'))) await new Promise(r => setTimeout(r, chatDelayMs));
   if (m === 'POST' && p === '/api/_offline') { const body = await readJson(req); macOffline = !!body?.offline; log('mac offline =', macOffline); return json(res, 200, { ok: true, macOffline }); }
   if (m === 'GET' && (p === '/login' || p === '/login/')) return html(res, loginPage('Sign in', 'Sign in with passkey (mock)'));
   if (m === 'GET' && (p === '/login/enrol' || p === '/login/enrol/')) return html(res, loginPage('Set up a passkey', 'Create passkey (mock)'));

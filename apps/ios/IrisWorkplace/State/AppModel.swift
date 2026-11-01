@@ -203,6 +203,8 @@ final class AppModel {
         plan.cache = cache
         rooms.cache = cache
         dashboard.cache = cache
+        talkThreads.cache = cache
+        coo.cache = cache
         pathMonitor?.onChange = { [weak self] satisfied in self?.networkChanged(satisfied: satisfied) }
         pathMonitor?.start()
         alerts.suppressLocal = { [weak self] in self?.pushRegistered ?? false }
@@ -267,6 +269,10 @@ final class AppModel {
         // Scripted runs: start from a clean slate, or skip sign-in with a known credential.
         if env["WORKPLACE_FORGET"] == "1" { relayTokens.clear(); lanTokens.clear() }
         if let t = env["WORKPLACE_TOKEN"], !t.isEmpty { tokens.save(token: t) }
+        // Notification-tap tests: SpringBoard relaunches the app without this environment, so the
+        // mock's address must outlive the run that set it.
+        if env["WORKPLACE_PERSIST_CONFIG"] == "1" { config.save(defaults: defaults) }
+        if env["WORKPLACE_FORGET_CONFIG"] == "1" { ServerConfig.forgetSaved(defaults: defaults) }
         #endif
         syncCredential()
         guard hasCredential else { connection = .signedOut; return }
@@ -339,7 +345,10 @@ final class AppModel {
         case .releases: router.closeSheets(); router.showReleases = true
         case .features: router.closeSheets(); router.showFeatures = true
         case .spend: router.closeSheets(); router.showSpend = true
-        case .chat(let id): router.talk(to: id)
+        case .chat(let id):
+            // The chat's cached messages are in memory before its screen is built: it opens on them.
+            talkThreads.hydrateMessages(id)
+            router.talk(to: id)
         case .talkList: router.openTalkList()
         }
     }
@@ -403,6 +412,8 @@ final class AppModel {
         stopConnections()
         cache?.clearAll()   // nothing from this session stays on the phone
         dashboard.clear()
+        talkThreads.clear()
+        coo.clear()
         relayTokens.clear()
         syncCredential()
         health = nil
@@ -631,6 +642,8 @@ final class AppModel {
         plan.hydrate()
         rooms.hydrate()
         dashboard.hydrate()
+        talkThreads.hydrate()
+        coo.hydrate()
     }
 
     /// Launch and foreground: fetch the snapshot behind the cached one (throttled; never blocks).

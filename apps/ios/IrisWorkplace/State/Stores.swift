@@ -470,6 +470,22 @@ final class CooStore {
     /// Same rule as Talk: typing only while a reply to the owner's message is pending, at most 2 min.
     private(set) var replyPendingSince: Date?
     private var typingTimer: Task<Void, Never>?
+    /// The phone's copy of the log (servers without Talk threads); nil in tests that do not want one.
+    var cache: DiskCache?
+
+    /// At connect: the cached log, so the COO chat opens with what the phone already had.
+    func hydrate() {
+        guard log.isEmpty, let cached = cache?.load([CooMessage].self, key: .cooLog) else { return }
+        log = cached
+    }
+
+    /// Sign-out.
+    func clear() {
+        stopPolling(); typingTimer?.cancel()
+        log = []; presence = nil; error = nil; loaded = false; replyPendingSince = nil
+    }
+
+    private func persist() { cache?.save(Array(log.suffix(DiskCache.chatKeep)), as: .cooLog) }
 
     func isTyping(now: Date = Date()) -> Bool {
         guard let since = replyPendingSince else { return false }
@@ -494,6 +510,7 @@ final class CooStore {
             log = try await rest.cooLog()
             error = nil
             loaded = true
+            persist()
         } catch {
             if let m = error.userMessage { self.error = m }
         }
@@ -535,5 +552,6 @@ final class CooStore {
         guard !log.contains(where: { $0.id == m.id }) else { return }
         log.append(m)
         log.sort { $0.at < $1.at }
+        persist()
     }
 }
