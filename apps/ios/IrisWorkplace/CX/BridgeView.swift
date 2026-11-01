@@ -22,6 +22,8 @@ struct BridgeView: View {
         .padding(14)
         .background { HoloCard(radius: 18) }
         .overlay { ShimmerBorder(radius: 18, motion: motion) }
+        // Large type: everything stacks (below); beyond AX3 the panel stops growing so it stays a panel.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility3)
         .foregroundStyle(SciFiPalette.textPrimary.color)
         .onAppear { cx.bridgeSeen = true; cx.queue.sync(open: model.inbox.open) }
         .onChange(of: model.inbox.open.map(\.id)) { _, _ in cx.queue.sync(open: model.inbox.open) }
@@ -32,17 +34,23 @@ struct BridgeView: View {
     // MARK: system pulse
 
     private var live: Bool { if case .online = model.connection { return model.socketIsOpen }; return false }
+    private var stacked: Bool { typeSize.isAccessibilitySize }
+    private func row(_ alignment: VerticalAlignment = .center, _ spacing: CGFloat = 8) -> AnyLayout {
+        stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(alignment: alignment, spacing: spacing))
+    }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        row().callAsFunction {
             HUDLabel(text: "Bridge")
-            Spacer()
+            if !stacked { Spacer() }
+            HStack(spacing: 8) {
             ZStack {
                 Circle().fill(live ? Color.green : Color.orange).frame(width: 8, height: 8)
                 if live { PulseRing(color: .green, motion: motion).frame(width: 8, height: 8) }
             }
             HUDLabel(text: live ? "Link live" : linkText, color: live ? .green : .orange)
             if case .online(let v) = model.connection { HUDLabel(text: "v" + v, color: SciFiPalette.textSecondary.color) }
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(live ? "System online" : "System \(linkText)")
@@ -65,7 +73,7 @@ struct BridgeView: View {
     @ViewBuilder private var needsYou: some View {
         let open = model.inbox.open
         let top = cx.queue.top.flatMap { id in open.first { $0.id == id } } ?? open.first
-        HStack(alignment: .top, spacing: 12) {
+        row(.top, 12).callAsFunction {
             VStack(spacing: 0) {
                 Text("\(open.count)").font(.title.monospacedDigit().weight(.bold))
                     .foregroundStyle(open.isEmpty ? SciFiPalette.textSecondary.color : Color.orange)
@@ -78,7 +86,7 @@ struct BridgeView: View {
             if let top {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(top.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-                    HStack(spacing: 8) {
+                    row().callAsFunction {
                         if let opt = DecisionQueue.swipeOption(top) {
                             Button {
                                 cx.stager.stage(item: top, option: opt, note: nil)

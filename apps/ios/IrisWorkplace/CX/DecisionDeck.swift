@@ -8,6 +8,7 @@ struct DecisionDeck: View {
     @Environment(SciFiCX.self) private var cx
     @Environment(\.motionLevel) private var motion
     @Environment(\.themeStore) private var store
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var drag: CGFloat = 0
     @State private var deferred = 0
 
@@ -42,6 +43,7 @@ struct DecisionDeck: View {
         }
         .onAppear { cx.queue.sync(open: model.inbox.open) }
         .onChange(of: model.inbox.open.map(\.id)) { _, _ in cx.queue.sync(open: model.inbox.open) }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility3)
         .sensoryFeedback(.impact(weight: .medium), trigger: deferred)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("inbox.queue")
@@ -51,11 +53,13 @@ struct DecisionDeck: View {
         let g = item.kind.glyph
         let u = (item.urgency ?? .normal).glyph
         let safe = DecisionQueue.swipeOption(item)
+        let stacked = typeSize.isAccessibilitySize
+        let line = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 6))
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
+            line {
                 if item.urgency.isRaised { Pill(text: u.label, symbol: u.symbol, tint: u.tint) }
                 Label(g.label, systemImage: g.symbol).font(.caption).foregroundStyle(g.tint).labelStyle(.titleAndIcon)
-                Spacer()
+                if !stacked { Spacer() }
                 Text("\(model.employeeName(item.raisedBy)) · \(Format.ago(item.lastMessageAt ?? item.createdAt))")
                     .font(.caption2.monospaced()).foregroundStyle(SciFiPalette.textSecondary.color)
             }
@@ -63,7 +67,7 @@ struct DecisionDeck: View {
             if !item.summary.isEmpty && item.summary != item.title {
                 Text(item.summary).font(.subheadline).foregroundStyle(SciFiPalette.textSecondary.color).lineLimit(3)
             }
-            HStack(spacing: 8) {
+            line {
                 if let safe {
                     Button { commit(item, safe) } label: { Label(safe.label, systemImage: "checkmark").lineLimit(1) }
                         .themedProminent()
@@ -73,7 +77,7 @@ struct DecisionDeck: View {
                 Button { model.router.openInbox(item.id) } label: { Text(safe == nil ? "Open to answer" : "All options") }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("queue.open")
-                Spacer(minLength: 0)
+                if !stacked { Spacer(minLength: 0) }
                 Button { later(item) } label: { Text("Later") }
                     .buttonStyle(.borderless)
                     .accessibilityIdentifier("queue.later")

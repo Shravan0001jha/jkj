@@ -45,4 +45,15 @@ final class ThemeShotsUITests: XCTestCase {
         shot("dash-6-product")
         drag(450); shot("dash-7-product-more")
     }
+
+    /// For the motion evidence (scripts/anim-frames.sh records the screen meanwhile): tab switches.
+    func testTabSwitchesForVideo() {
+        app.launchEnvironment["WORKPLACE_TAB"] = "plan"
+        app.launchThemed()
+        XCTAssertTrue(app.tabBars.buttons["Inbox"].waitForExistence(timeout: 10))
+        sleep(3)
+        app.tabBars.buttons["Inbox"].tap(); sleep(2)
+        app.tabBars.buttons["Room"].tap(); sleep(2)
+        app.tabBars.buttons["Plan"].tap(); sleep(2)
+    }
 }

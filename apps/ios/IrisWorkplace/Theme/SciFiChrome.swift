@@ -366,6 +366,8 @@ struct HUDLabel: View {
     let text: String
     var color: Color = SciFiPalette.accent.color
     var body: some View {
+        // Never broken mid-word: a HUD caption shrinks a little before it wraps.
         Text(text.uppercased()).font(.caption2.monospaced().weight(.semibold)).tracking(1.4).foregroundStyle(color)
+            .lineLimit(2).minimumScaleFactor(0.7)
     }
 }

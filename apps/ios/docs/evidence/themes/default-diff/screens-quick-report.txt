@@ -1,0 +1,6 @@
+01-plan-light  attempt1: 2157 3162132 bbox=25,958,1156,838; attempt2: 0 3162132 bbox=-;
+06-talk-thread-light  attempt1: 0 3162132 bbox=-;
+12-settings-light  attempt1: 0 3162132 bbox=-;
+01-plan-dark  attempt1: 0 3162132 bbox=-;
+06-talk-thread-dark  attempt1: 0 3162132 bbox=-;
+12-settings-dark  attempt1: 0 3162132 bbox=-;
