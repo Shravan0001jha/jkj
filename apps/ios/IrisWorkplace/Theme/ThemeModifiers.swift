@@ -81,8 +81,9 @@ extension View {
     func themedScreen() -> some View { modifier(ThemedScreen()) }
     /// List content (a Section, a ForEach or a Group of them): the theme's row background.
     func themedRows() -> some View { modifier(ThemedRows()) }
-    /// Replaces `.background(fill, in: RoundedRectangle(cornerRadius: radius, style: style))`.
-    func themedCard<S: ShapeStyle>(radius: CGFloat, fill: S, accent: Color? = nil, style: RoundedCornerStyle = .circular) -> some View {
+    /// Replaces `.background(fill, in: RoundedRectangle(cornerRadius: radius))`, or with `style:` the
+    /// same call with that corner style. (No style passes none, exactly as the call it replaces.)
+    func themedCard<S: ShapeStyle>(radius: CGFloat, fill: S, accent: Color? = nil, style: RoundedCornerStyle? = nil) -> some View {
         modifier(ThemedCard(radius: radius, fill: fill, accent: accent, style: style))
     }
     /// Replaces `.background(fill)` behind a whole screen.
@@ -173,13 +174,17 @@ struct ThemedCard<S: ShapeStyle>: ViewModifier {
     let radius: CGFloat
     let fill: S
     let accent: Color?
-    let style: RoundedCornerStyle
+    let style: RoundedCornerStyle?
     @Environment(\.theme) private var theme
     func body(content: Content) -> some View {
         if let c = theme.chrome {
             content.background { c.card(radius: radius, accent: accent) }
         } else {
-            content.background(fill, in: RoundedRectangle(cornerRadius: radius, style: style))
+            if let style {
+                content.background(fill, in: RoundedRectangle(cornerRadius: radius, style: style))
+            } else {
+                content.background(fill, in: RoundedRectangle(cornerRadius: radius))
+            }
         }
     }
 }
