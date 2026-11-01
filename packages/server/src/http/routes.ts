@@ -13,6 +13,8 @@ import * as agents from '../services/agents.js';
 import * as employees from '../services/employees.js';
 import * as work from '../services/work.js';
 import * as inbox from '../services/inbox.js';
+import * as chatPrefs from '../services/chat-prefs.js';
+import * as chatShared from '../services/chat-shared.js';
 import * as proposals from '../services/proposals.js';
 import * as releases from '../services/releases.js';
 import * as requests from '../services/requests.js';
@@ -173,6 +175,15 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       const limit = url.searchParams.get('limit');
       if (limit !== null && !/^[1-9]\d*$/.test(limit)) throw new BadRequest('limit must be a positive whole number');
       json(res, 200, talkStore.messages(wp, dec(id), { ...(limit ? { limit: Number(limit) } : {}), ...(url.searchParams.get('before') ? { before: url.searchParams.get('before')! } : {}) }));
+    }),
+    // Owner, 1 Nov (CHAT-NOTIFY-CONTRACT §2): per-chat notification mute; GET lists every chat's effective pref.
+    r('GET', '/api/chats/prefs', (_req, res) => json(res, 200, chatPrefs.all(wp))),
+    // CHAT-NOTIFY-CONTRACT §3: a chat's shared media, files and links, whole history, newest first.
+    r('GET', '/api/chats/:id/shared', (_req, res, url, [id]) => {
+      json(res, 200, chatShared.shared(wp, decodeURIComponent(id!), url.searchParams.get('kind') ?? '', url.searchParams.get('before')));
+    }),
+    r('PUT', '/api/chats/:id/prefs', async (req, res, _url, [id]) => {
+      json(res, 200, chatPrefs.set(wp, decodeURIComponent(id!), await readJson(req)));
     }),
     r('POST', '/api/talk/threads/:id/messages', async (req, res, _url, [id]) => {
       json(res, 201, talk.send(wp, dec(id), talkSpec(req, await readJson(req))));

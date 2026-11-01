@@ -364,7 +364,9 @@ export type WorkplaceServerEvent =
   /* Talk threads (docs/LLD-app-fixes.md): upsert by id. */
   | { type: 'talk.message'; message: TalkMessage; thread: TalkThread }
   | { type: 'talk.thread'; thread: TalkThread }
-  | { type: 'talk.typing'; threadId: string; employeeId: string; typing: boolean; at: string };
+  | { type: 'talk.typing'; threadId: string; employeeId: string; typing: boolean; at: string }
+  /** Owner, 1 Nov (CHAT-NOTIFY-CONTRACT §2): a chat's mute changed; every device updates. */
+  | { type: 'chat.prefs'; threadId: string; muted: boolean; mutedUntil: string | null };
 
 export type WorkplaceClientCommand =
   | { type: 'inbox.answer'; id: string; optionId: string; note?: string };
