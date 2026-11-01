@@ -11,6 +11,7 @@
 // --no-live turns off the scripted event stream (deterministic screenshots).
 // --mac-offline (or POST /api/_offline {offline:true}) answers 503 {error:"Mac offline"} like a relay
 // whose Mac is down. Loopback needs no token (as the real server).
+// Chat mute and shared media (mock/chats.mjs): on by default; --no-chats answers 404 like an older server.
 
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
@@ -19,6 +20,7 @@ import { networkInterfaces } from 'node:os';
 import * as D from './data.mjs';
 import * as V2 from './v2.mjs';
 import { talkState, handleTalk } from './talk.mjs';
+import { chatsState, handleChats } from './chats.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : def; };
@@ -47,6 +49,7 @@ const fresh = () => withV2({
   cooOnline: true,
   usedCodes: new Set(),
   talk: (() => { const t = talkState(D.cards); t.on = args.includes('--talk-threads'); return t; })(),
+  chats: chatsState(args),
 });
 /** v2: the open decision joins the Inbox, and the live area/release threads join the Room. */
 function withV2(st) {
@@ -136,6 +139,7 @@ const server = createServer(async (req, res) => {
   if (!authed(req, url)) return json(res, 401, { error: 'unauthorized' });
 
   if (await handleTalk(state.talk, { m, p, url, req, res, json, readJson, broadcast })) return;
+  if (await handleChats(state, { m, p, url, req, res, json, readJson, broadcast })) return;
   const seg = p.split('/').filter(Boolean); // ['api', ...]
   const id = seg[2] ? decodeURIComponent(seg[2]) : undefined;
 

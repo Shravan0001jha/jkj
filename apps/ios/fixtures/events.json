@@ -2633,6 +2633,12 @@
   "at": "2026-10-04T09:31:00.000Z"
  },
  {
+  "type": "chat.prefs",
+  "threadId": "asha",
+  "muted": true,
+  "mutedUntil": "2026-10-04T10:00:00.000Z"
+ },
+ {
   "type": "future.event",
   "anything": 1
  }

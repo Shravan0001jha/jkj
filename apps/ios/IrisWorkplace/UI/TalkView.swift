@@ -14,8 +14,15 @@ struct TalkView: View {
                 .safeAreaInset(edge: .top, spacing: 0) { ConnectionStrip() }
                 .onChange(of: model.router.talkEmployeeId, initial: true) { _, id in
                     guard let id else { return }
-                    path = NavigationPath([TalkRoute(employeeId: id)])
+                    var p = NavigationPath([TalkRoute(employeeId: id)])
+                    if model.router.talkProfile { p.append(ChatProfileRoute(threadId: id)); model.router.talkProfile = false }
+                    path = p
                     model.router.talkEmployeeId = nil
+                }
+                .onChange(of: model.router.talkList, initial: true) { _, list in
+                    guard list else { return }
+                    path = NavigationPath()
+                    model.router.talkList = false
                 }
         }
     }
@@ -44,7 +51,8 @@ struct TalkListView: View {
                 let id = card.employee.id
                 NavigationLink(value: TalkRoute(employeeId: id)) {
                     TalkListRow(card: card, preview: IdLinks.plain(preview(card)) { model.title(forId: $0) }, time: time(card),
-                                pinned: isPinned(card), unread: unread(card), typing: thread(card).map { model.talkThreads.typing.contains($0.id) } ?? false)
+                                pinned: isPinned(card), unread: unread(card), typing: thread(card).map { model.talkThreads.typing.contains($0.id) } ?? false,
+                                muted: model.chatPrefs.isMuted(chatId(card)))
                 }
                 .frame(height: Self.rowHeight)
                 .listRowInsets(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 12))
@@ -60,6 +68,9 @@ struct TalkListView: View {
                     }
                     if unread(card) > 0 {
                         Button { markRead(card) } label: { Label("Mark as read", systemImage: "envelope.open") }
+                    }
+                    Menu { MuteMenuItems(threadId: chatId(card)) } label: {
+                        model.chatPrefs.isMuted(chatId(card)) ? Label("Notifications: muted", systemImage: "bell.slash") : Label("Mute", systemImage: "bell.slash")
                     }
                 }
                 .accessibilityIdentifier("talk.row.\(id)")
@@ -109,6 +120,9 @@ struct TalkListView: View {
         }
         return Self.ordered(cards, pinned: model.talkPrefs.pinned, unread: unread, lastAt: lastAt)
     }
+
+    /// The chat's thread id (CHAT-NOTIFY-CONTRACT §6.1): `coo` for the COO, else the employee id.
+    private func chatId(_ c: EmployeeCard) -> String { c.employee.virtual == true ? "coo" : c.employee.id }
 
     private func isPinned(_ c: EmployeeCard) -> Bool { thread(c)?.pinned ?? model.talkPrefs.isPinned(c.employee.id) }
 
@@ -165,6 +179,7 @@ struct TalkListRow: View {
     var pinned = false
     var unread = 0
     var typing = false
+    var muted = false
 
     /// Presence: the COO's heartbeat; for an employee, a session that is live right now.
     private var online: Bool? {
@@ -184,6 +199,7 @@ struct TalkListRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(card.employee.name).font(.subheadline.weight(unread > 0 ? .bold : .semibold)).lineLimit(1)
+                    if muted { MutedMark() }
                     Spacer(minLength: 6)
                     if let time { Text(time).font(.caption2.weight(unread > 0 ? .semibold : .regular)).foregroundStyle(unread > 0 ? Color.accentColor : .secondary) }
                 }
@@ -195,9 +211,10 @@ struct TalkListRow: View {
                             .accessibilityLabel("Pinned")
                     }
                     if unread > 0 {
+                        // Muted: the count turns grey, as in Telegram.
                         Text("\(unread)").font(.caption2.weight(.bold)).foregroundStyle(.white)
                             .padding(.horizontal, 6).frame(minWidth: 18, minHeight: 18)
-                            .background(Color.accentColor, in: Capsule())
+                            .background(muted ? Color.gray : Color.accentColor, in: Capsule())
                             .accessibilityLabel("\(unread) unread")
                     }
                     if card.needsYou > 0 {
@@ -253,7 +270,14 @@ struct ConversationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                ChatTitle(name: name, subtitle: subtitle, online: isCoo ? cooOnline : sessionOnline, tint: isCoo ? .indigo : .accentColor)
+                // Tap the header for the chat's profile, like Telegram.
+                Button { path.append(ChatProfileRoute(threadId: threadId)) } label: {
+                    ChatTitle(name: name, subtitle: subtitle, online: isCoo ? cooOnline : sessionOnline, tint: isCoo ? .indigo : .accentColor,
+                              muted: model.chatPrefs.isMuted(threadId))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("chat.header")
+                .accessibilityHint("Shows the profile")
             }
             ToolbarItem(placement: .topBarTrailing) { menu }
         }
@@ -290,8 +314,8 @@ struct ConversationView: View {
                 await talk.reload(rest)
             }
         }
-        .onDisappear { if isCoo { model.coo.stopPolling() }; model.talkPrefs.markRead(employeeId); model.chatClosed(threadId) }
-        .onAppear { model.talkPrefs.markRead(employeeId); model.chatOpened(threadId) }
+        .onDisappear { if isCoo { model.coo.stopPolling() }; model.talkPrefs.markRead(employeeId); model.chatClosed(threadId); model.chatHidden(threadId) }
+        .onAppear { model.talkPrefs.markRead(employeeId); model.chatOpened(threadId); model.chatVisible(threadId) }
         .task(id: "fallback-\(threadId)") {
             // While the live socket is down, check this chat every few seconds so a reply still shows.
             while !Task.isCancelled {
@@ -525,6 +549,10 @@ struct ConversationView: View {
                 .accessibilityLabel("Refresh")
         } else {
             Menu {
+                Button { path.append(ChatProfileRoute(threadId: threadId)) } label: { Label("Info", systemImage: "info.circle") }
+                Menu { MuteMenuItems(threadId: threadId) } label: {
+                    model.chatPrefs.isMuted(threadId) ? Label("Notifications: muted", systemImage: "bell.slash") : Label("Mute", systemImage: "bell.slash")
+                }
                 Button { showProfile = true } label: { Label("Charter and status", systemImage: "doc.text") }
                 Button { showAssign = true } label: { Label("Assign work to \(name)", systemImage: "tray.and.arrow.down") }
                 if let s = talk.session {

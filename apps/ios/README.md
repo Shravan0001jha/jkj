@@ -51,7 +51,8 @@ Everything is driven by `make` (XcodeGen generates the project; the `.xcodeproj`
 Debug builds accept launch environment variables for scripted runs: `WORKPLACE_RELAY_URL` (relay
 mode against a mock), `WORKPLACE_URL` (LAN mode), `WORKPLACE_TOKEN` (skip sign-in or pairing),
 `WORKPLACE_FORGET` (clear both credentials first), `WORKPLACE_TAB`, `WORKPLACE_INBOX_ITEM`, `WORKPLACE_TALK`,
-`WORKPLACE_FEATURE`, `WORKPLACE_PIVOT`, `WORKPLACE_SETTINGS`, `WORKPLACE_NO_NOTIF_PROMPT`.
+`WORKPLACE_FEATURE`, `WORKPLACE_PIVOT`, `WORKPLACE_SETTINGS`, `WORKPLACE_NO_NOTIF_PROMPT`,
+`WORKPLACE_CHAT_PROFILE` (a chat's profile, e.g. `coo`).
 
 ## Tests
 

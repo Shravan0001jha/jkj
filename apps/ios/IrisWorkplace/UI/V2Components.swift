@@ -16,6 +16,7 @@ extension View {
         navigationDestination(for: ItemRoute.self) { ItemDetailView(id: $0.id) }
             .navigationDestination(for: ReleasePostRoute.self) { ReleasePostView(id: $0.id) }
             .navigationDestination(for: RoomRoute.self) { RoomDetailView(id: $0.id) }
+            .navigationDestination(for: ChatProfileRoute.self) { ChatProfileView(route: $0) }
             .navigationDestination(for: ThreadRoute.self) { ThreadView(id: $0.id) }
     }
 }

@@ -588,6 +588,7 @@ export const sampleEvents = [
   { type: 'coo.item', item: { id: 'coi-1', at: T0, kind: 'mention', title: 'Mentioned in "General"', body: 'ask the COO', options: [], raisedBy: 'asha', state: 'open' } },
   { type: 'coo.presence', presence: { online: true, lastHeartbeat: T0 } },
   ...sampleV2Events(),
+  { type: 'chat.prefs', threadId: 'asha', muted: true, mutedUntil: '2026-10-04T10:00:00.000Z' },
   { type: 'future.event', anything: 1 },
 ];
 

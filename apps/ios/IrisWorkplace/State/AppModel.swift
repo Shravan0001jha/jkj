@@ -72,6 +72,8 @@ final class Router {
     var inboxList = false
     var roomList = false
     var talkList = false
+    /// Push the chat's profile on top of the chat `talkEmployeeId` opens (DEBUG screenshots).
+    var talkProfile = false
 
     func openInbox(_ id: String) { closeSheets(); inboxItemId = id; tab = .inbox }
     func openInboxList() { closeSheets(); inboxItemId = nil; inboxList = true; tab = .inbox }
@@ -278,6 +280,7 @@ final class AppModel {
         if env["WORKPLACE_BOARD"] == "1" { router.planBoard = true }
         if let id = env["WORKPLACE_INBOX_ITEM"] { router.openInbox(id) }
         if let id = env["WORKPLACE_TALK"] { router.talk(to: id) }
+        if let id = env["WORKPLACE_CHAT_PROFILE"] { router.talk(to: id); router.talkProfile = true }
         if let id = env["WORKPLACE_FEATURE"] { router.featureId = id; router.showFeatures = true }
         if let id = env["WORKPLACE_ROOM"] { if id == "list" { router.tab = .room } else { router.openThread(id) } }
         if env["WORKPLACE_SPEND"] == "1" { router.showSpend = true }

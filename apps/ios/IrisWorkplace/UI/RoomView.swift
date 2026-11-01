@@ -197,6 +197,7 @@ struct ThreadRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(thread.title).font(.subheadline.weight(model.room.unread.contains(thread.id) ? .bold : .semibold)).lineLimit(2)
+                    if model.chatPrefs.isMuted(thread.id, isRoom: true) { MutedMark() }
                     if model.room.unread.contains(thread.id) { Circle().fill(Color.accentColor).frame(width: 8, height: 8).accessibilityLabel("unread") }
                 }
                 if !thread.headline.isEmpty { Text(thread.headline).font(.caption).lineLimit(2) }
@@ -250,7 +251,15 @@ struct ThreadView: View {
             if let t = thread {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
-                        Text(t.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                        // Tap the title for the thread's info (members, mute, what was shared).
+                        NavigationLink(value: ChatProfileRoute(threadId: id, isRoom: true)) {
+                            HStack(spacing: 4) {
+                                Text(t.title).font(.subheadline.weight(.semibold)).lineLimit(2).foregroundStyle(.primary)
+                                if model.chatPrefs.isMuted(id, isRoom: true) { MutedMark() }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("chat.header")
                         Spacer()
                         if isChannel {
                             Pill(text: "everyone", symbol: "person.3", tint: .secondary)
@@ -305,12 +314,16 @@ struct ThreadView: View {
         .navigationTitle(thread?.title ?? "Thread")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if canResolve {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    NavigationLink(value: ChatProfileRoute(threadId: id, isRoom: true)) { Label("Info", systemImage: "info.circle") }
+                    Menu { MuteMenuItems(threadId: id, isRoom: true) } label: {
+                        model.chatPrefs.isMuted(id, isRoom: true) ? Label("Notifications: muted", systemImage: "bell.slash") : Label("Mute", systemImage: "bell.slash")
+                    }
+                    if canResolve {
                         Button { showResolve = true } label: { Label("Resolve with a summary", systemImage: "checkmark.circle") }
-                    } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("More")
-                }
+                    }
+                } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("More")
             }
         }
         .alert("Resolve this thread", isPresented: $showResolve) {
@@ -322,7 +335,8 @@ struct ThreadView: View {
             guard let rest = model.rest else { return }
             await model.room.loadThread(rest, id: id)
         }
-        .onAppear { model.room.markRead(id) }
+        .onAppear { model.room.markRead(id); model.chatVisible(id) }
+        .onDisappear { model.chatHidden(id) }
         .onChange(of: messages.count) { _, _ in model.room.markRead(id) }
     }
 

@@ -737,6 +737,7 @@ struct ChatTitle: View {
     let subtitle: String
     let online: Bool?
     var tint: Color = .accentColor
+    var muted = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -745,7 +746,10 @@ struct ChatTitle: View {
                 PresenceDot(online: online).offset(x: 1, y: 1)
             }
             VStack(alignment: .leading, spacing: 0) {
-                Text(name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    if muted { MutedMark() }
+                }
                 Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
         }

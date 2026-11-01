@@ -178,3 +178,10 @@ Input: `[SharedSource { messageId, at, text, attachments: [TalkAttachment] }]` b
 ### 6.9 Mock (`mock/chats.mjs`)
 
 `GET /api/chats/prefs`, `PUT /api/chats/:id/prefs` (broadcasts `chat.prefs`), `GET /api/chats/:id/shared?kind=&before=` (derived from the mock's Talk/COO messages, page size 30), plus test hooks: `POST /api/_chats {on}` (off → every `/api/chats` route 404s, as today's server), `POST /api/_chat/message {threadId, text}` (a message from the other side over the socket), `POST /api/_chat/prefs {threadId, muted, mutedUntil}` (another device changed it). `--no-chats` starts with the routes off.
+
+### 6.10 Evidence
+
+`docs/evidence/chat/`: `scripts/shots-chat.sh` screens (Talk list with muted rows, chat header,
+profile for an employee and the COO, a room thread) in Default and Sci-fi, light and dark; `ui-*`
+are the `ChatNotifyUITests` screenshots (profile, mute menu, shared tabs, phone-only fallback)
+under each theme.

@@ -52,6 +52,11 @@ struct RootView: View {
                 .sheet(isPresented: $router.showReleases) { ReleasesView() }
                 .sheet(isPresented: $router.showOffice) { OfficeView() }
                 .sheet(isPresented: $router.showFeatures) { FeaturesView() }
+                // A mute that did not save was rolled back (CHAT-NOTIFY-CONTRACT §6.5): say so once.
+                .alert("Couldn't change notifications", isPresented: Binding(get: { model.chatPrefs.error != nil },
+                                                                              set: { if !$0 { model.chatPrefs.clearError() } })) {
+                    Button("OK", role: .cancel) {}
+                } message: { Text(model.chatPrefs.error ?? "") }
             }
         }
         .onOpenURL { url in model.handleOpenURL(url) }
@@ -162,6 +167,7 @@ struct AlertBanner: View {
             .transition(.move(edge: .top).combined(with: .opacity))
             .animation(.snappy, value: b.id)
             .accessibilityLabel("\(g.label): \(b.event.title). \(b.event.body)")
+            .accessibilityIdentifier("alert.banner")
         }
     }
 }
