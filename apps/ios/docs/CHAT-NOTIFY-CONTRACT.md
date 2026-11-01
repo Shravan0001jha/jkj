@@ -25,7 +25,7 @@ Push intent fields (`push.ts` `PushIntent`):
 | field | value |
 |---|---|
 | title | the sender's display name (`Asha`, `Claude — COO`). For a room: `Asha · <room name>` (TITLE_MAX 80) |
-| body | the message text through `scrub()`: whitespace collapsed, cut at 240 chars with `…`. Attachment only: `📷 Photo`, `📄 <file name>`, `🎤 Voice message`. Text plus attachment: the text. |
+| body | the message text through `scrub()`: whitespace collapsed, cut at 1000 chars with `…` (iOS shows ~2-4 lines in the banner and the full text when expanded, like Telegram). Attachment only: `📷 Photo`, `📄 <file name>`, `🎤 Voice message`. Text plus attachment: the text. |
 | threadId (APNs thread-id) | `chat:<threadId>`, so iOS groups each chat's messages into one stack. The COO thread uses `chat:coo`. 32-char relay cap: hash longer ids, deterministically. |
 | category | `WP_CHAT` |
 | collapseId | `chat:<messageId>`: one notification per message, like Telegram. Never deduped against other messages. |
@@ -66,7 +66,7 @@ The app builds it from existing data plus one new server route:
 
 ## 4. Relay (small change, needs the owner's OK to deploy)
 
-- `push.py` BODY_MAX 120 → 240 for category `WP_CHAT` only; other categories stay at 120.
+- `push.py` BODY_MAX 120 → 1000 for category `WP_CHAT` only (APNs payload limit is 4 KB; 1000 chars of UTF-8 plus the rest fits); other categories stay at 120.
 - Add `"mutable-content": 0` as it is now. No Notification Service Extension: avoids an App ID or extension change.
 
 ## 5. App behaviour
