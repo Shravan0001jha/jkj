@@ -71,6 +71,7 @@ final class Router {
     /// Set to show a tab's list itself (pops whatever page that tab had open); the tab clears it.
     var inboxList = false
     var roomList = false
+    var talkList = false
 
     func openInbox(_ id: String) { closeSheets(); inboxItemId = id; tab = .inbox }
     func openInboxList() { closeSheets(); inboxItemId = nil; inboxList = true; tab = .inbox }
@@ -78,6 +79,7 @@ final class Router {
     func openRoomList() { closeSheets(); roomThreadId = nil; roomList = true; tab = .room }
     func openRoom(_ id: String) { closeSheets(); roomId = id; tab = .room }
     func talk(to employeeId: String) { closeSheets(); talkEmployeeId = employeeId; tab = .talk }
+    func openTalkList() { closeSheets(); talkEmployeeId = nil; talkList = true; tab = .talk }
     func openItem(_ id: String) { closeSheets(); itemId = id; tab = .plan }
     func openReleasePost(_ id: String) { closeSheets(); releasePostId = id; tab = .room }
 
@@ -104,6 +106,11 @@ final class AppModel {
     /// them: events sent while the socket was down (tunnel blip, app in the background) are never
     /// replayed, so without this an agent's reply only appeared after leaving and re-opening the chat.
     private(set) var openChats: [String: Int] = [:]
+    /// Chats visible right now, Talk and room threads (thread id -> views): a push for one of them
+    /// only taps (§6.4). Separate from `openChats`, which re-syncs Talk threads only.
+    private(set) var visibleChats: [String: Int] = [:]
+    /// Removes a chat's delivered notifications (installed by the app; nil in tests).
+    var clearChatNotifications: ((String) -> Void)?
     private var everOpened = false
 
     let office = OfficeStore()
@@ -130,6 +137,8 @@ final class AppModel {
     let talkThreads = TalkThreadsStore()
     /// The mini dashboard (HLD-dashboard): the cached metrics snapshot, refreshed in the background.
     let dashboard = DashboardStore()
+    /// Per-chat mute (CHAT-NOTIFY-CONTRACT §2): the server's, mirrored on this phone.
+    let chatPrefs: ChatPrefsStore
     private var planReload: Task<Void, Never>?
     let alerts: AlertsStore
     /// Releases updated over the socket, and their streamed log lines.
@@ -178,6 +187,7 @@ final class AppModel {
         self.defaults = defaults
         self.alerts = AlertsStore(notifier: notifier)
         self.talkPrefs = TalkPrefs(defaults: defaults)
+        self.chatPrefs = ChatPrefsStore(defaults: defaults)
         self.urlSession = urlSession
         self.makeTransport = makeTransport
         self.webAuth = webAuth ?? ASWebAuth()
@@ -326,6 +336,8 @@ final class AppModel {
         case .releases: router.closeSheets(); router.showReleases = true
         case .features: router.closeSheets(); router.showFeatures = true
         case .spend: router.closeSheets(); router.showSpend = true
+        case .chat(let id): router.talk(to: id)
+        case .talkList: router.openTalkList()
         }
     }
 
@@ -454,6 +466,16 @@ final class AppModel {
     // MARK: connection
 
     func chatOpened(_ threadId: String) { openChats[threadId, default: 0] += 1 }
+
+    /// A chat (Talk or room thread) came on screen: its notifications on the lock screen go.
+    func chatVisible(_ threadId: String) {
+        visibleChats[threadId, default: 0] += 1
+        clearChatNotifications?(threadId)
+    }
+    func chatHidden(_ threadId: String) {
+        guard let n = visibleChats[threadId] else { return }
+        if n <= 1 { visibleChats[threadId] = nil } else { visibleChats[threadId] = n - 1 }
+    }
     func chatClosed(_ threadId: String) {
         guard let n = openChats[threadId] else { return }
         if n <= 1 { openChats[threadId] = nil } else { openChats[threadId] = n - 1 }
@@ -629,6 +651,46 @@ final class AppModel {
         return await dashboard.load(client)
     }
 
+    // MARK: chat notification actions (CHAT-NOTIFY-CONTRACT §6.3)
+
+    /// A client for work that may run before any screen (a notification action launched the app in
+    /// the background): the live one, else one built from the saved mode and credential.
+    private func clientForBackgroundWork() -> RestClient? {
+        if let rest { return rest }
+        config = ServerConfig.load(defaults: defaults, env: env)
+        syncCredential()
+        guard hasCredential, !credentialUnreadable else { return nil }
+        return RestClient(config: config, tokens: tokens, session: urlSession)
+    }
+
+    /// Reply from the notification: the COO bridge, the Talk thread, or the room thread.
+    func replyFromNotification(threadId: String, isRoom: Bool, text: String) async throws {
+        guard let rest = clientForBackgroundWork() else { throw WorkplaceError.notPaired }
+        if isRoom {
+            _ = try await rest.postMessage(threadId, text: text, mentions: RoomStore.mentions(in: text, known: mentionable))
+        } else if threadId == "coo" {
+            _ = try await rest.cooMessage(text)
+        } else {
+            _ = try await rest.sendTalk(threadId, SendTalkMessageRequest(text: text, replyTo: nil, mentions: nil, attachmentIds: nil))
+        }
+    }
+
+    /// A chat notification's action: send the reply (a failure is reported in the same stack) or mute.
+    func perform(_ action: ChatAction) async {
+        switch action {
+        case .reply(let threadId, let isRoom, let text):
+            do { try await replyFromNotification(threadId: threadId, isRoom: isRoom, text: text) }
+            catch { LocalNotifier.replyFailed(threadId: threadId, isRoom: isRoom, reason: error.userMessage ?? "Try again from the app.") }
+        case .mute(let threadId, _):
+            await muteFromNotification(threadId: threadId)
+        }
+    }
+
+    /// Mute for 1 hour from the notification.
+    func muteFromNotification(threadId: String) async {
+        try? await chatPrefs.set(clientForBackgroundWork(), threadId: threadId, option: .hour)
+    }
+
     func loadAll() async {
         guard let rest else { return }
         // `health` is already fresh here: both callers run this right after `probe(_:)`, which
@@ -636,8 +698,9 @@ final class AppModel {
         async let o: Void = office.load(rest)
         async let i: Void = inbox.load(rest)
         async let p: Void = plan.load(rest)
+        async let c: Void = chatPrefs.load(rest)
         refreshDashboard()
-        _ = await (o, i, p)
+        _ = await (o, i, p, c)
         syncNeedsYou()
         if inbox.loaded { housekeeping?(Set(inbox.open.map(\.id))) }
     }
@@ -717,6 +780,7 @@ final class AppModel {
         rooms.handle(event)
         releasePosts.handle(event)
         talkThreads.handle(event)
+        chatPrefs.handle(event)
         switch event {
         case .hello(let version, _):
             connection = .online(version: version)

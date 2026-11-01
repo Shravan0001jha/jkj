@@ -19,6 +19,12 @@ struct WorkplaceApp: App {
         // Wired here, not when a credential appears: a notification tap that cold-launches the app
         // reaches the router before the first view (PushManager keeps it if it arrives earlier still).
         AppDelegate.push.onOpen = { [weak m] link in m?.open(link) }
+        // Chat pushes (CHAT-NOTIFY-CONTRACT §6.3–§6.4): what is on screen, what is muted, and the
+        // Reply / Mute actions, which can arrive with the app launched in the background.
+        AppDelegate.push.visibleChats = { [weak m] in Set(m?.visibleChats.keys.map { $0 } ?? []) }
+        AppDelegate.push.isChatMuted = { [weak m] id, room in m?.chatPrefs.isMuted(id, isRoom: room) ?? false }
+        AppDelegate.push.onChatAction = { [weak m] action in await m?.perform(action) }
+        m.clearChatNotifications = { PushManager.clear(threadId: $0) }
     }
 
     var body: some Scene {
@@ -93,6 +99,18 @@ final class LocalNotifier: Notifier {
         if ProcessInfo.processInfo.environment["WORKPLACE_NO_NOTIF_PROMPT"] == "1" { done(false); return }
         #endif
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in done(granted) }
+    }
+
+    /// A Reply from a chat notification did not go out: say so in that chat's stack.
+    static func replyFailed(threadId: String, isRoom: Bool, reason: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Couldn't send your reply"
+        content.body = reason
+        content.sound = .default
+        content.threadIdentifier = "chat:\(threadId)"
+        content.categoryIdentifier = PushCategory.chat
+        content.userInfo = ["link": isRoom ? "room/\(threadId)" : "chat/\(threadId)", "threadId": threadId]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
     func notify(_ alert: AlertEvent) {

@@ -120,13 +120,14 @@ final class AppLinkTests: XCTestCase {
     }
 
     func testCategoriesAreForegroundOnly() {
-        for c in PushCategory.all {
+        // WP_CHAT's Reply and Mute run in the background (CHAT-NOTIFY-CONTRACT §6.3; ChatLinkTests).
+        for c in PushCategory.all where c.identifier != PushCategory.chat {
             for a in c.actions {
                 XCTAssertTrue(a.options.contains(.foreground), "\(c.identifier)/\(a.identifier) must open the app")
                 XCTAssertFalse(a.options.contains(.destructive))
             }
         }
-        XCTAssertEqual(Set(PushCategory.all.map(\.identifier)), ["WP_INBOX", "WP_ROOM", "WP_ALERT", "WP_UPDATE"])
+        XCTAssertEqual(Set(PushCategory.all.map(\.identifier)), ["WP_INBOX", "WP_ROOM", "WP_ALERT", "WP_UPDATE", "WP_CHAT"])
         XCTAssertEqual(PushCategory.all.first { $0.identifier == "WP_INBOX" }?.actions.map(\.identifier), ["OPEN", "DECIDE"])
     }
 }

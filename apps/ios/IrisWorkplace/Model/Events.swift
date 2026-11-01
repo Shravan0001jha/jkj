@@ -64,6 +64,8 @@ enum ServerEvent: Equatable {
     case talkMessage(TalkMessage, thread: TalkThread)
     case talkThread(TalkThread)
     case talkTyping(threadId: String, employeeId: String, typing: Bool)
+    /// A chat's mute changed (this phone or another device): CHAT-NOTIFY-CONTRACT §2.
+    case chatPrefs(threadId: String, pref: ChatPref)
     case unknown(type: String)
 
     static let knownTypes: [String] = [
@@ -73,6 +75,7 @@ enum ServerEvent: Equatable {
         "room.replying",
         "item.updated", "item.comment", "activity.recorded", "update.posted", "area.updated", "inbox.message", "release.post",
         "talk.message", "talk.thread", "talk.typing",
+        "chat.prefs",
     ]
 }
 
@@ -87,6 +90,7 @@ extension ServerEvent: Decodable {
         case office, card, item, proposal, release, id, line, summary, signals, level, title, body, inboxId
         case thread, presence, threadId, employeeId, state
         case comment, activity, update, area, post, typing
+        case muted, mutedUntil
     }
 
     init(from decoder: Decoder) throws {
@@ -169,6 +173,10 @@ extension ServerEvent: Decodable {
             self = .talkTyping(threadId: try c.decode(String.self, forKey: .threadId),
                                employeeId: try c.decodeIfPresent(String.self, forKey: .employeeId) ?? "",
                                typing: try c.decode(Bool.self, forKey: .typing))
+        case "chat.prefs":
+            self = .chatPrefs(threadId: try c.decode(String.self, forKey: .threadId),
+                              pref: ChatPref(muted: try c.decodeIfPresent(Bool.self, forKey: .muted) ?? false,
+                                             mutedUntil: try c.decodeIfPresent(String.self, forKey: .mutedUntil)))
         default:
             self = .unknown(type: type)
         }

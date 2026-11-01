@@ -186,6 +186,13 @@ final class RestClient {
         return try await send(req)
     }
 
+    func put<T: Decodable, B: Encodable>(_ path: String, _ body: B) async throws -> T {
+        var req = request(path, method: "PUT")
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.httpBody = try encoder.encode(body)
+        return try await send(req)
+    }
+
     /// A file upload: the raw bytes as the body, typed by `contentType`.
     func postRaw<T: Decodable>(_ path: String, _ data: Data, contentType: String) async throws -> T {
         var req = request(path, method: "POST")

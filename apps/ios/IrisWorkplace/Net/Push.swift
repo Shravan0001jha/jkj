@@ -24,6 +24,11 @@ enum AppLink: Equatable {
     case releases
     case features
     case spend
+    /// A chat (CHAT-NOTIFY-CONTRACT §5): `chat/<threadId>`; the COO's is `chat/coo`. Talk thread ids
+    /// are employee ids, so this opens Talk with that person.
+    case chat(String)
+    /// `chat` with no id: the Talk list.
+    case talkList
 
     /// Every form the server sends (packages/server/src): push.ts `inbox/<id>`, `inbox`, `office`,
     /// `employee/<id>` (and `item/<id>` once alerts carry their item); trail.ts / status.ts / rhythm.ts
@@ -66,6 +71,7 @@ enum AppLink: Equatable {
         case "releases": return id.isEmpty ? .releases : .releasePost(id)
         case "features": return .features
         case "spend": return .spend
+        case "chat", "chats": return id.isEmpty ? .talkList : .chat(id)
         default: return nil
         }
     }
@@ -79,9 +85,11 @@ enum AppLink: Equatable {
         let str = { (k: String) -> String? in (info[k] as? String).flatMap { $0.isEmpty ? nil : $0 } }
         let link = str("link").flatMap { parse($0, decide: decide) }
         switch link {
-        case .some(.inboxList), .some(.office), .some(.plan), .some(.roomList), .some(.updates), .none: break
+        case .some(.inboxList), .some(.office), .some(.plan), .some(.roomList), .some(.updates), .some(.talkList), .none: break
         case .some(let specific): return specific
         }
+        // A chat push names its thread: that chat, not a room (rooms always send their `room/` link).
+        if category == PushCategory.chat { return str("threadId").map(AppLink.chat) ?? .talkList }
         if let id = str("inboxId") { return .inbox(id, decide: decide) }
         if let id = str("itemId") { return .item(id) }
         if let id = str("threadId") { return .room(id) }
@@ -103,8 +111,12 @@ enum PushCategory {
     static let alert = "WP_ALERT"
     /// v2: a pushed Update (started, blocked, the brief, the weekly review).
     static let update = "WP_UPDATE"
+    /// A chat message (CHAT-NOTIFY-CONTRACT §1): Reply and Mute 1 h without opening the app.
+    static let chat = "WP_CHAT"
     static let open = "OPEN"
     static let decide = "DECIDE"
+    static let reply = "REPLY"
+    static let mute1h = "MUTE_1H"
 
     static var all: Set<UNNotificationCategory> {
         let open = UNNotificationAction(identifier: Self.open, title: "Open", options: [.foreground])
@@ -114,8 +126,68 @@ enum PushCategory {
             UNNotificationCategory(identifier: room, actions: [open], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: alert, actions: [open], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: update, actions: [open], intentIdentifiers: [], options: []),
+            // Background actions, never from a locked phone (the reply goes out as the owner).
+            UNNotificationCategory(identifier: chat, actions: [
+                UNTextInputNotificationAction(identifier: Self.reply, title: "Reply", options: [.authenticationRequired],
+                                              textInputButtonTitle: "Send", textInputPlaceholder: "Message"),
+                UNNotificationAction(identifier: Self.mute1h, title: "Mute for 1 hour", options: [.authenticationRequired]),
+            ], intentIdentifiers: [], options: []),
         ]
     }
+}
+
+/// What a foreground chat push does (CHAT-NOTIFY-CONTRACT §5, §6.4).
+enum ChatPresentation: Equatable {
+    /// Another chat or screen is open: a banner, as iOS presents it.
+    case show
+    /// That chat is on screen: no banner, a light tap; the message arrives live.
+    case haptic
+    /// The chat is muted: nothing at all.
+    case drop
+    /// Not a chat push: the older path (Inbox, alerts, room escalations).
+    case notChat
+}
+
+enum ChatPushPolicy {
+    /// The chat a push is about: its `threadId`, else its link's id. Nil when it is not a chat push.
+    static func thread(userInfo info: [AnyHashable: Any], category: String) -> (id: String, isRoom: Bool)? {
+        let link = (info["link"] as? String).flatMap { AppLink.parse($0) }
+        let isChatLink: Bool = { if case .chat = link { return true }; return false }()
+        guard category == PushCategory.chat || isChatLink else { return nil }
+        var isRoom = false
+        var fromLink: String?
+        switch link {
+        case .chat(let id)?: fromLink = id
+        case .room(let id)?: fromLink = id; isRoom = true
+        default: break
+        }
+        guard let id = (info["threadId"] as? String).flatMap({ $0.isEmpty ? nil : $0 }) ?? fromLink else { return ("", false) }
+        return (id, isRoom)
+    }
+
+    static func decide(userInfo: [AnyHashable: Any], category: String, onScreen: Set<String>,
+                       isMuted: (_ threadId: String, _ isRoom: Bool) -> Bool) -> ChatPresentation {
+        guard let t = thread(userInfo: userInfo, category: category) else { return .notChat }
+        guard !t.id.isEmpty else { return .show }
+        if isMuted(t.id, t.isRoom) { return .drop }
+        if onScreen.contains(t.id) { return .haptic }
+        return .show
+    }
+
+    /// No `.badge`: the badge stays "things that need you" (§1).
+    static func options(for p: ChatPresentation) -> UNNotificationPresentationOptions {
+        switch p {
+        case .show: return [.banner, .sound, .list]
+        case .haptic, .drop: return []
+        case .notChat: return [.banner, .sound, .badge]
+        }
+    }
+}
+
+/// A notification action on a chat push that runs without opening the app.
+enum ChatAction: Equatable {
+    case reply(threadId: String, isRoom: Bool, text: String)
+    case mute(threadId: String, isRoom: Bool)
 }
 
 /// Which answers need the device owner (Face ID / passcode) before they leave the phone:
@@ -165,6 +237,11 @@ final class PushManager: NSObject, UNUserNotificationCenterDelegate {
     }
     /// Asked before showing a foreground push: did the socket already show this item/thread?
     var recentlyShownBySocket: ((_ inboxId: String?, _ threadId: String?) -> Bool)?
+    /// The chats on screen right now (thread ids), and whether one is muted: §6.4.
+    var visibleChats: (() -> Set<String>)?
+    var isChatMuted: ((_ threadId: String, _ isRoom: Bool) -> Bool)?
+    /// Reply / Mute from the notification itself. Wired at launch, like `onOpen`.
+    var onChatAction: ((ChatAction) async -> Void)?
 
     /// The notification centre's delegate and categories. Called from `didFinishLaunching`: Apple
     /// delivers the tap that launched the app only to a delegate set before launch finishes.
@@ -182,6 +259,11 @@ final class PushManager: NSObject, UNUserNotificationCenterDelegate {
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let info = notification.request.content.userInfo
+        let category = notification.request.content.categoryIdentifier
+        if let chat = await MainActor.run(body: { self.chatPresentation(userInfo: info, category: category) }) {
+            if chat == .haptic { await MainActor.run { UIImpactFeedbackGenerator(style: .light).impactOccurred() } }
+            return ChatPushPolicy.options(for: chat)
+        }
         let inboxId = Self.string(info["inboxId"]) ?? AppLink.parse(Self.string(info["link"]) ?? "").flatMap { if case .inbox(let id, _) = $0 { return id } else { return nil } }
         let threadId = Self.string(info["threadId"]) ?? AppLink.parse(Self.string(info["link"]) ?? "").flatMap { if case .room(let id) = $0 { return id } else { return nil } }
         let dup = await MainActor.run { self.recentlyShownBySocket?(inboxId, threadId) ?? false }
@@ -191,6 +273,21 @@ final class PushManager: NSObject, UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let content = response.notification.request.content
         guard response.actionIdentifier != UNNotificationDismissActionIdentifier else { return }
+        if content.categoryIdentifier == PushCategory.chat,
+           response.actionIdentifier == PushCategory.reply || response.actionIdentifier == PushCategory.mute1h {
+            guard let t = ChatPushPolicy.thread(userInfo: content.userInfo, category: content.categoryIdentifier), !t.id.isEmpty else { return }
+            let action: ChatAction
+            if response.actionIdentifier == PushCategory.reply {
+                let text = ((response as? UNTextInputNotificationResponse)?.userText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return }
+                action = .reply(threadId: t.id, isRoom: t.isRoom, text: text)
+            } else {
+                action = .mute(threadId: t.id, isRoom: t.isRoom)
+            }
+            let handler = await MainActor.run { self.onChatAction }
+            await handler?(action)
+            return
+        }
         let link = AppLink.resolve(userInfo: content.userInfo, category: content.categoryIdentifier,
                                    decide: response.actionIdentifier == PushCategory.decide)
         await MainActor.run { self.deliver(link) }
@@ -200,6 +297,14 @@ final class PushManager: NSObject, UNUserNotificationCenterDelegate {
     /// delegate during launch, before the first view appears) waits here and is applied the moment
     /// `onOpen` is set. Only the latest tap is kept.
     private(set) var pendingLink: AppLink?
+
+    /// Nil for a push that is not a chat message (then the older rules apply).
+    func chatPresentation(userInfo: [AnyHashable: Any], category: String) -> ChatPresentation? {
+        let p = ChatPushPolicy.decide(userInfo: userInfo, category: category, onScreen: visibleChats?() ?? []) { id, room in
+            self.isChatMuted?(id, room) ?? false
+        }
+        return p == .notChat ? nil : p
+    }
 
     func deliver(_ link: AppLink) {
         if let onOpen { onOpen(link) } else { pendingLink = link }
@@ -231,6 +336,20 @@ final class PushManager: NSObject, UNUserNotificationCenterDelegate {
                 let info = n.request.content.userInfo
                 let id = (info["inboxId"] as? String) ?? AppLink.parse((info["link"] as? String) ?? "").flatMap { if case .inbox(let id, _) = $0 { return id } else { return nil } }
                 return id == inboxId
+            }.map(\.request.identifier)
+            if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
+        }
+    }
+
+    /// A chat was opened: its delivered notifications go (the lock screen clears, like Telegram).
+    static func clear(threadId: String) {
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            let ids = delivered.filter { n in
+                let c = n.request.content
+                if c.threadIdentifier == "chat:\(threadId)" { return true }
+                guard c.categoryIdentifier == PushCategory.chat else { return false }
+                return ChatPushPolicy.thread(userInfo: c.userInfo, category: c.categoryIdentifier)?.id == threadId
             }.map(\.request.identifier)
             if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
         }
