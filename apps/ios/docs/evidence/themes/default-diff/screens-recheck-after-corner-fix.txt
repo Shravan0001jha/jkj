@@ -1,0 +1,4 @@
+04-inbox-item-light  attempt1: 0 3162132 bbox=-;
+06-talk-thread-light  attempt1: 6478 3162132 bbox=84,195,744,2403; attempt2: 26 3162132 bbox=84,195,744,1283; attempt3: 26 3162132 bbox=84,195,744,1283;
+04-inbox-item-dark  attempt1: 0 3162132 bbox=-;
+06-talk-thread-dark  attempt1: 2 3162132 bbox=81,196,66,1; attempt2: 2 3162132 bbox=81,196,66,1; attempt3: 2 3162132 bbox=81,196,66,1;

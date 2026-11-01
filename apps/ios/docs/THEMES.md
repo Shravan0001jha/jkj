@@ -187,8 +187,28 @@ scripts/theme-diff.sh <baseline.app> <new.app> build/diff 4413 "iPhone 17"   # D
 scripts/shots-themes.sh <app> <out> dark scifi 4413                       # Sci-fi screens
 ```
 
-## 8. Evidence
+## 8. Evidence and results (1 Nov 2026)
 
-`docs/evidence/themes/` — Default vs `45dc1d8` diff table, Sci-fi screens (light and dark system
-appearance), animation frames. Scripts: `scripts/shots-themes.sh`, `scripts/imagediff.swift`,
-`scripts/theme-diff.sh`.
+`docs/evidence/themes/` (README.txt lists the folders). Scripts: `shots-themes.sh`, `theme-diff.sh`,
+`theme-diff-dash.sh`, `imagediff.swift`, `anim-frames.sh`, `ui-themes.sh`, `idle-frames.sh`.
+
+**Default is unchanged** — new build (theme = default) vs the baseline build of `78b0bfe`
+(45dc1d8 + Dashboard v2), same mock (`--no-live`), status bar pinned, full 1206×2622 pixels:
+- 16 screens × light/dark: 30 of 32 identical (0 px). Talk thread: 26 px (light) / 2 px (dark),
+  every one off by exactly 1/255 in one channel on text anti-aliasing — compositing rounding, not
+  visible. Inbox item first showed ~850 px at the card corners (themedCard passed a corner style
+  the original call did not); fixed, now 0 px light and dark.
+- Dashboard v2 (7 frames × light/dark, scrolled by a UI test): earlier run 13 of 14 identical, the
+  14th 9 px of chart anti-aliasing; in the final run three light frames landed a few points apart
+  (drag offset, same content).
+- Settings gains the Appearance section at the bottom (by design); the first screen is identical.
+
+**Tests**: unit 295/295, `make check` ok. UI suite (34 tests) per theme: baseline 33/34, Default
+33/34, Sci-fi 32-33/34; the steady failure, `RelayUITests.testMacOfflineIsShownAndRecovers`,
+fails on the untouched baseline too. AppFixes needs a fresh `--talk-threads` mock per run (it does
+not reset it; replies pile up).
+
+**Performance** (simulator, DEBUG frame probe, slow = frame > 1.5× interval): idle Plan 0.0-0.2%
+both themes (Sci-fi was 7.6% before the shimmer rewrite); scrolling the Plan, Default ~2.1%,
+Sci-fi ~3.3%, and still 3.2% with every Sci-fi effect off — the gap is the Bridge's extra content,
+not the effects. Device check with Instruments recommended.
