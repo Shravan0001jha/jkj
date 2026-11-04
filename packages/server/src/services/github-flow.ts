@@ -112,7 +112,7 @@ export function state(wp: Workplace, nowMs = Date.now()): { mode: GitHubMode; fa
  * A GitHub failure (an API error, a push GitHub refused for a network or auth reason). Three within
  * five minutes switch the flow to `local` and alert the COO. A policy refusal is never counted.
  */
-export const BRANCH_STATE = /cannot lock ref|non-fast-forward|\(fetch first\)|Updates were rejected because|Merge already in progress|Head branch was modified|Pull Request is not mergeable|is not the reviewed commit/i;
+export const BRANCH_STATE = /cannot lock ref|non-fast-forward|\(fetch first\)|Updates were rejected because|Merge already in progress|Head branch was modified|Pull Request is not mergeable|is not the reviewed commit|Note about fast-forwards|If you want to integrate the remote changes|tip of your current branch is behind/i;
 
 export function recordFailure(wp: Workplace, op: string, itemId: string | undefined, nowMs = Date.now(), message = ''): void {
   // A repository rule refusing a merge (405 "Repository rule violation") is GitHub's policy answer, not an

@@ -283,6 +283,7 @@ test('COO 4 Nov: branch-state answers from one PR never switch the whole flow to
       'GitHub PUT /repos/o/r/pulls/991/merge failed (409): Head branch was modified. Review and try the merge again.',
       'GitHub PUT /repos/o/r/pulls/1088/merge failed (405): Pull Request is not mergeable',
       "hint: Updates were rejected because the tip of your current branch is behind (non-fast-forward)",
+      "hint: counterpart. If you want to integrate the remote changes, use 'git pull' hint: before pushing again. hint: See the 'Note about fast-forwards' in 'git push --help' for details.",
     ];
     for (const m of branchState) flow.recordFailure(s.wp, 'merge', s.storyId, Date.now(), m);
     assert.equal(flow.state(s.wp).mode, 'on', 'five branch-state answers in a minute leave the flow on');
