@@ -272,3 +272,22 @@ test('class: a story already Done with an open PR whose approvals do not hold is
     assert.equal((await flow.approve(s.wp, s.storyId, 'nikhil', undefined, qaText(s.wp))).stage, 'qa');
   } finally { await s.done(); }
 });
+
+test('COO 4 Nov: branch-state answers from one PR never switch the whole flow to local; a real outage still does', async () => {
+  const s = setup('kabir');
+  try {
+    flow.setMode(s.wp, 'on', 'coo');
+    const branchState = [
+      "! [remote rejected] x -> emp/nikhil/as_x (cannot lock ref 'refs/heads/emp/nikhil/as_x': is at 6992b5a7 but expected 1135dceb)",
+      'GitHub PUT /repos/o/r/pulls/1083/merge failed (405): Merge already in progress',
+      'GitHub PUT /repos/o/r/pulls/991/merge failed (409): Head branch was modified. Review and try the merge again.',
+      'GitHub PUT /repos/o/r/pulls/1088/merge failed (405): Pull Request is not mergeable',
+      "hint: Updates were rejected because the tip of your current branch is behind (non-fast-forward)",
+    ];
+    for (const m of branchState) flow.recordFailure(s.wp, 'merge', s.storyId, Date.now(), m);
+    assert.equal(flow.state(s.wp).mode, 'on', 'five branch-state answers in a minute leave the flow on');
+    assert.equal(flow.state(s.wp).failures, 0, 'and none of them is counted');
+    for (let i = 0; i < 3; i++) flow.recordFailure(s.wp, 'push', s.storyId, Date.now(), 'GitHub PUT /repos/o/r/pulls/1/merge failed (502): Server Error');
+    assert.equal(flow.state(s.wp).mode, 'local', 'three real 502s still fall back');
+  } finally { await s.done(); }
+});

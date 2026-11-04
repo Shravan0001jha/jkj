@@ -112,10 +112,16 @@ export function state(wp: Workplace, nowMs = Date.now()): { mode: GitHubMode; fa
  * A GitHub failure (an API error, a push GitHub refused for a network or auth reason). Three within
  * five minutes switch the flow to `local` and alert the COO. A policy refusal is never counted.
  */
+export const BRANCH_STATE = /cannot lock ref|non-fast-forward|\(fetch first\)|Updates were rejected because|Merge already in progress|Head branch was modified|Pull Request is not mergeable|is not the reviewed commit/i;
+
 export function recordFailure(wp: Workplace, op: string, itemId: string | undefined, nowMs = Date.now(), message = ''): void {
   // A repository rule refusing a merge (405 "Repository rule violation") is GitHub's policy answer, not an
   // outage: it never counts toward the fallback (case 6, 19 Oct: three of them switched the flow to local).
   if (/Repository rule violation/i.test(message)) { log.warn('github', `${op} refused by a repository rule${itemId ? ` for ${itemId}` : ''}: ${message}`); return; }
+  // A branch-state answer is about one branch or PR, not GitHub's health (COO, 4 Nov: four fallbacks in one day,
+  // each from one story): a stale lease or non-fast-forward push, "Merge already in progress" after a 502,
+  // "Head branch was modified" by a catch-up, or "not mergeable" (conflict). Logged, never counted.
+  if (BRANCH_STATE.test(message)) { log.warn('github', `${op}: branch state, not an outage${itemId ? ` for ${itemId}` : ''}: ${message}`); return; }
   const recent = [...failures(wp).filter(t => t >= nowMs - FAILURE_WINDOW_MS), nowMs];
   putSetting(wp, FAILURES_KEY, JSON.stringify(recent.map(t => new Date(t).toISOString())));
   log.warn('github', `${op} failed${itemId ? ` for ${itemId}` : ''} (${recent.length} in 5 min)${message ? `: ${message}` : ''}`);
