@@ -15,6 +15,13 @@ import { log } from '../util/logger.js';
  */
 
 export const WEEKLY_STOP = 0.90;
+/** Owner, 5 Nov ("98% for Thursday, as a permanent for each Thursday"): on Thursdays (IST) the weekly stop is 98%. */
+export const THURSDAY_STOP = 0.98;
+/** The weekly stop line in force at nowMs: 98% on a Thursday in India time, 90% otherwise. */
+export function weeklyStopAt(nowMs: number): number {
+  const ist = new Date(nowMs + 5.5 * 3_600_000);
+  return ist.getUTCDay() === 4 ? THURSDAY_STOP : WEEKLY_STOP;
+}
 export const CEILING = 0.99;
 export const BY = 'usage-ceiling';
 
@@ -39,17 +46,18 @@ export function liftWeeklyStop(wp: Workplace, by: string): string | null {
   return new Date(resetsAtMs).toISOString();
 }
 
-export function apply(wp: Workplace, r: Reading): CeilingVerdict {
+export function apply(wp: Workplace, r: Reading, nowMs = Date.now()): CeilingVerdict {
   const lifted = !!wp.db.prepare('select value from settings where key = ?').get(liftKey(r.resetsAtMs));
-  const v = lifted ? evaluate(r, CEILING, Number.POSITIVE_INFINITY) : evaluate(r);
+  const stopLine = weeklyStopAt(nowMs);
+  const v = lifted ? evaluate(r, CEILING, Number.POSITIVE_INFINITY) : evaluate(r, CEILING, stopLine);
   const st = floor.state(wp);
   if (v.stop) {
     if (!st.paused) {
-      floor.setPaused(wp, true, `weekly usage at ${Math.round(v.utilization * 100)}% (owner's stop line is 90%)`, BY);
+      floor.setPaused(wp, true, `weekly usage at ${Math.round(v.utilization * 100)}% (owner's stop line is ${Math.round(stopLine * 100)}%)`, BY);
       log.warn('ceiling', `7d at ${Math.round(v.utilization * 100)}%: floor paused`);
     }
   } else if (st.paused && st.by === BY) {
-    floor.setPaused(wp, false, `weekly usage back under 90% (${Math.round(r.utilization * 100)}%)`, BY);
+    floor.setPaused(wp, false, `weekly usage back under ${Math.round(stopLine * 100)}% (${Math.round(r.utilization * 100)}%)`, BY);
     log.info('ceiling', 'weekly usage under the stop line: pause lifted');
   }
   if (!v.over) return v;
