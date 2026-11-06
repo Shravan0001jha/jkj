@@ -23,6 +23,7 @@ import { isReviewerRole, isQa } from './review-policy.js';
 import { assertNotRealPath, underTest } from './test-guard.js';
 import * as evidenceShare from './evidence-share.js';
 import * as deferred from './deferred.js';
+import * as batchTest from './batch-test.js';
 import { log } from '../util/logger.js';
 
 /**
@@ -179,6 +180,10 @@ export interface EvidenceJob {
   server?: boolean;
   /** Dropped from the queue by the COO before it started (a stale twin, or staging reserved): never run, no result. */
   cancelled?: { by: string; why: string; at: string };
+  /** A batch test (batch-test.ts): the combined build's commit and branch, not a story's head. */
+  batch?: { id: string; repo: string; trunk: string; branch: string; sha: string };
+  /** 'cheap': the robot run's chats use the cheaper model (batch tests without model-choice rows, owner 4 Nov). */
+  robotModel?: 'cheap' | 'default';
 }
 
 /* ---------- the ports ---------- */
@@ -379,6 +384,23 @@ export function request(wp: Workplace, spec: { itemId: string; by: string; platf
       (server ? 'Your commit changes the server, so it deploys your iris-api and cloud-agent to staging first (one such run at a time). ' : '') +
       'Don\'t wait for it: the summary comes back to you and onto the story when it finishes.',
   };
+}
+
+/** One evidence job for a batch test's combined build (batch-test.ts): Android, the batch's features, no per-story checks. */
+export function enqueueBatch(wp: Workplace, spec: { batchId: string; repo: string; trunk: string; branch: string; sha: string; features: string[]; by: string; robotModel?: 'cheap' | 'default' }): string {
+  const e = engine(wp);
+  const server = serverChange(wp, spec.repo, spec.trunk, spec.sha).touched;
+  const job: EvidenceJob = {
+    id: newJobId(), itemId: `batch-${spec.batchId}`, by: spec.by, platforms: ['android'], features: [...new Set(spec.features)], state: 'queued',
+    requestedSha: spec.sha, queuedAt: now(), attempts: 0, ...(server ? { server: true } : {}),
+    batch: { id: spec.batchId, repo: spec.repo, trunk: spec.trunk, branch: spec.branch, sha: spec.sha },
+    ...(spec.robotModel === 'cheap' ? { robotModel: 'cheap' as const } : {}),
+  };
+  persist(wp, job);
+  e.queue.push(job.id);
+  schedulePump(wp);
+  log.info('evidence', `batch ${spec.batchId}: queued ${job.id} (android / ${job.features.join(',')} on ${spec.sha.slice(0, 8)})`);
+  return job.id;
 }
 
 /* ---------- the pump ---------- */
@@ -665,7 +687,9 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
   persist(wp, job);
 
   const w = rawGet(wp, job.itemId);
-  const ctx = w ? storyOf(wp, w) : 'the item is gone';
+  const ctx: StoryCtx | string = job.batch
+    ? { w: { id: job.itemId, title: `batch ${job.batch.id}` } as WorkItem, repo: job.batch.repo, trunk: job.batch.trunk, branch: job.batch.branch, head: job.batch.sha }
+    : w ? storyOf(wp, w) : 'the item is gone';
   if (typeof ctx === 'string') {
     job.sha = job.requestedSha ?? '';
     job.run = `${(job.sha || '0000000').slice(0, 12)}-${stamp()}`;
@@ -775,7 +799,7 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
         }
         const before = JSON.stringify(stagingServer(wp));
         job.state = 'running'; job.phase = 'running the suite'; persist(wp, job);
-        const res = await p.runner.run({ checkout, platforms: job.platforms, features: job.features, ...(job.androidApi ? { androidApi: job.androidApi } : {}), api: cfg.stagingUrl, apps, slot, out: runDir, log: join(logs, 'runner.log'), onSpawn, sha, repo: ctx.repo, branch: ctx.branch, requestId: `${job.itemId}-${job.run}` });
+        const res = await p.runner.run({ checkout, platforms: job.platforms, features: job.features, ...(job.androidApi ? { androidApi: job.androidApi } : {}), ...(job.robotModel ? { robotModel: job.robotModel } : {}), api: cfg.stagingUrl, apps, slot, out: runDir, log: join(logs, 'runner.log'), onSpawn, sha, repo: ctx.repo, branch: ctx.branch, requestId: `${job.itemId}-${job.run}` });
         const afterState = stagingServer(wp);
         if (!job.server && JSON.stringify(afterState) !== before) srv.changedTo = knownSha(afterState);
         // Known infra gaps: a listed BLOCKED case is deferred to the story that will verify it, not a failure.
@@ -882,7 +906,10 @@ async function finish(wp: Workplace, job: EvidenceJob, outcome: Outcome, started
     try { evidenceShare.slim(runDir, rec.state); } catch (err) { log.warn('evidence', `${job.id}: not slimmed: ${errText(err)}`); }
   }
   const text = summaryText(rec, title);
-  if (w) {
+  if (job.batch) {
+    try { await batchTest.onResult(wp, job.batch.id, { state: rec.state === 'success' ? 'success' : rec.state === 'failure' ? 'failure' : 'error', failures: rec.failures, durationS: rec.durationS, report: rec.share?.url ?? rec.report, ...(rec.note ? { note: rec.note } : {}) }); }
+    catch (err) { log.warn('evidence', `${job.id}: batch result: ${errText(err)}`); }
+  } else if (w) {
     try {
       const cur = rawGet(wp, job.itemId)!;
       work.saveQuiet(wp, { ...cur, evidenceRun: rec });

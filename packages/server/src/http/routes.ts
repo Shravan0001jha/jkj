@@ -25,6 +25,7 @@ import * as stall from '../services/stall.js';
 import * as room from '../services/room.js';
 import * as coo from '../services/coo.js';
 import * as ownerInbox from '../services/owner-inbox.js';
+import * as batchTest from '../services/batch-test.js';
 import * as superFocus from '../services/focus.js';
 import * as features from '../services/features.js';
 import * as digest from '../services/digest.js';
@@ -635,6 +636,14 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
       json(res, 200, result);
     }),
     r('GET', '/api/coo/evidence', (req, res) => { requireLocal(req); json(res, 200, evidence.state(wp)); }),
+    r('GET', '/api/coo/batch-test', (req, res) => { requireLocal(req); json(res, 200, batchTest.state(wp)); }),
+    r('POST', '/api/coo/batch-test', async (req, res) => {
+      requireLocal(req); const body = await readJson(req);
+      if (body['mode'] === 'on' || body['mode'] === 'off') batchTest.setMode(wp, body['mode']);
+      else if (body['mode'] !== undefined) throw new BadRequest('mode must be on or off');
+      if (body['startNow'] === true) await batchTest.tick(wp, Date.now() + 365 * 86_400_000);
+      json(res, 200, batchTest.state(wp));
+    }),
     r('GET', '/api/coo/evidence/staging', (req, res) => { requireLocal(req); json(res, 200, evidence.stagingServer(wp)); }),
     r('GET', '/api/coo/evidence/deferred', (req, res) => { requireLocal(req); json(res, 200, deferred.allowlist(wp)); }),
     r('POST', '/api/coo/evidence/deferred', async (req, res) => { requireLocal(req); const body = await readJson(req); json(res, 200, deferred.allow(wp, { case: str(body['case']), storyId: str(body['storyId']), reason: str(body['reason']) }, str(body['by']) || 'coo')); }),
