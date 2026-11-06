@@ -848,7 +848,7 @@ export class RealServerDeployer implements ServerDeployer {
    * `tooling` reads trunk's DEPLOY_TOOLING_PATHS. The server-owned checkout is overlaid in place (staging.sh does
    * `cd "$(dirname "$0")/.."`, so it must live in the checkout's scripts/) and restored in a finally.
    */
-  constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 60 * 60_000, private readonly evidenceKeyValue: () => Promise<string | null> = async () => null, private readonly around?: <T>(fn: () => Promise<T>) => Promise<T>, private readonly tooling: (repo: string, trunk: string) => Promise<Record<string, string>> = trunkTooling) {}
+  constructor(private readonly cfg: EvidenceConfig, private readonly timeoutMs = 100 * 60_000, private readonly evidenceKeyValue: () => Promise<string | null> = async () => null, private readonly around?: <T>(fn: () => Promise<T>) => Promise<T>, private readonly tooling: (repo: string, trunk: string) => Promise<Record<string, string>> = trunkTooling) {}
 
   async deploy(r: ServerDeployRequest): Promise<void> {
     const script = join(r.checkout, 'scripts', 'staging.sh');

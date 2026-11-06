@@ -226,3 +226,16 @@ test('a contributor charter may edit a shared file; consulted may not; others st
   assert.equal(guardEdit('services/agent-svc/app.py', { ...base, charterIds: ['mobile'] }).decision, 'deny');
   assert.equal(guardEdit('services/agent-svc/phone.py', { ...base, charterIds: ['conversation'] }).decision, 'deny', 'the rest of agent-svc stays experts-only');
 });
+
+test('words like "say" or "open" inside a commit message are not Mac commands (6 Nov, as_mw448qfj34i57)', () => {
+  const allowed = [
+    'git commit -q -m "Repeat end date kept and the reply will say so"',
+    'git commit -m "keep the dialog open until the user answers"',
+    "git commit -m 'open the alarm list; say the time'",
+    'git add -A && git commit -q -m "Hinglish: the confirmation should say 7am"',
+  ];
+  for (const c of allowed) assert.equal(guardCommand(c, ctx).decision, 'allow', c);
+  // Controls: the same words as real commands, or after the commit, are still denied.
+  const denied = ['say "hello"', 'git commit -m "x" && say done', 'git commit -m "x"; open -a Safari', 'open https://example.com'];
+  for (const c of denied) assert.equal(guardCommand(c, ctx).decision, 'deny', c);
+});

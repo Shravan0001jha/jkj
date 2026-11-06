@@ -214,8 +214,10 @@ export function guardCommand(command: string, ctx: GuardContext): GuardDecision 
   for (const rule of FORBIDDEN_COMMANDS) {
     if (rule.pattern.test(judged)) return { decision: 'deny', reason: `"${command.slice(0, 80)}": ${rule.why}` };
   }
+  // Judged with git's quoted arguments blanked (6 Nov, as_mw448qfj34i57: "say" in a commit message
+  // was refused as driving the Mac for 5 h). A real `say`/`open` outside the quotes still matches.
   for (const rule of HOST_COMMANDS) {
-    if (!rule.pattern.test(command)) continue;
+    if (!rule.pattern.test(judged)) continue;
     if (ctx.liveWindowUntil && Date.now() < ctx.liveWindowUntil) return { decision: 'allow' };
     return { decision: 'deny', reason: `"${command.slice(0, 80)}": ${rule.why}` };
   }
