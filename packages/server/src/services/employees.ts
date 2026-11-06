@@ -12,6 +12,7 @@ import * as work from './work.js';
 import { COMMENT_CAP } from './one-line.js';
 import * as githubFlow from './github-flow.js';
 import * as evidenceRuns from './evidence.js';
+import * as batchTest from './batch-test.js';
 import * as spend from './spend.js';
 import * as inbox from './inbox.js';
 import { assembleContext } from './context-layers.js';
@@ -1442,10 +1443,17 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         'Platforms: android, ios. Features: any name the suite plan lists for that platform (e2e/scripts/plan.mjs PER, read at your story\'s head commit; or all, which the suite expands itself); a feature the plan does not list for the requested platforms is refused before queueing, and the refusal lists what it does run. Setup always runs (install, sign-in), so don\'t name it. ' +
         (macHost() ? 'Desktop (the Mac app) and voice checks are not run here: ask for the Mac with request_mac and do a live check. Windows is a cloud run QA schedules. ' : `Desktop (the Mac app) and voice checks are not run here, and need a Mac. ${NO_MAC_REFUSAL} Windows is a cloud run QA schedules. `) +
         'Evidence belongs to one commit: a new commit makes it stale, so run it again.',
-        { itemId: z.string().optional(), platforms: z.string(), features: z.string(), androidApi: z.enum(['34', '36']).optional().describe('Android emulator API level: 36 (Android 16, what Google Play now requires new apps to target) or 34 (default)') },
-        async ({ itemId, platforms, features, androidApi }) => {
+        { itemId: z.string().optional(), platforms: z.string(), features: z.string(), androidApi: z.enum(['34', '36']).optional().describe('Android emulator API level: 36 (Android 16, what Google Play now requires new apps to target) or 34 (default)'),
+          fast: z.boolean().optional().describe('CTO only: run this now from the ₹1,000/month fast lane instead of waiting for the hourly batch (owner, 4 Nov)') },
+        async ({ itemId, platforms, features, androidApi, fast }) => {
           const id = itemId ?? currentStory(session());
           if (!id) return ok(evidenceRuns.platformRefusal(platforms) ?? 'Name the story: no story is attached to this session, so call run_evidence again with its itemId.');
+          // Owner, 4 Nov: Android evidence is tested before merge in an hourly batch (docs/HLD-batched-testing.md).
+          const item = rawGet(wp, id);
+          if (item && !androidApi && batchTest.routes(wp, { platforms, releaseGate: evidenceRuns.isReleaseGate(item), fast: !!fast })) {
+            const b = batchTest.request(wp, { itemId: id, by: employeeId, features: features.split(',').map(f => f.trim()).filter(Boolean), fast: !!fast });
+            return ok(b.ok ? `${id} (${item.title}): ${b.message}` : `Not queued for ${id}: ${b.message}`);
+          }
           const r = evidenceRuns.request(wp, { itemId: id, by: employeeId, platforms, features, ...(androidApi ? { androidApi } : {}) });
           return ok(r.ok ? `${id} (${rawGet(wp, id)?.title ?? ''}): ${r.message}` : `Not queued for ${id}: ${r.message}`);
         }),

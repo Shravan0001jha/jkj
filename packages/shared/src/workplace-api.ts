@@ -366,7 +366,9 @@ export type WorkplaceServerEvent =
   | { type: 'talk.thread'; thread: TalkThread }
   | { type: 'talk.typing'; threadId: string; employeeId: string; typing: boolean; at: string }
   /** Owner, 1 Nov (CHAT-NOTIFY-CONTRACT §2): a chat's mute changed; every device updates. */
-  | { type: 'chat.prefs'; threadId: string; muted: boolean; mutedUntil: string | null };
+  | { type: 'chat.prefs'; threadId: string; muted: boolean; mutedUntil: string | null }
+  | { type: 'batch.started'; id: string; itemIds: string[]; sha: string }
+  | { type: 'batch.finished'; id: string };
 
 export type WorkplaceClientCommand =
   | { type: 'inbox.answer'; id: string; optionId: string; note?: string };

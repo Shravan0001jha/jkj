@@ -43,6 +43,7 @@ import * as lifecycleWatch from './services/lifecycle-watch.js';
 import * as stallChain from './services/stall-chain.js';
 import * as githubFlow from './services/github-flow.js';
 import * as evidence from './services/evidence.js';
+import * as batchTest from './services/batch-test.js';
 import * as spend from './services/spend.js';
 import * as pace from './services/pace.js';
 import * as alphaIntake from './services/alpha-intake.js';
@@ -155,6 +156,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
   const stopGitHubFlow = githubFlow.startGitHubFlow(wp);
   // run_evidence (docs/LLD-evidence.md §3): runs left by the last process are queued again.
   const stopEvidence = evidence.startEvidence(wp);
+  const stopBatchTest = batchTest.startBatchTest(wp);
 
   const auth = new Auth(join(config.opsDir, 'workplace', 'api-token'));
   // Pushes ride the tunnel; without a relay there is nowhere to send them and `send` says so.
@@ -274,6 +276,7 @@ async function boot(config: Config, held: lock.Lock): Promise<Running> {
       stopHygiene();
       stopGitHubFlow();
       stopEvidence();
+      stopBatchTest();
       clearInterval(awsTimer);
       clearInterval(digestTimer);
       clearInterval(docsTimer);

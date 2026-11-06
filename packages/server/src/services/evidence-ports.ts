@@ -39,6 +39,8 @@ export interface RunnerRequest {
   branch?: string;
   /** Unique per run; a GitHub run carries it in its run name. */
   requestId?: string;
+  /** 'cheap': the suite's chats use the cheaper model (sent as suite input robot_model only if suite.yml declares it). */
+  robotModel?: 'cheap' | 'default';
 }
 
 export interface RunnerOutcome {
@@ -584,6 +586,8 @@ export class GitHubRunner implements EvidenceRunner {
     const optional: Record<string, string> = {};
     // iris-e2e refuses macOS platforms unless release_gate is true; evidence.request only lets release-gate stories ask for ios.
     if (r.platforms.includes('ios')) optional['release_gate'] = 'true';
+    // Owner, 4 Nov: batch tests without model-choice rows run on the cheaper model (iris-e2e input robot_model).
+    if (r.robotModel === 'cheap') optional['robot_model'] = 'cheap';
     const inputs = { iris_ref: r.sha, build_ref: r.sha, platforms: r.platforms.join(','), features: r.features.join(','), target: 'staging', account_mode: 'new', windows_default_smoke: 'false', request_id: requestId,
       // GitHub rejects the whole dispatch (422) for any input the workflow doesn't declare, so an optional one is sent only if suite.yml declares it.
       ...(Object.keys(optional).length ? await this.onlyDeclared(gh, optional, say) : {}) };
