@@ -742,6 +742,9 @@ test('a story that changes iris-api deploys THAT commit to staging before the su
     assert.equal(s.deployer.heads[0], head, 'from the evidence checkout at the story\'s commit');
     assert.equal(s.deployer.runsBefore[0], 0, 'before the suite ran');
     assert.ok(s.deployer.calls[0]!.checkout.includes('_evidence'), 'the server-owned checkout, never the employee worktree');
+    const pr = rawGet(s.wp, s.storyId)!.pr!;
+    assert.equal(pr.tests?.state === 'success' && pr.tests.sha === head ? head : undefined, s.deployer.calls[0]!.testsPassedSha, 'the pre-PR pass on THIS sha is handed to the deploy (8 Nov: deploy-time suites ran past the cap)');
+    assert.equal(s.deployer.calls[0]!.testsPassedSha, undefined, 'pre-PR still pending on the head: the deploy runs its own tests');
     assert.equal(s.runner.calls.length, 1);
     const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
     assert.equal(rec.state, 'success');
@@ -1011,4 +1014,20 @@ test('COO hold: "all" starts nothing new while a run in flight finishes; "server
     assert.equal(evidence.setEvidenceHold(s.wp, { serverMinutes: 0, by: 'coo' }), null, 'clearing both parts removes the hold');
     assert.equal(evidence.evidenceHold(s.wp), null);
   } finally { evidence.setEvidenceHold(s.wp, { allMinutes: 0, serverMinutes: 0, by: 'coo' }); await s.done(); }
+});
+
+test('a story whose pre-PR passed on THIS commit hands that sha to the staging deploy, so the deploy can skip the suites (8 Nov)', async () => {
+  const s = setup({ auto: true });
+  shadow(s);
+  try {
+    const head = s.commit('services/iris-api/app.py', 'ROUTE = "/v1/proven"\n');
+    work.reportDone(s.wp, s.storyId, { tests: { passed: 1, failed: 0 }, commits: ['x'], liveVerified: [], notVerified: [] }, 'kabir');
+    await (await flow.onReview(s.wp, s.storyId, 'kabir')).tests;
+    flow.savePr(s.wp, s.storyId, c => (c.pr ? { pr: { ...c.pr, tests: { state: 'success', sha: head, at: new Date().toISOString(), summary: 'pre-pr OK' } } } : {}));
+    const r = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    assert.ok(r.ok, r.ok ? '' : r.message);
+    await evidence.settled(s.wp);
+    assert.equal(s.deployer.calls.length, 1);
+    assert.equal(s.deployer.calls[0]!.testsPassedSha, head);
+  } finally { await s.done(); }
 });

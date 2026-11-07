@@ -69,6 +69,12 @@ export interface BuildRequest {
   out: string;
   log: string;
   onSpawn?: (pid: number) => void;
+  /**
+   * Set to `sha` only when the PR's workplace/tests record is a success for that exact commit: the pre-PR gate already
+   * ran the api and agent suites there, so the deploy may skip running them again (8 Nov: deploy-time suites ran past
+   * the 100-min cap under load). staging.sh/deploy-target.sh decides; it never skips for production.
+   */
+  testsPassedSha?: string;
 }
 
 export interface AppBuilder {
@@ -88,6 +94,12 @@ export interface ServerDeployRequest {
   /** The checkout, at `sha`. */
   checkout: string;
   sha: string;
+  /**
+   * Set to `sha` only when the PR's workplace/tests record is a success for that exact commit: the pre-PR gate already
+   * ran the api and agent suites there, so the deploy may skip them (8 Nov: deploy-time suites ran past the 100-min
+   * cap under load). staging.sh/deploy-target.sh makes the final call and never skips for production.
+   */
+  testsPassedSha?: string;
   /** The trunk branch whose deploy tooling is used (default TRUNK_BRANCH). */
   trunk?: string;
   log: string;
@@ -858,7 +870,8 @@ export class RealServerDeployer implements ServerDeployer {
     // deploy-api.sh and deploy-agent.sh run their tests with ../../.venv first.
     linkUntracked(r.repo, r.checkout);
     const held = await this.evidenceKeyValue().catch(() => null);
-    const env = childEnvFor({ STAGING_HOST: new URL(this.cfg.stagingUrl).host, ...(held ? { STAGING_DEPLOY_FOR_EVIDENCE: held } : {}) });
+    const proven: Record<string, string> = r.testsPassedSha && r.testsPassedSha === r.sha ? { DEPLOY_SKIP_TESTS: '1', DEPLOY_TESTS_PASSED_SHA: r.sha } : {};
+    const env = childEnvFor({ STAGING_HOST: new URL(this.cfg.stagingUrl).host, ...(held ? { STAGING_DEPLOY_FOR_EVIDENCE: held } : {}), ...proven });
     // Judged on the staging.sh that RUNS (trunk's): until it knows STAGING_DEPLOY_FOR_EVIDENCE, release the legacy key around the deploy (see RealStagingLock).
     const aware = stagingTextKnowsEvidenceKey(files['scripts/staging.sh']);
     const run = (): ReturnType<typeof runLogged> => runLogged('bash', [script, 'deploy'], { cwd: r.checkout, env, logFile: r.log, timeoutMs: this.timeoutMs, ...(r.onSpawn ? { onSpawn: r.onSpawn } : {}) });

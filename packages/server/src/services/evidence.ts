@@ -785,7 +785,9 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
           const base = { sha, itemId: job.itemId, run: job.run! };
           setStagingServer(wp, { state: 'deploying', ...base, at: now() });
           try {
-            await p.deployer.deploy({ repo: ctx.repo, checkout, sha, trunk: ctx.trunk, log: join(logs, 'deploy.log'), onSpawn });
+            const tests = rawGet(wp, job.itemId)?.pr?.tests;
+            const testsPassedSha = tests?.state === 'success' && tests.sha === sha ? sha : undefined;
+            await p.deployer.deploy({ repo: ctx.repo, checkout, sha, trunk: ctx.trunk, log: join(logs, 'deploy.log'), onSpawn, ...(testsPassedSha ? { testsPassedSha } : {}) });
           } catch (err) {
             const why = `staging deploy of ${sha.slice(0, 8)} failed: ${errText(err)}`;
             setStagingServer(wp, { state: 'failed', ...base, at: now(), note: why });
