@@ -33,8 +33,8 @@ function Report({ r, open }: { r: SprintReport; open: boolean }) {
         <b>Sprint {r.number}</b> <span className="muted">{day(r.start)} – {day(r.end)} · {r.done.length}/{total} done{r.slipped.length ? ` · ${r.slipped.length} slipped` : ''}</span>
       </summary>
       {r.goal && <p><b>Goal:</b> {r.goal}</p>}
-      <Refs title="Done" refs={r.done} tone="c-done" />
-      <Refs title="Slipped and carried over" refs={r.slipped} tone="c-overdue" />
+      <Refs title="Done" refs={r.done} tone="col-done" />
+      <Refs title="Slipped and carried over" refs={r.slipped} tone="f-overdue" />
     </details>
   );
 }

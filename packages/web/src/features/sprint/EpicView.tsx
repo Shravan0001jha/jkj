@@ -1,5 +1,5 @@
-import type { DateChange, EpicDetail, FeatureDetail$, Item } from '@jkj/shared';
-import { TRUE_STATUS_LABEL } from '@jkj/shared';
+import type { BoardColumn, DateChange, EpicDetail, FeatureDetail$, Item } from '@jkj/shared';
+import { BOARD_COLUMNS, BOARD_COLUMN_LABEL, TRUE_STATUS_LABEL } from '@jkj/shared';
 import { sprintApi } from '../../api/client.js';
 import { useApi } from '../../lib/useApi.js';
 import { hrefFor, message, showToast } from '../../state/store.js';
@@ -29,11 +29,45 @@ export function EpicView({ id }: { id: string }) {
             }} />
           </div>
           {data.epic.carried?.map((c, i) => <p key={i} className="muted">Carried from {c.fromSprint.replace('sp_', 'Sprint ')}: {c.reason}</p>)}
-          <Stories stories={data.stories} />
+          <StoryBoard columns={data.columns} />
           <Dates dates={data.dates} />
         </>
       )}
     </div>
+  );
+}
+
+/** An epic's stories on the board's four columns (HLD D8), blocked first within each. */
+export function StoryBoard({ columns }: { columns: Record<BoardColumn, Item[]> }) {
+  const names = useNames();
+  return (
+    <div className="jboard">
+      {BOARD_COLUMNS.map(c => (
+        <div key={c} className={`jcol col-${c}`}>
+          <h4><span className={`dot col-${c}`} />{BOARD_COLUMN_LABEL[c]} <span className="muted">{columns[c].length}</span></h4>
+          {columns[c].map(s => <StoryCard key={s.id} s={s} name={names(s.assigneeId)} />)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A story card, the same on the epic page and the team boards. */
+export function StoryCard({ s, name }: { s: Item; name: string }) {
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  const due = s.targetDate;
+  const blocked = !!s.blocker || s.status === 'blocked';
+  return (
+    <a className={`kcard${blocked ? ' blocked' : ''}${due === today && s.status !== 'done' ? ' today' : ''}${due && due < today && s.status !== 'done' ? ' overdue' : ''}`} href={hrefFor('item', s.id)}>
+      <span className="kt">{s.title}</span>
+      <span className="ef">
+        {blocked && <span className="chip f-blocked">Blocked</span>}
+        {s.stall && <span className="chip f-risk">Stalled</span>}
+        {s.trueStatus === 'qa' && <span className="chip col-review">QA</span>}
+      </span>
+      <span className="muted">{name || 'unassigned'}{due ? ` · ${day(due)}` : ''}</span>
+      {s.blocker && <span className="kb">Waiting on {s.blocker.label}{s.blocker.reason ? `: ${s.blocker.reason}` : ''}</span>}
+    </a>
   );
 }
 

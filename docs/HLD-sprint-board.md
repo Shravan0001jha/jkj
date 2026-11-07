@@ -70,6 +70,13 @@ Out of scope:
 - The new write routes accept only the owner or the COO (`x-workplace-actor: coo` from loopback). Any other actor header gets 403.
 - Agents have no HTTP access, so they never reach these routes.
 
+**D8. Jira-style columns (owner, 7 Nov, after the first look: "show which are to do, in progress, backlog, in review, done").**
+- The sprint board is a board of **epics** with four derived columns: To do, In progress, In review and Done. The backlog sits beside it, collapsible.
+- Columns come from the stories and can't be dragged between. A card moves when its stories move.
+- Blocked, at risk, overdue and due today are **flags** on the card (coloured badge plus blocker text), never columns.
+- Dragging between Backlog and To do plans or unplans the epic in the current sprint. Parking is in the card menu.
+- The epic page, the team boards and Today use the same four names and colours.
+
 ## 3. Components
 
 - **`packages/shared/src/sprint.ts`:** the contract types (Feature, PlannedEpic, Sprint, views, requests).

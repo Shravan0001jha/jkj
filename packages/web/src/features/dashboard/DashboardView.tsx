@@ -12,7 +12,7 @@ interface Snapshot {
   gaps?: { window?: string; lostDaysByCause?: { cause: string; days: number }[]; reviewWaitHours?: { p50?: number; p90?: number }; sendBacks?: number; stagingDownDays?: number };
 }
 
-const HEALTH: Record<string, string> = { 'on-track': 'c-track', late: 'c-overdue', 'at-risk': 'c-risk', done: 'c-done' };
+const HEALTH: Record<string, string> = { 'on-track': 'col-progress', late: 'f-overdue', 'at-risk': 'f-risk', done: 'col-done' };
 
 /**
  * The app's Dashboard tab on the web (parity, HLD §6): products with health and forecast, usage against
@@ -38,7 +38,7 @@ export function DashboardView() {
           {(data.products ?? []).map(p => (
             <div key={p.id} className="epicrow">
               <div className="em">
-                <div className="t"><b>{p.name}</b>{p.health && <span className={`chip ${HEALTH[p.health] ?? 'c-parked'}`}>{p.health}</span>}</div>
+                <div className="t"><b>{p.name}</b>{p.health && <span className={`chip ${HEALTH[p.health] ?? 'f-parked'}`}>{p.health}</span>}</div>
                 <div className="m muted">
                   {p.committedDate ? `committed ${day(p.committedDate)}` : 'no date'}
                   {p.forecast?.p50 ? ` · forecast ${day(p.forecast.p50)}${p.forecast.p90 ? ` (p90 ${day(p.forecast.p90)})` : ''}` : ''}

@@ -11,6 +11,50 @@ export type PlanState = 'backlog' | 'planned' | 'parked';
 export type EpicState = 'backlog' | 'planned' | 'in-progress' | 'at-risk' | 'blocked' | 'done' | 'parked';
 export const EPIC_STATES: readonly EpicState[] = ['backlog', 'planned', 'in-progress', 'at-risk', 'blocked', 'done', 'parked'];
 
+/**
+ * The board's columns, Jira-style (owner, 7 Nov 2026: "show which are to do, in progress, backlog, in review,
+ * done"). One vocabulary for epics and stories. Columns are DERIVED from the stories, never set by hand;
+ * blocked / at risk / overdue / due today are flags on the card, not columns. The backlog sits beside the board.
+ */
+export type BoardColumn = 'todo' | 'progress' | 'review' | 'done';
+export const BOARD_COLUMNS: readonly BoardColumn[] = ['todo', 'progress', 'review', 'done'];
+export const BOARD_COLUMN_LABEL: Record<BoardColumn, string> = { todo: 'To do', progress: 'In progress', review: 'In review', done: 'Done' };
+
+/**
+ * A story's column from its true status (workplace-v2 TrueStatus):
+ * To do = backlog, ready, on-hold · In progress = in-progress, waiting, blocked, parked ·
+ * In review = in-review, qa, approved (an open PR or approvals pending) · Done = merged, awaiting-mac, done.
+ */
+export function storyColumn(trueStatus: string): BoardColumn {
+  switch (trueStatus) {
+    case 'in-progress': case 'waiting': case 'blocked': case 'parked': return 'progress';
+    case 'in-review': case 'qa': case 'approved': return 'review';
+    case 'merged': case 'awaiting-mac': case 'done': return 'done';
+    default: return 'todo';
+  }
+}
+
+/**
+ * An epic's column from its stories' columns (LLD §3): Done when every story is done (or the epic itself is);
+ * In review when nothing is to do or in progress and at least one story is in review; In progress when any
+ * story is in progress, or some are done and some not; else To do (nothing started, or no stories yet).
+ */
+export function epicColumn(stories: readonly BoardColumn[], epicDone: boolean): BoardColumn {
+  if (epicDone || (stories.length > 0 && stories.every(c => c === 'done'))) return 'done';
+  const has = (c: BoardColumn): boolean => stories.includes(c);
+  if (!has('todo') && !has('progress') && has('review')) return 'review';
+  if (has('progress') || has('review') || (has('done') && stories.some(c => c !== 'done'))) return 'progress';
+  return 'todo';
+}
+
+/** What the card flags (coloured badges); none of these is a column. */
+export interface EpicFlags {
+  blocked: boolean;
+  atRisk: boolean;
+  overdue: boolean;
+  dueToday: boolean;
+}
+
 export interface DateChange {
   subjectId: string;
   kind: 'feature' | 'epic';
@@ -66,7 +110,11 @@ export interface PlannedEpic {
   /** null in the backlog or parked. */
   sprintId: string | null;
   planState: PlanState;
+  /** Derived (kept for the flags and the Today groups); the board uses `column` + `flags`. */
   state: EpicState;
+  /** The board column, derived from the stories. */
+  column: BoardColumn;
+  flags: EpicFlags;
   /** Past its date and not done (shown red). */
   overdue: boolean;
   /** Due today and not done (highlighted). */
@@ -141,6 +189,10 @@ export interface TodayView {
 
 export interface SprintView {
   sprint: Sprint;
+  /** The board: this sprint's epics (parked ones excluded) by derived column, rank order. */
+  board: Record<BoardColumn, PlannedEpic[]>;
+  /** Jira's backlog beside the board: epics in the backlog, ranked (top = next). */
+  backlog: PlannedEpic[];
   features: { feature?: Feature; epics: PlannedEpic[] }[];
   /** The next 14 days from today, each with the epics due that day. */
   timeline: { date: string; epics: { id: string; title: string; state: EpicState; overdue: boolean }[] }[];
@@ -174,8 +226,6 @@ export interface Team {
   memberIds: string[];
 }
 
-export type BoardColumn = 'todo' | 'progress' | 'review' | 'qa' | 'done';
-export const BOARD_COLUMNS: readonly BoardColumn[] = ['todo', 'progress', 'review', 'qa', 'done'];
 
 export interface TeamBoard {
   team: Team;
@@ -188,6 +238,8 @@ export interface EpicDetail {
   feature?: Feature;
   /** Blocked/waiting first, then open, then done. */
   stories: Item[];
+  /** The same stories on the board's columns, blocked first within each. */
+  columns: Record<BoardColumn, Item[]>;
   dates: DateChange[];
 }
 

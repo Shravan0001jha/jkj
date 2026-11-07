@@ -11,6 +11,7 @@ import type {
 import type { Workplace } from './workplace.js';
 import * as items from './items.js';
 import * as inbox from './inbox.js';
+import { BOARD_COLUMNS, epicColumn, storyColumn } from '@jkj/shared';
 import { rowsJson } from './store.js';
 import { chiefOfStaffId, levelOf, rawGet } from './v2-map.js';
 import { BadRequest, NotFound } from '../util/errors.js';
@@ -253,11 +254,14 @@ function plannedEpic(wp: Workplace, row: EpicRow, nowMs: number, stories?: Item[
   else state = row.sprintId ? 'planned' : 'backlog';
   const feature = row.featureId ? featureRow(wp, row.featureId) : undefined;
   const assignees = [...new Set(all.map(s => s.assigneeId).filter((a): a is string => !!a))];
+  const column = epicColumn(all.map(s => storyColumn(s.trueStatus ?? s.status)), isDone);
+  const dueToday = !isDone && row.planState !== 'parked' && row.dueDate === today;
+  const flags = { blocked: state === 'blocked', atRisk: state === 'at-risk' || (overdue && state === 'blocked'), overdue, dueToday };
   return {
     id: w.id, title: w.title,
     ...(feature ? { featureId: feature.id, featureTitle: feature.title } : {}),
-    sprintId: row.sprintId, planState: row.planState, state, overdue,
-    dueToday: !isDone && row.planState !== 'parked' && row.dueDate === today,
+    sprintId: row.sprintId, planState: row.planState, state, column, flags, overdue,
+    dueToday,
     ...(row.dueDate ? { dueDate: row.dueDate } : {}),
     rank: row.rank, progress, blockers, waitingOnOwner,
     ...(row.carried?.length ? { carried: row.carried } : {}),
@@ -275,6 +279,10 @@ function allPlanned(wp: Workplace, nowMs: number): PlannedEpic[] {
 
 const STORY_ORDER = (s: Item): number => (blockerOf(s) ? 0 : isOpen(s) ? 1 : 2);
 
+function emptyColumns<T>(): Record<BoardColumn, T[]> {
+  return Object.fromEntries(BOARD_COLUMNS.map(c => [c, [] as T[]])) as Record<BoardColumn, T[]>;
+}
+
 export function epic(wp: Workplace, id: string, nowMs = Date.now()): EpicDetail {
   roll(wp, nowMs);
   const row = epicRow(wp, id);
@@ -284,7 +292,9 @@ export function epic(wp: Workplace, id: string, nowMs = Date.now()): EpicDetail 
   if (!pe) throw new NotFound(`No planned epic ${id}`);
   const feature = row.featureId ? featureView(wp, row.featureId, nowMs) : undefined;
   const sorted = stories.map((s, i) => ({ s, i })).sort((a, b) => STORY_ORDER(a.s) - STORY_ORDER(b.s) || a.i - b.i).map(x => x.s);
-  return { epic: pe, ...(feature ? { feature } : {}), stories: sorted, dates: dates(wp, id) };
+  const columns = emptyColumns<Item>();
+  for (const s of sorted) columns[storyColumn(s.trueStatus ?? s.status)].push(s);
+  return { epic: pe, ...(feature ? { feature } : {}), stories: sorted, columns, dates: dates(wp, id) };
 }
 
 /* ---------- features ---------- */
@@ -494,8 +504,11 @@ export function sprintView(wp: Workplace, sprintId?: string, nowMs = Date.now())
     epics: [...planned.filter(e => e.dueDate === date && e.planState !== 'parked'), ...(date === today ? live.filter(e => e.overdue) : [])]
       .map(e => ({ id: e.id, title: e.title, state: e.state, overdue: e.overdue })),
   }));
+  const board = emptyColumns<PlannedEpic>();
+  for (const e of [...inSprint].sort(byRankDue)) if (e.planState !== 'parked') board[e.column].push(e);
+  const backlog$ = planned.filter(e => e.planState === 'backlog').sort(byRankDue);
   return {
-    sprint, features: featureList, timeline,
+    sprint, board, backlog: backlog$, features: featureList, timeline,
     totals: { epics: inSprint.length, done: inSprint.filter(e => e.state === 'done').length, atRisk: inSprint.filter(e => e.state === 'at-risk').length, blocked: inSprint.filter(e => e.state === 'blocked').length },
   };
 }
@@ -594,17 +607,11 @@ export function teams(wp: Workplace): Team[] {
   return out;
 }
 
-const COLUMN: Record<string, BoardColumn> = {
-  backlog: 'todo', ready: 'todo', 'on-hold': 'todo',
-  'in-progress': 'progress', waiting: 'progress', blocked: 'progress', parked: 'progress',
-  'in-review': 'review', qa: 'qa', approved: 'qa', merged: 'done', 'awaiting-mac': 'done', done: 'done',
-};
-
 export function teamBoard(wp: Workplace, teamId: string, nowMs = Date.now()): TeamBoard {
   const sprint = roll(wp, nowMs);
   const team = teams(wp).find(t => t.id === teamId);
   if (!team) throw new NotFound(`No team ${teamId}`);
-  const columns: TeamBoard['columns'] = { todo: [], progress: [], review: [], qa: [], done: [] };
+  const columns: TeamBoard['columns'] = emptyColumns<Item>();
   if (!team.memberIds.length) return { team, sprint, columns };
   const marks = team.memberIds.map(() => '?').join(', ');
   const rows = rowsJson<WorkItem>(wp.db.prepare(`select json from work where employee_id in (${marks}) order by coalesce(rank, 0), created_at`).all(...team.memberIds));
@@ -615,8 +622,7 @@ export function teamBoard(wp: Workplace, teamId: string, nowMs = Date.now()): Te
     if (w.status === 'done' && (!inWindow(w.statusSince) || (w.resolution && w.resolution !== 'done'))) continue;
     if (w.status === 'parked' && !inWindow(w.statusSince)) continue;
     const item = items.toItem(wp, w);
-    const col = COLUMN[item.trueStatus ?? item.status] ?? 'todo';
-    columns[col].push(item);
+    columns[storyColumn(item.trueStatus ?? item.status)].push(item);
   }
   return { team, sprint, columns };
 }

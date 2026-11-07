@@ -17,7 +17,7 @@ export function PlanView() {
   const card = (c: EpicCard) => (
     <div key={c.epic.id} className={`epicrow${c.finished ? ' dim' : ''}`}>
       <a className="em" href={hrefFor('item', c.epic.id)}>
-        <div className="t"><b>{c.epic.title}</b>{c.inFocus && <span className="chip c-track">Focus</span>}{c.finished && <span className="chip c-done">Done</span>}</div>
+        <div className="t"><b>{c.epic.title}</b>{c.inFocus && <span className="chip col-progress">Focus</span>}{c.finished && <span className="chip col-done">Done</span>}</div>
         {c.next && <div className="m muted">Next: {c.next.title}</div>}
         {c.flags.map(f => <div key={f.itemId} className="blk"><b className="bl">{f.kind === 'blocked' ? 'Blocked' : 'Stalled'}</b> {f.title} — {f.reason}{f.waitingOn ? ` (waiting on ${names(f.waitingOn)})` : ''}</div>)}
         <Progress pct={c.progress.pct} done={c.progress.storiesDone} total={c.progress.storiesTotal} />

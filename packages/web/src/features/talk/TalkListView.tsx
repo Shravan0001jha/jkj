@@ -14,7 +14,7 @@ export function TalkListView() {
       <div className="stack tight">
         {sorted.map(t => (
           <a key={t.id} className="talkrow" href={hrefFor('employee', t.employeeId)}>
-            <div className="t"><b>{t.name}</b>{t.role && <span className="muted"> · {t.role}</span>}{t.pinned && <span className="chip c-parked">pinned</span>}{t.unreadCount > 0 && <span className="badge">{t.unreadCount}</span>}{t.typing && <span className="muted"> typing…</span>}</div>
+            <div className="t"><b>{t.name}</b>{t.role && <span className="muted"> · {t.role}</span>}{t.pinned && <span className="chip f-parked">pinned</span>}{t.unreadCount > 0 && <span className="badge">{t.unreadCount}</span>}{t.typing && <span className="muted"> typing…</span>}</div>
             {t.lastMessage && <div className="muted one">{t.lastMessage.fromName}: {t.lastMessage.text}</div>}
             {t.lastMessageAt && <div className="muted">{new Date(t.lastMessageAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
           </a>

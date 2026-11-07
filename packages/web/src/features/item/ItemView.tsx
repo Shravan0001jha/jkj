@@ -24,7 +24,7 @@ export function ItemView({ id }: { id: string }) {
         {data.parent && data.parent.id !== data.epic?.id ? <><a href={hrefFor('item', data.parent.id)}>{data.parent.title}</a> › </> : null}
         {it.level}{it.type ? ` (${it.type})` : ''} · {it.id}
       </p>
-      <div className="sec-h"><h2>{it.title}</h2><span className="chip c-track">{TRUE_STATUS_LABEL[st as keyof typeof TRUE_STATUS_LABEL] ?? st}</span></div>
+      <div className="sec-h"><h2>{it.title}</h2><span className="chip col-progress">{TRUE_STATUS_LABEL[st as keyof typeof TRUE_STATUS_LABEL] ?? st}</span></div>
       <p className="muted">
         {it.assigneeId ? `With ${names(it.assigneeId)}` : 'Unassigned'}
         {it.reviewerId ? ` · reviewer ${names(it.reviewerId)}` : ''}

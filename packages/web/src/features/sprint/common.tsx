@@ -1,24 +1,31 @@
 import { useState } from 'react';
-import type { EpicState, PlannedEpic } from '@jkj/shared';
+import type { BoardColumn, PlannedEpic } from '@jkj/shared';
+import { BOARD_COLUMN_LABEL } from '@jkj/shared';
 import { hrefFor, useStore } from '../../state/store.js';
 
-/** The owner's chip vocabulary (LLD §6): green done, blue on track, amber at risk, red overdue, grey blocked. */
-export function StateChip({ epic }: { epic: Pick<PlannedEpic, 'state' | 'overdue' | 'dueToday'> }) {
-  const [tone, label] = chip(epic.state, epic.overdue);
-  return <span className={`chip ${tone}`}>{label}{epic.dueToday && epic.state !== 'done' ? ' · due today' : ''}</span>;
+/**
+ * The board's vocabulary (HLD D8): one column chip (To do / In progress / In review / Done, Jira's names and
+ * colours) plus flag badges (Blocked, At risk, Overdue, Due today). Flags are never columns.
+ */
+export function ColumnChip({ column }: { column: BoardColumn }) {
+  return <span className={`chip col-${column}`}>{BOARD_COLUMN_LABEL[column]}</span>;
 }
 
-export function chip(state: EpicState, overdue: boolean): [string, string] {
-  if (overdue) return ['c-overdue', 'Overdue'];
-  switch (state) {
-    case 'done': return ['c-done', 'Done'];
-    case 'at-risk': return ['c-risk', 'At risk'];
-    case 'blocked': return ['c-blocked', 'Blocked'];
-    case 'parked': return ['c-parked', 'Parked'];
-    case 'backlog': return ['c-parked', 'Backlog'];
-    case 'in-progress': return ['c-track', 'On track'];
-    default: return ['c-track', 'Planned'];
-  }
+export function Flags({ epic }: { epic: Pick<PlannedEpic, 'flags' | 'state'> }) {
+  const f = epic.flags;
+  return (
+    <>
+      {f.blocked && <span className="chip f-blocked">Blocked</span>}
+      {f.overdue ? <span className="chip f-overdue">Overdue</span> : f.atRisk && <span className="chip f-risk">At risk</span>}
+      {f.dueToday && <span className="chip f-today">Due today</span>}
+      {epic.state === 'parked' && <span className="chip f-parked">Parked</span>}
+    </>
+  );
+}
+
+/** The epic's chips: its column, then its flags. */
+export function StateChip({ epic }: { epic: Pick<PlannedEpic, 'column' | 'flags' | 'state'> }) {
+  return <><ColumnChip column={epic.column} /><Flags epic={epic} /></>;
 }
 
 export function Progress({ pct, done, total }: { pct: number; done: number; total: number }) {
@@ -59,7 +66,7 @@ export function EpicRow({ epic, showFeature = true, actions }: { epic: PlannedEp
   const names = useNames();
   const first = epic.blockers[0];
   return (
-    <div className={`epicrow${epic.dueToday ? ' today' : ''}${epic.overdue ? ' overdue' : ''}`}>
+    <div className={`epicrow${epic.flags.dueToday ? ' today' : ''}${epic.flags.overdue ? ' overdue' : ''}${epic.flags.blocked ? ' blockedrow' : ''}`}>
       <a className="em" href={hrefFor('epic', epic.id)}>
         <div className="t">
           <b>{epic.title}</b>
@@ -125,4 +132,35 @@ export function SprintTabs() {
 
 export function Loading({ error }: { error: string | null }) {
   return error ? <div className="note"><b>Couldn't load.</b> {error}</div> : <div className="muted pad">Loading…</div>;
+}
+
+/**
+ * One epic as a board card (HLD D8): title, feature tag, people, due date, stories done/total, flags, and the
+ * first blocker. The card menu (Park, Move date, Backlog) is passed in by the board.
+ */
+export function EpicCard({ epic, menu, draggable, onDragStart }: { epic: PlannedEpic; menu?: React.ReactNode; draggable?: boolean; onDragStart?: () => void }) {
+  const names = useNames();
+  const first = epic.blockers[0];
+  const p = epic.progress;
+  return (
+    <div className={`ecard${epic.flags.dueToday ? ' today' : ''}${epic.flags.overdue ? ' overdue' : ''}${epic.flags.blocked ? ' blocked' : ''}`}
+      draggable={draggable} onDragStart={e => { e.dataTransfer.setData('text/plain', epic.id); onDragStart?.(); }}>
+      <a className="et" href={hrefFor('epic', epic.id)}>{epic.title}</a>
+      <div className="ef">
+        {epic.featureTitle && <span className="chip ftag">{epic.featureTitle}</span>}
+        <Flags epic={epic} />
+      </div>
+      {first && <div className="blk"><b className="bl">Blocked</b> {first.title}, waiting on <b>{first.blocker.label}</b></div>}
+      <div className="em2 muted">
+        <span>{day(epic.dueDate)}</span>
+        <span>{p.storiesTotal ? `${p.storiesDone}/${p.storiesTotal}` : 'no stories'}</span>
+        <span className="who">{epic.assignees.length ? epic.assignees.map(id => <span key={id} className="av" title={names(id)}>{initials(names(id))}</span>) : <span className="muted">unassigned</span>}</span>
+      </div>
+      {menu && <div className="emenu">{menu}</div>}
+    </div>
+  );
+}
+
+function initials(name: string): string {
+  return name.split(/\s+/).filter(Boolean).map(w => w[0]!.toUpperCase()).slice(0, 2).join('') || '?';
 }

@@ -1193,3 +1193,68 @@ details.activity .activitylog { margin: 4px 0 4px 14px; padding-left: 8px; borde
 @media (max-width: 720px) {
   .runcount span { display: inline-block; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 }
+
+/* ---------- Jira-style columns and flags (HLD D8): one vocabulary for epics and stories ---------- */
+.chip.col-todo { background: var(--surface-3); color: var(--ink-2); }
+.chip.col-progress { background: var(--run-soft); color: var(--run); }
+.chip.col-review { background: var(--accent-soft); color: var(--accent-ink); }
+.chip.col-done { background: var(--done-soft); color: var(--done); }
+.chip.f-blocked { background: var(--err-soft); color: var(--err); font-weight: 700; }
+.chip.f-risk { background: var(--wait-soft); color: var(--wait); }
+.chip.f-overdue { background: var(--err); color: #fff; font-weight: 700; }
+.chip.f-today { background: transparent; color: var(--accent-ink); border: 1px solid var(--accent); }
+.chip.f-parked { background: transparent; color: var(--ink-3); border: 1px solid var(--line); }
+.chip.ftag { background: var(--surface-2); color: var(--ink-2); font-family: var(--ui); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--ink-3); vertical-align: middle; }
+.dot.col-progress { background: var(--run); } .dot.col-review { background: var(--accent); } .dot.col-done { background: var(--done); }
+.tchip.col-done { background: var(--done-soft); color: var(--done); }
+.tchip.col-progress { background: var(--run-soft); color: var(--run); }
+.tchip.f-overdue { background: var(--err-soft); color: var(--err); }
+.tchip.f-risk { background: var(--wait-soft); color: var(--wait); }
+.tchip.f-blocked { background: var(--surface-3); color: var(--ink-2); }
+.epicrow.blockedrow { border-left-color: var(--err); }
+
+.boardbar { margin: 0 0 10px; }
+.jboard { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(230px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; align-items: start; }
+.jcol { background: var(--surface-2); border-radius: var(--radius); padding: 8px; display: grid; gap: 8px; align-content: start; min-height: 160px; scroll-snap-align: start; border: 2px dashed transparent; }
+.jcol h4 { margin: 0; font-size: 12.5px; display: flex; align-items: center; gap: 4px; text-transform: none; }
+.jcol.backlogcol { background: color-mix(in srgb, var(--surface-2) 60%, var(--bg)); }
+.jcol.over { border-color: var(--accent); }
+.jcol.nodrop { border-color: var(--err); cursor: not-allowed; }
+.lane { display: grid; gap: 8px; }
+.lanehead { font-size: 11px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; border-top: 1px solid var(--line); padding-top: 6px; }
+.lane:first-of-type .lanehead { border-top: 0; padding-top: 0; }
+
+.ecard { position: relative; display: grid; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 5px; padding: 8px 9px; font-size: 12.5px; cursor: grab; }
+.ecard.today { border-left-color: var(--accent); }
+.ecard.overdue { border-left-color: var(--err); }
+.ecard.blocked { border-left-color: var(--err); }
+.ecard .et { font-weight: 650; color: var(--ink); text-decoration: none; padding-right: 22px; }
+.ecard .et:hover { color: var(--accent-ink); }
+.ecard .ef, .kcard .ef { display: flex; flex-wrap: wrap; gap: 4px; }
+.ecard .em2 { display: flex; align-items: center; gap: 10px; }
+.ecard .who { margin-left: auto; display: inline-flex; gap: 3px; }
+.av { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-size: 9.5px; font-weight: 700; }
+.emenu { position: absolute; top: 4px; right: 4px; }
+.cardmenu summary { list-style: none; cursor: pointer; padding: 0 6px; border-radius: 4px; color: var(--ink-3); }
+.cardmenu summary::-webkit-details-marker { display: none; }
+.cardmenu[open] .menubody { position: absolute; right: 0; z-index: 5; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 8px; display: grid; gap: 6px; min-width: 190px; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+.timelinebox { margin-top: 14px; }
+.timelinebox summary { cursor: pointer; }
+
+@media (max-width: 720px) {
+  .jboard { grid-auto-columns: 84vw; }
+}
+.pane.sprint { min-width: 0; }
+.jboard { width: 100%; max-width: 100%; min-width: 0; }
+@media (max-width: 720px) {
+  /* The tab bar belongs at the bottom (its More sheet opens upward); in the one-column grid it sat on top and took the spare height on short pages. */
+  .main { grid-template-rows: minmax(0, 1fr) auto; }
+  .main > .content { order: 1; min-height: 0; }
+  .main > .tabbar { order: 2; }
+}
+.colswitch { display: none; }
+@media (max-width: 720px) {
+  .colswitch { display: flex; gap: 6px; overflow-x: auto; margin: 0 0 8px; padding-bottom: 2px; }
+  .colswitch .btn { white-space: nowrap; }
+}

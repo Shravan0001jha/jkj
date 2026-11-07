@@ -173,7 +173,7 @@ function Features({ b, reload }: { b: Backlog; reload: () => void }) {
         {b.features.map(f => (
           <div key={f.id} className={`epicrow${f.status !== 'active' ? ' dim' : ''}`}>
             <a className="em" href={hrefFor('feature', f.id)}>
-              <div className="t"><b>{f.title}</b>{f.status !== 'active' && <span className="chip c-parked">{f.status}</span>}</div>
+              <div className="t"><b>{f.title}</b>{f.status !== 'active' && <span className="chip f-parked">{f.status}</span>}</div>
               <div className="m muted">due {day(f.dueDate)} · {f.progress.epicsTotal} epic{f.progress.epicsTotal === 1 ? '' : 's'}</div>
               <Progress pct={f.progress.pct} done={f.progress.epicsTotal ? f.progress.epicsDone : f.progress.storiesDone} total={f.progress.epicsTotal || f.progress.storiesTotal} />
             </a>

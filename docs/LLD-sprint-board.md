@@ -105,6 +105,32 @@ plan_meta(key pk, value text)                                            -- 'mig
 - Open owner-facing Inbox items: id, title, summary, createdAt.
 - Plus open stories and epics waiting on, or blocked on, `owner`: id, title, reason.
 
+**Columns** (shared `storyColumn` / `epicColumn`, used by the server and the web alike):
+
+| Column | Story trueStatus |
+|---|---|
+| To do | backlog, ready, on-hold |
+| In progress | in-progress, waiting, blocked, parked |
+| In review | in-review, qa, approved |
+| Done | merged, awaiting-mac, done |
+
+Epic column, first match wins:
+1. **Done:** the epic item is done, or every story is done.
+2. **In review:** no story is in To do or In progress, and at least one is in review.
+3. **In progress:** any story is in progress or in review, or some are done and some not.
+4. **To do:** otherwise (nothing started, or no stories yet).
+
+Flags:
+- `blocked` = state blocked.
+- `atRisk` = state at-risk, or overdue while blocked.
+- `overdue` and `dueToday` as before.
+
+The SprintView gains:
+- `board`: the sprint's non-parked epics by column, in rank order.
+- `backlog`: the ranked backlog.
+
+EpicDetail gains `columns` (stories by column, blocked first). TeamBoard uses the same four columns (QA folds into In review).
+
 ## 4. Routes (in `routes.ts`, all under `/api/sprint`)
 
 | Method | Path | Notes |
@@ -161,7 +187,7 @@ plan_meta(key pk, value text)                                            -- 'mig
 - Primary: Today, Sprint, Inbox, Talk, Room.
 - More: Backlog, Review, Teams, Plan, Dashboard, Updates, Office, Features, Org, Assign, Releases, Spend, Settings.
 
-**Chips**
+**Chips** (superseded by D8: the board shows the column, with flags as badges)
 
 | State | Chip |
 |---|---|

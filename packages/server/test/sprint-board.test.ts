@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BacklogView, EpicDetail, Feature, PlannedEpic, TeamBoard, TodayView, TrackedDay } from '@jkj/shared';
+import { epicColumn, storyColumn } from '@jkj/shared';
 import * as items from '../src/services/items.js';
 import * as inbox from '../src/services/inbox.js';
 import * as sprints from '../src/services/sprints.js';
@@ -314,4 +315,86 @@ test('routes: owner and COO write; any other actor header is 403; writes emit sp
     fake.restore();
     tmp.cleanup();
   }
+});
+
+test('Jira columns: story statuses map to To do / In progress / In review / Done; the epic column follows its stories', () => {
+  assert.equal(storyColumn('backlog'), 'todo');
+  assert.equal(storyColumn('ready'), 'todo');
+  assert.equal(storyColumn('on-hold'), 'todo');
+  for (const s of ['in-progress', 'waiting', 'blocked', 'parked']) assert.equal(storyColumn(s), 'progress', s);
+  for (const s of ['in-review', 'qa', 'approved']) assert.equal(storyColumn(s), 'review', s);
+  for (const s of ['merged', 'awaiting-mac', 'done']) assert.equal(storyColumn(s), 'done', s);
+
+  assert.equal(epicColumn([], false), 'todo', 'no stories yet');
+  assert.equal(epicColumn(['todo', 'todo'], false), 'todo');
+  assert.equal(epicColumn(['todo', 'progress'], false), 'progress');
+  assert.equal(epicColumn(['done', 'todo'], false), 'progress', 'some done, some not');
+  assert.equal(epicColumn(['review', 'done'], false), 'review', 'nothing to do or in progress, one in review');
+  assert.equal(epicColumn(['review', 'todo'], false), 'progress');
+  assert.equal(epicColumn(['done', 'done'], false), 'done');
+  assert.equal(epicColumn(['todo'], true), 'done', 'the epic itself is done');
+});
+
+test('sprint board: epics by derived column with flags; the backlog beside it; parked epics left out', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const t = ist('2026-11-09');
+    const todo = planned(wp, t, 'Nothing started', '2026-11-18').epic;
+    items.create(wp, { level: 'story', parentId: todo.id, title: 't1', assigneeId: 'dev' }, 'asha');
+    const prog = planned(wp, t, 'Started', '2026-11-18').epic;
+    const p1 = items.create(wp, { level: 'story', parentId: prog.id, title: 'p1', assigneeId: 'dev' }, 'asha');
+    items.update(wp, p1.id, { status: 'in-progress', reason: 'test: start' }, 'dev');
+    const done = planned(wp, t, 'Finished', '2026-11-12').epic;
+    const d1 = items.create(wp, { level: 'story', parentId: done.id, title: 'd1', assigneeId: 'dev' }, 'asha');
+    items.update(wp, d1.id, { status: 'done', resolution: 'done', reason: 'test: done' }, 'owner');
+    const late = planned(wp, t, 'Late, nothing started', '2026-11-08').epic;
+    const blocked = planned(wp, t, 'Blocked one', '2026-11-18').epic;
+    const b1 = items.create(wp, { level: 'story', parentId: blocked.id, title: 'b1', assigneeId: 'dev' }, 'asha');
+    items.update(wp, b1.id, { status: 'blocked', blockedReason: 'AWS quota', waitingOn: 'external', reason: 'test: blocked' }, 'dev');
+    const back = planned(wp, t, 'In the backlog', '2026-11-25', 'backlog').epic;
+    const parked = planned(wp, t, 'Parked one', '2026-11-25').epic;
+    sprints.updateEpic(wp, parked.id, { planState: 'parked' }, 'owner', t);
+
+    const v = sprints.sprintView(wp, undefined, t);
+    const ids = (c: 'todo' | 'progress' | 'review' | 'done') => v.board[c].map(e => e.id).sort();
+    assert.deepEqual(ids('todo'), [todo.id, late.id].sort());
+    assert.deepEqual(ids('progress'), [prog.id, blocked.id].sort(), 'a blocked story is in progress, flagged');
+    assert.deepEqual(ids('done'), [done.id]);
+    assert.deepEqual(ids('review'), []);
+    assert.deepEqual(v.backlog.map(e => e.id), [back.id]);
+    assert.ok(!Object.values(v.board).flat().some(e => e.id === parked.id));
+    const lateCard = v.board.todo.find(e => e.id === late.id)!;
+    assert.deepEqual(lateCard.flags, { blocked: false, atRisk: true, overdue: true, dueToday: false });
+    const blockedCard = v.board.progress.find(e => e.id === blocked.id)!;
+    assert.equal(blockedCard.flags.blocked, true);
+    assert.equal(blockedCard.column, 'progress');
+  } finally { tmp.cleanup(); }
+});
+
+test('epic detail: stories on the same four columns, blocked first within a column', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const t = ist('2026-11-09');
+    const { epic } = planned(wp, t, 'Cols', '2026-11-14');
+    const a = items.create(wp, { level: 'story', parentId: epic.id, title: 'a', assigneeId: 'dev' }, 'asha');
+    items.update(wp, a.id, { status: 'in-progress', reason: 'test: start' }, 'dev');
+    const b = items.create(wp, { level: 'story', parentId: epic.id, title: 'b', assigneeId: 'dev' }, 'asha');
+    items.update(wp, b.id, { status: 'blocked', blockedReason: 'quota', waitingOn: 'external', reason: 'test: blocked' }, 'dev');
+    const c = items.create(wp, { level: 'story', parentId: epic.id, title: 'c', assigneeId: 'dev' }, 'asha');
+    const d = sprints.epic(wp, epic.id, t);
+    assert.deepEqual(d.columns.progress.map(s => s.id), [b.id, a.id]);
+    assert.deepEqual(d.columns.todo.map(s => s.id), [c.id]);
+    assert.deepEqual(Object.keys(d.columns), ['todo', 'progress', 'review', 'done']);
+    assert.equal(d.epic.column, 'progress');
+  } finally { tmp.cleanup(); }
+});
+
+test('team board uses the same four columns (In review = review + QA)', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    withTree(wp);
+    const t = ist('2026-11-09');
+    const board = sprints.teamBoard(wp, 'dev', t);
+    assert.deepEqual(Object.keys(board.columns), ['todo', 'progress', 'review', 'done']);
+  } finally { tmp.cleanup(); }
 });

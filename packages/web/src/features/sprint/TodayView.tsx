@@ -40,7 +40,7 @@ function TodayBody({ t }: { t: Today }) {
           <Group title="Overdue" epics={t.overdue} hideEmpty />
           <Group title="Blocked" epics={t.blocked} hideEmpty />
           <Group title="At risk" epics={t.atRisk} hideEmpty />
-          <Group title="Moving" epics={t.moving} hideEmpty />
+          <Group title="In progress" epics={t.moving} hideEmpty />
           <Group title="Done today" epics={t.doneToday} hideEmpty />
         </>
       )}
