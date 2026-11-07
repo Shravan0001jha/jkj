@@ -213,7 +213,9 @@ test('today: due today, overdue, done today, waiting on you, and the empty state
     assert.deepEqual(today.overdue.map(e => e.id), [late.id]);
     assert.deepEqual(today.blocked.map(e => e.id), [blockedEpic.id]);
     assert.ok(today.waitingOnYou.some(w => w.kind === 'inbox' && /plan limits/.test(w.title)));
-    assert.ok(today.waitingOnYou.some(w => w.kind === 'item' && w.id === st.id));
+    // The blocked story waits on the owner: listed once, as its own Inbox item when the block raised one, else as the item.
+    const forStory = today.waitingOnYou.filter(w => w.id === st.id || /which voice/.test(`${w.title} ${w.line}`));
+    assert.equal(forStory.length, 1, JSON.stringify(today.waitingOnYou));
 
     const tracked: TrackedDay = sprints.tracked(wp, '2026-11-12', t);
     const ids = new Set(tracked.tracked.map(e => e.id));

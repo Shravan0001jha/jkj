@@ -501,9 +501,13 @@ export function sprintView(wp: Workplace, sprintId?: string, nowMs = Date.now())
 }
 
 function waitingOnYou(wp: Workplace): WaitingOnYou[] {
-  const out: WaitingOnYou[] = inbox.ownerList(wp, 'open').map(i => ({ kind: 'inbox' as const, id: i.id, title: i.title, line: i.summary || i.title, since: i.createdAt }));
+  const open = inbox.ownerList(wp, 'open');
+  const out: WaitingOnYou[] = open.map(i => ({ kind: 'inbox' as const, id: i.id, title: i.title, line: i.summary || i.title, since: i.createdAt }));
+  // A story blocked on the owner usually raised its own Inbox item ("Blocked on you: …"): list it once.
+  const raised = new Set(open.map(i => i.context['itemId']).filter((x): x is string => typeof x === 'string'));
   const rows = rowsJson<WorkItem>(wp.db.prepare("select json from work where status in ('waiting', 'blocked')").all());
   for (const w of rows) {
+    if (raised.has(w.id)) continue;
     const onOwner = (w.status === 'blocked' && w.waitingOn === 'owner') || (w.status === 'waiting' && w.waiting?.on === 'owner');
     if (!onOwner) continue;
     const reason = w.status === 'blocked' ? w.blockedReason : w.waiting?.reason;
