@@ -1258,3 +1258,13 @@ details.activity .activitylog { margin: 4px 0 4px 14px; padding-left: 8px; borde
   .colswitch { display: flex; gap: 6px; overflow-x: auto; margin: 0 0 8px; padding-bottom: 2px; }
   .colswitch .btn { white-space: nowrap; }
 }
+
+/* ---------- Today (HLD D9): a compact Waiting-on-you strip above the board ---------- */
+.waitstrip { border: 1px solid color-mix(in srgb, var(--wait) 40%, transparent); background: color-mix(in srgb, var(--wait-soft) 55%, var(--surface)); border-radius: var(--radius); padding: 6px 10px; margin: 0 0 12px; }
+.waitstrip .wshead { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-weight: 650; font-size: 13px; }
+.waitstrip .wshead .badge { margin: 0; }
+.waitstrip ul { list-style: none; margin: 6px 0 2px; padding: 0; display: grid; gap: 3px; }
+.waitstrip li { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.waitstrip li a { color: var(--ink); text-decoration: none; }
+.waitstrip li a:hover { color: var(--accent-ink); text-decoration: underline; }
+.boardempty { margin: 0 0 8px; }

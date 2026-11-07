@@ -131,6 +131,16 @@ The SprintView gains:
 
 EpicDetail gains `columns` (stories by column, blocked first). TeamBoard uses the same four columns (QA folds into In review).
 
+**TodayView board (D9).**
+- `board` holds the four columns for the union of:
+  - dueToday, overdue and blocked
+  - at-risk or blocked epics that are neither parked nor done
+  - doneToday
+  - epics moved today: a story whose `statusSince` is today and is a real status change (not its filing: `statusSince ≠ createdAt`, or its status is past ready/backlog)
+- Parked epics are left out, and epics are sorted by due date.
+- `daysLeft` counts today.
+- The older fields (dueToday, overdue, atRisk, blocked, moving, doneToday, waitingOnYou, empty) are unchanged for the COO's daily hook.
+
 ## 4. Routes (in `routes.ts`, all under `/api/sprint`)
 
 | Method | Path | Notes |

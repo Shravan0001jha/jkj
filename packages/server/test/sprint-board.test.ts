@@ -398,3 +398,42 @@ test('team board uses the same four columns (In review = review + QA)', () => {
     assert.deepEqual(Object.keys(board.columns), ['todo', 'progress', 'review', 'done']);
   } finally { tmp.cleanup(); }
 });
+
+test('today board: today\'s scope on the four columns (due today, overdue, at risk, blocked, moved today, done today); backward compatible lists', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    const t = Date.now();
+    const today = sprints.istDate(t);
+    const add = (d: number) => new Date(Date.parse(`${today}T00:00:00Z`) + d * 86_400_000).toISOString().slice(0, 10);
+    let v = sprints.today(wp, t);
+    assert.deepEqual(Object.keys(v.board), ['todo', 'progress', 'review', 'done'], 'the board is there even when empty');
+    assert.equal(Object.values(v.board).flat().length, 0);
+
+    const due = planned(wp, t, 'Due today', today).epic;
+    const late = planned(wp, t, 'Overdue', add(-2)).epic;
+    const quiet = planned(wp, t, 'Quiet, due later', add(9)).epic;
+    items.create(wp, { level: 'story', parentId: quiet.id, title: 'q1', assigneeId: 'dev' }, 'asha');
+    const moved = planned(wp, t, 'Moved today', add(9)).epic;
+    const m1 = items.create(wp, { level: 'story', parentId: moved.id, title: 'm1', assigneeId: 'dev' }, 'asha');
+    items.update(wp, m1.id, { status: 'in-progress', reason: 'test: start' }, 'dev');
+    const fin = planned(wp, t, 'Finished today', add(9)).epic;
+    const f1 = items.create(wp, { level: 'story', parentId: fin.id, title: 'f1', assigneeId: 'dev' }, 'asha');
+    items.update(wp, f1.id, { status: 'done', resolution: 'done', reason: 'test: done' }, 'owner');
+    const parkedE = planned(wp, t, 'Parked, due today', today).epic;
+    sprints.updateEpic(wp, parkedE.id, { planState: 'parked' }, 'owner', t);
+
+    v = sprints.today(wp, t);
+    const on = new Set(Object.values(v.board).flat().map(e => e.id));
+    for (const [n, id] of [["due", due.id], ["late", late.id], ["moved", moved.id], ["fin", fin.id]] as const) assert.ok(on.has(id), n);
+    assert.ok(!on.has(quiet.id), 'nothing due and nothing moved today: not on today\'s board');
+    assert.ok(!on.has(parkedE.id));
+    assert.ok(v.board.done.some(e => e.id === fin.id));
+    assert.ok(v.board.progress.some(e => e.id === moved.id));
+    assert.ok(v.board.todo.some(e => e.id === due.id));
+    assert.ok(v.daysLeft >= 1 && v.daysLeft <= 14);
+    // The daily hook's fields are unchanged.
+    assert.deepEqual(v.dueToday.map(e => e.id), [due.id]);
+    assert.deepEqual(v.overdue.map(e => e.id), [late.id]);
+    assert.ok(Array.isArray(v.waitingOnYou) && Array.isArray(v.doneToday) && typeof v.empty === 'boolean');
+  } finally { tmp.cleanup(); }
+});

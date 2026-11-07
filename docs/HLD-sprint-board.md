@@ -77,6 +77,15 @@ Out of scope:
 - Dragging between Backlog and To do plans or unplans the epic in the current sprint. Parking is in the card menu.
 - The epic page, the team boards and Today use the same four names and colours.
 
+**D9. Today uses the same board (owner, 7 Nov: "Today should also have the same format").**
+- Today is the Jira board, filtered to today's scope:
+  - epics due today, overdue, at risk or blocked
+  - any epic whose stories changed status today
+  - epics done today, in the Done column
+- It uses the same card, flags, colours and phone behaviour as Sprint.
+- "Waiting on you" shrinks to a compact collapsible strip above the board: a count, then three one-line titles, then "Show all".
+- With nothing in scope, the board still shows its empty columns, with one line: "Nothing due or moving today".
+
 ## 3. Components
 
 - **`packages/shared/src/sprint.ts`:** the contract types (Feature, PlannedEpic, Sprint, views, requests).

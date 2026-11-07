@@ -552,7 +552,17 @@ export function today(wp: Workplace, nowMs = Date.now()): TodayView {
   const atRisk = inSprint.filter(e => e.state === 'at-risk').sort(byDue);
   const moving = inSprint.filter(e => e.state === 'in-progress').sort(byDue);
   const doneToday = planned.filter(e => { const at = doneAt(wp, e, nowMs); return !!at && istDate(Date.parse(at)) === date; });
-  return { date, sprint, dueToday, overdue, atRisk, blocked, moving, doneToday, waitingOnYou: waitingOnYou(wp), empty: planned.length === 0 };
+  // Today's board (HLD D9): the same columns as the sprint board, today's scope only.
+  // A story moved today when its status changed today: filing it (statusSince = createdAt) is not a move.
+  const movedToday = (e: PlannedEpic): boolean => storiesOf(wp, e.id, nowMs).some(s => !!s.statusSince && istDate(Date.parse(s.statusSince)) === date
+    && (s.statusSince !== s.createdAt || (s.status !== 'ready' && s.status !== 'backlog')));
+  const scope = new Map<string, PlannedEpic>();
+  for (const e of [...dueToday, ...overdue, ...blocked, ...live.filter(x => x.state === 'at-risk' || x.state === 'blocked'), ...doneToday]) scope.set(e.id, e);
+  for (const e of live) if (!scope.has(e.id) && movedToday(e)) scope.set(e.id, e);
+  const board = emptyColumns<PlannedEpic>();
+  for (const e of [...scope.values()].sort(byDue)) if (e.planState !== 'parked') board[e.column].push(e);
+  const daysLeft = dayNum(sprint.end) - dayNum(date) + 1;
+  return { date, sprint, dueToday, overdue, atRisk, blocked, moving, doneToday, waitingOnYou: waitingOnYou(wp), empty: planned.length === 0, board, daysLeft };
 }
 
 export function tracked(wp: Workplace, day: string | undefined, nowMs = Date.now()): TrackedDay {

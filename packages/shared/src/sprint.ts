@@ -185,6 +185,13 @@ export interface TodayView {
   waitingOnYou: WaitingOnYou[];
   /** No dated epics yet: the features still need splitting into epics. */
   empty: boolean;
+  /**
+   * Today's board (HLD D9): the same four columns as the sprint board, holding today's scope only — due today,
+   * overdue, at risk, blocked, any epic whose stories moved today, and epics done today (in Done). Parked left out.
+   */
+  board: Record<BoardColumn, PlannedEpic[]>;
+  /** Days left in the sprint, today included. */
+  daysLeft: number;
 }
 
 export interface SprintView {
