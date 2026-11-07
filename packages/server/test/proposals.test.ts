@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as proposals from '../src/services/proposals.js';
 import * as inbox from '../src/services/inbox.js';
@@ -142,4 +142,36 @@ test('a proposal with a bad reference is refused outright', () => {
   } finally {
     tmp.cleanup();
   }
+});
+
+test('a proposal copies only the org files, never evidence or scratch (7 Nov: a 15 GB copy filled the disk)', () => {
+  const { wp, tmp } = testWorkplace();
+  try {
+    commitOrg(wp.org.dir, 'Seed the first organisation');
+    // Bulky non-org folders that live beside the org files.
+    for (const d of ['evidence/as_x', 'scratch/run', 'backups', 'ctl-as_y-abc']) {
+      mkdirSync(join(wp.org.dir, d), { recursive: true });
+      writeFileSync(join(wp.org.dir, d, 'big.log'), 'x'.repeat(1000));
+    }
+    const parent = join(wp.org.dir, '..');
+    const before = new Set(readdirSync(parent));
+    let copied: string[] = [];
+    const orig = proposals.__scratchHook;
+    proposals.__setScratchHook((scratch: string) => { copied = readdirSync(scratch); });
+    try {
+      const p = proposals.propose(wp, {
+        kind: 'split', reason: 'Test that the scratch copy stays small.', proposedBy: 'asha',
+        params: { charterId: 'mobile', into: [
+          { id: 'mobile-ios', title: 'Mobile: iOS', mission: 'iPhone.', keys: ['ios'] },
+          { id: 'mobile-android', title: 'Mobile: Android', mission: 'Android.', keys: ['android'] },
+        ] },
+      });
+      assert.ok(!copied.includes('evidence') && !copied.includes('scratch') && !copied.includes('backups') && !copied.some(n => n.startsWith('ctl-')), `copied: ${copied.join(',')}`);
+      assert.ok(copied.includes('org.yaml') && copied.includes('charters'));
+      assert.ok(!/evidence|scratch\/|backups|ctl-as_y/.test(p.diff), 'the diff never shows the non-org folders as removed');
+      assert.ok(p.diff.includes('mobile-ios'), 'the real change is still in the diff');
+    } finally { proposals.__setScratchHook(orig); }
+    // The scratch copy is gone afterwards.
+    assert.deepEqual(readdirSync(parent).filter(n => !before.has(n) && n.includes('-proposal-')), [], 'no proposal copy is left behind');
+  } finally { tmp.cleanup(); }
 });

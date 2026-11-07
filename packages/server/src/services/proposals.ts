@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, rmSync, cpSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { Charter, Employee, LintFinding, MapEntry, OrgProposal, OrgSnapshot, ProposalKind, Unit } from '@jkj/shared';
@@ -45,6 +45,7 @@ export function propose(wp: Workplace, opts: ProposeOptions): OrgProposal {
     const after = loadOrg(scratch);
     const findings = lint(after, wp.requirements().map(r => ({ ...r, charterId: null })), { exists: realFs.exists, topLevelDirs: () => [] });
     const diff = diffDirs(wp.org.dir, scratch);
+    __scratchHook?.(scratch);
 
     const proposal: OrgProposal = {
       id: newId('op'),
@@ -345,9 +346,27 @@ function snapshot(org: Org): OrgSnapshot {
   };
 }
 
+/**
+ * The org files a proposal can change: what loadOrg reads. Only these are copied and diffed (7 Nov: the copy was
+ * an rsync of the whole Workplace folder, 15 GB with evidence and scratch, which filled the disk and took the
+ * Workplace down mid-copy, leaving the copy behind).
+ */
+export const ORG_PATHS = ['org.yaml', 'roles.yaml', 'map.yaml', 'handbook.md', 'charters', 'units'] as const;
+
+function copyOrgFiles(from: string, to: string): void {
+  mkdirSync(to, { recursive: true });
+  for (const p of ORG_PATHS) {
+    if (existsSync(join(from, p))) cpSync(join(from, p), join(to, p), { recursive: true });
+  }
+}
+
+/** Test seam: sees the scratch copy before it is removed. */
+export let __scratchHook: ((scratch: string) => void) | undefined;
+export function __setScratchHook(fn: ((scratch: string) => void) | undefined): void { __scratchHook = fn; }
+
 function scratchCopy(dir: string): string {
   const scratch = join(dir, '..', `.${dir.split('/').pop()}-proposal-${process.pid}-${Date.now()}`);
-  execFileSync('rsync', ['-a', '--exclude', '.git', '--exclude', 'workplace.db*', `${dir}/`, `${scratch}/`]);
+  copyOrgFiles(dir, scratch);
   return scratch;
 }
 
@@ -366,12 +385,17 @@ export function diffStats(diff: string): { added: number; removed: number; files
 
 /** A unified diff of the org files between the live dir and the scratch copy. */
 function diffDirs(before: string, after: string): string {
+  // Compare like with like: the org files only, from a copy of the live folder made the same way.
+  const base = `${after}-before`;
+  copyOrgFiles(before, base);
   try {
-    execFileSync('diff', ['-ruN', '--exclude', '.git', '--exclude', 'workplace.db*', '--exclude', 'employees', before, after], { encoding: 'utf8' });
+    execFileSync('diff', ['-ruN', base, after], { encoding: 'utf8' });
     return '';
   } catch (err) {
     const out = (err as { stdout?: string }).stdout ?? '';
-    return out.replace(new RegExp(before.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'org').replace(new RegExp(after.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'org');
+    return out.replace(new RegExp(base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'org').replace(new RegExp(after.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'org');
+  } finally {
+    rmSync(base, { recursive: true, force: true });
   }
 }
 
