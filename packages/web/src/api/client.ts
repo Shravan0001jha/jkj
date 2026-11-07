@@ -7,6 +7,9 @@ import type {
   CreateWorkRequest, CreateFeatureRequest, CreateProposalRequest, CreateReleaseRequest,
   TransitionRequest, RoomResponse, RoomThreadDetail, RoomThread, RoomMessage, CreateThreadRequest, PostMessageRequest,
   ResolveThreadRequest, RequestResponse, CreateRequest, ReleaseReadiness, ProposalDetail, CooMessage, CooPresence,
+  BacklogView, CreatePlanFeatureRequest, CreatePlannedEpicRequest, EpicDetail, Feature as PlanFeature, FeatureDetail$, PlannedEpic,
+  ReviewView, Sprint, SprintView, Team, TeamBoard, TodayView, UpdatePlanFeatureRequest, UpdatePlannedEpicRequest,
+  PlanResponse, ItemDetail, UpdateItemRequest, Comment, TalkThread, Update, InboxThread, ReleasePost, SuperFocus, HygieneReport,
 } from '@jkj/shared';
 
 /**
@@ -122,3 +125,56 @@ export const getSignals = () => request<HealthSignals>(W.signals);
 export const getTranscript = (agentId: string) => request<LogEntry[]>(W.agentLog(agentId));
 export const postMessage = (agentId: string, text: string, attachments: Attachment[] = []) =>
   post<{ ok: true }>(W.agentMessage(agentId), { text, attachments });
+
+/* ---------- the owner's sprint board (docs/LLD-sprint-board.md §4) ---------- */
+
+export const sprintApi = {
+  today: () => request<TodayView>('/api/sprint/today'),
+  current: (sprintId?: string) => request<SprintView>(`/api/sprint/current${sprintId ? `?sprint=${encodeURIComponent(sprintId)}` : ''}`),
+  backlog: () => request<BacklogView>('/api/sprint/backlog'),
+  review: () => request<ReviewView>('/api/sprint/review'),
+  teams: () => request<Team[]>('/api/sprint/teams'),
+  team: (id: string) => request<TeamBoard>(`/api/sprint/teams/${encodeURIComponent(id)}`),
+  epic: (id: string) => request<EpicDetail>(`/api/sprint/epics/${encodeURIComponent(id)}`),
+  features: () => request<PlanFeature[]>('/api/sprint/features'),
+  feature: (id: string) => request<FeatureDetail$>(`/api/sprint/features/${encodeURIComponent(id)}`),
+  createFeature: (body: CreatePlanFeatureRequest) => post<PlanFeature>('/api/sprint/features', body),
+  updateFeature: (id: string, body: UpdatePlanFeatureRequest) => post<PlanFeature>(`/api/sprint/features/${encodeURIComponent(id)}`, body),
+  createEpic: (body: CreatePlannedEpicRequest) => post<PlannedEpic>('/api/sprint/epics', body),
+  updateEpic: (id: string, body: UpdatePlannedEpicRequest) => post<PlannedEpic>(`/api/sprint/epics/${encodeURIComponent(id)}`, body),
+  rank: (epicIds: string[]) => post<PlannedEpic[]>('/api/sprint/backlog/rank', { epicIds }),
+  setGoal: (sprintId: string, goal: string) => post<Sprint>(`/api/sprint/sprints/${encodeURIComponent(sprintId)}`, { goal }),
+};
+
+/* ---------- web/app parity (docs/HLD-sprint-board.md §6) ---------- */
+
+export const v2Api = {
+  plan: (board = false) => request<PlanResponse>(`/api/plan${board ? '?view=board' : ''}`),
+  item: (id: string) => request<ItemDetail>(`/api/items/${encodeURIComponent(id)}`),
+  updateItem: (id: string, body: UpdateItemRequest) => post<ItemDetail>(`/api/items/${encodeURIComponent(id)}`, body),
+  comment: (id: string, text: string) => post<Comment>(`/api/items/${encodeURIComponent(id)}/comments`, { text }),
+  talkThreads: () => request<TalkThread[]>('/api/talk/threads'),
+  updates: (before?: string) => request<Update[]>(`/api/updates?limit=60${before ? `&before=${encodeURIComponent(before)}` : ''}`),
+  snapshot: () => request<Record<string, unknown>>('/api/metrics/snapshot'),
+  inboxThread: (id: string) => request<InboxThread>(`/api/inbox/${encodeURIComponent(id)}`),
+  inboxReply: (id: string, text: string) => post<InboxThread>(`/api/inbox/${encodeURIComponent(id)}/reply`, { text }),
+  macQueue: () => request<{ active: MacQueueRequest | null; queue: MacQueueRequest[] }>('/api/mac-queue'),
+  macGrant: (id: string) => post<unknown>(`/api/mac-queue/${encodeURIComponent(id)}/grant`),
+  releasePosts: () => request<ReleasePost[]>('/api/releases/posts'),
+  superFocus: () => request<SuperFocus>('/api/settings/super-focus'),
+  setSuperFocus: (hours: number) => post<SuperFocus>('/api/settings/super-focus', { hours }),
+  hygiene: () => request<HygieneReport>('/api/hygiene'),
+};
+
+/** The Mac test-slot queue (server mac-queue.ts MacRequest), as the web reads it. */
+export interface MacQueueRequest {
+  id: string;
+  emp: string;
+  itemId: string;
+  minutes: number;
+  why: string;
+  at: string;
+  state: string;
+  grantedAt?: string;
+  until?: string;
+}

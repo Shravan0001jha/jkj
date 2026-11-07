@@ -17,7 +17,25 @@ import { sendCommand, type SocketStatus } from '../api/socket.js';
  * from the server; the socket keeps it current.
  */
 
-export type RouteName = 'office' | 'org' | 'inbox' | 'room' | 'features' | 'employee' | 'assign' | 'releases' | 'spend';
+export type RouteName =
+  | 'today' | 'sprint' | 'backlog' | 'review' | 'teams' | 'epic' | 'feature'
+  | 'plan' | 'item' | 'talk' | 'dashboard' | 'updates' | 'alerts' | 'settings'
+  | 'office' | 'org' | 'inbox' | 'room' | 'features' | 'employee' | 'assign' | 'releases' | 'spend';
+
+export const ROUTES: readonly RouteName[] = [
+  'today', 'sprint', 'backlog', 'review', 'teams', 'epic', 'feature', 'plan', 'item', 'talk', 'dashboard', 'updates', 'alerts', 'settings',
+  'office', 'org', 'inbox', 'room', 'features', 'employee', 'assign', 'releases', 'spend',
+];
+
+/** A socket alert kept for the Alerts screen (the app's AlertsView): newest first, this session only. */
+export interface AlertEntry {
+  at: string;
+  level: 'info' | 'needs-you' | 'blocked' | 'cap' | 'ring';
+  title: string;
+  body: string;
+  inboxId?: string;
+  read: boolean;
+}
 
 export interface Route {
   name: RouteName;
@@ -59,6 +77,10 @@ export interface AppState {
   /** The session open on the employee page (a subagent run, when one is drilled into). */
   openAgentId: string | null;
 
+  /** Bumped (debounced) when the board changes: sprint, item, inbox and update events. Screens re-read on it. */
+  tick: number;
+  alerts: AlertEntry[];
+
   /* ui */
   connection: SocketStatus;
   loading: boolean;
@@ -93,6 +115,9 @@ let state: AppState = {
   agents: [],
   transcripts: {},
   openAgentId: null,
+
+  tick: 0,
+  alerts: [],
 
   connection: 'connecting',
   loading: true,
@@ -143,9 +168,8 @@ function shallowEqual(a: unknown, b: unknown): boolean {
 
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  const name = (parts[0] ?? 'office') as RouteName;
-  const known: RouteName[] = ['office', 'org', 'inbox', 'room', 'features', 'employee', 'assign', 'releases', 'spend'];
-  if (!known.includes(name)) return { name: 'office' };
+  const name = (parts[0] ?? 'today') as RouteName;
+  if (!ROUTES.includes(name)) return { name: 'today' };
   return parts[1] ? { name, id: decodeURIComponent(parts[1]) } : { name };
 }
 
@@ -357,6 +381,7 @@ export function applyServerEvent(event: ServerEvent | WorkplaceServerEvent): voi
         inbox, employees,
         ...(state.office ? { office: { ...state.office, needsYou: openCount, counts: { ...state.office.counts, needsYou: openCount } } } : {}),
       });
+      bumpTick();
       break;
     }
 
@@ -438,6 +463,14 @@ export function applyServerEvent(event: ServerEvent | WorkplaceServerEvent): voi
 
     case 'alert':
       showToast(event.level === 'info' ? event.title : `${event.title} — ${event.body}`);
+      set({ alerts: [{ at: new Date().toISOString(), level: event.level, title: event.title, body: event.body, ...(event.inboxId ? { inboxId: event.inboxId } : {}), read: false }, ...state.alerts].slice(0, 100) });
+      break;
+
+    case 'sprint.changed':
+    case 'item.updated':
+    case 'item.comment':
+    case 'update.posted':
+      bumpTick();
       break;
 
     case 'error':
@@ -447,6 +480,21 @@ export function applyServerEvent(event: ServerEvent | WorkplaceServerEvent): voi
     default:
       break;
   }
+}
+
+let tickTimer: ReturnType<typeof setTimeout> | null = null;
+/** Coalesces a burst of board events (agents move many stories a minute) into one re-read, at most every 3 s. */
+function bumpTick(): void {
+  if (tickTimer) return;
+  tickTimer = setTimeout(() => { tickTimer = null; set({ tick: state.tick + 1 }); }, 3000);
+}
+
+export function markAlertsRead(): void {
+  if (state.alerts.some(a => !a.read)) set({ alerts: state.alerts.map(a => ({ ...a, read: true })) });
+}
+
+export function clearAlerts(): void {
+  set({ alerts: [] });
 }
 
 function mergeAgents(current: Agent[], incoming: Agent[]): Agent[] {

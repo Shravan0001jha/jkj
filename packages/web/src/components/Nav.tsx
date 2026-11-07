@@ -2,18 +2,32 @@ import { useState } from 'react';
 import { hrefFor, useStore, type RouteName } from '../state/store.js';
 
 const PRIMARY: { name: RouteName; label: string; glyph: string }[] = [
-  { name: 'office', label: 'Office', glyph: '◉' },
+  { name: 'today', label: 'Today', glyph: '◎' },
+  { name: 'sprint', label: 'Sprint', glyph: '▤' },
   { name: 'inbox', label: 'Inbox', glyph: '✉' },
+  { name: 'talk', label: 'Talk', glyph: '◐' },
   { name: 'room', label: 'Room', glyph: '◫' },
-  { name: 'features', label: 'Features', glyph: '▦' },
-  { name: 'org', label: 'Org', glyph: '⌥' },
 ];
 
 const MORE: { name: RouteName; label: string; glyph: string }[] = [
-  { name: 'assign', label: 'Assign', glyph: '＋' },
+  { name: 'backlog', label: 'Backlog', glyph: '☰' },
+  { name: 'review', label: 'Review', glyph: '↺' },
+  { name: 'teams', label: 'Teams', glyph: '▦' },
+  { name: 'plan', label: 'Plan', glyph: '▣' },
+  { name: 'dashboard', label: 'Dashboard', glyph: '◔' },
+  { name: 'updates', label: 'Updates', glyph: '≡' },
+  { name: 'alerts', label: 'Alerts', glyph: '△' },
+  { name: 'office', label: 'Office', glyph: '◉' },
+  { name: 'features', label: 'Features', glyph: '▧' },
+  { name: 'org', label: 'Org', glyph: '⌥' },
+  { name: 'assign', label: 'Assign', glyph: '+' },
   { name: 'releases', label: 'Releases', glyph: '⇪' },
   { name: 'spend', label: 'Spend & health', glyph: '₹' },
+  { name: 'settings', label: 'Settings', glyph: '⚙' },
 ];
+
+/** Screens that live under another nav entry (a drill-down highlights its parent). */
+const PARENT: Partial<Record<RouteName, RouteName>> = { employee: 'talk', epic: 'sprint', feature: 'backlog', item: 'plan' };
 
 /**
  * One list of destinations, two shapes: a rail beside the content on a wide
@@ -23,8 +37,9 @@ const MORE: { name: RouteName; label: string; glyph: string }[] = [
 export function Nav({ needsYou }: { needsYou: number }) {
   const route = useStore(s => s.route);
   const [more, setMore] = useState(false);
-  const current = (name: RouteName): boolean => route.name === name || (name === 'office' && route.name === 'employee');
-  const inMore = MORE.some(m => m.name === route.name);
+  const unread = useStore(s => s.alerts.filter(a => !a.read).length);
+  const current = (name: RouteName): boolean => route.name === name || PARENT[route.name] === name;
+  const inMore = MORE.some(m => m.name === route.name || PARENT[route.name] === m.name);
 
   return (
     <>
@@ -35,6 +50,7 @@ export function Nav({ needsYou }: { needsYou: number }) {
             <span className="glyph" aria-hidden="true">{item.glyph}</span>
             <span>{item.label}</span>
             {item.name === 'inbox' && needsYou > 0 && <span className="badge">{needsYou}</span>}
+            {item.name === 'alerts' && unread > 0 && <span className="badge">{unread}</span>}
           </a>
         ))}
       </nav>

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { InboxItem } from '@jkj/shared';
-import { answerInbox, hrefFor } from '../../state/store.js';
+import type { InboxThread } from '@jkj/shared';
+import { answerInbox, hrefFor, message, showToast } from '../../state/store.js';
+import { v2Api } from '../../api/client.js';
 import { ago } from '../../lib/format.js';
 import { Markdown } from '../../components/Markdown.js';
 import { Pill } from '../../components/Pill.js';
@@ -62,6 +64,8 @@ export function InboxCard({ item, compact = false }: { item: InboxItem; compact?
         </dl>
       )}
 
+      <Thread item={item} />
+
       {open ? (
         <>
           {noteFor && (
@@ -93,5 +97,35 @@ export function InboxCard({ item, compact = false }: { item: InboxItem; compact?
         <div className="answerline">Expired.</div>
       )}
     </article>
+  );
+}
+
+/**
+ * The item's reply thread (parity with the app, HLD §6): read what the raiser and the COO said, and reply
+ * without answering — ask back or suggest something else; the asker answers in the same thread.
+ */
+function Thread({ item }: { item: InboxItem }) {
+  const [thread, setThread] = useState<InboxThread | null>(null);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const count = (item as InboxItem & { replies?: number }).replies ?? 0;
+  const load = (): void => { v2Api.inboxThread(item.id).then(setThread, err => showToast(message(err))); };
+  if (!thread) {
+    return <button className="btn sm ghost" onClick={load}>{count ? `Thread (${count})` : 'Reply'}</button>;
+  }
+  const send = (): void => {
+    if (!text.trim()) return;
+    setBusy(true);
+    v2Api.inboxReply(item.id, text.trim()).then(t => { setThread(t); setText(''); }, err => showToast(message(err))).finally(() => setBusy(false));
+  };
+  return (
+    <div className="ithread">
+      {thread.messages.map(m => <div key={m.id} className="comment"><b>{m.by === 'owner' ? 'You' : m.by}</b> <span className="muted">{ago(m.at)} ago</span><Markdown text={m.text} /></div>)}
+      {thread.messages.length === 0 && <p className="muted">No replies yet.</p>}
+      <form className="row" onSubmit={e => { e.preventDefault(); send(); }}>
+        <input value={text} onChange={e => setText(e.target.value)} placeholder="Reply without answering: ask back or suggest something" aria-label="Reply" />
+        <button className="btn sm" type="submit" disabled={busy || !text.trim()}>Send</button>
+      </form>
+    </div>
   );
 }
