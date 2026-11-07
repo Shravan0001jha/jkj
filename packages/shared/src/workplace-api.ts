@@ -355,6 +355,8 @@ export type WorkplaceServerEvent =
   | { type: 'room.replying'; threadId: string; employeeId: string; state: 'started' | 'done' | 'skipped' }
   /* v2 (LLD §19.8) */
   | { type: 'item.updated'; item: Item }
+  /** The owner's sprint board changed (a feature, an epic's plan, a date, a rank or a sprint goal): reload it. */
+  | { type: 'sprint.changed'; at: string }
   | { type: 'item.comment'; comment: Comment }
   | { type: 'activity.recorded'; activity: Activity }
   | { type: 'update.posted'; update: Update }

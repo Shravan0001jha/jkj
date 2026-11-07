@@ -48,6 +48,7 @@ import * as deferred from '../services/deferred.js';
 import * as stagingDiag from '../services/staging-diag.js';
 import * as hygiene from '../services/hygiene.js';
 import * as macQueue from '../services/mac-queue.js';
+import * as sprints from '../services/sprints.js';
 import type { Telegram } from '../services/telegram.js';
 import type { Tunnel } from '../services/tunnel.js';
 import type { Push } from '../services/push.js';
@@ -58,7 +59,7 @@ import { coverage } from '../services/requirements.js';
 import { commitOrg, parseCharter, renderCharter, writeCharter } from '../services/org.js';
 import { readEmployeeContext, saveEmployeeContext } from '../services/context.js';
 import { findClaudeHome } from '../runtime/claude-home.js';
-import { BadRequest, NotFound, TooLarge, Unauthorized, statusOf } from '../util/errors.js';
+import { BadRequest, Forbidden, NotFound, TooLarge, Unauthorized, statusOf } from '../util/errors.js';
 
 /**
  * REST surface (LLD §14). One entry per route so the whole API is readable
@@ -715,6 +716,43 @@ export function createRouter({ config, wp, auth, telegram, tunnel, push, resilie
     /* ---------- v2: the plan (LLD §19.8) — owner-facing, ordinary auth, relay allowed ---------- */
     r('GET', '/api/plan', (_req, res, url) => json(res, 200, items.plan(wp, url.searchParams.get('view') === 'board' ? 'board' : undefined))),
     r('GET', '/api/focus', (_req, res) => json(res, 200, items.getFocus(wp))),
+
+    /* ---------- the owner's sprint board (docs/LLD-sprint-board.md §4): reads for the owner and the COO; writes owner or COO only ---------- */
+    r('GET', '/api/sprint/today', (_req, res) => json(res, 200, sprints.today(wp))),
+    r('GET', '/api/sprint/current', (_req, res, url) => json(res, 200, sprints.sprintView(wp, url.searchParams.get('sprint') ?? undefined))),
+    r('GET', '/api/sprint/backlog', (_req, res) => json(res, 200, sprints.backlog(wp))),
+    r('GET', '/api/sprint/review', (_req, res) => json(res, 200, sprints.review(wp))),
+    r('GET', '/api/sprint/teams', (_req, res) => json(res, 200, sprints.teams(wp))),
+    r('GET', '/api/sprint/teams/:id', (_req, res, _url, [id]) => json(res, 200, sprints.teamBoard(wp, dec(id)))),
+    r('GET', '/api/sprint/epics/:id', (_req, res, _url, [id]) => json(res, 200, sprints.epic(wp, dec(id)))),
+    r('GET', '/api/sprint/features', (_req, res) => json(res, 200, sprints.features(wp))),
+    r('GET', '/api/sprint/features/:id', (_req, res, _url, [id]) => json(res, 200, sprints.featureDetail(wp, dec(id)))),
+    // The COO's daily hook: what the 21:30 IST start report and the park report track.
+    r('GET', '/api/sprint/tracked', (_req, res, url) => json(res, 200, sprints.tracked(wp, url.searchParams.get('day') ?? undefined))),
+    r('POST', '/api/sprint/features', async (req, res) => {
+      const by = planner(req);
+      json(res, 201, sprints.createFeature(wp, await readJson(req) as never, by));
+    }),
+    r('POST', '/api/sprint/features/:id', async (req, res, _url, [id]) => {
+      const by = planner(req);
+      json(res, 200, sprints.updateFeature(wp, dec(id), await readJson(req) as never, by));
+    }),
+    r('POST', '/api/sprint/epics', async (req, res) => {
+      const by = planner(req);
+      json(res, 201, sprints.createEpic(wp, await readJson(req) as never, by));
+    }),
+    r('POST', '/api/sprint/epics/:id', async (req, res, _url, [id]) => {
+      const by = planner(req);
+      json(res, 200, sprints.updateEpic(wp, dec(id), await readJson(req) as never, by));
+    }),
+    r('POST', '/api/sprint/backlog/rank', async (req, res) => {
+      const by = planner(req);
+      json(res, 200, sprints.rank(wp, await readJson(req) as never, by));
+    }),
+    r('POST', '/api/sprint/sprints/:id', async (req, res, _url, [id]) => {
+      const by = planner(req);
+      json(res, 200, sprints.updateSprint(wp, dec(id), await readJson(req) as never, by));
+    }),
     // Is the board true (docs/HLD-jira-lifecycle.md §5): the current violations and the clean percentage.
     r('GET', '/api/hygiene', (_req, res) => json(res, 200, hygiene.report(wp))),
     // Super focus (rework W4): quiet hours off and night rings allowed until `until`. The owner (his
@@ -875,6 +913,19 @@ export function actorOf(req: IncomingMessage): 'owner' | 'coo' {
   const v = String(raw).trim().toLowerCase();
   if (v === 'coo' || v === 'owner') return v;
   throw new BadRequest(`x-workplace-actor must be coo or owner, not "${String(raw)}".`);
+}
+
+/**
+ * Who may change the sprint board (LLD §4): the owner (any relayed request, or loopback with no actor) or the COO
+ * (`x-workplace-actor: coo` from this Mac). Any other actor header is refused with 403, before actorOf would 400 it.
+ */
+function planner(req: IncomingMessage): 'owner' | 'coo' {
+  const raw = req.headers['x-workplace-actor'];
+  if (raw !== undefined && isLocal(req)) {
+    const v = String(raw).trim().toLowerCase();
+    if (v !== 'owner' && v !== 'coo') throw new Forbidden(`Only the owner or the COO plans the sprint board, not "${String(raw)}".`);
+  }
+  return actorOf(req);
 }
 
 /** A `by` named in the body (old engine routes) counts only from this Mac; otherwise the actor. */
