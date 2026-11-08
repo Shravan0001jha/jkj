@@ -1031,3 +1031,25 @@ test('a story whose pre-PR passed on THIS commit hands that sha to the staging d
     assert.equal(s.deployer.calls[0]!.testsPassedSha, head);
   } finally { await s.done(); }
 });
+
+test('a story with no PR yet but a passing full pre-pr on THIS commit also hands the sha to the deploy (8 Nov, Mira)', async () => {
+  const s = setup({ auto: true });
+  try {
+    const head = s.commit('services/iris-api/app.py', 'ROUTE = "/v1/prepr-proven"\n');
+    // No report_done, no PR: only the author's own pre-pr result in their worktree.
+    const dir = join(s.wt, '.workplace', 'pre-pr');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${head}.json`), JSON.stringify({ sha: head, ok: true, mode: 'full', only: null, areas: [] }));
+    const r = evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    assert.ok(r.ok, r.ok ? '' : r.message);
+    await evidence.settled(s.wp);
+    assert.equal(s.deployer.calls.length, 1);
+    assert.equal(s.deployer.calls[0]!.testsPassedSha, head, 'the pre-pr pass in the worktree counts');
+    // Controls: a failing or partial run, or a result for another commit, never counts.
+    assert.equal(evidence.testsProven(s.wp, s.storyId, 'kabir', 'f'.repeat(40)), false, 'another sha');
+    writeFileSync(join(dir, `${head}.json`), JSON.stringify({ sha: head, ok: true, mode: 'fast', only: null, areas: [] }));
+    assert.equal(evidence.testsProven(s.wp, s.storyId, 'kabir', head), false, 'a fast run does not count');
+    writeFileSync(join(dir, `${head}.json`), JSON.stringify({ sha: head, ok: false, mode: 'full', only: null, areas: [] }));
+    assert.equal(evidence.testsProven(s.wp, s.storyId, 'kabir', head), false, 'a failed run does not count');
+  } finally { await s.done(); }
+});

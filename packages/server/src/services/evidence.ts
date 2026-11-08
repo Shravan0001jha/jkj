@@ -18,7 +18,8 @@ import * as employees from './employees.js';
 import * as githubFlow from './github-flow.js';
 import { now } from './store.js';
 import { isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
-import { branchFor, excludeLinked } from './worktrees.js';
+import { branchFor, excludeLinked, worktreePath } from './worktrees.js';
+import * as prePr from './pre-pr.js';
 import { isReviewerRole, isQa } from './review-policy.js';
 import { assertNotRealPath, underTest } from './test-guard.js';
 import * as evidenceShare from './evidence-share.js';
@@ -785,8 +786,7 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
           const base = { sha, itemId: job.itemId, run: job.run! };
           setStagingServer(wp, { state: 'deploying', ...base, at: now() });
           try {
-            const tests = rawGet(wp, job.itemId)?.pr?.tests;
-            const testsPassedSha = tests?.state === 'success' && tests.sha === sha ? sha : undefined;
+            const testsPassedSha = testsProven(wp, job.itemId, job.by, sha) ? sha : undefined;
             await p.deployer.deploy({ repo: ctx.repo, checkout, sha, trunk: ctx.trunk, log: join(logs, 'deploy.log'), onSpawn, ...(testsPassedSha ? { testsPassedSha } : {}) });
           } catch (err) {
             const why = `staging deploy of ${sha.slice(0, 8)} failed: ${errText(err)}`;
@@ -1097,4 +1097,17 @@ export async function rescore(wp: Workplace, itemId: string, by: string, runId?:
     try { await githubFlow.prComment(wp, itemId, text); } catch (err) { log.warn('evidence', `${itemId}: re-score PR comment: ${errText(err)}`); }
   }
   return next;
+}
+
+/**
+ * The api and agent suites already passed on exactly `sha` (8 Nov): either the PR's workplace/tests record is a success
+ * for it, or (a story with no PR yet, the common case for evidence before review) the requester's own full pre-pr
+ * result in their worktree passes for it. Then the staging deploy may skip running them again.
+ */
+export function testsProven(wp: Workplace, itemId: string, by: string, sha: string): boolean {
+  const tests = rawGet(wp, itemId)?.pr?.tests;
+  if (tests?.state === 'success' && tests.sha === sha) return true;
+  const emp = wp.org.employees.find(e => e.id === by);
+  if (!emp) return false;
+  try { return prePr.passes(prePr.read(worktreePath(wp.config.workDir, emp), sha), sha); } catch { return false; }
 }
