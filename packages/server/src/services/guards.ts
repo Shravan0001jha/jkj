@@ -149,7 +149,15 @@ export function guardTool(tool: string, input: Record<string, unknown>, ctx: Gua
   if (SUBAGENT_TOOLS.has(tool)) return guardSubagent(input);
   if (ctx.readOnly && (EDIT_TOOLS.has(tool) || tool === 'Bash')) return { decision: 'deny', reason: ctx.readOnly };
   // The gate is read only for a write (it may be a live getter on the session's story).
-  if (EDIT_TOOLS.has(tool) || (tool === 'Bash' && GIT_WRITE.test(String(input['command'] ?? '')))) {
+  // It covers code: edits inside the worktree, and git writes. Scratch files outside the worktree stay free,
+  // since an RCA often needs a measurement script first (10 Nov: QA's own RCA was blocked by this gate).
+  const editPath = EDIT_TOOLS.has(tool) ? String(input['file_path'] ?? input['notebook_path'] ?? '') : '';
+  const editAbs = editPath ? resolve(ctx.worktree, editPath) : '';
+  const editRel = editAbs ? relative(resolve(ctx.worktree), editAbs) : '';
+  const editInside = !!editAbs && editRel !== '' && !editRel.startsWith('..') && !editRel.startsWith('/');
+  // Scratch means OUTSIDE the worktree too: a worktree can itself live under the temp dir (tests do).
+  const editsScratch = !!editAbs && !editInside && isScratch(editAbs);
+  if ((EDIT_TOOLS.has(tool) && !editsScratch) || (tool === 'Bash' && GIT_WRITE.test(String(input['command'] ?? '')))) {
     const gate = ctx.rcaGate ?? 'none';
     if (gate !== 'none') return { decision: 'deny', reason: gate === 'rca-only' ? RCA_ONLY : RCA_FIRST };
   }

@@ -239,3 +239,12 @@ test('words like "say" or "open" inside a commit message are not Mac commands (6
   const denied = ['say "hello"', 'git commit -m "x" && say done', 'git commit -m "x"; open -a Safari', 'open https://example.com'];
   for (const c of denied) assert.equal(guardCommand(c, ctx).decision, 'deny', c);
 });
+
+test('the RCA gate blocks code edits in the worktree, never scratch files (10 Nov: QA could not write a measurement script for its own RCA)', () => {
+  const gated = { ...ctx, rcaGate: 'until-rca' as const };
+  assert.equal(guardTool('Edit', { file_path: '/Users/o/iris-work/tara/claude-dev/mobile/ios/App.swift' }, gated).decision, 'deny', 'code in the worktree waits for the RCA');
+  assert.equal(guardTool('Write', { file_path: 'mobile/ios/New.swift' }, gated).decision, 'deny', 'relative paths resolve into the worktree');
+  assert.equal(guardTool('Write', { file_path: '/tmp/burst-rca/burst.py' }, gated).decision, 'allow', 'a scratch measurement script is fine');
+  assert.equal(guardTool('Bash', { command: 'git commit -m x' }, gated).decision, 'deny', 'no commits before the RCA');
+  assert.equal(guardTool('Write', { file_path: '/Users/o/elsewhere/x.py' }, gated).decision, 'deny', 'outside the worktree and outside scratch is still refused');
+});
