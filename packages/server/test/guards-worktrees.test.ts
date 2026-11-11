@@ -248,3 +248,15 @@ test('the RCA gate blocks code edits in the worktree, never scratch files (10 No
   assert.equal(guardTool('Bash', { command: 'git commit -m x' }, gated).decision, 'deny', 'no commits before the RCA');
   assert.equal(guardTool('Write', { file_path: '/Users/o/elsewhere/x.py' }, gated).decision, 'deny', 'outside the worktree and outside scratch is still refused');
 });
+
+test('a session may Read its OWN saved tool results under ~/.claude, nothing else there (11 Nov: room_read and staging_diag output was unreadable)', () => {
+  const proj = join(os.homedir(), '.claude', 'projects', ctx.worktree.replace(/\//g, '-'));
+  const own = join(proj, '0b6f9a54-1c2d-4e5f-8a9b-0123456789ab', 'tool-results', 'b123.txt');
+  assert.equal(guardTool('Read', { file_path: own }, ctx).decision, 'allow', 'its own tool-results file');
+  assert.equal(guardTool('Write', { file_path: own }, ctx).decision, 'deny', 'read only');
+  const other = join(os.homedir(), '.claude', 'projects', '-Users-o-iris-work-asha-claude-dev', '0b6f9a54-1c2d-4e5f-8a9b-0123456789ab', 'tool-results', 'b.txt');
+  assert.equal(guardTool('Read', { file_path: other }, ctx).decision, 'deny', 'another employee\'s results');
+  assert.equal(guardTool('Read', { file_path: join(proj, 'memory', 'MEMORY.md') }, ctx).decision, 'deny', 'not tool-results');
+  assert.equal(guardTool('Read', { file_path: join(proj, '0b6f9a54-1c2d-4e5f-8a9b-0123456789ab', 'tool-results', '..', '..', 'x') }, ctx).decision, 'deny', 'no escaping by ..');
+  assert.equal(guardTool('Read', { file_path: join(os.homedir(), '.claude', 'settings.json') }, ctx).decision, 'deny');
+});

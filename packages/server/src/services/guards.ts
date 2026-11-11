@@ -88,6 +88,15 @@ const PROTECTED_COMMAND_PATTERN = new RegExp(
 );
 
 /** The resolved path is inside (or is) one of the owner's personal folders. */
+/** `abs` (already resolved, so no `..`) is a file in this worktree's own Claude Code tool-results folder. */
+function isOwnToolResult(abs: string, worktree: string): boolean {
+  const project = resolve(homedir(), '.claude', 'projects', resolve(worktree).replace(/[/\\]/g, '-'));
+  const rel = relative(project, abs);
+  if (!rel || rel.startsWith('..') || rel.startsWith(sep)) return false;
+  const parts = rel.split(sep);
+  return parts.length === 3 && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(parts[0]!) && parts[1] === 'tool-results' && !!parts[2];
+}
+
 function touchesProtectedFolder(abs: string): string | undefined {
   return PROTECTED_ABS.find(folder => abs === folder || abs.startsWith(folder + sep));
 }
@@ -164,6 +173,9 @@ export function guardTool(tool: string, input: Record<string, unknown>, ctx: Gua
   // Protected folders are off limits even to read, for every tool that names a file (no exception path).
   if (tool === 'Read' || EDIT_TOOLS.has(tool)) {
     const filePath = String(input['file_path'] ?? input['notebook_path'] ?? '');
+    // The one exception (11 Nov): a session may READ its own saved tool output, which Claude Code writes
+    // under ~/.claude/projects/<its worktree, slashes as dashes>/<session uuid>/tool-results/. Nothing else there.
+    if (tool === 'Read' && filePath && isOwnToolResult(resolve(ctx.worktree, filePath), ctx.worktree)) return { decision: 'allow' };
     const hit = filePath ? touchesProtectedFolder(resolve(ctx.worktree, filePath)) : undefined;
     if (hit) return { decision: 'deny', reason: `${resolve(ctx.worktree, filePath)} is in ${hit}, a protected folder; off limits to the Workplace even to read` };
   }
