@@ -116,6 +116,10 @@ export function earlyQaMoveProblem(wp: Workplace, w: WorkItem, by: string, from:
 /** Who takes the QA approval: the item's reviewer if QA, else the `qa` role, else the quality charter; never the excluded. */
 export function qaReviewer(employees: Employee[], w: WorkItem, exclude: string[], load: Record<string, number> = {}): string | undefined {
   const ok = (e: Employee | undefined): e is Employee => !!e && isQa(e) && !exclude.includes(e.id) && e.id !== w.employeeId;
+  // 12 Nov (Asha, twice in a day): the QA who wrote the blind cases (qa_cases_write) is the only one who can file
+  // approval 2 under the blind rule, so they keep the review after approval 1 even if the board's reviewer moved.
+  const caseWriter = employees.find(e => e.id === w.qaCases?.by);
+  if (ok(caseWriter)) return caseWriter.id;
   const current = employees.find(e => e.id === w.reviewerId);
   if (ok(current)) return current.id;
   // RCA (7 Oct): this always returned the first `qa`-role employee (Nikhil), so every QA review queued on
