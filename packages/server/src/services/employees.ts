@@ -297,7 +297,7 @@ export function spawn(wp: Workplace, employeeId: string, options: SpawnOptions):
     ...(options.assignment ? { assignmentId: options.assignment.id } : {}),
     contextTokens: context.tokens,
     extra: {
-      env: childEnv(wp, employeeId),
+      env: childEnv(wp, employeeId, options.assignment ? { id: options.assignment.id, title: options.assignment.title } : undefined),
       systemPromptAppend: context.append,
       settingSources: ['user', 'project'],
       // The Workplace's own tools are the reporting channel; they never prompt.
@@ -410,7 +410,20 @@ export function foreignChanges(wp: Workplace, emp: Employee, worktree: Worktree)
 }
 
 /** The child gets the subscription token; the API key is absent, not blank. */
-export function childEnv(wp: Workplace, employeeId?: string): Record<string, string | undefined> {
+/** P0 and bug-bash stories jump the pre-pr slot queue (scripts/pre_pr.py's priority lane, c706ffe9, as_mwd3mk0awv6gs):
+ * a title that starts with "P0" (or "[P0]"), or a story id the COO listed in <opsDir>/coo/pre-pr-priority.txt (one per line). */
+export function prePrPriority(wp: Workplace, story?: { id: string; title: string }): boolean {
+  if (!story) return false;
+  if (/^\s*\[?P0\b/i.test(story.title)) return true;
+  try {
+    const listed = readFileSync(join(wp.config.opsDir, 'coo', 'pre-pr-priority.txt'), 'utf8');
+    return listed.split('\n').map(l => l.replace(/#.*/, '').trim()).includes(story.id);
+  } catch {
+    return false;
+  }
+}
+
+export function childEnv(wp: Workplace, employeeId?: string, story?: { id: string; title: string }): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env };
   delete env['ANTHROPIC_API_KEY'];
   delete env['ANTHROPIC_AUTH_TOKEN'];
@@ -419,6 +432,7 @@ export function childEnv(wp: Workplace, employeeId?: string): Record<string, str
   env['IRIS_WORKPLACE'] = '1';
   // Who is running: scripts/pre-pr.sh records it as "run by <id>" (dry run #11: it showed the owner's git email).
   if (employeeId) env['WORKPLACE_EMPLOYEE'] = employeeId; else delete env['WORKPLACE_EMPLOYEE'];
+  if (prePrPriority(wp, story)) env['PRE_PR_PRIORITY'] = '1'; else delete env['PRE_PR_PRIORITY'];
   // The toolchains scripts/pre-pr.sh needs (Android SDK, JDK 17, full Xcode, not the CLI tools).
   // Only what this machine has: on the Linux server the Mac paths are empty and nothing is set.
   if (wp.config.evidence.androidHome) env['ANDROID_HOME'] = wp.config.evidence.androidHome;
