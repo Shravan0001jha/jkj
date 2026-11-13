@@ -19,8 +19,11 @@ const openPr = (wp: Workplace, w: WorkItem): boolean => !!w.pr && !w.pr.merged &
 
 /** Has this item finished, for whoever starts after it: Merged when it has a PR, else Done (resolution done). */
 export function finished(w: WorkItem | undefined): boolean {
-  if (!w || w.status !== 'done' || (w.resolution ?? 'done') !== 'done') return false;
-  return !w.pr || !!w.pr.merged;
+  if (!w || (w.resolution ?? 'done') !== 'done') return false;
+  // 13 Nov (Asha, five hand-clears in a day): an iPhone story stays Merged, not Done, until its post-merge Mac
+  // review (handbook, 19 Oct), but its code is on the trunk, which is all a dependent waits for. Merged counts.
+  if (w.pr?.merged) return true;
+  return w.status === 'done' && !w.pr;
 }
 
 /** Closed in any way (Done, Won't do, Duplicate, Can't reproduce): nothing more will come of it. */
@@ -42,7 +45,7 @@ export function staleBlock(wp: Workplace, w: WorkItem): WorkItem | undefined {
   if (w.waitingOn && !rawGet(wp, w.waitingOn)) return undefined;
   const ids = [...new Set([w.waitingOn, w.startsAfter].filter((x): x is string => !!x))];
   const deps = ids.map(id => rawGet(wp, id));
-  if (!deps.length || deps.some(d => !d || !closed(d) || awaitingMerge(d))) return undefined;
+  if (!deps.length || deps.some(d => !d || !((closed(d) && !awaitingMerge(d)) || finished(d)))) return undefined;
   return deps[0];
 }
 
