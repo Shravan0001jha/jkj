@@ -33,3 +33,20 @@ test('an unowned ## section after a writer\'s section survives that writer\'s re
     assert.match(md, /Alarms follow the local clock\./, 'the unowned Decisions section survives');
   } finally { tmp.cleanup(); }
 });
+
+test('a writer\'s own # headings are theirs: a rewrite removes them, leaving no orphan sections', async () => {
+  const { wp, tmp } = testWorkplace();
+  const notion = new FakeNotion();
+  docs.setNotionPort(wp, notion);
+  try {
+    const epic = items.create(wp, { level: 'epic', title: 'Notifications', ownerId: 'asha' }, 'owner');
+    const s = items.create(wp, { level: 'story', parentId: epic.id, title: 'Notifications HLD', assigneeId: 'mira' }, 'asha');
+    await docs.docWrite(wp, 'nikhil', { itemId: s.id, type: 'RCA', title: 'Design', markdown: '# Part A\n\nRev 1 A.\n\n# Part D\n\nRev 1 D.' });
+    const pageId = work.get(wp, s.id)!.docId!;
+    await docs.docWrite(wp, 'nikhil', { itemId: s.id, type: 'RCA', title: 'Design', markdown: '# Part A\n\nRev 2 A.\n\n# Part D\n\nRev 2 D.' });
+    const md = docs.blocksToMarkdown(notion.pageBlocks(pageId));
+    assert.doesNotMatch(md, /Rev 1/, 'no rev-1 text is left behind as an orphan');
+    assert.match(md, /Rev 2 A\.[\s\S]*Rev 2 D\./);
+    assert.equal((md.match(/Part D/g) ?? []).length, 1, 'one Part D, not two');
+  } finally { tmp.cleanup(); }
+});

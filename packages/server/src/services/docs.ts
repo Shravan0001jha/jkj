@@ -508,11 +508,18 @@ function ownerByHeading(wp: Workplace, text: string, by: string): string | undef
  * first section heading were written whole by the old doc_write (or added by hand): they are one
  * section of the page's last whole-page writer (notion:owner), else of the story's assignee.
  */
+/** 13 Nov: an ## the writer's own markdown made ("# Part D" inside their section) is theirs, recorded so a rewrite removes it. */
+const BODY_MARK = 'body:';
+function markBody(map: Record<string, string>, made: Block[], by: string): void {
+  for (const b of made) if (b.type === 'heading_2' && b.id) map[b.id] = `${BODY_MARK}${by}`;
+}
+
 function splitSections(wp: Workplace, w: WorkItem, pageId: string, blocks: Block[], by: string): { legacy: Section; sections: Section[] } {
   const map = sectionMap(wp, pageId);
   const legacy: Section = { owner: getSetting(wp, `notion:owner:${pageId}`) ?? w.employeeId, body: [] };
   const sections: Section[] = [];
   for (const b of blocks) {
+    if (b.type === 'heading_2' && b.id && map[b.id]?.startsWith(BODY_MARK)) { (sections.at(-1) ?? legacy).body.push(b); continue; }
     if (b.type === 'heading_2') {
       // 13 Nov (as_mw76f3kofcnj3): an ## heading nobody owns (hand-written, a template heading, another tool's) used to
       // fall into the PREVIOUS writer's body, so that writer's next doc_write deleted it and everything under it (the
@@ -599,7 +606,7 @@ export async function docWrite(wp: Workplace, by: string, spec: DocWriteSpec): P
         const heading = mine.heading!;
         if (blockPlain(heading) !== headingText) await port.updateBlock(heading.id!, { heading_2: { rich_text: plainRich(headingText) } });
         await removeBlocks(wp, port, page.id, mine.body, by);
-        await appendAll(port, page.id, content, heading.id);
+        markBody(map, await appendAll(port, page.id, content, heading.id), by);
         map[heading.id!] = by;
         replaced = true;
       } else {
@@ -607,6 +614,7 @@ export async function docWrite(wp: Workplace, by: string, spec: DocWriteSpec): P
         if (legacy.body.length && legacy.owner === by) { await removeBlocks(wp, port, page.id, legacy.body, by); replaced = true; }
         const made = await appendAll(port, page.id, [block('heading_2', { rich_text: plainRich(headingText) }), ...content]);
         if (made[0]?.id) map[made[0].id] = by;
+        markBody(map, made.slice(1), by);
       }
       putSetting(wp, sectionsKey(page.id), JSON.stringify(map));
       trail.record(wp, { itemId: w.id, by, kind: 'doc', text: `${created ? 'Wrote' : replaced ? 'Rewrote' : 'Added'} the "${label}" section of the ${spec.type} doc of "${w.title}"`, link: page.url });
