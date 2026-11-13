@@ -513,8 +513,14 @@ function splitSections(wp: Workplace, w: WorkItem, pageId: string, blocks: Block
   const legacy: Section = { owner: getSetting(wp, `notion:owner:${pageId}`) ?? w.employeeId, body: [] };
   const sections: Section[] = [];
   for (const b of blocks) {
-    const owner = b.type === 'heading_2' ? (b.id && map[b.id]) || ownerByHeading(wp, blockPlain(b), by) : undefined;
-    if (owner) { sections.push({ owner, heading: b, body: [] }); continue; }
+    if (b.type === 'heading_2') {
+      // 13 Nov (as_mw76f3kofcnj3): an ## heading nobody owns (hand-written, a template heading, another tool's) used to
+      // fall into the PREVIOUS writer's body, so that writer's next doc_write deleted it and everything under it (the
+      // HLD, decisions and LLD). An unowned ## now starts its own section, owned by nobody, which no doc_write removes.
+      const owner = (b.id && map[b.id]) || ownerByHeading(wp, blockPlain(b), by) || undefined;
+      // Before the first owned section, the page is a pre-sections doc: its headings stay the legacy writer's (migration).
+      if (owner || sections.length) { sections.push({ owner, heading: b, body: [] }); continue; }
+    }
     (sections.at(-1) ?? legacy).body.push(b);
   }
   return { legacy, sections };
