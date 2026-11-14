@@ -1381,6 +1381,18 @@ export function recordLiveCheck(wp: Workplace, itemId: string, by: string, summa
  * item (never projected or shown to the assignee) and, when Notion is set up, as a separate "QA report"
  * page that is not the story's doc. Approval 2 must answer each one. Returns the tool's reply.
  */
+/** 14 Nov (Zoya, Nikhil): a QA's session can be lost and the blind cases were write-only. QA (never the story's
+ * assignee) reads them back as written, with who wrote them and when. */
+export function readQaCases(wp: Workplace, itemId: string, by: string): string {
+  const w = rawGet(wp, itemId);
+  if (!w) throw new NotFound(`No item ${itemId}`);
+  if (!isQa(employeeOf(wp, by))) throw new BadRequest('Only QA reads the blind cases: they stay hidden from the developer.');
+  if (by === w.employeeId) throw new BadRequest('You are the story\'s assignee: its blind cases stay hidden from you.');
+  const c = w.qaCases;
+  if (!c?.markdown) return `No blind cases are on record for ${itemId} yet: write them with qa_cases_write before reading the diff.`;
+  return `Blind cases for ${itemId}, written by ${nameOf(wp, c.by)} at ${c.at} (${c.titles.length} cases):\n\n${c.markdown}`;
+}
+
 export async function writeQaCases(wp: Workplace, itemId: string, by: string, markdown: string): Promise<string> {
   const w = rawGet(wp, itemId);
   if (!w) throw new NotFound(`No item ${itemId}`);

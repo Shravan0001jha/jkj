@@ -85,7 +85,7 @@ export function hitSessionBudget(subtype: string): boolean {
 
 export const CONTINUE_PHRASE = /\b(go ahead|continue|carry on|resume|proceed|keep going|keep working)\b/i;
 
-export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'qa_doc_update', 'record_live_check', 'qa_cases_write', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence', 'request_mac', 'release_mac', 'lease_test_account', 'return_test_account', 'doc_write', 'doc_read', 'doc_comment', 'pr_close_detach', 'story_close_no_code', 'signoff_recut', 'github_resume', 'status_repost', 'branch_reset_to_local', 'map_assign', 'staging_diag', 'approval_revoke', 'review_state'] as const;
+export const WORKPLACE_TOOLS = ['report_status', 'write_handoff', 'report_done', 'ask_owner', 'request_review', 'propose_org_change', 'write_spec', 'decompose_feature', 'record_spend', 'room_post', 'room_read', 'room_resolve', 'escalate', 'item_create', 'item_update', 'item_comment', 'flag_stall', 'item_handback', 'inbox_reply', 'status_of', 'item_read', 'inbox_read', 'review_approve', 'qa_doc_update', 'record_live_check', 'qa_cases_write', 'qa_cases_read', 'review_send_back', 'review_dispute', 'send_file', 'run_evidence', 'request_mac', 'release_mac', 'lease_test_account', 'return_test_account', 'doc_write', 'doc_read', 'doc_comment', 'pr_close_detach', 'story_close_no_code', 'signoff_recut', 'github_resume', 'status_repost', 'branch_reset_to_local', 'map_assign', 'staging_diag', 'approval_revoke', 'review_state'] as const;
 
 /**
  * What never asks, whatever the mode: reading, searching, the code graph,
@@ -1438,6 +1438,9 @@ export function workplaceTools(wp: Workplace, employeeId: string, session: () =>
         async ({ itemId, markdown }) => {
           try { return ok(await githubFlow.writeQaCases(wp, itemId, employeeId, markdown)); } catch (err) { return ok(`Not written: ${err instanceof Error ? err.message : String(err)}`); }
         }),
+      tool('qa_cases_read', 'QA only (never the story\'s assignee): read back the blind cases on record for a story, as written by qa_cases_write, with who wrote them and when. Use it after a lost session instead of rewriting them.',
+        { itemId: z.string() },
+        async ({ itemId }) => { try { return ok(githubFlow.readQaCases(wp, itemId, employeeId)); } catch (err) { return ok(`Not read: ${err instanceof Error ? err.message : String(err)}`); } }),
       tool('review_state', 'Read-only: where a story\'s review stands (who gave approval 1 of 2, the extra reviewers, approval 2 of 2, the story\'s QA) and what review_approve would do for YOU if you called it now. Records nothing; use it instead of calling review_approve to probe.',
         { itemId: z.string() },
         async ({ itemId }) => { try { return ok(githubFlow.reviewState(wp, itemId, employeeId)); } catch (err) { return ok(`Not read: ${err instanceof Error ? err.message : String(err)}`); } }),
