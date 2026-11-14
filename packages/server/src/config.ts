@@ -24,6 +24,8 @@ export interface Config {
   sessionRunawayUsd: number;
   /** Cap on the appended context an employee session is given. */
   contextTokens: number;
+  /** QA approval 2 needs blind cases on record (14 Nov). On by default; WORKPLACE_BLIND_GATE=0 turns it off (old test fixtures). */
+  blindGate: boolean;
   /** Hour (IST) of the daily digest. */
   digestHour: number;
   /** Send Telegram pings. Off in tests. */
@@ -152,6 +154,7 @@ export function loadConfig(argv: string[] = process.argv.slice(2), env = process
     usdInr: num(env['WORKPLACE_USD_INR'], 88),
     sessionRunawayUsd: num(env['WORKPLACE_SESSION_RUNAWAY_USD'], 25),
     contextTokens: num(env['WORKPLACE_CONTEXT_TOKENS'], 24_000),
+    blindGate: env['WORKPLACE_BLIND_GATE'] !== '0',
     digestHour: num(env['WORKPLACE_DIGEST_HOUR'], 9),
     telegram: !argv.includes('--no-telegram') && env['WORKPLACE_TELEGRAM'] !== '0',
     seed: !argv.includes('--no-seed'),

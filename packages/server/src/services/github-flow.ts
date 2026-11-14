@@ -1215,7 +1215,22 @@ export function unreadEvidence(wp: Workplace, w: WorkItem, by: string): string[]
  * The QA doc's checks beyond its shape: every blind case answered (dry run #8), and every live check it
  * cites as evidence recorded on this story, on this head, with its logs still there (dry run #5).
  */
+/** A QA doc line that names an allowed exception to blind cases (handbook §7: parity port, test tooling, test-only
+ * case tables, or a COO exception with its reason). */
+export const BLIND_EXCEPTION = /^\s*(?:[-*]\s*)?(?:blind(?: cases)?|exception)\s*:\s*(?:n\/a\s*[—-]\s*)?(parity port|test[- ]tooling|test[- ]only|not blind,?\s*coo exception)\b/im;
+
+/** 14 Nov (Vikram's batch review; #1459 approved with no case record): approval 2 needs the story's blind cases
+ * on record (qa_cases_write) unless the doc names an allowed exception. */
+export function blindProblem(w: WorkItem, text: string): string | null {
+  if (w.qaCases?.titles?.length) return null;
+  if (BLIND_EXCEPTION.test(text)) return null;
+  return 'This story has no blind cases on record (qa_cases_write). Write them from the story text before reading the diff (handbook §7), answer each in the QA doc, then approve. ' +
+    'If an exception applies, add one line to the QA doc: "Blind: n/a — parity port", "— test tooling", "— test-only" or "Blind: not blind, COO exception" (with the reason).';
+}
+
 function qaDocExtras(wp: Workplace, w: WorkItem, doc: qaDoc.QaDoc, text: string): void {
+  const noBlind = wp.config.blindGate === false ? null : blindProblem(w, text);
+  if (noBlind) throw new BadRequest(noBlind);
   const blind = w.qaCases?.titles ?? [];
   const missing = qaDoc.unansweredBlind(blind, doc.cases);
   if (missing.length) throw new BadRequest(`The QA doc does not answer every blind case: add a "- PASS/FAIL/N/A: <case> — …" line for ${missing.map(t => `"${t}"`).join(', ')}.`);

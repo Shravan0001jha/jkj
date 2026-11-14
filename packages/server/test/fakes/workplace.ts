@@ -26,6 +26,8 @@ export function testWorkplace(overrides: Partial<Record<string, string>> = {}): 
     IRIS_WORK_DIR: workDir,
     WORKPLACE_CAP_INR: '1000',
     WORKPLACE_USD_INR: '88',
+    // Fixtures predating the 14 Nov blind-case gate file QA docs without qa_cases_write; blind-qa-gate tests turn it on.
+    WORKPLACE_BLIND_GATE: '0',
     ...overrides,
   });
   const extract = readFileSync(fileURLToPath(new URL('../../../../docs/product-definition-extract.md', import.meta.url)), 'utf8');
