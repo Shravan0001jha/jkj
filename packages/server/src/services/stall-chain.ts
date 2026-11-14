@@ -12,6 +12,28 @@ import { openStartsAfter } from './lifecycle.js';
 import { chiefOfStaffId, isAgent, levelOf, nameOf, rawGet } from './v2-map.js';
 import { rowsJson } from './store.js';
 import { log } from '../util/logger.js';
+import { readdirSync, readFileSync, readlinkSync } from 'node:fs';
+import { join } from 'node:path';
+
+/**
+ * 14 Nov: a story whose author has a pre-pr run going (queued for a slot or running, 1-3 h) is waiting on the
+ * test queue, not stalled; the stall chain rang the owner twice for it. True when a scripts/pre_pr.py process
+ * runs with its working directory inside the employee's work dir. Linux /proc only (false elsewhere).
+ */
+export let prePrLive = (wp: Workplace, employeeId: string): boolean => {
+  const root = join(wp.config.workDir, employeeId) + '/';
+  let pids: string[];
+  try { pids = readdirSync('/proc').filter(p => /^\d+$/.test(p)); } catch { return false; }
+  for (const pid of pids) {
+    try {
+      if (!readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('scripts/pre_pr.py')) continue;
+      if ((readlinkSync(`/proc/${pid}/cwd`) + '/').startsWith(root)) return true;
+    } catch { /* gone or not ours */ }
+  }
+  return false;
+};
+/** Test seam. */
+export function setPrePrLiveForTest(fn: (wp: Workplace, employeeId: string) => boolean): void { prePrLive = fn; }
 
 /**
  * The stall chain (HLD-rework-2026-10 §1.5, LLD W2 §6). One service in place of the five old
@@ -91,6 +113,7 @@ export function evaluate(wp: Workplace, w: WorkItem, nowMs: number, firstSeen = 
   const who = w.employeeId;
   if (!who || !isAgent(wp, who)) return null;
   if (openStartsAfter(wp, w)) return null;
+  if (status === 'in-progress' && prePrLive(wp, who)) return null;
   // A Ready story queued behind the person's own In-progress story is waiting its turn (one story per person),
   // not stalled: only the story they are on can stall. Holds whether or not a session is open right now.
   if (status === 'ready') {
