@@ -132,7 +132,7 @@ test('control: an Android-only story merges as before and files no iPhone review
   const s = await mergedStory('mobile/android/app/Alarm.kt', 'class Alarm\n', []);
   try {
     assert.equal(item(s, s.storyId).postMerge, undefined);
-    assert.equal(lifecycle.trueStatus(s.wp, item(s, s.storyId)), 'merged');
+    assert.equal(lifecycle.trueStatus(s.wp, item(s, s.storyId)), 'done', 'no iPhone review left, so it closes itself on the merge (14 Nov)');
   } finally { s.done(); }
 });
 

@@ -170,7 +170,7 @@ test('startsAfter: shown with the blocker status, never dispatched early; on its
   } finally { await done(); }
 });
 
-test('PR merged: the story moves to Merged and Asha is told; she closes it to Done (an assignee may not)', async () => {
+test('PR merged: a story with no post-merge check closes itself to Done; no "close it" nag (14 Nov, was: Asha closes by hand)', async () => {
   const { wp, story, raw, patch, done } = setup();
   try {
     writeGithubMode(wp, 'on');
@@ -180,13 +180,12 @@ test('PR merged: the story moves to Merged and Asha is told; she closes it to Do
     patch(s.id, { pr: pr({ merged: { at: '2026-10-05T11:00:00Z', sha: 'm1', by: 'coo' } }) });
     assert.equal(lifecycleWatch.onMerged(wp, s.id, 'coo'), 'moved');
     assert.equal(raw(s.id).status, 'done');
-    assert.equal(items.require$(wp, s.id).trueStatus, 'merged');
-    const told = manager.list(wp).find(a => a.key.startsWith(`merged:${s.id}`));
-    assert.ok(told && /Close it: item_update/.test(told.text ?? ''));
-    assert.throws(() => items.update(wp, s.id, { status: 'done', reason: 'test: moved' }, 'tara'), /Asha's call/);
-    const it = items.update(wp, s.id, { status: 'done', reason: 'test: moved' }, 'asha');
-    assert.equal(it.trueStatus, 'done');
-    assert.ok(it.closedAt);
+    const it = items.require$(wp, s.id);
+    assert.equal(it.trueStatus, 'done', 'closed by itself on the merge');
+    assert.ok(raw(s.id).closedAt);
+    assert.equal(raw(s.id).closedBy, 'workplace');
+    assert.equal(manager.list(wp).find(a => a.key.startsWith(`merged:${s.id}`)), undefined, 'no "close it" nag');
+    assert.equal(items.update(wp, s.id, { status: 'done', reason: 'test: moved' }, 'asha').trueStatus, 'done', 'a late hand-close is harmless');
   } finally { await done(); }
 });
 

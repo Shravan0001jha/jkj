@@ -55,12 +55,14 @@ export function onMerged(wp: Workplace, id: string, by = 'workplace'): 'moved' |
   }
   // Awaiting its Mac check (owner rule, 23 Oct): already placed in the Mac verification queue, nothing for Asha to close.
   if (w.awaitingMac && !w.awaitingMac.closedAt) { onFinished(wp, id); return moved ? 'moved' : 'told'; }
-  manager.alert(wp, {
-    key: `merged:${id}:${w.pr!.merged!.at}`, itemId: id, by: 'workplace',
-    title: `Merged: ${w.title}`,
-    body: `PR #${w.pr!.number} is merged; the story shows Merged. Close it (item_update ${id} status done) so it shows Done.`,
-    text: `Merged: "${w.title}" [${id}], PR #${w.pr!.number} by ${nameOf(wp, w.employeeId)}. Close it: item_update ${id} status done.`,
-  });
+  // 14 Nov (COO): a merged story with no post-merge check left closes itself. The hand-close step only produced
+  // "Merged: close it" nags (one or more a day since 8 Nov) and nobody checked anything in it.
+  const cur = rawGet(wp, id)!;
+  if (!cur.closedAt) {
+    const at = now();
+    work.put(wp, cur, { ...cur, closedAt: at, closedBy: 'workplace', statusSince: at, updatedAt: at }, 'workplace', 'Closed: merged');
+    trail.record(wp, { itemId: id, by: 'workplace', kind: 'note', text: `Closed automatically: PR #${w.pr!.number} is merged and no post-merge check is open` });
+  }
   onFinished(wp, id);
   return moved ? 'moved' : 'told';
 }
