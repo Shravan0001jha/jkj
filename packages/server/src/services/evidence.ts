@@ -286,6 +286,9 @@ export type RequestResult = { ok: true; job: EvidenceJob; position: number; mess
 const listOf = (v: string | string[]): string[] =>
   (Array.isArray(v) ? v : String(v ?? '').split(/[,\s]+/)).map(x => x.trim().toLowerCase()).filter(Boolean);
 
+/** The note of a run that found its story already merged: recorded, never a stall alert. */
+export const ALREADY_MERGED = 'Already merged';
+
 interface StoryCtx { w: WorkItem; repo: string; trunk: string; branch: string; head: string }
 
 /** Where the story's code is: its assignee's branch, with commits past the trunk. A string says why not. */
@@ -694,7 +697,9 @@ async function execute(wp: Workplace, job: EvidenceJob, slot: number): Promise<v
   if (typeof ctx === 'string') {
     job.sha = job.requestedSha ?? '';
     job.run = `${(job.sha || '0000000').slice(0, 12)}-${stamp()}`;
-    return finish(wp, job, { state: 'error', passed: 0, failed: 0, failures: [], note: ctx }, started);
+    // 14 Nov: a run queued before its PR merged reaches here with no commits past the trunk. Nothing to test, nothing wrong.
+    const note = w?.pr?.merged && !job.batch ? `${ALREADY_MERGED} (PR #${w.pr.number}): its code is on the trunk, so there is nothing new to test; no action needed.` : ctx;
+    return finish(wp, job, { state: 'error', passed: 0, failed: 0, failures: [], note }, started);
   }
   const sha = ctx.head;
   job.sha = sha;
@@ -928,7 +933,7 @@ async function finish(wp: Workplace, job: EvidenceJob, outcome: Outcome, started
       catch (err) { log.warn('evidence', `${job.id}: PR comment: ${errText(err)}`); }
     }
   }
-  if (rec.state === 'error') {
+  if (rec.state === 'error' && !rec.note?.startsWith(ALREADY_MERGED)) {
     coo.notifyStall(wp, { itemId: job.itemId, by: 'workplace', title: `Evidence run could not run: ${title}`, body: `${rec.note ?? 'unknown error'}. Run ${rec.run} for ${nameOf(wp, job.by)}; logs at ${rec.report.replace(/index\.html$/, 'workplace/')}.` });
   }
   job.delivered = deliver(wp, job.by, text);

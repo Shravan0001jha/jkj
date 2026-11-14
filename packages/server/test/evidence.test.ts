@@ -1053,3 +1053,27 @@ test('a story with no PR yet but a passing full pre-pr on THIS commit also hands
     assert.equal(evidence.testsProven(s.wp, s.storyId, 'kabir', head), false, 'a failed run does not count');
   } finally { await s.done(); }
 });
+
+/* ---------- 14 Nov: a queued run whose story merged meanwhile ---------- */
+
+test('a run queued before its story merged ends quietly as "Already merged", with no stall alert to the COO', async () => {
+  const s = setup();
+  try {
+    const head = s.commit('services/agent-svc/b.py', 'b = 1\n');
+    evidence.setEvidenceHold(s.wp, { allMinutes: 60, by: 'coo', note: 'test hold' });
+    evidence.request(s.wp, { itemId: s.storyId, by: 'kabir', platforms: 'android', features: 'queries' });
+    // The PR merges while the run waits: the trunk now contains the branch, and the item records the merge.
+    const trunk = employee(s.wp, 'kabir').workspace.branch ?? s.wp.config.github.trunk;
+    git(s.repo, ['update-ref', `refs/heads/${trunk}`, head]);
+    const cur = rawGet(s.wp, s.storyId)!;
+    work.saveQuiet(s.wp, { ...cur, pr: { number: 77, url: 'u', branch: `emp/kabir/${s.storyId}`, stage: 'merged', merged: { at: '2026-11-14T00:00:00Z', by: 'workplace' } } as never });
+    evidence.setEvidenceHold(s.wp, { allMinutes: 0, by: 'coo' });
+    await evidence.settled(s.wp);
+    const rec = rawGet(s.wp, s.storyId)!.evidenceRun!;
+    assert.equal(rec.state, 'error');
+    assert.match(rec.note ?? '', /^Already merged \(PR #77\)/);
+    const { listItems } = await import('../src/services/coo.js');
+    assert.equal(listItems(s.wp).filter(i => /Evidence run could not run/.test(i.title)).length, 0, 'no stall alert');
+    assert.equal(s.runner.calls.length, 0, 'nothing was built or run');
+  } finally { await s.done(); }
+});
